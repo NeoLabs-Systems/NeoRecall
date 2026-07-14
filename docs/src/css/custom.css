@@ -1,0 +1,14 @@
+:root {
+  --ifm-color-primary: #b1812b;
+  --ifm-color-primary-dark: #8f6a22;
+  --ifm-color-primary-light: #c7994a;
+  --ifm-font-family-base: 'Geist', system-ui, -apple-system, sans-serif;
+  --ifm-font-family-monospace: 'Geist Mono', 'Fira Code', monospace;
+  --ifm-code-font-size: 90%;
+}
+[data-theme='dark'] {
+  --ifm-color-primary: #e3b655;
+  --ifm-color-primary-dark: #d1a343;
+  --ifm-color-primary-light: #f1c871;
+  --ifm-background-color: #0a0d13;
+}

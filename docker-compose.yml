@@ -1,0 +1,28 @@
+services:
+  neorecall:
+    build: .
+    image: neorecall:local
+    restart: unless-stopped
+    ports:
+      - "4500:4500"
+    environment:
+      NEORECALL_HOST: 0.0.0.0
+      NEORECALL_PORT: 4500
+      NEORECALL_REQUIRE_VECTOR: "true"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
+    volumes:
+      - neorecall-data:/root/.neorecall
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4500/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  neorecall-data:

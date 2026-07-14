@@ -1,0 +1,397 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../models/chunk.dart';
+import '../models/recording.dart';
+import 'chunk_store.dart';
+
+ChunkStore createChunkStore() => IoChunkStore();
+
+class IoChunkStore implements ChunkStore {
+  Database? _database;
+  late Directory _audioDirectory;
+
+  @override
+  Future<void> initialize() async {
+    sqfliteFfiInit();
+    final support = await getApplicationSupportDirectory();
+    final root = Directory(p.join(support.path, 'NeoRecall'))
+      ..createSync(recursive: true);
+    _audioDirectory = Directory(p.join(root.path, 'pending_audio'))
+      ..createSync(recursive: true);
+    Future<void> createSessions(Database database) => database.execute(
+      '''CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY, sourceId TEXT NOT NULL, deviceId TEXT NOT NULL, deviceClientUuid TEXT NOT NULL,
+        deviceName TEXT NOT NULL, platform TEXT NOT NULL, startedAt TEXT NOT NULL, timezone TEXT NOT NULL,
+        consentAttestedAt TEXT NOT NULL, sourceKind TEXT NOT NULL, channelLayout TEXT NOT NULL,
+        sampleRate INTEGER NOT NULL DEFAULT 16000,
+        endedAt TEXT, finalSequence INTEGER, interrupted INTEGER NOT NULL DEFAULT 0, synced INTEGER NOT NULL)''',
+    );
+    Future<void> createCapturePartials(Database database) =>
+        database.execute('''CREATE TABLE IF NOT EXISTS capture_partials (
+        sourceId TEXT PRIMARY KEY, chunkJson TEXT NOT NULL, filePath TEXT NOT NULL,
+        updatedAt TEXT NOT NULL)''');
+    _database = await databaseFactoryFfi.openDatabase(
+      p.join(root.path, 'offline.sqlite3'),
+      options: OpenDatabaseOptions(
+        version: 5,
+        onCreate: (database, _) async {
+          await database.execute('''CREATE TABLE chunks (
+        id TEXT PRIMARY KEY, sessionId TEXT NOT NULL, sourceId TEXT NOT NULL, sequence INTEGER NOT NULL,
+        startedAt TEXT NOT NULL, monotonicOffsetMs INTEGER NOT NULL, durationMs INTEGER NOT NULL, overlapMs INTEGER NOT NULL,
+        channelLayout TEXT NOT NULL, container TEXT NOT NULL, codec TEXT NOT NULL, sha256 TEXT NOT NULL,
+        state TEXT NOT NULL, createdAt TEXT NOT NULL, filePath TEXT, isFinal INTEGER NOT NULL,
+        receipt TEXT, error TEXT, UNIQUE(sourceId,sequence))''');
+          await createSessions(database);
+          await createCapturePartials(database);
+        },
+        onUpgrade: (database, oldVersion, _) async {
+          if (oldVersion < 2) {
+            await createSessions(database);
+          } else if (oldVersion < 3) {
+            await database.execute(
+              'ALTER TABLE sessions ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0',
+            );
+          }
+          if (oldVersion < 4) await createCapturePartials(database);
+          if (oldVersion >= 2 && oldVersion < 5) {
+            await database.execute(
+              'ALTER TABLE sessions ADD COLUMN sampleRate INTEGER NOT NULL DEFAULT 16000',
+            );
+          }
+        },
+      ),
+    );
+    final capturing = await _database!.query(
+      'chunks',
+      where: 'state=?',
+      whereArgs: <Object?>[LocalChunkState.capturing.name],
+    );
+    for (final row in capturing) {
+      final file = row['filePath'] == null
+          ? null
+          : File(row['filePath'] as String);
+      if (file != null && file.existsSync() && file.lengthSync() >= 44) {
+        final bytes = await file.readAsBytes();
+        final channels = row['channelLayout'] == 'mono' ? 1 : 2;
+        final frameBytes = channels * 2;
+        final availableData = ((bytes.length - 44) ~/ frameBytes) * frameBytes;
+        final recovered = Uint8List.sublistView(bytes, 0, 44 + availableData);
+        final header = ByteData.sublistView(recovered);
+        header.setUint32(4, recovered.length - 8, Endian.little);
+        header.setUint32(40, availableData, Endian.little);
+        final finalFile = File(
+          p.join(_audioDirectory.path, '${row['id']}.wav'),
+        );
+        final handle = await file.open(mode: FileMode.writeOnly);
+        try {
+          await handle.writeFrom(recovered);
+          await handle.truncate(recovered.length);
+          await handle.flush();
+        } finally {
+          await handle.close();
+        }
+        if (file.path != finalFile.path) await file.rename(finalFile.path);
+        await _database!.update(
+          'chunks',
+          <String, Object?>{
+            'state': LocalChunkState.ready.name,
+            'filePath': finalFile.path,
+            'sha256': sha256.convert(recovered).toString(),
+            'durationMs': (availableData * 1000 / (16000 * frameBytes)).round(),
+            'isFinal': 1,
+            'error': 'Recovered after an interrupted local write.',
+          },
+          where: 'id=?',
+          whereArgs: <Object?>[row['id']],
+        );
+      } else {
+        if (file?.existsSync() ?? false) file!.deleteSync();
+        await _database!.update(
+          'chunks',
+          <String, Object?>{
+            'state': LocalChunkState.failed.name,
+            'error':
+                'Capture was interrupted before a recoverable WAV header was written.',
+          },
+          where: 'id=?',
+          whereArgs: <Object?>[row['id']],
+        );
+      }
+    }
+    final capturePartials = await _database!.query('capture_partials');
+    for (final row in capturePartials) {
+      final file = File(row['filePath'] as String);
+      if (!file.existsSync() || file.lengthSync() < 44) continue;
+      final map = Map<String, dynamic>.from(
+        jsonDecode(row['chunkJson'] as String) as Map,
+      );
+      final bytes = await file.readAsBytes();
+      final channels = map['channelLayout'] == 'mono' ? 1 : 2;
+      final frameBytes = channels * 2;
+      final availableData = ((bytes.length - 44) ~/ frameBytes) * frameBytes;
+      final recovered = Uint8List.sublistView(bytes, 0, 44 + availableData);
+      final header = ByteData.sublistView(recovered);
+      header.setUint32(4, recovered.length - 8, Endian.little);
+      header.setUint32(40, availableData, Endian.little);
+      final handle = await file.open(mode: FileMode.writeOnly);
+      try {
+        await handle.writeFrom(recovered);
+        await handle.truncate(recovered.length);
+        await handle.flush();
+      } finally {
+        await handle.close();
+      }
+      map.addAll(<String, Object?>{
+        'state': LocalChunkState.ready.name,
+        'filePath': file.path,
+        'sha256': sha256.convert(recovered).toString(),
+        'durationMs': (availableData * 1000 / (16000 * frameBytes)).round(),
+        'isFinal': 1,
+        'error': 'Recovered from the desktop two-second capture ledger.',
+      });
+      final inserted = await _database!.insert(
+        'chunks',
+        map,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      if (inserted == 0) await file.delete();
+      await _database!.delete(
+        'capture_partials',
+        where: 'sourceId=?',
+        whereArgs: <Object?>[row['sourceId']],
+      );
+    }
+    final openSessions = await _database!.query(
+      'sessions',
+      where: 'endedAt IS NULL',
+    );
+    for (final session in openSessions) {
+      final maximum = await _database!.rawQuery(
+        'SELECT MAX(sequence) value FROM chunks WHERE sessionId=?',
+        <Object?>[session['id']],
+      );
+      final sequence = maximum.first['value'] as int? ?? -1;
+      await _database!.update(
+        'sessions',
+        <String, Object?>{
+          'endedAt': DateTime.now().toUtc().toIso8601String(),
+          'finalSequence': sequence,
+          'interrupted': 1,
+          'synced': 0,
+        },
+        where: 'id=?',
+        whereArgs: <Object?>[session['id']],
+      );
+    }
+  }
+
+  Database get db =>
+      _database ?? (throw StateError('ChunkStore is not initialized.'));
+  @override
+  Future<void> put(AudioChunk chunk, Uint8List bytes) async {
+    final partial = File(p.join(_audioDirectory.path, '${chunk.id}.partial'));
+    final finalFile = File(
+      p.join(_audioDirectory.path, '${chunk.id}.${chunk.container}'),
+    );
+    final map = chunk
+        .copyWith(state: LocalChunkState.capturing, filePath: partial.path)
+        .toMap(includeBytes: false);
+    await db.insert('chunks', map, conflictAlgorithm: ConflictAlgorithm.abort);
+    final handle = await partial.open(mode: FileMode.writeOnly);
+    try {
+      await handle.writeFrom(bytes);
+      await handle.flush();
+    } finally {
+      await handle.close();
+    }
+    await partial.rename(finalFile.path);
+    await db.update(
+      'chunks',
+      <String, Object?>{
+        'state': LocalChunkState.ready.name,
+        'filePath': finalFile.path,
+      },
+      where: 'id=?',
+      whereArgs: <Object?>[chunk.id],
+    );
+  }
+
+  @override
+  Future<void> putPartial(AudioChunk chunk, Uint8List bytes) async {
+    final file = File(p.join(_audioDirectory.path, '${chunk.id}.recovery.wav'));
+    final handle = await file.open(mode: FileMode.writeOnly);
+    try {
+      await handle.writeFrom(bytes);
+      await handle.flush();
+    } finally {
+      await handle.close();
+    }
+    final previous = await db.query(
+      'capture_partials',
+      columns: <String>['filePath'],
+      where: 'sourceId=?',
+      whereArgs: <Object?>[chunk.sourceId],
+      limit: 1,
+    );
+    final map = chunk.toMap(includeBytes: false)
+      ..['filePath'] = file.path
+      ..['state'] = LocalChunkState.ready.name;
+    await db.insert('capture_partials', <String, Object?>{
+      'sourceId': chunk.sourceId,
+      'chunkJson': jsonEncode(map),
+      'filePath': file.path,
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    if (previous.isNotEmpty) {
+      final old = File(previous.first['filePath'] as String);
+      if (old.path != file.path && old.existsSync()) await old.delete();
+    }
+  }
+
+  @override
+  Future<void> clearPartial(String sourceId) async {
+    final rows = await db.query(
+      'capture_partials',
+      columns: <String>['filePath'],
+      where: 'sourceId=?',
+      whereArgs: <Object?>[sourceId],
+    );
+    await db.delete(
+      'capture_partials',
+      where: 'sourceId=?',
+      whereArgs: <Object?>[sourceId],
+    );
+    for (final row in rows) {
+      final file = File(row['filePath'] as String);
+      if (file.existsSync()) await file.delete();
+    }
+  }
+
+  @override
+  Future<void> putSession(LocalRecordingDeclaration session) async => db.insert(
+    'sessions',
+    session.toMap(),
+    conflictAlgorithm: ConflictAlgorithm.replace,
+  );
+  @override
+  Future<List<LocalRecordingDeclaration>> pendingSessions() async =>
+      (await db.query('sessions', where: 'synced=0', orderBy: 'startedAt'))
+          .map(
+            (row) => LocalRecordingDeclaration.fromMap(
+              Map<String, dynamic>.from(row),
+            ),
+          )
+          .toList();
+  @override
+  Future<void> markSessionSynced(String id) async {
+    await db.update(
+      'sessions',
+      <String, Object?>{'synced': 1},
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Map<String, dynamic> _map(Map<String, Object?> row) => <String, dynamic>{
+    ...row,
+    if (row['receipt'] != null) 'receipt': jsonDecode(row['receipt'] as String),
+  };
+  @override
+  Future<List<AudioChunk>> pending({int limit = 100}) async => (await db.query(
+    'chunks',
+    where: 'state IN (?,?,?,?,?)',
+    whereArgs: <Object?>[
+      LocalChunkState.ready.name,
+      LocalChunkState.uploading.name,
+      LocalChunkState.uploaded.name,
+      LocalChunkState.failed.name,
+      LocalChunkState.capturing.name,
+    ],
+    orderBy: 'createdAt,sourceId,sequence',
+    limit: limit,
+  )).map((row) => AudioChunk.fromMap(_map(row))).toList();
+  @override
+  Future<Uint8List> readBytes(AudioChunk chunk) =>
+      File(chunk.filePath!).readAsBytes();
+  @override
+  Future<void> setState(
+    String id,
+    LocalChunkState state, {
+    Map<String, dynamic>? receipt,
+    String? error,
+  }) => db
+      .update(
+        'chunks',
+        <String, Object?>{
+          'state': state.name,
+          if (receipt != null) 'receipt': jsonEncode(receipt),
+          'error': ?error,
+        },
+        where: 'id=?',
+        whereArgs: <Object?>[id],
+      )
+      .then((_) {});
+  @override
+  Future<void> release(String id) async {
+    final rows = await db.query(
+      'chunks',
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final filePath = rows.first['filePath'] as String?;
+    if (filePath != null) {
+      final file = File(filePath);
+      if (file.existsSync()) await file.delete();
+    }
+    await db.update(
+      'chunks',
+      <String, Object?>{
+        'state': LocalChunkState.released.name,
+        'filePath': null,
+      },
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  @override
+  Future<int> pendingBytes() async {
+    final rows = await db.query(
+      'chunks',
+      columns: <String>['filePath'],
+      where: 'state!=?',
+      whereArgs: <Object?>[LocalChunkState.released.name],
+    );
+    final chunkBytes = rows.fold<int>(0, (sum, row) {
+      final path = row['filePath'] as String?;
+      return sum +
+          (path != null && File(path).existsSync()
+              ? File(path).lengthSync()
+              : 0);
+    });
+    final partials = await db.query(
+      'capture_partials',
+      columns: <String>['filePath'],
+    );
+    return chunkBytes +
+        partials.fold<int>(0, (sum, row) {
+          final file = File(row['filePath'] as String);
+          return sum + (file.existsSync() ? file.lengthSync() : 0);
+        });
+  }
+
+  @override
+  Future<void> close() async {
+    await _database?.close();
+    _database = null;
+  }
+}

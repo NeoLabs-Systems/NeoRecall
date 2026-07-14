@@ -1,0 +1,10 @@
+.git/
+.github/
+**/node_modules/
+test/*
+!test/fixtures/
+!test/fixtures/**
+runtime-data/
+flutter_app/.dart_tool/
+docs/.docusaurus/
+docs/build/

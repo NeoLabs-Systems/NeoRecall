@@ -1,0 +1,17 @@
+node_modules/
+.env
+*.log
+.DS_Store
+coverage/
+docs/build/
+docs/.docusaurus/
+flutter_app/.dart_tool/
+flutter_app/build/
+flutter_app/.flutter-plugins*
+runtime-data/
+models/downloads/
+*.sqlite*
+*.wav
+*.webm
+*.mp3
+!test/fixtures/*.wav

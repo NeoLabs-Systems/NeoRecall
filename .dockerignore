@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+docs/node_modules
+docs/build
+flutter_app/.dart_tool
+flutter_app/build
+coverage
+test
+*.sqlite*
+*.log

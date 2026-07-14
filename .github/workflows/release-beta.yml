@@ -1,0 +1,87 @@
+name: Release Beta
+
+on:
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-beta
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.release_tag }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0, ref: beta }
+      - uses: actions/setup-node@v6
+        with: { node-version: 20, registry-url: 'https://registry.npmjs.org', cache: npm }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: '3.35.5', cache: true }
+      - run: npm ci
+      - run: npm ci
+        working-directory: docs
+      - run: flutter pub get
+        working-directory: flutter_app
+      - run: npm run test:backend
+      - run: flutter analyze --no-pub && flutter test --no-pub
+        working-directory: flutter_app
+      - run: flutter build web --release --no-pub --base-href /app/
+        working-directory: flutter_app
+      - run: npm run build
+        working-directory: docs
+      - id: version
+        run: node scripts/next_release_version.js beta
+      - run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): ${{ steps.version.outputs.release_tag }} [skip ci]" || true
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - run: |
+          git tag "${{ steps.version.outputs.release_tag }}" -m "Beta ${{ steps.version.outputs.release_tag }}"
+          git push origin HEAD:beta
+          git push origin "${{ steps.version.outputs.release_tag }}"
+      - run: npm publish --tag beta
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+        if: env.NODE_AUTH_TOKEN != ''
+      - run: gh release create "${{ steps.version.outputs.release_tag }}" --target "${{ steps.commit.outputs.sha }}" --title "Beta ${{ steps.version.outputs.release_tag }}" --generate-notes --prerelease
+        env: { GH_TOKEN: '${{ github.token }}' }
+
+  desktop:
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-14
+          - platform: windows
+            runner: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: '${{ needs.release.outputs.sha }}' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: '3.35.5', cache: true }
+      - run: flutter pub get
+        working-directory: flutter_app
+      - if: matrix.platform == 'macos'
+        run: flutter build macos --release --no-pub && ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/NeoRecall.app ../NeoRecall-macOS.zip
+        working-directory: flutter_app
+      - if: matrix.platform == 'windows'
+        shell: pwsh
+        run: flutter build windows --release --no-pub; Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath ../NeoRecall-Windows-x64.zip
+        working-directory: flutter_app
+      - shell: bash
+        run: gh release upload "${{ needs.release.outputs.tag }}" NeoRecall-*.zip --clobber
+        env: { GH_TOKEN: '${{ github.token }}' }

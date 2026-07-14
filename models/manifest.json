@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78",
+      "license": "See NVIDIA Parakeet model license",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+      "archive": {
+        "filename": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+        "size": 487170055,
+        "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+        "stripComponents": 1
+      },
+      "files": [
+        { "path": "asr/encoder.int8.onnx", "archivePath": "encoder.int8.onnx", "size": 652184281, "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247" },
+        { "path": "asr/decoder.int8.onnx", "archivePath": "decoder.int8.onnx", "size": 11845275, "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e" },
+        { "path": "asr/joiner.int8.onnx", "archivePath": "joiner.int8.onnx", "size": 6355277, "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3" },
+        { "path": "asr/tokens.txt", "archivePath": "tokens.txt", "size": 93939, "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d" }
+      ]
+    },
+    {
+      "id": "silero-vad",
+      "revision": "sherpa-onnx-asr-models",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
+      "files": [
+        { "path": "vad/silero_vad.onnx", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx", "size": 643854, "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6" }
+      ]
+    },
+    {
+      "id": "pyannote-segmentation-3.0-int8",
+      "revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0",
+      "license": "See upstream pyannote segmentation license",
+      "licenseUrl": "https://huggingface.co/pyannote/segmentation-3.0/blob/main/LICENSE",
+      "archive": {
+        "filename": "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        "size": 6958444,
+        "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+        "stripComponents": 1
+      },
+      "files": [
+        { "path": "diarization/pyannote-segmentation-3.0.int8.onnx", "archivePath": "model.int8.onnx", "size": 1540506, "sha256": "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d" }
+      ]
+    },
+    {
+      "id": "wespeaker-voxceleb-campplus-lm",
+      "revision": "0743f301363dec56491a490f6d6cbc9d67f9a3bf",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus-LM",
+      "files": [
+        { "path": "diarization/wespeaker_en_voxceleb_CAM++_LM.onnx", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_CAM%2B%2B_LM.onnx", "size": 29292687, "sha256": "e197af7e9d473030cf486b3124149a19bf37014d0e4485e4c70c483b0ec10cb2" }
+      ]
+    },
+    {
+      "id": "multilingual-e5-small-int8",
+      "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/intfloat/multilingual-e5-small/blob/main/LICENSE",
+      "huggingFace": {
+        "repo": "Xenova/multilingual-e5-small"
+      },
+      "files": [
+        { "path": "Xenova/multilingual-e5-small/config.json", "hubPath": "config.json", "size": 658, "sha256": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1" },
+        { "path": "Xenova/multilingual-e5-small/sentencepiece.bpe.model", "hubPath": "sentencepiece.bpe.model", "size": 5069051, "sha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865" },
+        { "path": "Xenova/multilingual-e5-small/special_tokens_map.json", "hubPath": "special_tokens_map.json", "size": 167, "sha256": "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7" },
+        { "path": "Xenova/multilingual-e5-small/tokenizer.json", "hubPath": "tokenizer.json", "size": 17082730, "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39" },
+        { "path": "Xenova/multilingual-e5-small/tokenizer_config.json", "hubPath": "tokenizer_config.json", "size": 443, "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b" },
+        { "path": "Xenova/multilingual-e5-small/onnx/model_quantized.onnx", "hubPath": "onnx/model_quantized.onnx", "size": 118308185, "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193" }
+      ]
+    }
+  ]
+}

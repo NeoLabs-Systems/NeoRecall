@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Private, self-hosted audio memory with local transcription and search.">
+  <title>NeoRecall — Your day, remembered privately</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700;800&amp;family=Geist+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="progress-bar" aria-hidden="true"></div>
+  <nav>
+    <div class="container nav-row">
+      <a class="nav-logo" href="/" aria-label="NeoRecall home"><img src="assets/logo.svg" alt=""><span>NeoRecall</span></a>
+      <div class="nav-links"><a href="#workflow">Workflow</a><a href="#privacy">Privacy</a><a href="https://neolabs-systems.github.io/NeoRecall/docs/">Docs</a><a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a></div>
+      <a class="btn compact" href="/app/">Open app</a>
+    </div>
+  </nav>
+  <header class="hero">
+    <div class="container hero-grid">
+      <div>
+        <span class="eyebrow reveal">Self-hosted · Offline first · Local speech AI</span>
+        <h1 class="reveal">Your day, remembered privately.</h1>
+        <p class="sub reveal">Record your microphone and device audio, keep working offline, and turn the day into searchable transcripts and useful memories. Audio is removed after local transcription.</p>
+        <div class="cta-row reveal"><a class="btn" href="#install">Install NeoRecall</a><a class="btn btn-outline" href="https://neolabs-systems.github.io/NeoRecall/docs/">Read the docs</a></div>
+        <div class="badge-row reveal"><img src="https://img.shields.io/badge/Node-20%2B-5fa04e?style=flat-square" alt="Node 20 or newer"><img src="https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square" alt="AGPL-3.0"></div>
+      </div>
+      <div class="signal reveal" aria-label="Audio moving through local processing">
+        <div class="record-ring"><span></span></div>
+        <div class="signal-row"><strong>30 s</strong><span>durable offline chunks</span></div>
+        <div class="signal-row"><strong>Local</strong><span>transcription and embeddings</span></div>
+        <div class="signal-row"><strong>Rare</strong><span>hourly memory consolidation</span></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section id="workflow" class="section">
+      <div class="container"><span class="eyebrow reveal">From sound to recall</span><h2 class="reveal">A reliable path through every stage.</h2>
+        <div class="feature-grid">
+          <article class="feature-card reveal"><b>01</b><h3>Capture anywhere</h3><p>Web, macOS, and Windows record microphone audio, optional system audio, or imported files. Desktop is the uninterrupted-recording reference client.</p></article>
+          <article class="feature-card reveal"><b>02</b><h3>Transcribe locally</h3><p>CPU-only speech recognition, VAD, diarization, and multilingual embeddings run without paid speech services.</p></article>
+          <article class="feature-card reveal"><b>03</b><h3>Recall naturally</h3><p>Search transcripts and memories instantly with FTS5 and semantic vectors, or explicitly ask OpenRouter over cited local context.</p></article>
+        </div>
+      </div>
+    </section>
+    <section id="privacy" class="section section-alt">
+      <div class="container split"><div><span class="eyebrow reveal">Privacy by lifecycle</span><h2 class="reveal">The receipt proves the audio is gone.</h2><p class="lead reveal">The client retains each chunk until transcript data is durably committed and the server confirms its temporary file was deleted. NeoRecall stores transcripts, speaker embeddings, memories, and search vectors—not server-side audio.</p></div>
+        <ol class="lifecycle reveal"><li><span>1</span>Capture into a durable local queue</li><li><span>2</span>Upload idempotently with SHA-256</li><li><span>3</span>Persist transcript with full SQLite durability</li><li><span>4</span>Delete server audio, issue receipt, release client copy</li></ol>
+      </div>
+    </section>
+    <section class="section"><div class="container"><span class="eyebrow reveal">Built for real days</span><h2 class="reveal">Useful detail without constant token use.</h2><div class="feature-grid"><article class="feature-card reveal"><h3>Memories and mini-memories</h3><p>Meetings and important conversations become episodic memories. Facts, people, tasks, promises, events, and relationships remain atomic and easy to act on.</p></article><article class="feature-card reveal"><h3>English memory layer</h3><p>Original-language transcripts stay intact while consolidated memory text is normalized to English for consistent recall across German and English days.</p></article><article class="feature-card reveal"><h3>Visible, consent-aware recording</h3><p>First-run consent guidance, persistent indicators, and immediate pause controls keep capture explicit. NeoRecall does not include a covert mode.</p></article></div></div></section>
+    <section id="install" class="section install"><div class="container split"><div><span class="eyebrow reveal">Self-host in minutes</span><h2 class="reveal">One service. Your machine.</h2><p class="lead reveal">Setup downloads pinned local models, verifies native inference and sqlite-vec, then installs a user service. Docker Compose is available as an alternative.</p></div><pre class="reveal"><code>npm i -g neorecall
+neorecall install
+neorecall setup
+neorecall start</code></pre></div></section>
+  </main>
+  <footer><span>© NeoLabs-Systems. AGPL-3.0.</span><span>Web · macOS 13+ · Windows 10/11 x64</span></footer>
+  <script src="landing.js"></script>
+</body>
+</html>
