@@ -32,3 +32,18 @@ Every consolidation attempt, including a timeout, consumes its interval. It perf
 ## Operational thresholds
 
 The admin dashboard can safely tune boundary, deduplication, speaker matching, and consolidation material thresholds. Values are validated and stored in SQLite. Environment defaults remain the source of truth until an administrator explicitly overrides a value.
+
+## NeoAgent connection
+
+NeoAgent connects through NeoRecall's companion OAuth flow. In NeoAgent, open
+**Integrations**, select **NeoRecall**, and enter this server's base URL. The
+browser then returns to NeoRecall for sign-in and explicit consent.
+
+The issued access is limited to `search:read`, `memories:read`, and
+`recordings:read`. PKCE is mandatory, refresh tokens rotate on every use, and
+the authorization page shows the exact NeoAgent callback URL. NeoAgent cannot
+upload audio, change memories, start consolidation, or call NeoRecall Ask.
+
+Set `NEORECALL_PUBLIC_URL` to the externally reachable HTTPS origin when
+NeoRecall is behind a reverse proxy. Local HTTP URLs remain suitable when both
+services run on a trusted private host.

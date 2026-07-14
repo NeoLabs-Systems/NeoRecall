@@ -69,7 +69,7 @@ function verifySecondFactor(userId, value) {
   throw new HttpError(401, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
 }
 
-async function login({ account, password, twoFactorCode }, context = {}) {
+async function authenticateCredentials({ account, password, twoFactorCode }, context = {}) {
   const db = getDatabase();
   const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE').get(String(account || '').trim(), String(account || '').trim());
   const valid = user ? await verifyPassword(String(password || ''), user.password_hash) : false;
@@ -81,7 +81,12 @@ async function login({ account, password, twoFactorCode }, context = {}) {
   verifySecondFactor(user.id, twoFactorCode);
   db.prepare("UPDATE users SET last_login_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(user.id);
   audit.record({ actorType: 'user', actorId: user.id, affectedUserId: user.id, action: 'login_succeeded', ipAddress: context.ipAddress });
-  return { user: publicUser(user), session: createSession(user.id, context) };
+  return publicUser(user);
+}
+
+async function login(input, context = {}) {
+  const user = await authenticateCredentials(input, context);
+  return { user, session: createSession(user.id, context) };
 }
 
 function authenticateToken(token) {
@@ -162,6 +167,6 @@ async function deleteAccount(userId, password, code) {
 }
 
 module.exports = {
-  publicUser, register, login, authenticateToken, logout, logoutAll, changePassword,
+  publicUser, register, login, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
   beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, verifySecondFactor,
 };

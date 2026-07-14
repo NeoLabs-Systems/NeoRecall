@@ -31,6 +31,7 @@ function createApp() {
         worker: workerReady, models: modelReady, vector: isVectorReady(), vectorVersion: expectedVecVersion });
     } catch (error) { next(error); }
   });
+  app.use(require('./routes/oauth'));
   app.use(['/api/v1', '/admin/api/v1'], slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
   app.use('/api/v1', require('./routes'));
   app.use('/admin/api/v1', require('./routes/admin'));

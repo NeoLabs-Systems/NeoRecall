@@ -29,6 +29,8 @@ Open `http://localhost:4500`.
 
 **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
 
+**Native NeoAgent recall.** Connect from NeoAgent with PKCE OAuth to search memories and transcript evidence through read-only, token-free retrieval tools.
+
 ## Project status
 
 NeoRecall is in beta. Web, macOS 13+, and Windows 10/11 x64 are the v1 clients. Desktop is the reference client for uninterrupted recording; browser capture remains subject to browser permission and lifecycle limits.

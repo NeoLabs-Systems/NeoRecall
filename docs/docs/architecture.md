@@ -40,3 +40,11 @@ The SQLite budget gate is per user and survives restarts. A consolidation is eli
 ## Search
 
 Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented OpenRouter request with result citations.
+
+## NeoAgent boundary
+
+NeoAgent is an OAuth client of NeoRecall, not another processing worker. It
+receives seven read-only tools for on-demand local search and evidence access.
+Audio, voice embeddings, ingest, settings, memory mutation, consolidation, and
+Ask remain inside NeoRecall. This avoids duplicated memory stores and prevents
+an otherwise unnecessary second OpenRouter request.

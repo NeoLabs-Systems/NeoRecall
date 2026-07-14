@@ -2,6 +2,7 @@
 
 const authService = require('../services/auth/auth_service');
 const apiKeys = require('../services/auth/api_key_service');
+const oauth = require('../services/auth/oauth_service');
 const { HttpError } = require('./error_handler');
 
 function bearer(req) {
@@ -11,7 +12,7 @@ function bearer(req) {
 
 function requireAuth(req, _res, next) {
   const token = bearer(req);
-  const auth = apiKeys.authenticate(token) || authService.authenticateToken(token);
+  const auth = apiKeys.authenticate(token) || authService.authenticateToken(token) || oauth.authenticateAccessToken(token);
   if (!auth) return next(new HttpError(401, 'AUTHENTICATION_REQUIRED', 'A valid bearer token is required.'));
   req.auth = auth;
   req.user = auth.user;
