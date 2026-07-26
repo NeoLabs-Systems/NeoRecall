@@ -8,6 +8,8 @@
 
 ![Node 20+](https://img.shields.io/badge/Node-20%2B-5fa04e?style=flat-square) ![AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square)
 
+[![Join the NeoLabs Discord](https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/f59rg2RwUT)
+
 ## Install
 
 ```bash
