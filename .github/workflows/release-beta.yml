@@ -85,3 +85,13 @@ jobs:
       - shell: bash
         run: gh release upload "${{ needs.release.outputs.tag }}" NeoRecall-*.zip --clobber
         env: { GH_TOKEN: '${{ github.token }}' }
+
+  notify-discord:
+    name: Notify Discord
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/discord-release.yml
+    with:
+      release_tag: ${{ needs.release.outputs.tag }}
+    secrets:
+      DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
