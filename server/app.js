@@ -10,7 +10,8 @@ const { requestId } = require('./middleware/request_id');
 const { cors } = require('./middleware/cors');
 const { slidingWindow } = require('./middleware/rate_limit');
 const { notFound, errorHandler, HttpError } = require('./middleware/error_handler');
-const { isWebUiReady, webUiRoot, missingWebUiMessage } = require('../lib/web_ui');
+const { hasBundledWebClient } = require('../lib/install_helpers');
+const { WEB_CLIENT_DIR } = require('../runtime/paths');
 
 function createApp() {
   migrate();
@@ -37,10 +38,12 @@ function createApp() {
   app.use('/api/v1', require('./routes'));
   app.use('/admin/api/v1', require('./routes/admin'));
   app.use('/admin', express.static(path.join(__dirname, 'admin'), { extensions: ['html'] }));
-  const appWebRoot = webUiRoot();
+  const appWebRoot = WEB_CLIENT_DIR;
   app.use('/app', express.static(appWebRoot, { extensions: ['html'], fallthrough: true }));
   app.use('/app', (req, res, next) => {
-    if (!isWebUiReady()) return next(new HttpError(503, 'WEB_UI_MISSING', missingWebUiMessage()));
+    if (!hasBundledWebClient(appWebRoot)) {
+      return next(new HttpError(503, 'WEB_UI_MISSING', 'NeoRecall web UI assets are missing. Run `neorecall rebuild-web` or `neorecall repair`.'));
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     return res.sendFile(path.join(appWebRoot, 'index.html'), (error) => next(error));
   });

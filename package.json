@@ -48,7 +48,8 @@
     "build:web": "cd flutter_app && flutter build web --release --base-href /app/",
     "prepublishOnly": "npm run build:web",
     "docs:dev": "cd docs && npm run start",
-    "docs:build": "cd docs && npm run build"
+    "docs:build": "cd docs && npm run build",
+    "manage": "node bin/neorecall.js"
   },
   "engines": {
     "node": ">=20"
@@ -75,5 +76,13 @@
   },
   "devDependencies": {
     "supertest": "7.1.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeoLabs-Systems/NeoRecall.git"
+  },
+  "homepage": "https://github.com/NeoLabs-Systems/NeoRecall",
+  "bugs": {
+    "url": "https://github.com/NeoLabs-Systems/NeoRecall/issues"
   }
 }

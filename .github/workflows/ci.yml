@@ -1,8 +1,14 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
+      - beta
   pull_request:
-    branches: [main, beta]
+    branches:
+      - main
+      - beta
   workflow_dispatch:
 
 permissions:
@@ -13,43 +19,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend tests (Node ${{ matrix.node }})
+  backend-test:
+    name: Backend tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
-      - run: npm audit --omit=dev
-      - run: npm run test:backend
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+      - name: Run backend tests
+        run: npm run test:backend
 
-  flutter:
+  flutter-test:
     name: Flutter analyze, tests, and web build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: '3.35.5'
           cache: true
-      - run: flutter pub get
+      - name: Install Flutter dependencies
         working-directory: flutter_app
-      - run: flutter analyze --no-pub
+        run: flutter pub get
+      - name: Analyze Flutter app
         working-directory: flutter_app
-      - run: flutter test --no-pub
+        run: flutter analyze --no-pub
+      - name: Run Flutter tests
         working-directory: flutter_app
-      - run: flutter build web --release --no-pub --base-href /app/
+        run: flutter test --no-pub
+      - name: Build web client
         working-directory: flutter_app
+        run: flutter build web --release --no-pub --base-href /app/
 
-  desktop:
+  desktop-compile:
     name: ${{ matrix.platform }} compile gate
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -63,28 +80,36 @@ jobs:
             runner: windows-2025
             command: flutter build windows --release --no-pub
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: '3.35.5'
           cache: true
-      - run: flutter pub get
+      - name: Install Flutter dependencies
         working-directory: flutter_app
-      - run: ${{ matrix.command }}
+        run: flutter pub get
+      - name: Compile desktop client
         working-directory: flutter_app
+        run: ${{ matrix.command }}
 
   docs:
     name: Docs build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: docs/package-lock.json
-      - run: npm ci
+      - name: Install docs dependencies
         working-directory: docs
-      - run: npm run build
+        run: npm ci
+      - name: Build docs
         working-directory: docs
+        run: npm run build

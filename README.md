@@ -19,7 +19,7 @@ neorecall setup
 neorecall start
 ```
 
-Open `http://localhost:4500`.
+Open `http://localhost:4500` and `/app/`. Use `neorecall update` to install newer GitHub releases for the setup-selected `beta` or `stable` channel.
 
 ## What makes it different
 
