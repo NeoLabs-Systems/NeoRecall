@@ -34,16 +34,49 @@ class NeoRecallController extends ChangeNotifier {
     NeoRecallApiClient? api,
     ChunkStore? store,
     RecallRecorder? recorder,
-  }) : api =
-           api ??
-           NeoRecallApiClient(
-             baseUrl: const String.fromEnvironment(
-               'NEORECALL_API_URL',
-               defaultValue: 'http://localhost:4500',
-             ),
-           ),
+  }) : api = api ?? NeoRecallApiClient(baseUrl: _defaultBackendUrl),
        store = store ?? createChunkStore(),
        recorder = recorder ?? createRecorder();
+
+  static const String _configuredBackendUrl = String.fromEnvironment(
+    'NEORECALL_API_URL',
+  );
+
+  static String get _defaultBackendUrl {
+    final configured = _configuredBackendUrl.trim();
+    if (kIsWeb) {
+      if (configured.isEmpty) return _sameOriginBackendUrl();
+      final configuredUri = Uri.tryParse(configured);
+      final configuredHost = configuredUri?.host ?? '';
+      // A web bundle accidentally compiled against localhost should still work
+      // when served from a real host by falling back to same-origin.
+      if (!_isLoopbackHost(Uri.base.host) && _isLoopbackHost(configuredHost)) {
+        return _sameOriginBackendUrl();
+      }
+      return configured.replaceFirst(RegExp(r'/$'), '');
+    }
+    if (configured.isNotEmpty) {
+      return configured.replaceFirst(RegExp(r'/$'), '');
+    }
+    return 'http://localhost:4500';
+  }
+
+  static String _sameOriginBackendUrl() {
+    final base = Uri.base;
+    return Uri(
+      scheme: base.scheme.isEmpty ? 'http' : base.scheme,
+      host: base.host.isEmpty ? 'localhost' : base.host,
+      port: base.hasPort ? base.port : null,
+    ).toString().replaceFirst(RegExp(r'/$'), '');
+  }
+
+  static bool _isLoopbackHost(String host) {
+    final normalized = host.trim().toLowerCase();
+    return normalized == 'localhost' ||
+        normalized == '127.0.0.1' ||
+        normalized == '::1' ||
+        normalized == '[::1]';
+  }
 
   final NeoRecallApiClient api;
   final ChunkStore store;
@@ -101,7 +134,20 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<void> initialize() async {
     _preferences = await SharedPreferences.getInstance();
-    api.baseUrl = _preferences!.getString('backendUrl') ?? api.baseUrl;
+    final savedBackendUrl = _preferences!.getString('backendUrl')?.trim() ?? '';
+    if (savedBackendUrl.isNotEmpty) {
+      if (kIsWeb &&
+          !_isLoopbackHost(Uri.base.host) &&
+          _isLoopbackHost(Uri.tryParse(savedBackendUrl)?.host ?? '')) {
+        // Ignore a stale localhost preference when the app is served remotely.
+        api.baseUrl = _defaultBackendUrl;
+        await _preferences!.remove('backendUrl');
+      } else {
+        api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
+      }
+    } else {
+      api.baseUrl = _defaultBackendUrl;
+    }
     api.token = await _secureStorage.read(key: 'sessionToken');
     username = _preferences!.getString('username');
     consentAccepted =
