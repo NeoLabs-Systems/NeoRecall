@@ -5,14 +5,27 @@ function createGitHelpers(run) {
     throw new TypeError('createGitHelpers(run) requires a run function');
   }
 
-  function latestGitTagVersion(pattern) {
+  function listGitTagVersions(pattern) {
     const res = run('git', ['tag', '--list', pattern, '--sort=-v:refname']);
-    if (res.status !== 0) return null;
-    const tag = String(res.stdout || '')
+    if (res.status !== 0) return [];
+    return String(res.stdout || '')
       .split('\n')
-      .map((value) => value.trim())
-      .find(Boolean);
-    return tag ? tag.replace(/^v/, '') : null;
+      .map((value) => value.trim().replace(/^v/, ''))
+      .filter(Boolean);
+  }
+
+  function latestGitTagVersion(pattern) {
+    return listGitTagVersions(pattern)[0] || null;
+  }
+
+  function latestStableGitTagVersion() {
+    return listGitTagVersions('v[0-9]*.[0-9]*.[0-9]*')
+      .find((version) => /^\d+\.\d+\.\d+$/.test(version)) || null;
+  }
+
+  function latestBetaGitTagVersion() {
+    return listGitTagVersions('v[0-9]*.[0-9]*.[0-9]*-beta.*')
+      .find((version) => /^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) || null;
   }
 
   function gitWorkingTreeDirty() {
@@ -29,7 +42,10 @@ function createGitHelpers(run) {
   }
 
   return {
+    listGitTagVersions,
     latestGitTagVersion,
+    latestStableGitTagVersion,
+    latestBetaGitTagVersion,
     gitWorkingTreeDirty,
     gitLocalBranchExists,
     gitRemoteBranchExists,
