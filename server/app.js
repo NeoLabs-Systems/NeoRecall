@@ -9,7 +9,8 @@ const { getConfig } = require('./config');
 const { requestId } = require('./middleware/request_id');
 const { cors } = require('./middleware/cors');
 const { slidingWindow } = require('./middleware/rate_limit');
-const { notFound, errorHandler } = require('./middleware/error_handler');
+const { notFound, errorHandler, HttpError } = require('./middleware/error_handler');
+const { isWebUiReady, webUiRoot, missingWebUiMessage } = require('../lib/web_ui');
 
 function createApp() {
   migrate();
@@ -36,7 +37,13 @@ function createApp() {
   app.use('/api/v1', require('./routes'));
   app.use('/admin/api/v1', require('./routes/admin'));
   app.use('/admin', express.static(path.join(__dirname, 'admin'), { extensions: ['html'] }));
-  app.use('/app', express.static(path.join(__dirname, '..', 'flutter_app', 'build', 'web'), { extensions: ['html'], fallthrough: true }));
+  const appWebRoot = webUiRoot();
+  app.use('/app', express.static(appWebRoot, { extensions: ['html'], fallthrough: true }));
+  app.use('/app', (req, res, next) => {
+    if (!isWebUiReady()) return next(new HttpError(503, 'WEB_UI_MISSING', missingWebUiMessage()));
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    return res.sendFile(path.join(appWebRoot, 'index.html'), (error) => next(error));
+  });
   app.use('/', express.static(path.join(__dirname, '..', 'landing'), { extensions: ['html'] }));
   app.use(notFound, errorHandler);
   return app;
