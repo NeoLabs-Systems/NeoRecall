@@ -1,0 +1,33 @@
+#VRML V2.0 utf8
+# Molex 216990-0003 mechanical presentation model.
+# VRML units are 0.1 inch as expected by KiCad. Overall envelope follows the
+# 10.0 x 7.0 x 1.2 mm manufacturer body; the mating aperture and tongue are
+# separate solids so the USB-C opening remains visible in connector-edge views.
+DEF METAL Appearance { material Material { diffuseColor 0.62 0.65 0.68 specularColor 0.92 0.92 0.92 shininess 0.82 } }
+DEF DARK Appearance { material Material { diffuseColor 0.025 0.030 0.035 specularColor 0.05 0.05 0.05 shininess 0.15 } }
+DEF TONGUE Appearance { material Material { diffuseColor 0.08 0.08 0.085 specularColor 0.12 0.12 0.12 shininess 0.20 } }
+DEF GOLD Appearance { material Material { diffuseColor 0.82 0.60 0.18 specularColor 0.95 0.78 0.32 shininess 0.75 } }
+
+# Roof, floor and side walls form the shield rather than a solid block.
+Transform { translation 0 0 0.425 children [ Shape { appearance USE METAL geometry Box { size 3.9370 2.7559 0.0945 } } ] }
+Transform { translation 0 0 0.047 children [ Shape { appearance USE METAL geometry Box { size 3.9370 2.7559 0.0945 } } ] }
+Transform { translation -1.8898 0 0.236 children [ Shape { appearance USE METAL geometry Box { size 0.1575 2.7559 0.3780 } } ] }
+Transform { translation 1.8898 0 0.236 children [ Shape { appearance USE METAL geometry Box { size 0.1575 2.7559 0.3780 } } ] }
+
+# Black recessed cavity at the mating face (+Y), plus centered Type-C tongue.
+Transform { translation 0 1.3504 0.236 children [ Shape { appearance USE DARK geometry Box { size 3.4646 0.0551 0.2992 } } ] }
+Transform { translation 0 1.2756 0.205 children [ Shape { appearance USE TONGUE geometry Box { size 2.8346 0.3937 0.0551 } } ] }
+
+# Twelve visible gold contact tips on the tongue.
+Transform { translation -1.1811 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation -0.9646 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation -0.7480 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation -0.5315 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation -0.3150 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation -0.0984 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 0.0984 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 0.3150 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 0.5315 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 0.7480 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 0.9646 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
+Transform { translation 1.1811 1.4823 0.236 children [ Shape { appearance USE GOLD geometry Box { size 0.0787 0.0787 0.0197 } } ] }
