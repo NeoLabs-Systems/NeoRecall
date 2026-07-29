@@ -52,7 +52,6 @@ jobs:
         run: flutter build macos --release --no-pub
 
       - name: Package macOS app
-        id: package
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -72,16 +71,24 @@ jobs:
             exit 1
           fi
           mkdir -p ../dist
-          OUT="../dist/NeoRecall-macOS-${VERSION}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUT"
-          echo "asset=$(basename "$OUT")" >> "$GITHUB_OUTPUT"
+          DMG_ROOT="$(mktemp -d)"
+          trap 'rm -rf "$DMG_ROOT"' EXIT
+          ditto "$APP_PATH" "$DMG_ROOT/$(basename "$APP_PATH")"
+          ln -s /Applications "$DMG_ROOT/Applications"
+          OUT="../dist/NeoRecall-macOS-${VERSION}.dmg"
+          hdiutil create \
+            -volname "NeoRecall" \
+            -srcfolder "$DMG_ROOT" \
+            -format UDZO \
+            -ov \
+            "$OUT"
           ls -la ../dist
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: neorecall-macos-app
-          path: dist/NeoRecall-macOS-*.zip
+          path: dist/NeoRecall-macOS-*.dmg
           if-no-files-found: error
 
   build-windows:

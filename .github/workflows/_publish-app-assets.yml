@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          macos=(dist/NeoRecall-macOS-*.zip)
+          macos=(dist/NeoRecall-macOS-*.dmg)
           windows=(dist/NeoRecall-Windows-x64-*.zip)
           android=(dist/NeoRecall-Android-*.apk)
           asset_count=$((${#macos[@]} + ${#windows[@]} + ${#android[@]}))
@@ -41,10 +41,36 @@ jobs:
           find dist -maxdepth 1 -type f -print
 
       - name: Upload apps to GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.release_tag }}
-          files: |
-            dist/NeoRecall-macOS-*.zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(
+            dist/NeoRecall-macOS-*.dmg
             dist/NeoRecall-Windows-x64-*.zip
             dist/NeoRecall-Android-*.apk
+          )
+
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+
+          declare -A uploaded_by_name=()
+          while IFS= read -r name; do
+            uploaded_by_name["$name"]=1
+          done < <(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+              --jq '.assets[].name'
+          )
+
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            if [[ -z "${uploaded_by_name[$name]:-}" ]]; then
+              echo "::error::Release asset was not attached: $name"
+              exit 1
+            fi
+          done
+
+          echo "Verified ${#assets[@]} asset(s) on release $RELEASE_TAG."
