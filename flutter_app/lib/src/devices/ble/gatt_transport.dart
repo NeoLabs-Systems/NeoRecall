@@ -59,9 +59,10 @@ abstract class GattTransport {
     bool autoReconnect = true,
     Duration timeout = const Duration(seconds: 30),
   });
+  Future<int?> requestMtu(String deviceId, int expectedMtu);
   Future<void> pair(String deviceId);
   Future<void> disconnect(String deviceId);
-  Future<void> discoverServices(String deviceId);
+  Future<List<String>> discoverServices(String deviceId);
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
@@ -208,6 +209,16 @@ class UniversalGattTransport implements GattTransport {
   );
 
   @override
+  Future<int?> requestMtu(String deviceId, int expectedMtu) async {
+    if (kIsWeb) return null;
+    try {
+      return await UniversalBle.requestMtu(deviceId, expectedMtu);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<void> pair(String deviceId) => UniversalBle.pair(deviceId);
 
   bool get _nativeAutoReconnectSupported =>
@@ -220,9 +231,10 @@ class UniversalGattTransport implements GattTransport {
   Future<void> disconnect(String deviceId) => UniversalBle.disconnect(deviceId);
 
   @override
-  Future<void> discoverServices(String deviceId) async {
-    await UniversalBle.discoverServices(deviceId);
-  }
+  Future<List<String>> discoverServices(String deviceId) async =>
+      (await UniversalBle.discoverServices(deviceId))
+          .map((service) => service.uuid.toLowerCase())
+          .toList(growable: false);
 
   @override
   Future<Uint8List> read(

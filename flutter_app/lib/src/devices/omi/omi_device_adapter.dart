@@ -5,6 +5,7 @@ import '../audio_codec_decoder.dart';
 import '../audio_device_adapter.dart';
 import '../ble/gatt_connector_transport.dart';
 import '../ble/gatt_transport.dart';
+import '../../diagnostics/client_diagnostic_log.dart';
 import 'base_connector.dart';
 import 'device_factory.dart';
 import 'device_models.dart';
@@ -113,6 +114,7 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
           'Fieldy',
           'Limitless',
           'Pendant',
+          'Pocket',
         ],
       ),
       timeout: timeout,
@@ -136,9 +138,25 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       rssi: peripheral.rssi ?? 0,
       serviceUuids: services,
     );
-    if (!_hasValidatedIdentity(wearable) || !_hasLocalDecoder(type)) return;
     final old = _found[wearable.id];
     if (old != null && old.rssi == wearable.rssi) return;
+    final identityValidated = _hasValidatedIdentity(wearable);
+    final locallyDecodable = _hasLocalDecoder(type);
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'peripheral_discovered',
+      details: <String, Object?>{
+        'name': name,
+        'classifiedType': type.name,
+        'advertisedServices': services,
+        'identityValidated': identityValidated,
+        'locallyDecodable': locallyDecodable,
+      },
+    );
+    if ((!identityValidated || !locallyDecodable) &&
+        type != WearableDeviceType.custom) {
+      return;
+    }
     _found[wearable.id] = wearable;
     if (!_discoveries.isClosed) _discoveries.add(_toDescriptor(wearable));
   }
@@ -192,10 +210,12 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
           device.type == WearableDeviceType.omi ||
           device.type == WearableDeviceType.omiGlass ||
           device.type == WearableDeviceType.limitless,
+      supportsMicrophone: device.type != WearableDeviceType.custom,
       metadata: <String, Object?>{
         'type': device.type.name,
         'rssi': device.rssi,
         'serviceUuids': device.serviceUuids,
+        'compatibilityUnknown': device.type == WearableDeviceType.custom,
       },
     );
   }
@@ -216,13 +236,24 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     await stopScan();
     final resumeRecording = _resumeRecordingAfterReconnect;
     await _disconnectProtocol(clearResumeIntent: false);
-    final wearable = _found[device.deviceKey] ?? _restoreDescriptor(device);
+    var wearable = _found[device.deviceKey] ?? _restoreDescriptor(device);
+    if (wearable.type == WearableDeviceType.custom) {
+      wearable = await _probeProtocol(wearable);
+    }
     if (!_hasValidatedIdentity(wearable) || !_hasLocalDecoder(wearable.type)) {
       throw UnsupportedError(
         '${wearable.name} has no fully local, validated capture pipeline.',
       );
     }
 
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'connection_started',
+      details: <String, Object?>{
+        'name': wearable.name,
+        'type': wearable.type.name,
+      },
+    );
     _setState(DeviceTransportState.connecting);
     final wearableTransport = GattConnectorTransport(
       gatt: _gatt,
@@ -263,11 +294,30 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
       _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
       _setState(DeviceTransportState.connectedStandby);
+      ClientDiagnosticLog.instance.record(
+        'bluetooth',
+        'connection_ready',
+        details: <String, Object?>{
+          'name': wearable.name,
+          'type': wearable.type.name,
+          'codec': connector.codec.name,
+        },
+      );
       if (resumeRecording) {
         await connector.startRecording();
         _setState(DeviceTransportState.recording);
       }
-    } catch (_) {
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth',
+        'connection_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'name': wearable.name,
+          'type': wearable.type.name,
+          'error': error.toString(),
+        },
+      );
       try {
         await connector.dispose();
       } catch (_) {
@@ -276,6 +326,65 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       await _clearProtocolState();
       _setState(DeviceTransportState.faulted);
       rethrow;
+    }
+  }
+
+  Future<DiscoveredWearable> _probeProtocol(DiscoveredWearable device) async {
+    var connected = false;
+    try {
+      await _gatt.connect(device.id, autoReconnect: false);
+      connected = true;
+      var services = await _gatt.discoverServices(device.id);
+      var type = DiscoveredWearable.classify(
+        name: device.name,
+        serviceUuids: services,
+      );
+      var paired = false;
+      if (type == WearableDeviceType.custom) {
+        try {
+          await _gatt.pair(device.id);
+          paired = true;
+          services = await _gatt.discoverServices(device.id);
+          type = DiscoveredWearable.classify(
+            name: device.name,
+            serviceUuids: services,
+          );
+        } catch (error) {
+          ClientDiagnosticLog.instance.record(
+            'bluetooth',
+            'pairing_failed',
+            level: 'warning',
+            details: <String, Object?>{
+              'name': device.name,
+              'error': error.toString(),
+            },
+          );
+        }
+      }
+      final probed = DiscoveredWearable(
+        id: device.id,
+        name: device.name,
+        type: type,
+        rssi: device.rssi,
+        serviceUuids: services,
+      );
+      ClientDiagnosticLog.instance.record(
+        'bluetooth',
+        'compatibility_checked',
+        details: <String, Object?>{
+          'name': device.name,
+          'classifiedType': probed.type.name,
+          'services': services,
+          'paired': paired,
+        },
+      );
+      return probed;
+    } finally {
+      if (connected) {
+        try {
+          await _gatt.disconnect(device.id);
+        } catch (_) {}
+      }
     }
   }
 
@@ -343,6 +452,12 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   }
 
   void _emitProtocolWarning(String warning) {
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      'decode_warning',
+      level: 'warning',
+      details: <String, Object?>{'warning': warning},
+    );
     if (!_controlEvents.isClosed) {
       _controlEvents.add(
         DeviceControlEvent(

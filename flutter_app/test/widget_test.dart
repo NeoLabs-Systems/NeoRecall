@@ -25,6 +25,18 @@ void main() {
     );
   });
 
+  test('same-origin web backend restores its persisted session', () {
+    expect(canRestoreSessionForBackend(web: true, baseUrl: ''), isTrue);
+    expect(canRestoreSessionForBackend(web: false, baseUrl: ''), isFalse);
+    expect(
+      canRestoreSessionForBackend(
+        web: false,
+        baseUrl: 'https://recall.example',
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets('NeoRecall theme builds MaterialApp shell', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -160,7 +172,7 @@ void main() {
       tester.view.physicalSize = const Size(1180, 780);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      final now = DateTime.now();
+      final now = DateTime(2026, 7, 29, 12);
       final controller = NeoRecallController()
         ..transcript = <TranscriptSegment>[
           TranscriptSegment(

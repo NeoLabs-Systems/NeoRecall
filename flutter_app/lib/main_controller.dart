@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import 'src/api_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/desktop/startup.dart';
+import 'src/diagnostics/client_diagnostic_log.dart';
 import 'src/devices/audio_device_adapter.dart';
 import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
@@ -34,6 +36,11 @@ enum RecallPage {
   devices,
   settings,
 }
+
+bool canRestoreSessionForBackend({
+  required bool web,
+  required String baseUrl,
+}) => web || baseUrl.trim().isNotEmpty;
 
 class NeoRecallController extends ChangeNotifier {
   NeoRecallController({
@@ -240,7 +247,11 @@ class NeoRecallController extends ChangeNotifier {
         initialized = true;
         notifyListeners();
       }
-      if (api.baseUrl.isNotEmpty) {
+      final backendIsConfigured = canRestoreSessionForBackend(
+        web: kIsWeb,
+        baseUrl: api.baseUrl,
+      );
+      if (backendIsConfigured) {
         api.token = await _secureStorage.read(key: 'sessionToken');
         accountId = _preferences!.getString('accountId');
         username = _preferences!.getString('username');
@@ -263,7 +274,7 @@ class NeoRecallController extends ChangeNotifier {
         await sync.initialize();
         _syncInitialized = true;
       }
-      if (api.token != null && api.baseUrl.isNotEmpty) {
+      if (api.token != null && backendIsConfigured) {
         try {
           final payload = await api.request('GET', '/api/v1/auth/me') as Map;
           final user = payload['user'] as Map;
@@ -303,6 +314,16 @@ class NeoRecallController extends ChangeNotifier {
           await _preferences!.remove('username');
         }
       }
+      await ClientDiagnosticLog.instance.bindAccount(accountId);
+      ClientDiagnosticLog.instance.record(
+        'application',
+        'startup_completed',
+        details: <String, Object?>{
+          'authenticated': authenticated,
+          'platform': _platform,
+          'backendMode': kIsWeb ? 'same_origin' : 'configured',
+        },
+      );
       if (!_deviceRuntimeInitialized) {
         if (recorder is MobileRecallRecorder) {
           await (recorder as MobileRecallRecorder).initialize(
@@ -514,6 +535,12 @@ class NeoRecallController extends ChangeNotifier {
     username = user['username'] as String;
     sync.pump.accountId = accountId;
     await audioDeviceSessions.bindAccount(accountId);
+    await ClientDiagnosticLog.instance.bindAccount(accountId);
+    ClientDiagnosticLog.instance.record(
+      'authentication',
+      'session_started',
+      details: <String, Object?>{'platform': _platform},
+    );
     preferBluetoothCapture = audioDeviceSessions.preferBluetooth;
     preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
     await _secureStorage.write(key: 'sessionToken', value: api.token);
@@ -526,6 +553,7 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> logout() async {
     if (isRecording) await stopRecording();
     await audioDeviceSessions.bindAccount(null);
+    await ClientDiagnosticLog.instance.bindAccount(null);
     preferredDeviceLabel = null;
     try {
       await api.request('POST', '/api/v1/auth/logout');
@@ -537,7 +565,35 @@ class NeoRecallController extends ChangeNotifier {
     pendingAudioBytes = 0;
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
+    await _preferences?.remove('username');
     notifyListeners();
+  }
+
+  Future<String> buildDiagnosticExport() async {
+    if (!authenticated) {
+      throw StateError('Sign in before exporting diagnostics.');
+    }
+    Object backend;
+    var backendAvailable = true;
+    try {
+      backend = await api.request('GET', '/api/v1/diagnostics/export');
+    } catch (error) {
+      backendAvailable = false;
+      backend = <String, Object?>{
+        'available': false,
+        'error': error.toString(),
+      };
+    }
+    ClientDiagnosticLog.instance.record(
+      'diagnostics',
+      'export_created',
+      details: <String, Object?>{'backendAvailable': backendAvailable},
+    );
+    return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+      'schemaVersion': 1,
+      'client': ClientDiagnosticLog.instance.clientSummary(),
+      'backend': backend,
+    });
   }
 
   Future<bool> _run(

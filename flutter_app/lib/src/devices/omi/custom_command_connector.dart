@@ -161,6 +161,9 @@ class BeeConnector extends CustomCommandConnector {
 
 class FieldyConnector extends WearableConnector {
   FieldyConnector({required super.device, required super.transport});
+  static const frameSize = 40;
+  static const opusToc = 0xb8;
+  final List<int> _frameBuffer = <int>[];
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
@@ -184,14 +187,16 @@ class FieldyConnector extends WearableConnector {
         WearableDeviceUuids.fieldyService,
         WearableDeviceUuids.fieldyAudio,
       )).listen((value) {
-        const frameSize = 40;
-        var offset = 0;
-        while (offset + frameSize <= value.length) {
-          audioBytes.add(value.sublist(offset, offset + frameSize));
-          offset += frameSize;
+        _frameBuffer.addAll(value);
+        while (_frameBuffer.isNotEmpty && _frameBuffer.first != opusToc) {
+          _frameBuffer.removeAt(0);
         }
-        if (offset < value.length && value[offset] == 0xb8) {
-          audioBytes.add(value.sublist(offset));
+        while (_frameBuffer.length >= frameSize) {
+          audioBytes.add(_frameBuffer.sublist(0, frameSize));
+          _frameBuffer.removeRange(0, frameSize);
+          while (_frameBuffer.isNotEmpty && _frameBuffer.first != opusToc) {
+            _frameBuffer.removeAt(0);
+          }
         }
       }),
     );
@@ -201,6 +206,7 @@ class FieldyConnector extends WearableConnector {
   @override
   Future<void> stopRecording() async {
     await cancelRecordingSubscriptions();
+    _frameBuffer.clear();
     recording = false;
   }
 }

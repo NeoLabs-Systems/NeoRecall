@@ -32,6 +32,7 @@ dependencies:
   window_manager: ^0.5.1
   launch_at_startup: ^0.5.1
   opus_dart: ^3.0.1
+  opus_flutter: ^3.0.3
   permission_handler: ^12.0.0+1
   universal_ble: 1.2.0
 

@@ -40,6 +40,56 @@ void main() {
     await adapter.dispose();
   });
 
+  test(
+    'Pocket is discoverable and probes services before being saved',
+    () async {
+      final transport = _FakeGattTransport()
+        ..discoveredServiceUuids = const <String>['unknown-service'];
+      final adapter = OmiDeviceAdapter(gatt: transport);
+      final discovery = expectLater(
+        adapter.discoveries,
+        emits(
+          isA<AudioDeviceDescriptor>()
+              .having((device) => device.displayName, 'name', 'Pocket')
+              .having(
+                (device) => device.metadata['compatibilityUnknown'],
+                'compatibility',
+                isTrue,
+              ),
+        ),
+      );
+
+      await adapter.startScan();
+      transport.emitPeripheral(
+        const GattPeripheral(
+          id: 'pocket-device',
+          name: 'Pocket',
+          serviceUuids: <String>[],
+        ),
+      );
+      await discovery;
+      const descriptor = AudioDeviceDescriptor(
+        adapterId: 'omi_family',
+        deviceKey: 'pocket-device',
+        displayName: 'Pocket',
+        transport: 'bluetooth_le',
+        supportsMicrophone: false,
+        metadata: <String, Object?>{
+          'type': 'custom',
+          'compatibilityUnknown': true,
+        },
+      );
+      await expectLater(adapter.connect(descriptor), throwsUnsupportedError);
+      expect(transport.pairCalls, 1);
+      expect(
+        transport.discoverServicesCalls,
+        2,
+        reason: 'services are refreshed after pairing',
+      );
+      await adapter.dispose();
+    },
+  );
+
   test('unexpected disconnect resumes an active wearable recording', () async {
     final transport = _FakeGattTransport();
     final adapter = OmiDeviceAdapter(gatt: transport);
@@ -111,6 +161,10 @@ class _FakeGattTransport implements GattTransport {
 
   bool? lastAutoReconnect;
   int discoverServicesCalls = 0;
+  int pairCalls = 0;
+  List<String> discoveredServiceUuids = const <String>[
+    WearableDeviceUuids.omiService,
+  ];
   GattScanSpec? lastScanSpec;
 
   @override
@@ -118,6 +172,10 @@ class _FakeGattTransport implements GattTransport {
 
   void emitConnection(bool connected) {
     _connections.add(connected);
+  }
+
+  void emitPeripheral(GattPeripheral peripheral) {
+    _discoveries.add(peripheral);
   }
 
   @override
@@ -140,11 +198,18 @@ class _FakeGattTransport implements GattTransport {
   Future<void> disconnect(String deviceId) async {}
 
   @override
-  Future<void> pair(String deviceId) async {}
+  Future<void> pair(String deviceId) async {
+    pairCalls += 1;
+  }
 
   @override
-  Future<void> discoverServices(String deviceId) async {
+  Future<int?> requestMtu(String deviceId, int expectedMtu) async =>
+      expectedMtu;
+
+  @override
+  Future<List<String>> discoverServices(String deviceId) async {
     discoverServicesCalls += 1;
+    return discoveredServiceUuids;
   }
 
   @override

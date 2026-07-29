@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../../diagnostics/client_diagnostic_log.dart';
 import 'gatt_transport.dart';
 
 /// The small, plugin-independent GATT surface used by wearable protocols.
@@ -36,6 +37,7 @@ class GattConnectorTransport implements WearableTransport {
     : _gatt = gatt;
 
   final GattTransport _gatt;
+  static const int preferredMtu = 512;
 
   @override
   final String deviceId;
@@ -50,6 +52,15 @@ class GattConnectorTransport implements WearableTransport {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     await _gatt.connect(deviceId, autoReconnect: false, timeout: timeout);
+    final negotiatedMtu = await _gatt.requestMtu(deviceId, preferredMtu);
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'mtu_negotiated',
+      details: <String, Object?>{
+        'requested': preferredMtu,
+        'negotiated': negotiatedMtu,
+      },
+    );
     await _gatt.discoverServices(deviceId);
     if (requiresPairing) {
       try {

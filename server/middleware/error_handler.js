@@ -20,6 +20,7 @@ function notFound(_req, res) {
 function errorHandler(error, req, res, _next) {
   const status = error.status || (error.code === 'LIMIT_FILE_SIZE' ? 413 : 500);
   const code = error.code || 'INTERNAL_ERROR';
+  res.locals.diagnosticErrorCode = code;
   if (status >= 500) logger.error('Request failed', { requestId: req.id, method: req.method, path: req.path, error });
   const payload = {
     error: {

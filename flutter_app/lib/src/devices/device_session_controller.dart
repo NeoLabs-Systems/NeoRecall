@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../diagnostics/client_diagnostic_log.dart';
 import 'audio_device_adapter.dart';
 
 /// Coordinates preferred external capture device selection and reconnect.
@@ -115,10 +116,19 @@ class DeviceSessionController {
   }
 
   Future<void> prefer(AudioDeviceDescriptor device) async {
+    final previousDevice = preferredDevice;
+    final previousAdapter = activeAdapter;
     preferredDevice = device;
     activeAdapter = registry[device.adapterId];
+    final connected = await connectPreferred(scheduleReconnect: false);
+    if (!connected) {
+      preferredDevice = previousDevice;
+      activeAdapter = previousAdapter;
+      throw StateError(
+        '${device.displayName} could not be connected as an audio device.',
+      );
+    }
     await _persist();
-    await connectPreferred();
   }
 
   Future<void> clearPreferred() async {
@@ -127,7 +137,7 @@ class DeviceSessionController {
     await _persist();
   }
 
-  Future<bool> connectPreferred() async {
+  Future<bool> connectPreferred({bool scheduleReconnect = true}) async {
     final device = preferredDevice;
     final adapter =
         activeAdapter ?? (device == null ? null : registry[device.adapterId]);
@@ -167,10 +177,19 @@ class DeviceSessionController {
       _messages.add('Connected to ${device.displayName}');
       return true;
     } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth',
+        'preferred_connection_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'name': device.displayName,
+          'error': error.toString(),
+        },
+      );
       state = DeviceTransportState.faulted;
       _states.add(state);
       _messages.add('Connect failed: $error');
-      if (autoReconnect) _scheduleReconnect();
+      if (autoReconnect && scheduleReconnect) _scheduleReconnect();
       return false;
     } finally {
       _connecting = false;

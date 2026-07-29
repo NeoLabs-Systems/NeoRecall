@@ -362,6 +362,8 @@ class _RecordScreenState extends State<RecordScreen> {
                   if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 14),
                     ...controller.discoveredWearables.map((device) {
+                      final compatibilityUnknown =
+                          device.metadata['compatibilityUnknown'] == true;
                       final selected =
                           controller.preferredDeviceLabel == device.displayName;
                       return ListTile(
@@ -376,7 +378,9 @@ class _RecordScreenState extends State<RecordScreen> {
                         ),
                         title: Text(device.displayName),
                         subtitle: Text(
-                          '${device.metadata['type'] ?? 'wearable'} · ${device.deviceKey}',
+                          compatibilityUnknown
+                              ? 'Compatibility will be checked securely'
+                              : '${device.metadata['type'] ?? 'wearable'} · Ready for audio',
                         ),
                         trailing: selected
                             ? const Icon(Icons.check_circle, size: 18)
@@ -404,7 +408,9 @@ class _RecordScreenState extends State<RecordScreen> {
                                           );
                                         }
                                       },
-                                child: const Text('Connect'),
+                                child: Text(
+                                  compatibilityUnknown ? 'Check' : 'Connect',
+                                ),
                               ),
                       );
                     }),

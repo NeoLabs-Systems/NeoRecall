@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'main_controller.dart';
 import 'main_devices.dart';
@@ -26,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? settings;
   final timezone = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
+  bool exportingDiagnostics = false;
 
   @override
   void initState() {
@@ -58,6 +60,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
+  }
+
+  Future<void> exportDiagnostics() async {
+    setState(() => exportingDiagnostics = true);
+    try {
+      final report = await widget.controller.buildDiagnosticExport();
+      await Clipboard.setData(ClipboardData(text: report));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Diagnostic report copied.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => exportingDiagnostics = false);
+    }
   }
 
   @override
@@ -181,6 +202,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 prefixIcon: Icon(Icons.public_outlined),
               ),
               onChanged: (value) => settings!['timezone'] = value,
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 14),
+      SectionCard(
+        eyebrow: 'SUPPORT',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Diagnostic report',
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Copies recent connection and synchronization details for this account. Passwords, access tokens, recordings, transcripts, and data from other accounts are excluded.',
+              style: TextStyle(color: palette.textSecondary, height: 1.45),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: exportingDiagnostics ? null : exportDiagnostics,
+              icon: exportingDiagnostics
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.content_copy_outlined),
+              label: Text(
+                exportingDiagnostics
+                    ? 'Preparing report…'
+                    : 'Copy diagnostic report',
+              ),
             ),
           ],
         ),

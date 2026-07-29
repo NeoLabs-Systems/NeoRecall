@@ -8,6 +8,7 @@ const { getDatabase, isVectorReady, expectedVecVersion } = require('./db/databas
 const { getConfig } = require('./config');
 const { requestId } = require('./middleware/request_id');
 const { cors } = require('./middleware/cors');
+const { userDiagnostics } = require('./middleware/user_diagnostics');
 const { slidingWindow } = require('./middleware/rate_limit');
 const { notFound, errorHandler, HttpError } = require('./middleware/error_handler');
 const { hasBundledWebClient } = require('../lib/install_helpers');
@@ -21,6 +22,7 @@ function createApp() {
   app.disable('x-powered-by');
   app.use(requestId, cors, compression());
   app.use(express.json({ limit: '1mb' }));
+  app.use(userDiagnostics);
   app.get('/health', (_req, res) => res.json({ status: 'ok', process: 'http', version: require('../package.json').version }));
   app.get('/ready', async (req, res, next) => {
     try {

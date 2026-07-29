@@ -127,7 +127,7 @@ void main() {
     },
   );
 
-  test('Fieldy splits each notification into FS320 Opus frames', () async {
+  test('Fieldy reassembles fragmented FS320 Opus frames', () async {
     final transport = _FakeWearableTransport();
     final connector = FieldyConnector(
       device: _device(WearableDeviceType.fieldy),
@@ -137,13 +137,26 @@ void main() {
     await connector.startRecording();
     final received = <List<int>>[];
     final subscription = connector.audioBytes.stream.listen(received.add);
+    final first = <int>[0xb8, ...List<int>.filled(39, 0x11)];
+    final second = <int>[0xb8, ...List<int>.filled(39, 0x22)];
     transport.emit(
       WearableDeviceUuids.fieldyService,
       WearableDeviceUuids.fieldyAudio,
-      <int>[...List<int>.filled(40, 0xb8), ...List<int>.filled(40, 0x78)],
+      first.sublist(0, 19),
+    );
+    transport.emit(
+      WearableDeviceUuids.fieldyService,
+      WearableDeviceUuids.fieldyAudio,
+      <int>[...first.sublist(19), ...second.sublist(0, 7)],
+    );
+    transport.emit(
+      WearableDeviceUuids.fieldyService,
+      WearableDeviceUuids.fieldyAudio,
+      second.sublist(7),
     );
     await Future<void>.delayed(Duration.zero);
     expect(received.map((frame) => frame.length), <int>[40, 40]);
+    expect(received, <List<int>>[first, second]);
     await subscription.cancel();
     await connector.dispose();
   });

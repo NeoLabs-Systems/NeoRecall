@@ -11,9 +11,11 @@ import 'main_controller.dart';
 import 'main_shared.dart';
 import 'main_shell.dart';
 import 'main_theme.dart';
+import 'src/devices/audio_codec_decoder.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeWearableAudioCodecs();
   if (!kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.macOS ||
           defaultTargetPlatform == TargetPlatform.windows)) {

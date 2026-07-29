@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 
+import 'diagnostics/client_diagnostic_log.dart';
 import 'models/chunk.dart';
 import 'models/recording.dart';
 
@@ -78,9 +79,44 @@ class NeoRecallApiClient {
       default:
         throw ArgumentError.value(method, 'method');
     }
-    final response = await responseFuture.timeout(requestTimeout);
+    late http.Response response;
+    try {
+      response = await responseFuture.timeout(requestTimeout);
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'network',
+        'request_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'method': method,
+          'path': _diagnosticPath(path),
+          'error': error.toString(),
+        },
+      );
+      rethrow;
+    }
+    if (response.statusCode >= 400) {
+      ClientDiagnosticLog.instance.record(
+        'network',
+        'request_rejected',
+        level: 'warning',
+        details: <String, Object?>{
+          'method': method,
+          'path': _diagnosticPath(path),
+          'status': response.statusCode,
+        },
+      );
+    }
     return _decode(response);
   }
+
+  String _diagnosticPath(String path) => path.replaceAll(
+    RegExp(
+      r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
+      caseSensitive: false,
+    ),
+    ':id',
+  );
 
   dynamic _decode(http.Response response) {
     final payload = response.body.isEmpty ? null : jsonDecode(response.body);

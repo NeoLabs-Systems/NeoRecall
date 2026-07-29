@@ -33,4 +33,5 @@ router.use('/daily-summaries', require('./daily_summaries'));
 router.use('/search', require('./search'));
 router.use('/settings', require('./settings'));
 router.use('/events', require('./events'));
+router.use('/diagnostics', require('./diagnostics'));
 module.exports = router;

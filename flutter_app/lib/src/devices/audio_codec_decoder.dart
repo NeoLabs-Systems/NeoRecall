@@ -1,8 +1,22 @@
 import 'dart:typed_data';
 
 import 'package:opus_dart/opus_dart.dart';
+import 'package:opus_flutter/opus_flutter.dart' as opus_flutter;
 
 import 'omi/device_models.dart';
+
+bool _opusInitialized = false;
+Object? _opusInitializationError;
+
+Future<void> initializeWearableAudioCodecs() async {
+  if (_opusInitialized || _opusInitializationError != null) return;
+  try {
+    initOpus(await opus_flutter.load());
+    _opusInitialized = true;
+  } catch (error) {
+    _opusInitializationError = error;
+  }
+}
 
 /// Decodes wearable audio frames to mono PCM16 @ 16 kHz.
 ///
@@ -29,9 +43,10 @@ class WearableAudioDecoder {
     switch (codec) {
       case WearableAudioCodec.pcm8:
       case WearableAudioCodec.pcm16:
+        return true;
       case WearableAudioCodec.opus:
       case WearableAudioCodec.opusFs320:
-        return true;
+        return _opusInitialized;
       case WearableAudioCodec.aac:
       case WearableAudioCodec.lc3:
       case WearableAudioCodec.unknown:
@@ -40,6 +55,12 @@ class WearableAudioDecoder {
   }
 
   void _ensureOpus() {
+    if (!_opusInitialized) {
+      throw StateError(
+        'The bundled Opus decoder could not be loaded'
+        '${_opusInitializationError == null ? '.' : ': $_opusInitializationError'}',
+      );
+    }
     _opus ??= SimpleOpusDecoder(sampleRate: sampleRate, channels: 1);
   }
 
