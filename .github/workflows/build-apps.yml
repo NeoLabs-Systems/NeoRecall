@@ -1,23 +1,29 @@
 name: Build Apps
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing GitHub release tag to attach unsigned app assets to
-        required: true
+        description: Release tag used to name app assets
+        required: false
         type: string
       ref:
-        description: Git ref to build from (defaults to the release tag)
+        description: Git ref to build from (defaults to the current commit)
         required: false
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-apps:
     uses: ./.github/workflows/_build-apps.yml
     with:
-      ref: ${{ github.event.inputs.ref || github.event.inputs.release_tag }}
-      release_tag: ${{ github.event.inputs.release_tag }}
+      ref: ${{ inputs.ref || github.sha }}
+      release_tag: ${{ inputs.release_tag || '' }}

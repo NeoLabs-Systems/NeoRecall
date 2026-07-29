@@ -1,0 +1,47 @@
+name: Reusable App Asset Publisher
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to receive app assets
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-app-assets:
+    name: Attach apps to release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download app artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: neorecall-*-app
+          merge-multiple: true
+
+      - name: Verify app assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          macos=(dist/NeoRecall-macOS-*.zip)
+          windows=(dist/NeoRecall-Windows-x64-*.zip)
+          android=(dist/NeoRecall-Android-*.apk)
+          if [ "${#macos[@]}" -ne 1 ] || [ "${#windows[@]}" -ne 1 ] || [ "${#android[@]}" -ne 1 ]; then
+            echo "Expected exactly one macOS, Windows, and Android app asset."
+            find dist -maxdepth 1 -type f -print
+            exit 1
+          fi
+
+      - name: Upload apps to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: |
+            dist/NeoRecall-macOS-*.zip
+            dist/NeoRecall-Windows-x64-*.zip
+            dist/NeoRecall-Android-*.apk

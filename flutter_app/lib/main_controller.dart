@@ -43,6 +43,17 @@ class NeoRecallController extends ChangeNotifier {
   static const String _configuredBackendUrl = String.fromEnvironment(
     'NEORECALL_API_URL',
   );
+  static const Map<String, dynamic> _fallbackSettings = <String, dynamic>{
+    'consolidationIntervalMs': 3600000,
+    'effectiveConsolidationIntervalMs': 3600000,
+    'timezone': 'UTC',
+    'recurringSpeakerMatching': true,
+    'diarizationEnabled': true,
+    'chunkTargetMs': 30000,
+    'chunkOverlapMs': 2000,
+    'chunkMinMs': 15000,
+    'chunkMaxMs': 120000,
+  };
 
   static String get _defaultBackendUrl {
     final configured = _configuredBackendUrl.trim();
@@ -86,7 +97,9 @@ class NeoRecallController extends ChangeNotifier {
     if (!kIsWeb) return false;
     final uri = Uri.tryParse(candidate.trim());
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) return true;
-    if (_isLoopbackHost(uri.host) && !_isLoopbackHost(Uri.base.host)) return true;
+    if (_isLoopbackHost(uri.host) && !_isLoopbackHost(Uri.base.host)) {
+      return true;
+    }
     // If the page is served by NeoRecall and the saved backend points at a
     // different host only because of an old default, keep same-origin.
     return false;
@@ -168,7 +181,8 @@ class NeoRecallController extends ChangeNotifier {
       if (savedBackendUrl.isNotEmpty) {
         await _preferences!.remove('backendUrl');
       }
-    } else if (savedBackendUrl.isNotEmpty && !_shouldPreferSameOrigin(savedBackendUrl)) {
+    } else if (savedBackendUrl.isNotEmpty &&
+        !_shouldPreferSameOrigin(savedBackendUrl)) {
       api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
     } else {
       api.baseUrl = _defaultBackendUrl;
@@ -420,7 +434,9 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<void> preferBluetoothDevice(AudioDeviceDescriptor device) async {
     if (recorder is! MobileRecallRecorder) {
-      throw StateError('Bluetooth capture is only available on mobile clients.');
+      throw StateError(
+        'Bluetooth capture is only available on mobile clients.',
+      );
     }
     final mobile = recorder as MobileRecallRecorder;
     await mobile.devices.prefer(device);
@@ -440,7 +456,9 @@ class NeoRecallController extends ChangeNotifier {
   List<AudioDeviceDescriptor> discoveredWearables = <AudioDeviceDescriptor>[];
   bool scanningWearables = false;
 
-  Future<void> scanForWearables({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<void> scanForWearables({
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     if (recorder is! MobileRecallRecorder) return;
     final mobile = recorder as MobileRecallRecorder;
     scanningWearables = true;
@@ -449,16 +467,26 @@ class NeoRecallController extends ChangeNotifier {
     final subs = <StreamSubscription<dynamic>>[];
     try {
       for (final adapter in mobile.registry.adapters) {
-        subs.add(adapter.discoveries.listen((device) {
-          if (discoveredWearables.any((item) => item.deviceKey == device.deviceKey)) {
-            discoveredWearables = discoveredWearables
-                .map((item) => item.deviceKey == device.deviceKey ? device : item)
-                .toList(growable: false);
-          } else {
-            discoveredWearables = <AudioDeviceDescriptor>[...discoveredWearables, device];
-          }
-          notifyListeners();
-        }));
+        subs.add(
+          adapter.discoveries.listen((device) {
+            if (discoveredWearables.any(
+              (item) => item.deviceKey == device.deviceKey,
+            )) {
+              discoveredWearables = discoveredWearables
+                  .map(
+                    (item) =>
+                        item.deviceKey == device.deviceKey ? device : item,
+                  )
+                  .toList(growable: false);
+            } else {
+              discoveredWearables = <AudioDeviceDescriptor>[
+                ...discoveredWearables,
+                device,
+              ];
+            }
+            notifyListeners();
+          }),
+        );
         await adapter.startScan(timeout: timeout);
       }
       await Future<void>.delayed(timeout);
@@ -538,8 +566,12 @@ class NeoRecallController extends ChangeNotifier {
       capability = await recorder.start(
         microphone: microphone,
         systemAudio: systemAudio,
-        chunkMs: settings['chunkTargetMs'] as int? ?? 30000,
-        overlapMs: settings['chunkOverlapMs'] as int? ?? 2000,
+        chunkMs:
+            settings['chunkTargetMs'] as int? ??
+            _fallbackSettings['chunkTargetMs']! as int,
+        overlapMs:
+            settings['chunkOverlapMs'] as int? ??
+            _fallbackSettings['chunkOverlapMs']! as int,
       );
       warning = capability!.warning;
       final layout = capability!.systemAudio && capability!.microphone
@@ -679,13 +711,13 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<Map<String, dynamic>> _settings() async {
     if (!authenticated || !online) {
-      return <String, dynamic>{'chunkTargetMs': 30000, 'chunkOverlapMs': 2000};
+      return Map<String, dynamic>.from(_fallbackSettings);
     }
     try {
       final payload = await api.request('GET', '/api/v1/settings') as Map;
       return Map<String, dynamic>.from(payload['settings'] as Map);
     } catch (_) {
-      return <String, dynamic>{'chunkTargetMs': 30000, 'chunkOverlapMs': 2000};
+      return Map<String, dynamic>.from(_fallbackSettings);
     }
   }
 

@@ -9,11 +9,12 @@ on:
         type: string
       release_tag:
         description: Release tag used to name artifacts
-        required: true
+        required: false
+        default: ''
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-macos:
@@ -58,6 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="commit-${GITHUB_SHA:0:12}"
+          fi
           APP_PATH="build/macos/Build/Products/Release/NeoRecall.app"
           if [ ! -d "$APP_PATH" ]; then
             APP_PATH="$(find build/macos/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -n 1)"
@@ -79,15 +83,6 @@ jobs:
           name: neorecall-macos-app
           path: dist/NeoRecall-macOS-*.zip
           if-no-files-found: error
-
-      - name: Attach macOS asset to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$RELEASE_TAG" dist/NeoRecall-macOS-*.zip --clobber
 
   build-windows:
     name: Build Windows app
@@ -134,6 +129,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $version = $env:RELEASE_TAG.TrimStart("v", "V")
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "commit-$($env:GITHUB_SHA.Substring(0, 12))"
+          }
           $releaseDir = Join-Path $PWD "build\windows\x64\runner\Release"
           if (-not (Test-Path $releaseDir)) {
             $candidate = Get-ChildItem "build\windows" -Directory -Recurse -Filter "Release" |
@@ -154,15 +152,6 @@ jobs:
           name: neorecall-windows-app
           path: dist/NeoRecall-Windows-x64-*.zip
           if-no-files-found: error
-
-      - name: Attach Windows asset to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$RELEASE_TAG" dist/NeoRecall-Windows-x64-*.zip --clobber
 
   build-android:
     name: Build Android APK
@@ -198,12 +187,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build unsigned Android APK
+      - name: Build Android APK
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="commit-${GITHUB_SHA:0:12}"
+          fi
           mkdir -p ../dist
           # No custom release keystore is configured; Flutter uses the debug
           # signing config already set for release builds in this repo.
@@ -217,12 +209,3 @@ jobs:
           name: neorecall-android-app
           path: dist/NeoRecall-Android-*.apk
           if-no-files-found: error
-
-      - name: Attach Android asset to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$RELEASE_TAG" dist/NeoRecall-Android-*.apk --clobber

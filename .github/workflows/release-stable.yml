@@ -109,9 +109,20 @@ jobs:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}
 
+  publish-app-assets:
+    name: Publish app binaries
+    needs:
+      - release
+      - build-apps
+    uses: ./.github/workflows/_publish-app-assets.yml
+    with:
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
   notify-discord:
     name: Notify Discord
-    needs: release
+    needs:
+      - release
+      - publish-app-assets
     if: needs.release.outputs.release_tag != ''
     uses: ./.github/workflows/discord-release.yml
     with:

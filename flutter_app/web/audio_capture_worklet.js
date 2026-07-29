@@ -19,6 +19,14 @@ if (typeof window !== 'undefined') {
     let left = [], right = [], startedAt, emittedOffsetMs = 0, options, systemActive = false, lastLevelAt = 0;
     const api = { onChunk: null, onWarning: null, onLevel: null };
     const requestPersistence = async () => Boolean(navigator.storage?.persist && await navigator.storage.persist());
+    const openRecoveryDatabase = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open('neorecall-capture-recovery-v1', 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains('partial')) request.result.createObjectStore('partial');
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
     const wav = (leftSamples, rightSamples) => {
       const channels = rightSamples ? 2 : 1;
       const frames = leftSamples.length;
@@ -37,28 +45,41 @@ if (typeof window !== 'undefined') {
     };
     const persistPartial = async () => {
       if (!left.length) return;
-      const request = indexedDB.open('neorecall-capture-recovery-v1', 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('partial');
-      await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = reject; });
-      const transaction = request.result.transaction('partial', 'readwrite');
-      transaction.objectStore('partial').put({ left: new Float32Array(left), right: systemActive ? new Float32Array(right) : null,
+      const database = await openRecoveryDatabase();
+      const transaction = database.transaction('partial', 'readwrite');
+      transaction.objectStore('partial').put({ left: new Float32Array(left), right: options.microphone && systemActive ? new Float32Array(right) : null,
         startedAt: startedAt.toISOString(), emittedOffsetMs, options, sampleRate: context.sampleRate }, 'active');
-      await new Promise((resolve, reject) => { transaction.oncomplete = resolve; transaction.onerror = reject; }); request.result.close();
+      await new Promise((resolve, reject) => { transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error); });
+      database.close();
     };
-    const clearPartial = async () => { const request = indexedDB.open('neorecall-capture-recovery-v1', 1); await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = reject; }); const transaction = request.result.transaction('partial', 'readwrite'); transaction.objectStore('partial').delete('active'); await new Promise((resolve, reject) => { transaction.oncomplete = resolve; transaction.onerror = reject; }); request.result.close(); };
+    const clearPartial = async () => {
+      const database = await openRecoveryDatabase();
+      const transaction = database.transaction('partial', 'readwrite');
+      transaction.objectStore('partial').delete('active');
+      await new Promise((resolve, reject) => { transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error); });
+      database.close();
+    };
     const queuePersistence = () => { persistenceChain = persistenceChain.then(persistPartial).catch(() => { api.onWarning?.('Browser storage could not persist the active audio block. Recording will stop if the durable chunk queue cannot accept more data.'); }); return persistenceChain; };
     const emit = (frames, isFinal) => {
       if (!frames) return;
       const durationMs = Math.round(frames / context.sampleRate * 1000);
-      const bytes = wav(left.slice(0, frames), systemActive ? right.slice(0, frames) : null);
-      api.onChunk?.(Array.from(bytes), { durationMs, overlapMs: emittedOffsetMs === 0 ? 0 : options.overlapMs,
-        channelLayout: systemActive ? 'microphone_left_system_right' : 'mono', startedAt: new Date(startedAt.getTime() + emittedOffsetMs).toISOString(), monotonicOffsetMs: emittedOffsetMs, isFinal });
+      const combined = options.microphone && systemActive;
+      const bytes = wav(left.slice(0, frames), combined ? right.slice(0, frames) : null);
+      api.onChunk?.(
+        Array.from(bytes),
+        durationMs,
+        emittedOffsetMs === 0 ? 0 : options.overlapMs,
+        combined ? 'microphone_left_system_right' : 'mono',
+        new Date(startedAt.getTime() + emittedOffsetMs).toISOString(),
+        emittedOffsetMs,
+        isFinal,
+      );
       const retain = isFinal ? 0 : Math.round(context.sampleRate * options.overlapMs / 1000);
       const consumed = Math.max(0, frames - retain); left = left.slice(consumed); right = right.slice(consumed); emittedOffsetMs += Math.round(consumed / context.sampleRate * 1000);
       if (!isFinal) queuePersistence();
     };
     api.requestPersistence = requestPersistence;
-    api.start = async (requested) => {
+    const startCapture = async (requested) => {
       options = requested; startedAt = new Date(); emittedOffsetMs = 0; left = []; right = []; systemActive = false;
       const persistentStorage = await requestPersistence(); let warning = persistentStorage ? null : 'Persistent browser storage was not granted. Keep this tab open and monitor available storage.';
       context = new AudioContext({ sampleRate: 16000 }); await context.audioWorklet.addModule('audio_capture_worklet.js');
@@ -72,11 +93,14 @@ if (typeof window !== 'undefined') {
       if (!requested.microphone && !systemActive) throw new Error('No audio source is active.');
       silentGain = context.createGain(); silentGain.gain.value = 0; node.connect(silentGain).connect(context.destination);
       node.port.onmessage = (event) => {
-        left.push(...event.data.microphone); right.push(...event.data.system);
+        const microphoneSamples = event.data.microphone;
+        const systemSamples = event.data.system;
+        left.push(...(requested.microphone ? microphoneSamples : systemSamples));
+        if (requested.microphone && systemActive) right.push(...systemSamples);
         const now = performance.now();
         if (now - lastLevelAt >= 100) {
           let energy = 0; let count = 0;
-          for (const samples of [event.data.microphone, ...(systemActive ? [event.data.system] : [])]) {
+          for (const samples of [...(requested.microphone ? [microphoneSamples] : []), ...(systemActive ? [systemSamples] : [])]) {
             for (let index = 0; index < samples.length; index += 4) { energy += samples[index] * samples[index]; count += 1; }
           }
           api.onLevel?.(count ? Math.min(1, Math.sqrt(energy / count)) : 0); lastLevelAt = now;
@@ -86,7 +110,31 @@ if (typeof window !== 'undefined') {
       persistenceTimer = setInterval(async () => { queuePersistence(); const estimate = await navigator.storage?.estimate?.(); if (estimate?.quota && estimate.usage / estimate.quota >= .9) api.onWarning?.(`Browser storage is ${Math.round(estimate.usage / estimate.quota * 100)}% full. Keep NeoRecall online so acknowledged chunks can be released.`); }, 2000); await context.resume();
       return { microphone: requested.microphone, systemAudio: systemActive, persistentStorage, sampleRate: context.sampleRate, warning };
     };
-    api.stop = async () => { clearInterval(persistenceTimer); await persistenceChain; if (left.length) emit(left.length, true); await clearPartial(); node?.disconnect(); microphoneStream?.getTracks().forEach((track) => track.stop()); displayStream?.getTracks().forEach((track) => track.stop()); await context?.close(); context = null; };
+    const stopCapture = async () => { clearInterval(persistenceTimer); await persistenceChain; if (left.length) emit(left.length, true); await clearPartial(); node?.disconnect(); microphoneStream?.getTracks().forEach((track) => track.stop()); displayStream?.getTracks().forEach((track) => track.stop()); await context?.close(); context = null; };
+    const abortCapture = async () => {
+      clearInterval(persistenceTimer);
+      node?.disconnect();
+      microphoneStream?.getTracks().forEach((track) => track.stop());
+      displayStream?.getTracks().forEach((track) => track.stop());
+      await context?.close();
+      context = null;
+    };
+    const reportError = (callback, error) => callback(error instanceof Error ? error.message : String(error));
+    api.start = (microphone, systemAudio, chunkMs, overlapMs, onSuccess, onError) => {
+      const requested = { microphone, systemAudio, chunkMs, overlapMs };
+      startCapture(requested).then((capability) => {
+        onSuccess(
+          capability.microphone,
+          capability.systemAudio,
+          capability.persistentStorage,
+          capability.sampleRate,
+          capability.warning,
+        );
+      }, async (error) => {
+        try { await abortCapture(); } finally { reportError(onError, error); }
+      });
+    };
+    api.stop = (onSuccess, onError) => { stopCapture().then(onSuccess, (error) => reportError(onError, error)); };
     return api;
   })();
 }
