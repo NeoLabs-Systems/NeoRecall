@@ -84,9 +84,23 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
+    final compact = MediaQuery.sizeOf(context).width < 760;
 
     final card = GlassSurface(
-      padding: const EdgeInsets.all(30),
+      radius: serverSetup && _canConfigureServer ? 34 : 32,
+      padding: serverSetup && _canConfigureServer
+          ? EdgeInsets.fromLTRB(
+              compact ? 24 : 34,
+              compact ? 24 : 32,
+              compact ? 24 : 34,
+              compact ? 24 : 30,
+            )
+          : EdgeInsets.fromLTRB(
+              compact ? 18 : 34,
+              compact ? 20 : 30,
+              compact ? 18 : 34,
+              compact ? 20 : 30,
+            ),
       child: serverSetup && _canConfigureServer
           ? _serverCard(palette)
           : Column(
@@ -122,6 +136,16 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 const SizedBox(height: 20),
                 if (controller.error != null) ...<Widget>[
                   InlineMessage(message: controller.error!, error: true),
+                  const SizedBox(height: 16),
+                ],
+                if (controller.initializationError != null) ...<Widget>[
+                  OutlinedButton.icon(
+                    onPressed: controller.initializing
+                        ? null
+                        : controller.initialize,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry local startup'),
+                  ),
                   const SizedBox(height: 16),
                 ],
                 TextField(
@@ -219,7 +243,9 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 ),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 468),
+                    constraints: BoxConstraints(
+                      maxWidth: serverSetup && _canConfigureServer ? 680 : 468,
+                    ),
                     child: card,
                   ),
                 ),
@@ -232,48 +258,82 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   }
 
   Widget _serverCard(NeoRecallPalette palette) {
+    final controller = widget.controller;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        const BrandLockup(logoSize: 48),
-        const SizedBox(height: 22),
-        Text('SERVER', style: sectionEyebrowStyle(palette)),
-        const SizedBox(height: 8),
-        Text(
-          'Connect this client',
-          style: displayTitleStyle(palette, size: 28),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: BrandLockup(logoSize: 60),
         ),
+        const SizedBox(height: 22),
+        Text('WELCOME TO NEORECALL', style: sectionEyebrowStyle(palette)),
+        const SizedBox(height: 8),
+        Text('Connect NeoRecall', style: displayTitleStyle(palette, size: 34)),
         const SizedBox(height: 8),
         Text(
-          'Desktop and mobile builds can point at any NeoRecall server. Web builds always use the host that serves /app.',
+          'Enter the address of the NeoRecall server this device should use.',
           style: TextStyle(color: palette.textSecondary, height: 1.5),
         ),
+        if (controller.error != null) ...<Widget>[
+          const SizedBox(height: 18),
+          InlineMessage(message: controller.error!, error: true),
+        ],
         const SizedBox(height: 20),
         TextField(
           controller: _server,
+          enabled: !controller.loading && !controller.initializing,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          autocorrect: false,
+          onSubmitted: (_) => _saveServer(),
           decoration: const InputDecoration(
-            labelText: 'NeoRecall server URL',
+            labelText: 'NeoRecall server address',
             prefixIcon: Icon(Icons.dns_outlined),
             hintText: 'http://192.168.1.20:4500',
           ),
         ),
         const SizedBox(height: 18),
         FilledButton(
-          onPressed: widget.controller.loading
+          onPressed: controller.loading || controller.initializing
               ? null
-              : () async {
-                  await widget.controller.setBackendUrl(_server.text);
-                  if (mounted) setState(() => serverSetup = false);
-                },
-          child: const Text('Save server'),
+              : _saveServer,
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(58)),
+          child: controller.loading || controller.initializing
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Connect to this server'),
         ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: () => setState(() => serverSetup = false),
-          child: const Text('Back to sign in'),
-        ),
+        if (controller.initializationError != null) ...<Widget>[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: controller.initializing ? null : controller.initialize,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Retry local startup'),
+          ),
+        ],
+        if (!controller.requiresBackendUrlSetup) ...<Widget>[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => setState(() => serverSetup = false),
+            child: const Text('Back to sign in'),
+          ),
+        ],
       ],
     );
+  }
+
+  Future<void> _saveServer() async {
+    final saved = await widget.controller.setBackendUrl(_server.text);
+    if (!saved || !mounted) return;
+    if (widget.controller.initializationError != null) {
+      await widget.controller.initialize();
+    }
+    if (mounted && widget.controller.initializationError == null) {
+      setState(() => serverSetup = false);
+    }
   }
 }

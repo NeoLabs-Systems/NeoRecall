@@ -24,6 +24,8 @@ dependencies:
   path_provider: ^2.1.5
   record: ^6.1.2
   shared_preferences: ^2.5.3
+  sqflite: ^2.4.2
+  sqflite_common: ^2.5.6
   sqflite_common_ffi: ^2.3.6
   tray_manager: ^0.5.1
   uuid: ^4.5.1

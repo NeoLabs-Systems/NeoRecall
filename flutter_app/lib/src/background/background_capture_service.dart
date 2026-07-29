@@ -88,9 +88,16 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
         );
       }
     });
-    _running =
-        await _channel.invokeMethod<bool>('isBackgroundCaptureRunning') ??
-        false;
+    try {
+      _running =
+          await _channel.invokeMethod<bool>('isBackgroundCaptureRunning') ??
+          false;
+    } on PlatformException catch (error) {
+      _running = false;
+      _message(
+        'Android background capture host is temporarily unavailable: ${error.message ?? error.code}',
+      );
+    }
     _initialized = true;
     _message('Android background capture host ready.');
   }

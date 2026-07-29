@@ -73,7 +73,10 @@ class NeoRecallController extends ChangeNotifier {
     if (configured.isNotEmpty) {
       return configured.replaceFirst(RegExp(r'/$'), '');
     }
-    return 'http://localhost:4500';
+    // Native clients can run on a different device than the server. Falling
+    // back to localhost silently points Android/iOS at the phone itself and
+    // skips the required backend setup flow.
+    return '';
   }
 
   static String get _sameOriginBackendUrl {
@@ -165,6 +168,11 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> _partialWrite = Future<void>.value();
   String? _pendingAccount;
   String? _pendingPassword;
+  bool _initializing = false;
+  bool _syncInitialized = false;
+  bool _mobileInitialized = false;
+  bool _runtimeSubscriptionsReady = false;
+  String? initializationError;
 
   bool get authenticated => api.token != null && accountId != null;
   bool get isRecording => recorder.isRecording;
@@ -181,93 +189,147 @@ class NeoRecallController extends ChangeNotifier {
 
   bool get requiresBackendUrlSetup =>
       allowsBackendUrlConfiguration && api.baseUrl.trim().isEmpty;
+  bool get initializing => _initializing;
 
   Future<void> initialize() async {
-    _preferences = await SharedPreferences.getInstance();
-    final savedBackendUrl = _preferences!.getString('backendUrl')?.trim() ?? '';
-    if (!allowsBackendUrlConfiguration) {
-      api.baseUrl = _defaultBackendUrl;
-      if (savedBackendUrl.isNotEmpty) {
-        await _preferences!.remove('backendUrl');
+    if (_initializing) return;
+    _initializing = true;
+    if (error == initializationError) error = null;
+    initializationError = null;
+    notifyListeners();
+    try {
+      _preferences ??= await SharedPreferences.getInstance();
+      final savedBackendUrl =
+          _preferences!.getString('backendUrl')?.trim() ?? '';
+      if (!allowsBackendUrlConfiguration) {
+        api.baseUrl = _defaultBackendUrl;
+        if (savedBackendUrl.isNotEmpty) {
+          await _preferences!.remove('backendUrl');
+        }
+      } else if (savedBackendUrl.isNotEmpty &&
+          !_shouldPreferSameOrigin(savedBackendUrl)) {
+        api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
+      } else {
+        api.baseUrl = _defaultBackendUrl;
+        if (savedBackendUrl.isNotEmpty) {
+          await _preferences!.remove('backendUrl');
+        }
       }
-    } else if (savedBackendUrl.isNotEmpty &&
-        !_shouldPreferSameOrigin(savedBackendUrl)) {
-      api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
-    } else {
-      api.baseUrl = _defaultBackendUrl;
-      if (savedBackendUrl.isNotEmpty) {
-        await _preferences!.remove('backendUrl');
+      if (requiresBackendUrlSetup && !initialized) {
+        // Match NeoAgent's bootstrap behavior: show server setup as soon as
+        // preferences are loaded. Local audio recovery continues without
+        // holding the entire app behind a blank spinner.
+        initialized = true;
+        notifyListeners();
       }
-    }
-    api.token = await _secureStorage.read(key: 'sessionToken');
-    accountId = _preferences!.getString('accountId');
-    username = _preferences!.getString('username');
-    consentAccepted =
-        _preferences!.getBool('recordingConsentAccepted') ?? false;
-    autostartEnabled = await startupEnabled();
-    await sync.initialize();
-    if (api.token != null) {
+      if (api.baseUrl.isNotEmpty) {
+        api.token = await _secureStorage.read(key: 'sessionToken');
+        accountId = _preferences!.getString('accountId');
+        username = _preferences!.getString('username');
+      } else {
+        // A token is valid only for the server that issued it. Never attach a
+        // cached native session to a backend selected later by the user.
+        api.token = null;
+        accountId = null;
+        username = null;
+      }
+      consentAccepted =
+          _preferences!.getBool('recordingConsentAccepted') ?? false;
       try {
-        final payload = await api.request('GET', '/api/v1/auth/me') as Map;
-        final user = payload['user'] as Map;
-        accountId = user['id'] as String;
-        username = user['username'] as String;
-        sync.pump.accountId = accountId;
-        // Databases created before account ownership was added can only be
-        // claimed by the still-authenticated session present during upgrade.
-        await store.claimLegacySessions(accountId!);
-        await _preferences!.setString('accountId', accountId!);
-      } on ApiException catch (exception) {
-        if (exception.status != 401 && exception.status != 403) {
+        autostartEnabled = await startupEnabled();
+      } catch (_) {
+        // Autostart is a desktop convenience and must never block mobile boot.
+        autostartEnabled = false;
+      }
+      if (!_syncInitialized) {
+        await sync.initialize();
+        _syncInitialized = true;
+      }
+      if (api.token != null && api.baseUrl.isNotEmpty) {
+        try {
+          final payload = await api.request('GET', '/api/v1/auth/me') as Map;
+          final user = payload['user'] as Map;
+          accountId = user['id'] as String;
+          username = user['username'] as String;
+          sync.pump.accountId = accountId;
+          // Databases created before account ownership was added can only be
+          // claimed by the still-authenticated session present during upgrade.
+          await store.claimLegacySessions(accountId!);
+          await _preferences!.setString('accountId', accountId!);
+        } on ApiException catch (exception) {
+          if (exception.status != 401 && exception.status != 403) {
+            sync.pump.accountId = accountId;
+            if (accountId != null) await store.claimLegacySessions(accountId!);
+          } else {
+            api.token = null;
+            accountId = null;
+            username = null;
+            sync.pump.accountId = null;
+            await _secureStorage.delete(key: 'sessionToken');
+            await _preferences!.remove('accountId');
+            await _preferences!.remove('username');
+          }
+        } catch (_) {
+          // Offline startup keeps the last server-proven account binding. The
+          // token is not discarded merely because this device cannot reach the
+          // server; queued audio remains account-scoped and upload stays paused.
           sync.pump.accountId = accountId;
           if (accountId != null) await store.claimLegacySessions(accountId!);
-        } else {
+        }
+        if (accountId == null) {
           api.token = null;
-          accountId = null;
           username = null;
           sync.pump.accountId = null;
           await _secureStorage.delete(key: 'sessionToken');
           await _preferences!.remove('accountId');
           await _preferences!.remove('username');
         }
-      } catch (_) {
-        // Offline startup keeps the last server-proven account binding. The
-        // token is not discarded merely because this device cannot reach the
-        // server; queued audio remains account-scoped and upload stays paused.
-        sync.pump.accountId = accountId;
-        if (accountId != null) await store.claimLegacySessions(accountId!);
       }
-      if (accountId == null) {
-        api.token = null;
-        username = null;
-        sync.pump.accountId = null;
-        await _secureStorage.delete(key: 'sessionToken');
-        await _preferences!.remove('accountId');
-        await _preferences!.remove('username');
-      }
-    }
-    if (recorder is MobileRecallRecorder) {
-      final mobile = recorder as MobileRecallRecorder;
-      await mobile.initialize(accountId: accountId);
-      preferBluetoothCapture = mobile.devices.preferBluetooth;
-      preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
-      _deviceStateSubscription = mobile.devices.states.listen((state) {
+      if (recorder is MobileRecallRecorder && !_mobileInitialized) {
+        final mobile = recorder as MobileRecallRecorder;
+        await mobile.initialize(accountId: accountId);
+        _mobileInitialized = true;
+        preferBluetoothCapture = mobile.devices.preferBluetooth;
         preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
-        _handleDeviceTransportState(state);
-        notifyListeners();
-      });
-      _deviceControlSubscription = mobile.devices.controlEvents.listen(
-        _handleDeviceControlEvent,
-      );
-      _backgroundSubscription = mobile.background.events.listen((event) {
-        if (event.type == BackgroundCaptureEventType.stopRequested &&
-            isRecording) {
-          unawaited(stopRecording());
-        }
-      });
+        _deviceStateSubscription = mobile.devices.states.listen((state) {
+          preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+          _handleDeviceTransportState(state);
+          notifyListeners();
+        });
+        _deviceControlSubscription = mobile.devices.controlEvents.listen(
+          _handleDeviceControlEvent,
+        );
+        _backgroundSubscription = mobile.background.events.listen((event) {
+          if (event.type == BackgroundCaptureEventType.stopRequested &&
+              isRecording) {
+            unawaited(stopRecording());
+          }
+        });
+      }
+      if (!_runtimeSubscriptionsReady) {
+        _attachRuntimeSubscriptions();
+        _runtimeSubscriptionsReady = true;
+      }
+      // Recover interrupted offline sessions/chunks before new capture starts.
+      sync.pump.pump();
+      await _refreshPending();
+      if (authenticated) await refreshAll(silent: true);
+      if (_supportsDurableMobileResume) {
+        unawaited(_resumeMobileCaptureIfRequested());
+      }
+    } catch (exception) {
+      initializationError =
+          'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.';
+      error = initializationError;
+      debugPrint('NeoRecall initialization failed: $exception');
+    } finally {
+      initialized = true;
+      _initializing = false;
+      notifyListeners();
     }
-    // Recover any interrupted offline sessions/chunks before new capture starts.
-    sync.pump.pump();
+  }
+
+  void _attachRuntimeSubscriptions() {
     _chunkSubscription = recorder.chunks.listen((chunk) {
       final write = _chunkWrite.then((_) => _storeRecordedChunk(chunk));
       _chunkWrite = write.catchError((Object exception) {
@@ -312,22 +374,15 @@ class NeoRecallController extends ChangeNotifier {
       if (available) sync.pump.pump();
       notifyListeners();
     });
-    await _refreshPending();
-    if (authenticated) await refreshAll(silent: true);
-    initialized = true;
-    notifyListeners();
-    if (_supportsDurableMobileResume) {
-      unawaited(_resumeMobileCaptureIfRequested());
-    }
   }
 
-  Future<void> setBackendUrl(String value) async {
+  Future<bool> setBackendUrl(String value) async {
     if (!allowsBackendUrlConfiguration) {
       // Web and compile-time configured clients keep their fixed backend target.
       api.baseUrl = kIsWeb ? '' : _defaultBackendUrl;
       await _preferences?.remove('backendUrl');
       notifyListeners();
-      return;
+      return true;
     }
     final normalized = value.trim().replaceFirst(RegExp(r'/$'), '');
     if (kIsWeb &&
@@ -337,17 +392,42 @@ class NeoRecallController extends ChangeNotifier {
       api.baseUrl = '';
       await _preferences?.remove('backendUrl');
       notifyListeners();
-      return;
+      return true;
     }
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
-      throw const FormatException(
-        'Enter a complete server URL including http:// or https://.',
-      );
+      error = 'Enter a complete server URL including http:// or https://.';
+      notifyListeners();
+      return false;
     }
-    api.baseUrl = normalized;
-    await _preferences?.setString('backendUrl', normalized);
+    final previous = api.baseUrl;
+    loading = true;
+    error = null;
     notifyListeners();
+    try {
+      api.baseUrl = normalized;
+      final health = await api.request('GET', '/health');
+      if (health is! Map || health['status'] != 'ok') {
+        throw const FormatException(
+          'The address did not return a NeoRecall health response.',
+        );
+      }
+      _preferences ??= await SharedPreferences.getInstance();
+      await _preferences!.setString('backendUrl', normalized);
+      return true;
+    } on ApiException catch (exception) {
+      api.baseUrl = previous;
+      error = exception.message;
+      return false;
+    } catch (_) {
+      api.baseUrl = previous;
+      error =
+          'NeoRecall could not reach that server. Check the address and that the server is running.';
+      return false;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
   }
 
   Future<bool> login(

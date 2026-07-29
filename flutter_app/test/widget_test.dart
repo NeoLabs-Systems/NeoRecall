@@ -1,11 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:neorecall/main.dart';
 import 'package:neorecall/main_auth.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
 import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/main_timeline.dart';
+import 'package:neorecall/src/api_client.dart';
 import 'package:neorecall/src/models/transcript.dart';
 
 void main() {
@@ -172,7 +177,9 @@ void main() {
     tester.view.physicalSize = const Size(1280, 720);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final controller = NeoRecallController();
+    final controller = NeoRecallController(
+      api: NeoRecallApiClient(baseUrl: 'http://localhost:4500'),
+    );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
@@ -197,5 +204,54 @@ void main() {
     expect(find.byType(SingleChildScrollView), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Create account'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Android opens backend setup when no URL was built in', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final controller = NeoRecallController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: NeoRecallAuthScreen(controller: controller),
+      ),
+    );
+
+    expect(find.text('WELCOME TO NEORECALL'), findsOneWidget);
+    expect(find.text('Connect NeoRecall'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('Connect to this server'), findsOneWidget);
+    expect(find.text('Back to sign in'), findsNothing);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Android app leaves the loader for backend setup', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'accountId': 'cached-account',
+      'username': 'cached-user',
+    });
+    FlutterSecureStorage.setMockInitialValues(<String, String>{
+      'sessionToken': 'cached-token',
+    });
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
+    await tester.pumpWidget(const NeoRecallApp());
+    for (var attempt = 0; attempt < 20; attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (find.text('Connect NeoRecall').evaluate().isNotEmpty) break;
+    }
+
+    expect(find.text('Loading NeoRecall'), findsNothing);
+    expect(find.text('Connect NeoRecall'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    debugDefaultTargetPlatformOverride = null;
   });
 }

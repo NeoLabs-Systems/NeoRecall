@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'main_auth.dart';
 import 'main_controller.dart';
+import 'main_shared.dart';
 import 'main_shell.dart';
 import 'main_theme.dart';
 
@@ -50,7 +52,7 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   @override
   void initState() {
     super.initState();
-    controller.initialize();
+    unawaited(controller.initialize());
     if (_desktop) _initializeDesktopShell();
   }
 
@@ -139,9 +141,40 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     theme: buildNeoRecallTheme(Brightness.light),
     darkTheme: buildNeoRecallTheme(Brightness.dark),
     home: !controller.initialized
-        ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-        : controller.authenticated
+        ? const _NeoRecallSplashView()
+        : controller.authenticated && !controller.requiresBackendUrlSetup
         ? NeoRecallShell(controller: controller)
         : NeoRecallAuthScreen(controller: controller),
   );
+}
+
+class _NeoRecallSplashView extends StatelessWidget {
+  const _NeoRecallSplashView();
+
+  @override
+  Widget build(BuildContext context) {
+    return AmbientBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const BrandLockup(logoSize: 52),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: 180,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: const LinearProgressIndicator(minHeight: 4),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('Loading NeoRecall'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

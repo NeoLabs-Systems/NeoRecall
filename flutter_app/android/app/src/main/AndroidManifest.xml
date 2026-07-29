@@ -15,7 +15,8 @@
     <application
         android:label="NeoRecall"
         android:name=".NeoRecallApplication"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <service
             android:name=".BackgroundCaptureService"
             android:exported="false"
