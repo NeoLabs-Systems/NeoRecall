@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
@@ -15,6 +16,27 @@ class RecordScreen extends StatefulWidget {
 class _RecordScreenState extends State<RecordScreen> {
   bool microphone = true;
   bool systemAudio = false;
+  bool bluetoothPreferred = true;
+
+  bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+  bool get _isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
+  @override
+  void initState() {
+    super.initState();
+    bluetoothPreferred = widget.controller.preferBluetoothCapture;
+    if (_isMobile) {
+      systemAudio = false;
+      microphone = true;
+    }
+  }
 
   String _elapsed() {
     final started = widget.controller.recordingStartedAt;
@@ -26,8 +48,7 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<bool> _consent() async {
     if (widget.controller.consentAccepted) return true;
-    final accepted =
-        await showDialog<bool>(
+    final accepted = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
           builder: (context) => AlertDialog(
@@ -53,22 +74,25 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _toggle() async {
-    if (widget.controller.isRecording) {
-      await widget.controller.stopRecording();
+    final controller = widget.controller;
+    if (controller.isRecording) {
+      await controller.stopRecording();
       return;
     }
     if (!await _consent()) return;
     try {
-      await widget.controller.startRecording(
+      if (_isMobile) {
+        await controller.setPreferBluetoothCapture(bluetoothPreferred);
+      }
+      await controller.startRecording(
         microphone: microphone,
-        systemAudio: systemAudio,
+        systemAudio: _isDesktop ? systemAudio : false,
       );
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
     }
   }
 
@@ -82,9 +106,7 @@ class _RecordScreenState extends State<RecordScreen> {
     await widget.controller.importAudio(
       file!.bytes!,
       file.name,
-      file.extension == 'wav'
-          ? 'audio/wav'
-          : 'audio/${file.extension ?? 'mpeg'}',
+      file.extension == 'wav' ? 'audio/wav' : 'audio/${file.extension ?? 'mpeg'}',
     );
   }
 
@@ -93,15 +115,18 @@ class _RecordScreenState extends State<RecordScreen> {
     final controller = widget.controller;
     final palette = neoRecallPaletteOf(context);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          const ScreenHeader(
+          ScreenHeader(
             eyebrow: 'CAPTURE',
             title: 'Record what matters',
-            description:
-                'Microphone and optional device audio are chunked into a durable offline queue. Audio leaves this device only for local server transcription.',
+            description: _isMobile
+                ? 'Mobile capture prefers a connected Bluetooth device and falls back to the phone microphone. Android keeps a foreground service alive while recording.'
+                : _isDesktop
+                    ? 'Desktop can capture microphone and system audio together. Permissions are requested up front and recording stays visibly active.'
+                    : 'Browser capture supports microphone and optional tab/system audio through the browser permission flow.',
           ),
           const SizedBox(height: 24),
           if (controller.warning != null) ...<Widget>[
@@ -124,11 +149,10 @@ class _RecordScreenState extends State<RecordScreen> {
                   height: 156,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color:
-                        (controller.isRecording
-                                ? palette.secondary
-                                : palette.surfaceMuted)
-                            .withValues(alpha: .18),
+                    color: (controller.isRecording
+                            ? palette.secondary
+                            : palette.surfaceMuted)
+                        .withValues(alpha: .18),
                     border: Border.all(
                       color: controller.isRecording
                           ? palette.secondary
@@ -183,32 +207,149 @@ class _RecordScreenState extends State<RecordScreen> {
                   style: TextStyle(color: palette.textMuted),
                 ),
                 const SizedBox(height: 22),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: <Widget>[
-                    FilterChip(
-                      selected: microphone,
-                      onSelected: controller.isRecording
-                          ? null
-                          : (value) => setState(() => microphone = value),
-                      avatar: const Icon(Icons.mic_outlined),
-                      label: const Text('Microphone'),
-                    ),
-                    FilterChip(
-                      selected: systemAudio,
-                      onSelected: controller.isRecording
-                          ? null
-                          : (value) => setState(() => systemAudio = value),
-                      avatar: const Icon(Icons.desktop_windows_outlined),
-                      label: const Text('Device audio'),
-                    ),
+                if (_isMobile) ...<Widget>[
+                  Text('MOBILE CAPTURE', style: sectionEyebrowStyle(palette)),
+                  const SizedBox(height: 10),
+                  Text(
+                    controller.preferredDeviceLabel == null
+                        ? 'Bluetooth is preferred. No device is linked yet, so the phone microphone is used until an adapter registers one.'
+                        : 'Preferred device: ${controller.preferredDeviceLabel}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: palette.textSecondary, height: 1.45),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: <Widget>[
+                      OutlinedButton.icon(
+                        onPressed: controller.isRecording || controller.scanningWearables
+                            ? null
+                            : () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                try {
+                                  await controller.scanForWearables();
+                                } catch (error) {
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text(error.toString())),
+                                  );
+                                }
+                              },
+                        icon: controller.scanningWearables
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.bluetooth_searching),
+                        label: Text(
+                          controller.scanningWearables
+                              ? 'Scanning…'
+                              : 'Scan for wearables',
+                        ),
+                      ),
+                      ChoiceChip(
+                        selected: bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                  bluetoothPreferred = true;
+                                  microphone = true;
+                                  systemAudio = false;
+                                }),
+                        avatar: const Icon(Icons.bluetooth_connected),
+                        label: const Text('Bluetooth device'),
+                      ),
+                      ChoiceChip(
+                        selected: !bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                  bluetoothPreferred = false;
+                                  microphone = true;
+                                  systemAudio = false;
+                                }),
+                        avatar: const Icon(Icons.mic_none_rounded),
+                        label: const Text('Phone microphone'),
+                      ),
+                    ],
+                  ),
+                  if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 14),
+                    ...controller.discoveredWearables.map((device) {
+                      final selected =
+                          controller.preferredDeviceLabel == device.displayName;
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          selected
+                              ? Icons.bluetooth_connected
+                              : Icons.bluetooth,
+                          color: selected ? palette.accentHover : palette.textSecondary,
+                        ),
+                        title: Text(device.displayName),
+                        subtitle: Text(
+                          '${device.metadata['type'] ?? 'wearable'} · ${device.deviceKey}',
+                        ),
+                        trailing: selected
+                            ? const Icon(Icons.check_circle, size: 18)
+                            : TextButton(
+                                onPressed: controller.isRecording
+                                    ? null
+                                    : () async {
+                                        final messenger = ScaffoldMessenger.of(context);
+                                        try {
+                                          await controller.preferBluetoothDevice(device);
+                                          if (!mounted) return;
+                                          setState(() {
+                                            bluetoothPreferred = true;
+                                            microphone = true;
+                                            systemAudio = false;
+                                          });
+                                        } catch (error) {
+                                          messenger.showSnackBar(
+                                            SnackBar(content: Text(error.toString())),
+                                          );
+                                        }
+                                      },
+                                child: const Text('Connect'),
+                              ),
+                      );
+                    }),
                   ],
-                ),
+                ] else ...<Widget>[
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 10,
+                    children: <Widget>[
+                      FilterChip(
+                        selected: microphone,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() => microphone = value),
+                        avatar: const Icon(Icons.mic_outlined),
+                        label: const Text('Microphone'),
+                      ),
+                      FilterChip(
+                        selected: systemAudio,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() => systemAudio = value),
+                        avatar: Icon(
+                          _isDesktop
+                              ? Icons.desktop_windows_outlined
+                              : Icons.headphones_outlined,
+                        ),
+                        label: Text(_isDesktop ? 'Device audio' : 'Tab/system audio'),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 22),
                 SizedBox(
-                  width: 260,
+                  width: 280,
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
                       backgroundColor: controller.isRecording
@@ -228,6 +369,14 @@ class _RecordScreenState extends State<RecordScreen> {
                     ),
                   ),
                 ),
+                if (_isDesktop) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Text(
+                    'System audio uses the OS screen-recording permission and captures audio only, not video frames.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: palette.textMuted, height: 1.4),
+                  ),
+                ],
               ],
             ),
           ),
@@ -240,14 +389,13 @@ class _RecordScreenState extends State<RecordScreen> {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Text(
+                    children: const <Widget>[
+                      Text(
                         'Import existing audio',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(
                         'WAV, MP3, M4A, and other ffmpeg-supported formats use the same private transcription pipeline.',
-                        style: TextStyle(color: palette.textMuted),
                       ),
                     ],
                   ),

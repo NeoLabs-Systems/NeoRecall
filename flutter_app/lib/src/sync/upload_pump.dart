@@ -32,7 +32,9 @@ class UploadPump {
           await api.syncSession(session);
           await store.markSessionSynced(session.id);
         } catch (_) {
-          return;
+          // Keep trying other sessions/devices. Network or one bad session
+          // must not freeze the entire multi-device upload ledger.
+          continue;
         }
       }
       final chunks = await store.pending(limit: 200);

@@ -30,8 +30,14 @@ class NeoRecallApiClient {
     if (token != null) 'Authorization': 'Bearer $token',
   };
 
+  Uri _resolve(String path) {
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    if (baseUrl.isEmpty) return Uri.parse(normalizedPath);
+    return Uri.parse('$baseUrl$normalizedPath');
+  }
+
   Future<dynamic> request(String method, String path, {Object? body}) async {
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = _resolve(path);
     final headers = <String, String>{
       ..._headers,
       if (body != null) 'Content-Type': 'application/json',
@@ -75,8 +81,8 @@ class NeoRecallApiClient {
   ) async {
     final request = http.MultipartRequest(
       'PUT',
-      Uri.parse(
-        '$baseUrl/api/v1/ingest/sessions/${chunk.sessionId}/sources/${chunk.sourceId}/chunks/${chunk.sequence}',
+      _resolve(
+        '/api/v1/ingest/sessions/${chunk.sessionId}/sources/${chunk.sourceId}/chunks/${chunk.sequence}',
       ),
     );
     request.headers.addAll(<String, String>{
@@ -170,7 +176,11 @@ class NeoRecallApiClient {
         'clientUuid': session.deviceClientUuid,
         'name': session.deviceName,
         'platform': session.platform,
-        'kind': session.platform == 'web' ? 'browser' : 'desktop',
+        'kind': session.platform == 'web'
+            ? 'browser'
+            : (session.platform == 'android' || session.platform == 'ios')
+                ? 'mobile'
+                : 'desktop',
         'capabilities': <String, dynamic>{
           'microphone': session.sourceKind != 'system',
           'systemAudio': <String>{
@@ -267,7 +277,7 @@ class NeoRecallApiClient {
       final content = Uint8List.sublistView(bytes, offset, endExclusive);
       final partRequest = http.MultipartRequest(
         'PUT',
-        Uri.parse('$baseUrl/api/v1/imports/$id/parts/$part'),
+        _resolve('/api/v1/imports/$id/parts/$part'),
       );
       partRequest.headers.addAll(<String, String>{
         ..._headers,

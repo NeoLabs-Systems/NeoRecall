@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   desktop_audio_capture
   flutter_secure_storage_windows
+  permission_handler_windows
   record_windows
   screen_retriever_windows
   tray_manager

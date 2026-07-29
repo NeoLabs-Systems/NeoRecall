@@ -16,6 +16,8 @@ import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
 import 'src/recording/recorder.dart';
+import 'src/recording/recorder_mobile.dart';
+import 'src/devices/audio_device_adapter.dart';
 import 'src/sync/chunk_store.dart';
 import 'src/sync/sync_coordinator.dart';
 
@@ -45,13 +47,13 @@ class NeoRecallController extends ChangeNotifier {
   static String get _defaultBackendUrl {
     final configured = _configuredBackendUrl.trim();
     if (kIsWeb) {
-      if (configured.isEmpty) return _sameOriginBackendUrl();
+      // Web is always served by NeoRecall itself under /app, so same-origin is
+      // the correct default. An empty base URL keeps API calls relative.
+      if (configured.isEmpty) return '';
       final configuredUri = Uri.tryParse(configured);
       final configuredHost = configuredUri?.host ?? '';
-      // A web bundle accidentally compiled against localhost should still work
-      // when served from a real host by falling back to same-origin.
-      if (!_isLoopbackHost(Uri.base.host) && _isLoopbackHost(configuredHost)) {
-        return _sameOriginBackendUrl();
+      if (_isLoopbackHost(configuredHost) && !_isLoopbackHost(Uri.base.host)) {
+        return '';
       }
       return configured.replaceFirst(RegExp(r'/$'), '');
     }
@@ -61,21 +63,33 @@ class NeoRecallController extends ChangeNotifier {
     return 'http://localhost:4500';
   }
 
-  static String _sameOriginBackendUrl() {
+  static String get _sameOriginBackendUrl {
     final base = Uri.base;
+    if (base.host.isEmpty) return '';
     return Uri(
       scheme: base.scheme.isEmpty ? 'http' : base.scheme,
-      host: base.host.isEmpty ? 'localhost' : base.host,
+      host: base.host,
       port: base.hasPort ? base.port : null,
     ).toString().replaceFirst(RegExp(r'/$'), '');
   }
 
   static bool _isLoopbackHost(String host) {
     final normalized = host.trim().toLowerCase();
-    return normalized == 'localhost' ||
+    return normalized.isEmpty ||
+        normalized == 'localhost' ||
         normalized == '127.0.0.1' ||
         normalized == '::1' ||
         normalized == '[::1]';
+  }
+
+  static bool _shouldPreferSameOrigin(String candidate) {
+    if (!kIsWeb) return false;
+    final uri = Uri.tryParse(candidate.trim());
+    if (uri == null || !uri.hasScheme || !uri.hasAuthority) return true;
+    if (_isLoopbackHost(uri.host) && !_isLoopbackHost(Uri.base.host)) return true;
+    // If the page is served by NeoRecall and the saved backend points at a
+    // different host only because of an old default, keep same-origin.
+    return false;
   }
 
   final NeoRecallApiClient api;
@@ -101,6 +115,8 @@ class NeoRecallController extends ChangeNotifier {
   bool _stoppingRecording = false;
   bool cachedData = false;
   bool autostartEnabled = false;
+  bool preferBluetoothCapture = true;
+  String? preferredDeviceLabel;
   String? error;
   String? notice;
   String? username;
@@ -130,23 +146,35 @@ class NeoRecallController extends ChangeNotifier {
 
   bool get authenticated => api.token != null;
   bool get isRecording => recorder.isRecording;
-  String get backendUrl => api.baseUrl;
+  String get backendUrl {
+    if (api.baseUrl.isNotEmpty) return api.baseUrl;
+    if (kIsWeb) return _sameOriginBackendUrl;
+    return api.baseUrl;
+  }
+
+  /// Web is always same-origin. Native builds only expose server configuration
+  /// when no backend URL was baked in at compile time.
+  bool get allowsBackendUrlConfiguration =>
+      !kIsWeb && _configuredBackendUrl.trim().isEmpty;
+
+  bool get requiresBackendUrlSetup =>
+      allowsBackendUrlConfiguration && api.baseUrl.trim().isEmpty;
 
   Future<void> initialize() async {
     _preferences = await SharedPreferences.getInstance();
     final savedBackendUrl = _preferences!.getString('backendUrl')?.trim() ?? '';
-    if (savedBackendUrl.isNotEmpty) {
-      if (kIsWeb &&
-          !_isLoopbackHost(Uri.base.host) &&
-          _isLoopbackHost(Uri.tryParse(savedBackendUrl)?.host ?? '')) {
-        // Ignore a stale localhost preference when the app is served remotely.
-        api.baseUrl = _defaultBackendUrl;
+    if (!allowsBackendUrlConfiguration) {
+      api.baseUrl = _defaultBackendUrl;
+      if (savedBackendUrl.isNotEmpty) {
         await _preferences!.remove('backendUrl');
-      } else {
-        api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
       }
+    } else if (savedBackendUrl.isNotEmpty && !_shouldPreferSameOrigin(savedBackendUrl)) {
+      api.baseUrl = savedBackendUrl.replaceFirst(RegExp(r'/$'), '');
     } else {
       api.baseUrl = _defaultBackendUrl;
+      if (savedBackendUrl.isNotEmpty) {
+        await _preferences!.remove('backendUrl');
+      }
     }
     api.token = await _secureStorage.read(key: 'sessionToken');
     username = _preferences!.getString('username');
@@ -154,6 +182,18 @@ class NeoRecallController extends ChangeNotifier {
         _preferences!.getBool('recordingConsentAccepted') ?? false;
     autostartEnabled = await startupEnabled();
     await sync.initialize();
+    if (recorder is MobileRecallRecorder) {
+      final mobile = recorder as MobileRecallRecorder;
+      await mobile.initialize();
+      preferBluetoothCapture = mobile.devices.preferBluetooth;
+      preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+      mobile.devices.states.listen((_) {
+        preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+        notifyListeners();
+      });
+    }
+    // Recover any interrupted offline sessions/chunks before new capture starts.
+    sync.pump.pump();
     _chunkSubscription = recorder.chunks.listen((chunk) {
       final write = _chunkWrite.then((_) => _storeRecordedChunk(chunk));
       _chunkWrite = write.catchError((Object exception) {
@@ -202,7 +242,23 @@ class NeoRecallController extends ChangeNotifier {
   }
 
   Future<void> setBackendUrl(String value) async {
+    if (!allowsBackendUrlConfiguration) {
+      // Web and compile-time configured clients keep their fixed backend target.
+      api.baseUrl = kIsWeb ? '' : _defaultBackendUrl;
+      await _preferences?.remove('backendUrl');
+      notifyListeners();
+      return;
+    }
     final normalized = value.trim().replaceFirst(RegExp(r'/$'), '');
+    if (kIsWeb &&
+        (normalized.isEmpty ||
+            normalized == _sameOriginBackendUrl ||
+            _shouldPreferSameOrigin(normalized))) {
+      api.baseUrl = '';
+      await _preferences?.remove('backendUrl');
+      notifyListeners();
+      return;
+    }
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
       throw const FormatException(
@@ -324,6 +380,9 @@ class NeoRecallController extends ChangeNotifier {
       : switch (defaultTargetPlatform) {
           TargetPlatform.macOS => 'macos',
           TargetPlatform.windows => 'windows',
+          TargetPlatform.android => 'android',
+          TargetPlatform.iOS => 'ios',
+          TargetPlatform.linux => 'linux',
           _ => defaultTargetPlatform.name,
         };
   String get _deviceName => kIsWeb
@@ -331,8 +390,89 @@ class NeoRecallController extends ChangeNotifier {
       : switch (defaultTargetPlatform) {
           TargetPlatform.macOS => 'Mac',
           TargetPlatform.windows => 'Windows PC',
-          _ => 'Desktop',
+          TargetPlatform.android => 'Android phone',
+          TargetPlatform.iOS => 'iPhone',
+          TargetPlatform.linux => 'Linux desktop',
+          _ => 'Device',
         };
+
+  bool get isMobileCapturePlatform =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  bool get hasPreferredBluetoothDevice =>
+      recorder is MobileRecallRecorder &&
+      (recorder as MobileRecallRecorder).devices.hasPreferredDevice;
+
+  Future<void> setPreferBluetoothCapture(bool enabled) async {
+    preferBluetoothCapture = enabled;
+    if (recorder is MobileRecallRecorder) {
+      final mobile = recorder as MobileRecallRecorder;
+      await mobile.devices.setPreferBluetooth(enabled);
+      if (enabled && mobile.devices.hasPreferredDevice) {
+        await mobile.devices.connectPreferred();
+      }
+      preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+    }
+    notifyListeners();
+  }
+
+  Future<void> preferBluetoothDevice(AudioDeviceDescriptor device) async {
+    if (recorder is! MobileRecallRecorder) {
+      throw StateError('Bluetooth capture is only available on mobile clients.');
+    }
+    final mobile = recorder as MobileRecallRecorder;
+    await mobile.devices.prefer(device);
+    preferBluetoothCapture = true;
+    preferredDeviceLabel = device.displayName;
+    notifyListeners();
+  }
+
+  Future<void> clearPreferredBluetoothDevice() async {
+    if (recorder is! MobileRecallRecorder) return;
+    final mobile = recorder as MobileRecallRecorder;
+    await mobile.devices.clearPreferred();
+    preferredDeviceLabel = null;
+    notifyListeners();
+  }
+
+  List<AudioDeviceDescriptor> discoveredWearables = <AudioDeviceDescriptor>[];
+  bool scanningWearables = false;
+
+  Future<void> scanForWearables({Duration timeout = const Duration(seconds: 10)}) async {
+    if (recorder is! MobileRecallRecorder) return;
+    final mobile = recorder as MobileRecallRecorder;
+    scanningWearables = true;
+    discoveredWearables = <AudioDeviceDescriptor>[];
+    notifyListeners();
+    final subs = <StreamSubscription<dynamic>>[];
+    try {
+      for (final adapter in mobile.registry.adapters) {
+        subs.add(adapter.discoveries.listen((device) {
+          if (discoveredWearables.any((item) => item.deviceKey == device.deviceKey)) {
+            discoveredWearables = discoveredWearables
+                .map((item) => item.deviceKey == device.deviceKey ? device : item)
+                .toList(growable: false);
+          } else {
+            discoveredWearables = <AudioDeviceDescriptor>[...discoveredWearables, device];
+          }
+          notifyListeners();
+        }));
+        await adapter.startScan(timeout: timeout);
+      }
+      await Future<void>.delayed(timeout);
+    } finally {
+      for (final adapter in mobile.registry.adapters) {
+        await adapter.stopScan();
+      }
+      for (final sub in subs) {
+        await sub.cancel();
+      }
+      scanningWearables = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> startRecording({
     required bool microphone,
@@ -340,6 +480,19 @@ class NeoRecallController extends ChangeNotifier {
   }) async {
     if (!consentAccepted) {
       throw StateError('Recording consent must be acknowledged first.');
+    }
+    if (isMobileCapturePlatform) {
+      // Mobile never uses desktop system-audio capture.
+      systemAudio = false;
+      if (!microphone && !preferBluetoothCapture) {
+        throw StateError('Select phone microphone or a Bluetooth device.');
+      }
+      // Bluetooth-preferred mode still keeps microphone true as fallback source
+      // selection inside MobileRecallRecorder.
+      microphone = true;
+    }
+    if (!microphone && !systemAudio) {
+      throw StateError('Select at least one capture source.');
     }
     error = null;
     warning = null;

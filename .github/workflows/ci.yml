@@ -95,6 +95,30 @@ jobs:
         working-directory: flutter_app
         run: ${{ matrix.command }}
 
+  android-compile:
+    name: Android compile gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+      - name: Install Flutter dependencies
+        working-directory: flutter_app
+        run: flutter pub get
+      - name: Compile Android APK
+        working-directory: flutter_app
+        run: flutter build apk --release --no-pub
+
   docs:
     name: Docs build
     runs-on: ubuntu-latest

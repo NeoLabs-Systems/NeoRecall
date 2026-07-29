@@ -1,127 +1,132 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// Gold is the fixed NeoLabs family accent. Muted rose is NeoRecall's
-// product-specific recording accent.
+import 'main_spacing.dart';
+
 class NeoRecallPalette {
   const NeoRecallPalette({
-    required this.scaffold,
-    required this.surface,
-    required this.surfaceRaised,
-    required this.surfaceMuted,
-    required this.border,
-    required this.borderStrong,
-    required this.text,
-    required this.textSoft,
+    required this.bgPrimary,
+    required this.bgSecondary,
+    required this.bgTertiary,
+    required this.bgCard,
+    required this.textPrimary,
+    required this.textSecondary,
     required this.textMuted,
     required this.accent,
-    required this.accentStrong,
-    required this.accentSoft,
-    required this.onAccent,
+    required this.accentHover,
+    required this.accentAlt,
+    required this.accentMuted,
     required this.secondary,
+    required this.border,
+    required this.borderLight,
     required this.success,
     required this.warning,
-    required this.error,
+    required this.danger,
+    required this.info,
+    required this.onAccent,
     required this.shadow,
-    required this.glassFill,
-    required this.glassBorder,
-    required this.backgroundGradient,
-    required this.panelGradient,
   });
 
-  final Color scaffold;
-  final Color surface;
-  final Color surfaceRaised;
-  final Color surfaceMuted;
-  final Color border;
-  final Color borderStrong;
-  final Color text;
-  final Color textSoft;
+  final Color bgPrimary;
+  final Color bgSecondary;
+  final Color bgTertiary;
+  final Color bgCard;
+  final Color textPrimary;
+  final Color textSecondary;
   final Color textMuted;
   final Color accent;
-  final Color accentStrong;
-  final Color accentSoft;
-  final Color onAccent;
+  final Color accentHover;
+  final Color accentAlt;
+  final Color accentMuted;
   final Color secondary;
+  final Color border;
+  final Color borderLight;
   final Color success;
   final Color warning;
-  final Color error;
+  final Color danger;
+  final Color info;
+  final Color onAccent;
   final Color shadow;
-  final Color glassFill;
-  final Color glassBorder;
-  final Gradient backgroundGradient;
-  final Gradient panelGradient;
+
+  // Back-compat aliases used across the app.
+  Color get scaffold => bgPrimary;
+  Color get surface => bgCard;
+  Color get surfaceRaised => bgSecondary;
+  Color get surfaceMuted => bgTertiary;
+  Color get text => textPrimary;
+  Color get textSoft => textSecondary;
+  Color get accentStrong => accentHover;
+  Color get accentSoft => accentMuted;
+  Color get error => danger;
+  Color get glassFill => bgCard.withValues(alpha: 0.86);
+  Color get glassBorder => borderLight;
+  Color get borderStrong => borderLight;
+  Gradient get backgroundGradient => LinearGradient(
+        colors: <Color>[
+          bgPrimary,
+          Color.lerp(bgSecondary, accentAlt, 0.08)!.withValues(alpha: 0.98),
+          Color.lerp(bgPrimary, accent, 0.05)!,
+        ],
+        stops: const <double>[0, 0.52, 1],
+        begin: const Alignment(-0.95, -1),
+        end: const Alignment(1, 0.92),
+      );
+  Gradient get panelGradient => LinearGradient(
+        colors: <Color>[
+          Colors.white.withValues(alpha: 0.10),
+          bgCard.withValues(alpha: 0.94),
+          bgSecondary.withValues(alpha: 0.88),
+        ],
+        stops: const <double>[0, 0.2, 1],
+        begin: const Alignment(-0.85, -1),
+        end: const Alignment(1, 1),
+      );
 }
 
-// Deep charcoal-navy ground with the fixed NeoLabs gold accent.
 const NeoRecallPalette _darkPalette = NeoRecallPalette(
-  scaffold: Color(0xFF0A0D13),
-  surface: Color(0xFF12161F),
-  surfaceRaised: Color(0xFF181D29),
-  surfaceMuted: Color(0xFF1E2433),
-  border: Color(0x1AFFFFFF),
-  borderStrong: Color(0x26FFFFFF),
-  text: Color(0xFFF1F2F6),
-  textSoft: Color(0xFFB7BCCC),
-  textMuted: Color(0xFF7E8499),
-  accent: Color(0xFFE3B655),
-  accentStrong: Color(0xFFF1C871),
-  accentSoft: Color(0x26E3B655),
-  onAccent: Color(0xFF1A1306),
+  bgPrimary: Color(0xFF0E1511),
+  bgSecondary: Color(0xFF171F1A),
+  bgTertiary: Color(0xFF1C261F),
+  bgCard: Color(0xFF171F1A),
+  textPrimary: Color(0xFFECEFE5),
+  textSecondary: Color(0xFFAEB7A6),
+  textMuted: Color(0xFF7E8877),
+  accent: Color(0xFFE1B052),
+  accentHover: Color(0xFFEAC272),
+  accentAlt: Color(0xFF84BA87),
+  accentMuted: Color(0x24E1B052),
   secondary: Color(0xFFD98AA6),
-  success: Color(0xFF5FC793),
-  warning: Color(0xFFE3B655),
-  error: Color(0xFFE57F7F),
-  shadow: Color(0x70000000),
-  glassFill: Color(0x99151A24),
-  glassBorder: Color(0x1FFFFFFF),
-  backgroundGradient: LinearGradient(
-    colors: <Color>[Color(0xFF080A0F), Color(0xFF0C0F17), Color(0xFF11141F)],
-    stops: <double>[0, 0.5, 1],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
-  panelGradient: LinearGradient(
-    colors: <Color>[Color(0xE6171B26), Color(0xE6141821), Color(0xF20F121A)],
-    stops: <double>[0, 0.4, 1],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
+  border: Color(0x14E0F0E0),
+  borderLight: Color(0x24E0F0E0),
+  success: Color(0xFF74C07C),
+  warning: Color(0xFFE1B052),
+  danger: Color(0xFFDE8A78),
+  info: Color(0xFF6FB0A4),
+  onAccent: Color(0xFF0E1511),
+  shadow: Color(0xA0000000),
 );
 
 const NeoRecallPalette _lightPalette = NeoRecallPalette(
-  scaffold: Color(0xFFF4F3EE),
-  surface: Color(0xFFFFFFFF),
-  surfaceRaised: Color(0xFFFCFBF7),
-  surfaceMuted: Color(0xFFEEEBE1),
-  border: Color(0x141A211B),
-  borderStrong: Color(0x221A211B),
-  text: Color(0xFF1A1D24),
-  textSoft: Color(0xFF4A4F5C),
-  textMuted: Color(0xFF767C8C),
-  accent: Color(0xFFB1812B),
-  accentStrong: Color(0xFF8F6A22),
-  accentSoft: Color(0x1CB1812B),
-  onAccent: Color(0xFFFFFFFF),
+  bgPrimary: Color(0xFFF4F1E8),
+  bgSecondary: Color(0xFFEDE9DC),
+  bgTertiary: Color(0xFFF1EDE1),
+  bgCard: Color(0xFFFDFCF8),
+  textPrimary: Color(0xFF1C2117),
+  textSecondary: Color(0xFF49503F),
+  textMuted: Color(0xFF7E8470),
+  accent: Color(0xFFB07D2B),
+  accentHover: Color(0xFFC8943F),
+  accentAlt: Color(0xFF5E6B4C),
+  accentMuted: Color(0x24B07D2B),
   secondary: Color(0xFFA8506E),
-  success: Color(0xFF2F8A5C),
+  border: Color(0x1A1C2117),
+  borderLight: Color(0x291C2117),
+  success: Color(0xFF527C4F),
   warning: Color(0xFF9A6B1E),
-  error: Color(0xFFB6473F),
-  shadow: Color(0x140E120F),
-  glassFill: Color(0xCCFFFFFF),
-  glassBorder: Color(0x1F1A211B),
-  backgroundGradient: LinearGradient(
-    colors: <Color>[Color(0xFFF6F4ED), Color(0xFFF8F6F0), Color(0xFFECE8DC)],
-    stops: <double>[0, 0.5, 1],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
-  panelGradient: LinearGradient(
-    colors: <Color>[Color(0xFAFFFFFF), Color(0xFAFAF8F2), Color(0xF5F4F1E7)],
-    stops: <double>[0, 0.4, 1],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
+  danger: Color(0xFFAE473C),
+  info: Color(0xFF2F7D6E),
+  onAccent: Color(0xFFFDFCF8),
+  shadow: Color(0x241C2117),
 );
 
 NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
@@ -130,21 +135,43 @@ NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
 NeoRecallPalette neoRecallPaletteOf(BuildContext context) =>
     neoRecallPaletteFor(Theme.of(context).brightness);
 
-TextStyle sectionEyebrowStyle(NeoRecallPalette palette) => TextStyle(
-  color: palette.accentStrong,
-  fontWeight: FontWeight.w700,
-  fontSize: 12,
-  letterSpacing: 1.6,
-);
+TextStyle sectionEyebrowStyle(NeoRecallPalette palette) => GoogleFonts.geistMono(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 1.7,
+      color: palette.accentHover,
+    );
 
 TextStyle displayTitleStyle(NeoRecallPalette palette, {double size = 28}) =>
     TextStyle(
-      color: palette.text,
+      color: palette.textPrimary,
+      fontWeight: FontWeight.w700,
+      fontSize: size,
+      letterSpacing: -0.8,
+      height: 1.08,
+    );
+
+TextStyle heroTitleStyle(NeoRecallPalette palette, {double size = 24}) =>
+    TextStyle(
+      color: palette.textPrimary,
       fontWeight: FontWeight.w800,
       fontSize: size,
-      letterSpacing: -0.9,
+      letterSpacing: -1.0,
       height: 1.1,
     );
+
+List<BoxShadow> softPanelShadow(NeoRecallPalette palette) => <BoxShadow>[
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.18),
+        blurRadius: 40,
+        offset: const Offset(0, 18),
+      ),
+      BoxShadow(
+        color: palette.accent.withValues(alpha: 0.07),
+        blurRadius: 28,
+        offset: const Offset(0, 8),
+      ),
+    ];
 
 ThemeData buildNeoRecallTheme(Brightness brightness) {
   final palette = neoRecallPaletteFor(brightness);
@@ -158,73 +185,86 @@ ThemeData buildNeoRecallTheme(Brightness brightness) {
   );
 
   return base.copyWith(
-    scaffoldBackgroundColor: palette.scaffold,
+    focusColor: palette.accent.withValues(alpha: 0.2),
+    scaffoldBackgroundColor: palette.bgPrimary,
     colorScheme: base.colorScheme.copyWith(
       primary: palette.accent,
-      secondary: palette.secondary,
+      secondary: palette.accentHover,
       tertiary: palette.secondary,
-      surface: palette.surface,
-      onSurface: palette.text,
-      error: palette.error,
+      surface: palette.bgCard,
+      onSurface: palette.textPrimary,
+      error: palette.danger,
     ),
-    textTheme: GoogleFonts.geistTextTheme(
-      base.textTheme,
-    ).apply(bodyColor: palette.text, displayColor: palette.text),
+    textTheme: GoogleFonts.geistTextTheme(base.textTheme).apply(
+      bodyColor: palette.textPrimary,
+      displayColor: palette.textPrimary,
+    ),
     splashFactory: InkSparkle.splashFactory,
     cardTheme: CardThemeData(
-      color: palette.surface.withValues(
-        alpha: brightness == Brightness.dark ? 0.92 : 0.97,
+      color: palette.bgCard.withValues(
+        alpha: brightness == Brightness.dark ? 0.86 : 0.96,
       ),
       surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      shadowColor: palette.shadow,
+      elevation: brightness == Brightness.dark ? 8 : 3,
+      shadowColor: Colors.black.withValues(
+        alpha: brightness == Brightness.dark ? 0.24 : 0.12,
+      ),
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: palette.borderStrong),
+        borderRadius: BorderRadius.circular(AppRadius.panel),
+        side: BorderSide(
+          color: Colors.white.withValues(
+            alpha: brightness == Brightness.dark ? 0.08 : 0.22,
+          ),
+        ),
       ),
     ),
     dividerColor: palette.border,
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: palette.surfaceMuted.withValues(
-        alpha: brightness == Brightness.dark ? 0.82 : 0.88,
+      fillColor: palette.bgSecondary.withValues(
+        alpha: brightness == Brightness.dark ? 0.82 : 0.84,
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       labelStyle: TextStyle(
-        color: palette.textMuted,
-        fontWeight: FontWeight.w600,
+        color: palette.textSecondary,
         fontSize: 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.15,
       ),
       hintStyle: TextStyle(color: palette.textMuted),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: palette.borderStrong),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        borderSide: BorderSide(color: palette.borderLight),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: palette.borderStrong),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        borderSide: BorderSide(color: palette.borderLight),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: palette.accent, width: 1.4),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: palette.error, width: 1.2),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        borderSide: BorderSide(color: palette.accentHover, width: 1.4),
       ),
     ),
+    iconTheme: IconThemeData(color: palette.textSecondary),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: palette.accent,
         foregroundColor: palette.onAccent,
-        disabledBackgroundColor: palette.surfaceMuted,
+        disabledBackgroundColor: palette.bgTertiary,
         disabledForegroundColor: palette.textMuted,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.input),
+          side: BorderSide(
+            color: Colors.white.withValues(
+              alpha: brightness == Brightness.dark ? 0.14 : 0.22,
+            ),
+          ),
+        ),
         textStyle: const TextStyle(
-          fontSize: 14,
+          fontSize: 14.5,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.1,
         ),
@@ -232,49 +272,40 @@ ThemeData buildNeoRecallTheme(Brightness brightness) {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: palette.text,
-        backgroundColor: palette.surface.withValues(
-          alpha: brightness == Brightness.dark ? 0.3 : 0.65,
+        foregroundColor: palette.textPrimary,
+        side: BorderSide(
+          color: Colors.white.withValues(
+            alpha: brightness == Brightness.dark ? 0.12 : 0.26,
+          ),
         ),
-        side: BorderSide(color: palette.borderStrong),
+        backgroundColor: palette.bgCard.withValues(
+          alpha: brightness == Brightness.dark ? 0.2 : 0.5,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.input),
+        ),
+        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: palette.accentStrong,
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        foregroundColor: palette.accentHover,
+        textStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.05,
+        ),
       ),
-    ),
-    iconTheme: IconThemeData(color: palette.textSoft),
-    chipTheme: base.chipTheme.copyWith(
-      backgroundColor: palette.surfaceMuted,
-      selectedColor: palette.accentSoft,
-      side: BorderSide(color: palette.borderStrong),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-      labelStyle: TextStyle(
-        color: palette.textSoft,
-        fontWeight: FontWeight.w600,
-        fontSize: 12,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
     ),
     listTileTheme: ListTileThemeData(
-      iconColor: palette.textMuted,
-      textColor: palette.text,
-      selectedTileColor: palette.accentSoft,
-      selectedColor: palette.accentStrong,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-    ),
-    tooltipTheme: TooltipThemeData(
-      decoration: BoxDecoration(
-        color: palette.surfaceRaised,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: palette.borderStrong),
+      iconColor: palette.textSecondary,
+      textColor: palette.textPrimary,
+      selectedColor: palette.accentHover,
+      selectedTileColor: palette.accentMuted,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.input),
       ),
-      textStyle: TextStyle(color: palette.text, fontSize: 12),
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((states) {
@@ -282,21 +313,39 @@ ThemeData buildNeoRecallTheme(Brightness brightness) {
         return palette.textMuted;
       }),
       trackColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) return palette.accentSoft;
-        return palette.surfaceMuted;
+        if (states.contains(WidgetState.selected)) return palette.accentMuted;
+        return palette.border;
       }),
     ),
-    navigationRailTheme: NavigationRailThemeData(
+    sliderTheme: SliderThemeData(
+      activeTrackColor: palette.accent,
+      inactiveTrackColor: palette.border,
+      thumbColor: palette.accentHover,
+      overlayColor: palette.accent.withValues(alpha: 0.12),
+    ),
+    appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
-      indicatorColor: palette.accentSoft,
-      selectedIconTheme: IconThemeData(color: palette.accent),
-      selectedLabelTextStyle: TextStyle(
-        color: palette.text,
+      foregroundColor: palette.textPrimary,
+      elevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        color: palette.textPrimary,
         fontWeight: FontWeight.w700,
+        fontSize: 18,
       ),
-      unselectedIconTheme: IconThemeData(color: palette.textMuted),
-      unselectedLabelTextStyle: TextStyle(color: palette.textMuted),
-      labelType: NavigationRailLabelType.all,
+    ),
+    drawerTheme: DrawerThemeData(
+      backgroundColor: palette.bgSecondary,
+      surfaceTintColor: Colors.transparent,
+    ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: palette.bgCard,
+      contentTextStyle: TextStyle(color: palette.textPrimary),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        side: BorderSide(color: palette.borderLight),
+      ),
     ),
   );
 }

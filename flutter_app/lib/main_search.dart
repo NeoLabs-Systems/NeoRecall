@@ -35,7 +35,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     return ListView(
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
       children: <Widget>[
         const ScreenHeader(
           eyebrow: 'SEARCH',

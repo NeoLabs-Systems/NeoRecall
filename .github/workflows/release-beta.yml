@@ -100,39 +100,13 @@ jobs:
         id: capture_release_sha
         run: echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  desktop:
-    name: Build desktop clients
+  build-apps:
+    name: Build app binaries
     needs: release
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - platform: macos
-            runner: macos-14
-          - platform: windows
-            runner: windows-2025
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release.outputs.release_sha }}
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.35.5'
-          cache: true
-      - run: flutter pub get
-        working-directory: flutter_app
-      - if: matrix.platform == 'macos'
-        run: flutter build macos --release --no-pub && ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/NeoRecall.app ../NeoRecall-macOS.zip
-        working-directory: flutter_app
-      - if: matrix.platform == 'windows'
-        shell: pwsh
-        run: flutter build windows --release --no-pub; Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath ../NeoRecall-Windows-x64.zip
-        working-directory: flutter_app
-      - shell: bash
-        run: gh release upload "${{ needs.release.outputs.release_tag }}" NeoRecall-*.zip --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
+    uses: ./.github/workflows/_build-apps.yml
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
 
   notify-discord:
     name: Notify Discord

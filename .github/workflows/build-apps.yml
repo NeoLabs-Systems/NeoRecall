@@ -1,0 +1,23 @@
+name: Build Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to attach unsigned app assets to
+        required: true
+        type: string
+      ref:
+        description: Git ref to build from (defaults to the release tag)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-apps:
+    uses: ./.github/workflows/_build-apps.yml
+    with:
+      ref: ${{ github.event.inputs.ref || github.event.inputs.release_tag }}
+      release_tag: ${{ github.event.inputs.release_tag }}

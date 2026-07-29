@@ -1,0 +1,228 @@
+name: Reusable App Builds
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build apps from
+        required: true
+        type: string
+      release_tag:
+        description: Release tag used to name artifacts
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS app
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Ensure macOS project exists
+        run: |
+          if [ ! -d "macos" ]; then
+            flutter create --platforms=macos .
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release --no-pub
+
+      - name: Package macOS app
+        id: package
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          APP_PATH="build/macos/Build/Products/Release/NeoRecall.app"
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH="$(find build/macos/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          fi
+          if [ -z "${APP_PATH:-}" ] || [ ! -d "$APP_PATH" ]; then
+            echo "NeoRecall.app was not produced."
+            ls -la build/macos/Build/Products/Release || true
+            exit 1
+          fi
+          mkdir -p ../dist
+          OUT="../dist/NeoRecall-macOS-${VERSION}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUT"
+          echo "asset=$(basename "$OUT")" >> "$GITHUB_OUTPUT"
+          ls -la ../dist
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neorecall-macos-app
+          path: dist/NeoRecall-macOS-*.zip
+          if-no-files-found: error
+
+      - name: Attach macOS asset to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" dist/NeoRecall-macOS-*.zip --clobber
+
+  build-windows:
+    name: Build Windows app
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Enable Windows desktop
+        shell: pwsh
+        run: flutter config --enable-windows-desktop
+
+      - name: Ensure Windows project exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "windows")) {
+            flutter create --platforms=windows .
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: flutter pub get
+
+      - name: Build Windows release
+        shell: pwsh
+        run: flutter build windows --release --no-pub
+
+      - name: Package Windows app
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_TAG.TrimStart("v", "V")
+          $releaseDir = Join-Path $PWD "build\windows\x64\runner\Release"
+          if (-not (Test-Path $releaseDir)) {
+            $candidate = Get-ChildItem "build\windows" -Directory -Recurse -Filter "Release" |
+              Where-Object { Test-Path (Join-Path $_.FullName "*.exe") } |
+              Select-Object -First 1
+            if (-not $candidate) { throw "Windows Release directory was not produced." }
+            $releaseDir = $candidate.FullName
+          }
+          $distDir = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+          $out = Join-Path $distDir "NeoRecall-Windows-x64-$version.zip"
+          Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $out -Force
+          Get-ChildItem $distDir
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neorecall-windows-app
+          path: dist/NeoRecall-Windows-x64-*.zip
+          if-no-files-found: error
+
+      - name: Attach Windows asset to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" dist/NeoRecall-Windows-x64-*.zip --clobber
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Ensure Android project exists
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=android .
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build unsigned Android APK
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          mkdir -p ../dist
+          # No custom release keystore is configured; Flutter uses the debug
+          # signing config already set for release builds in this repo.
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk "../dist/NeoRecall-Android-${VERSION}.apk"
+          ls -la ../dist
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neorecall-android-app
+          path: dist/NeoRecall-Android-*.apk
+          if-no-files-found: error
+
+      - name: Attach Android asset to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" dist/NeoRecall-Android-*.apk --clobber

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_shared.dart';
-import 'main_spacing.dart';
 import 'main_theme.dart';
 
 class NeoRecallAuthScreen extends StatefulWidget {
@@ -22,10 +21,14 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   bool registerMode = false;
   bool serverSetup = false;
   bool awaitingTwoFactor = false;
+
+  bool get _canConfigureServer => widget.controller.allowsBackendUrlConfiguration;
+
   @override
   void initState() {
     super.initState();
     _server.text = widget.controller.backendUrl;
+    serverSetup = widget.controller.requiresBackendUrlSetup;
   }
 
   @override
@@ -45,9 +48,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
 
   Future<void> _submit() async {
     if (awaitingTwoFactor) {
-      final ok = await widget.controller.completeTwoFactor(
-        _twoFactor.text.trim(),
-      );
+      final ok = await widget.controller.completeTwoFactor(_twoFactor.text.trim());
       if (ok && mounted) setState(() => awaitingTwoFactor = false);
       return;
     }
@@ -63,17 +64,16 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
         _email.text.trim(),
         _password.text,
       );
-    } else {
-      final ok = await widget.controller.login(
-        _username.text.trim(),
-        _password.text,
-      );
-      if (!ok &&
-          widget.controller.error?.toLowerCase().contains('two-factor') ==
-              true &&
-          mounted) {
-        setState(() => awaitingTwoFactor = true);
-      }
+      return;
+    }
+    final ok = await widget.controller.login(
+      _username.text.trim(),
+      _password.text,
+    );
+    if (!ok &&
+        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
+        mounted) {
+      setState(() => awaitingTwoFactor = true);
     }
   }
 
@@ -81,15 +81,17 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
+    final wide = MediaQuery.sizeOf(context).width >= 980;
+
     final card = GlassSurface(
       padding: const EdgeInsets.all(30),
-      child: serverSetup
+      child: serverSetup && _canConfigureServer
           ? _serverCard(palette)
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                const BrandLockup(logoSize: 58),
+                const BrandLockup(logoSize: 56),
                 const SizedBox(height: 26),
                 Text(
                   awaitingTwoFactor
@@ -102,18 +104,18 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   awaitingTwoFactor
                       ? 'Enter 2FA code'
                       : registerMode
-                      ? 'Create your NeoRecall account'
-                      : 'Welcome back',
-                  style: displayTitleStyle(palette, size: 28),
+                          ? 'Create your NeoRecall account'
+                          : 'Welcome back',
+                  style: displayTitleStyle(palette, size: 30),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   awaitingTwoFactor
                       ? 'Open your authenticator app and enter the current NeoRecall code.'
                       : registerMode
-                      ? 'Your first account becomes the NeoRecall administrator for this server.'
-                      : 'Sign in to your private NeoRecall workspace.',
-                  style: TextStyle(color: palette.textSoft, height: 1.5),
+                          ? 'Your first account becomes the NeoRecall administrator for this server.'
+                          : 'Sign in to your private NeoRecall control surface.',
+                  style: TextStyle(color: palette.textSecondary, height: 1.5),
                 ),
                 const SizedBox(height: 20),
                 if (controller.error != null) ...<Widget>[
@@ -123,9 +125,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 TextField(
                   controller: awaitingTwoFactor ? _twoFactor : _username,
                   decoration: InputDecoration(
-                    labelText: awaitingTwoFactor
-                        ? '2FA or recovery code'
-                        : 'Username',
+                    labelText: awaitingTwoFactor ? '2FA or recovery code' : 'Username',
                     prefixIcon: Icon(
                       awaitingTwoFactor
                           ? Icons.verified_user_outlined
@@ -160,7 +160,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       controller: _confirm,
                       obscureText: true,
                       decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
+                        labelText: 'Confirm password',
                         prefixIcon: Icon(Icons.lock_outline),
                       ),
                     ),
@@ -178,106 +178,130 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                           awaitingTwoFactor
                               ? 'Verify'
                               : registerMode
-                              ? 'Create account'
-                              : 'Sign in',
+                                  ? 'Create account'
+                                  : 'Sign in',
                         ),
                 ),
                 const SizedBox(height: 10),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
                     TextButton(
-                      onPressed: () =>
-                          setState(() => registerMode = !registerMode),
+                      onPressed: () => setState(() {
+                        registerMode = !registerMode;
+                        awaitingTwoFactor = false;
+                      }),
                       child: Text(
                         registerMode
                             ? 'Already have an account?'
                             : 'Create account',
                       ),
                     ),
-                    TextButton(
-                      onPressed: () => setState(() => serverSetup = true),
-                      child: const Text('Server settings'),
-                    ),
+                    const Spacer(),
+                    if (_canConfigureServer)
+                      TextButton(
+                        onPressed: () => setState(() => serverSetup = true),
+                        child: const Text('Server'),
+                      ),
                   ],
                 ),
               ],
             ),
     );
+
     return AmbientBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) => SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(
-                      constraints.maxWidth < AppBreakpoints.mobile ? 14 : 24,
-                    ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 468),
-                      child: card,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: wide ? 1080 : 480),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: wide
+                ? Row(
+                    children: <Widget>[
+                      Expanded(child: _heroPanel(palette)),
+                      const SizedBox(width: 28),
+                      SizedBox(width: 440, child: card),
+                    ],
+                  )
+                : card,
           ),
         ),
       ),
     );
   }
 
-  Widget _serverCard(NeoRecallPalette palette) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    mainAxisSize: MainAxisSize.min,
-    children: <Widget>[
-      const BrandLockup(logoSize: 58),
-      const SizedBox(height: 24),
-      Text('FIRST-RUN SETUP', style: sectionEyebrowStyle(palette)),
-      const SizedBox(height: 8),
-      Text(
-        'Connect this build to your NeoRecall backend',
-        style: displayTitleStyle(palette, size: 26),
+  Widget _heroPanel(NeoRecallPalette palette) {
+    return GlassSurface(
+      padding: const EdgeInsets.all(34),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text('CONTROL SURFACE', style: sectionEyebrowStyle(palette)),
+          const SizedBox(height: 14),
+          Text(
+            'Private audio memory that stays under your control.',
+            style: displayTitleStyle(palette, size: 40),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Record anywhere, transcribe locally, and recall the day without keeping server-side audio after processing.',
+            style: TextStyle(color: palette.textSecondary, height: 1.55, fontSize: 16),
+          ),
+          const SizedBox(height: 28),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: const <Widget>[
+              MetaPill(icon: Icons.mic_none_rounded, label: 'Local capture', active: true),
+              MetaPill(icon: Icons.lock_outline, label: 'Receipt-gated release'),
+              MetaPill(icon: Icons.auto_awesome_outlined, label: 'Hybrid recall'),
+            ],
+          ),
+        ],
       ),
-      const SizedBox(height: 12),
-      Text(
-        'Enter your self-hosted server URL once. NeoRecall stores it locally on this device.',
-        style: TextStyle(color: palette.textSoft, height: 1.5),
-      ),
-      const SizedBox(height: 22),
-      TextField(
-        controller: _server,
-        keyboardType: TextInputType.url,
-        decoration: const InputDecoration(
-          labelText: 'Backend URL',
-          hintText: 'Enter your NeoRecall server URL',
-          prefixIcon: Icon(Icons.cloud_outlined),
+    );
+  }
+
+  Widget _serverCard(NeoRecallPalette palette) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        const BrandLockup(logoSize: 48),
+        const SizedBox(height: 22),
+        Text('SERVER', style: sectionEyebrowStyle(palette)),
+        const SizedBox(height: 8),
+        Text('Connect this client', style: displayTitleStyle(palette, size: 28)),
+        const SizedBox(height: 8),
+        Text(
+          'Desktop and mobile builds can point at any NeoRecall server. Web builds always use the host that serves /app.',
+          style: TextStyle(color: palette.textSecondary, height: 1.5),
         ),
-      ),
-      const SizedBox(height: 18),
-      FilledButton(
-        onPressed: () async {
-          try {
-            await widget.controller.setBackendUrl(_server.text);
-            if (mounted) setState(() => serverSetup = false);
-          } catch (error) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text(error.toString())));
-            }
-          }
-        },
-        child: const Text('Connect backend'),
-      ),
-      TextButton(
-        onPressed: () => setState(() => serverSetup = false),
-        child: const Text('Back'),
-      ),
-    ],
-  );
+        const SizedBox(height: 20),
+        TextField(
+          controller: _server,
+          decoration: const InputDecoration(
+            labelText: 'NeoRecall server URL',
+            prefixIcon: Icon(Icons.dns_outlined),
+            hintText: 'http://192.168.1.20:4500',
+          ),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: widget.controller.loading
+              ? null
+              : () async {
+                  await widget.controller.setBackendUrl(_server.text);
+                  if (mounted) setState(() => serverSetup = false);
+                },
+          child: const Text('Save server'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => setState(() => serverSetup = false),
+          child: const Text('Back to sign in'),
+        ),
+      ],
+    );
+  }
 }

@@ -18,3 +18,4 @@ models/downloads/
 *.webm
 *.mp3
 !test/fixtures/*.wav
+/tmp

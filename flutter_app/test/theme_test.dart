@@ -8,7 +8,7 @@ void main() {
     () {
       expect(
         neoRecallPaletteFor(Brightness.dark).accent,
-        const Color(0xFFE3B655),
+        const Color(0xFFE1B052),
       );
       expect(
         neoRecallPaletteFor(Brightness.dark).secondary,
@@ -16,7 +16,7 @@ void main() {
       );
       expect(
         neoRecallPaletteFor(Brightness.light).accent,
-        const Color(0xFFB1812B),
+        const Color(0xFFB07D2B),
       );
       expect(
         neoRecallPaletteFor(Brightness.light).secondary,

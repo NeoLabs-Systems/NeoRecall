@@ -10,7 +10,7 @@ const router = express.Router();
 router.use(requireAuth);
 const deviceSchema = z.object({
   id: z.string().uuid().optional(), clientUuid: z.string().min(8).max(128), name: z.string().min(1).max(100), platform: z.string().min(1).max(40),
-  kind: z.enum(['browser', 'desktop', 'import', 'wearable']), capabilities: z.record(z.unknown()).optional(),
+  kind: z.enum(['browser', 'desktop', 'mobile', 'import', 'wearable']), capabilities: z.record(z.unknown()).optional(),
 });
 router.get('/', requireScope('devices:read'), (req, res) => res.json({ devices: devices.list(req.auth.userId) }));
 router.post('/', requireAnyScope('devices:write', 'ingest:write'), validate(deviceSchema), (req, res) => res.status(201).json(devices.register(req.auth.userId, req.body)));

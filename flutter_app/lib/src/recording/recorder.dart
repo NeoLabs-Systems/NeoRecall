@@ -1,7 +1,7 @@
 import 'audio_frame.dart';
 import 'recorder_stub.dart'
-    if (dart.library.io) 'recorder_desktop.dart'
     if (dart.library.html) 'recorder_web.dart'
+    if (dart.library.io) 'recorder_io.dart'
     as implementation;
 
 abstract class RecallRecorder {

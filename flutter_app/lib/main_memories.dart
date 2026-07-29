@@ -22,7 +22,7 @@ class MemoriesScreen extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
-        padding: const EdgeInsets.all(28),
+        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
         children: <Widget>[
           ScreenHeader(
             eyebrow: 'MEMORIES',

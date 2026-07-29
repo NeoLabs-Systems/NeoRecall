@@ -1,4 +1,41 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NeoRecall Admin</title><link rel="stylesheet" href="admin.css"></head>
-<body class="login-page"><main class="login-card"><img src="logo.svg" alt="NeoRecall" width="64" height="64"><h1>NeoRecall Admin</h1><p>Sign in to manage this server.</p>
-<form id="login-form"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">Sign in</button><p class="error" id="error" role="alert"></p></form></main>
-<script>document.querySelector('#login-form').addEventListener('submit',async(e)=>{e.preventDefault();const f=new FormData(e.target);const r=await fetch('/admin/api/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(f))});const p=await r.json();if(!r.ok){document.querySelector('#error').textContent=p.error?.message||'Sign-in failed.';return}sessionStorage.setItem('neorecall_admin_token',p.token);location.href='/admin/'});</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NeoRecall Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="eyebrow">ADMIN</div>
+    <img src="logo.svg" alt="NeoRecall" width="56" height="56" style="margin-top:14px">
+    <h1>NeoRecall Admin</h1>
+    <p>Sign in to manage this private audio memory server.</p>
+    <form id="login-form">
+      <label>Username<input name="username" autocomplete="username" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+      <p class="error" id="error" role="alert"></p>
+    </form>
+  </main>
+  <script>
+    document.querySelector('#login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const r = await fetch('/admin/api/v1/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(f)),
+      });
+      const p = await r.json();
+      if (!r.ok) {
+        document.querySelector('#error').textContent = p.error?.message || 'Sign-in failed.';
+        return;
+      }
+      sessionStorage.setItem('neorecall_admin_token', p.token);
+      location.href = '/admin/';
+    });
+  </script>
+</body>
+</html>
