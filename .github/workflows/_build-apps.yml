@@ -51,6 +51,9 @@ jobs:
       - name: Build macOS release
         run: flutter build macos --release --no-pub
 
+      - name: Verify macOS Opus runtime
+        run: test -n "$(find build/macos/Build/Products/Release -path '*.app/Contents/Frameworks/opus.framework' -print -quit)"
+
       - name: Package macOS app
         shell: bash
         env:
@@ -128,6 +131,13 @@ jobs:
       - name: Build Windows release
         shell: pwsh
         run: flutter build windows --release --no-pub
+
+      - name: Verify Windows Opus runtime
+        shell: pwsh
+        run: |
+          $opus = Get-ChildItem build\windows -Recurse -File -Filter "libopus_x64.dll.blob" |
+            Select-Object -First 1
+          if (-not $opus) { throw "Bundled Opus DLL asset is missing." }
 
       - name: Package Windows app
         shell: pwsh
@@ -207,6 +217,8 @@ jobs:
           # No custom release keystore is configured; Flutter uses the debug
           # signing config already set for release builds in this repo.
           flutter build apk --release --no-pub
+          unzip -l build/app/outputs/flutter-apk/app-release.apk |
+            grep -Eq 'lib/(arm64-v8a|armeabi-v7a|x86_64)/libopus\.so'
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/NeoRecall-Android-${VERSION}.apk"
           ls -la ../dist
 

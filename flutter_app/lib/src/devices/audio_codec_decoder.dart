@@ -1,28 +1,64 @@
+import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:opus_dart/opus_dart.dart';
-import 'package:opus_flutter/opus_flutter.dart' as opus_flutter;
+import 'package:opus_codec/opus_codec.dart' as opus_codec;
+import 'package:opus_codec_dart/opus_codec_dart.dart';
 
 import 'omi/device_models.dart';
 
 bool _opusInitialized = false;
 Object? _opusInitializationError;
+Future<bool>? _opusInitialization;
+const Duration wearableAudioCodecInitializationTimeout = Duration(seconds: 15);
+const List<int> _opusSilenceProbe = <int>[0xf8, 0xff, 0xfe];
 
-Future<void> initializeWearableAudioCodecs() async {
-  if (_opusInitialized || _opusInitializationError != null) return;
+Future<bool> initializeWearableAudioCodecs({bool retry = false}) async {
+  if (_opusInitialized) return true;
+  final pending = _opusInitialization;
+  if (pending != null) return pending;
+  if (_opusInitializationError != null && !retry) return false;
+  final initialization = _initializeOpus();
+  _opusInitialization = initialization;
   try {
-    initOpus(await opus_flutter.load());
-    _opusInitialized = true;
-  } catch (error) {
-    _opusInitializationError = error;
+    return await initialization;
+  } finally {
+    if (identical(_opusInitialization, initialization)) {
+      _opusInitialization = null;
+    }
   }
 }
+
+Future<bool> _initializeOpus() async {
+  try {
+    initOpus(
+      await opus_codec.load().timeout(wearableAudioCodecInitializationTimeout),
+    );
+    final probe = SimpleOpusDecoder(sampleRate: 16000, channels: 1);
+    try {
+      probe.decode(input: Uint8List.fromList(_opusSilenceProbe));
+    } finally {
+      probe.destroy();
+    }
+    _opusInitializationError = null;
+    _opusInitialized = true;
+    return true;
+  } catch (error) {
+    _opusInitializationError = error;
+    return false;
+  }
+}
+
+String get wearableAudioCodecStatus => _opusInitialized
+    ? 'ready'
+    : _opusInitializationError == null
+    ? 'not_initialized'
+    : 'load_failed';
 
 /// Decodes wearable audio frames to mono PCM16 @ 16 kHz.
 ///
 /// Mirrors the Omi app approach:
 /// - BLE packets often include a 3-byte firmware header
-/// - Opus frames are decoded with opus_dart
+/// - Opus frames are decoded with the bundled cross-platform libopus runtime
 /// - PCM8 is expanded to PCM16
 /// - PCM16 is passed through
 class WearableAudioDecoder {
@@ -47,6 +83,21 @@ class WearableAudioDecoder {
       case WearableAudioCodec.opus:
       case WearableAudioCodec.opusFs320:
         return _opusInitialized;
+      case WearableAudioCodec.aac:
+      case WearableAudioCodec.lc3:
+      case WearableAudioCodec.unknown:
+        return false;
+    }
+  }
+
+  Future<bool> ensureSupported() async {
+    switch (codec) {
+      case WearableAudioCodec.pcm8:
+      case WearableAudioCodec.pcm16:
+        return true;
+      case WearableAudioCodec.opus:
+      case WearableAudioCodec.opusFs320:
+        return initializeWearableAudioCodecs(retry: true);
       case WearableAudioCodec.aac:
       case WearableAudioCodec.lc3:
       case WearableAudioCodec.unknown:

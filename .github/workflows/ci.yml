@@ -67,6 +67,11 @@ jobs:
       - name: Build web client
         working-directory: flutter_app
         run: flutter build web --release --no-pub --base-href /app/
+      - name: Verify web Opus runtime
+        working-directory: flutter_app
+        run: |
+          test -s build/web/assets/packages/opus_codec_web/assets/libopus.js
+          test -s build/web/assets/packages/opus_codec_web/assets/libopus.wasm
 
   desktop-compile:
     name: ${{ matrix.platform }} compile gate
@@ -79,9 +84,11 @@ jobs:
           - platform: macOS
             runner: macos-14
             command: flutter build macos --release --no-pub
+            verify: test -n "$(find build/macos/Build/Products/Release -path '*.app/Contents/Frameworks/opus.framework' -print -quit)"
           - platform: Windows
             runner: windows-2022
             command: flutter build windows --release --no-pub
+            verify: if (-not (Get-ChildItem build/windows -Recurse -File -Filter 'libopus_x64.dll.blob' | Select-Object -First 1)) { throw 'Bundled Opus DLL asset is missing.' }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,6 +104,9 @@ jobs:
       - name: Compile desktop client
         working-directory: flutter_app
         run: ${{ matrix.command }}
+      - name: Verify desktop Opus runtime
+        working-directory: flutter_app
+        run: ${{ matrix.verify }}
 
   android-compile:
     name: Android compile gate
@@ -122,6 +132,9 @@ jobs:
       - name: Compile Android APK
         working-directory: flutter_app
         run: flutter build apk --release --no-pub
+      - name: Verify Android Opus runtime
+        working-directory: flutter_app
+        run: unzip -l build/app/outputs/flutter-apk/app-release.apk | grep -Eq 'lib/(arm64-v8a|armeabi-v7a|x86_64)/libopus\.so'
 
   docs:
     name: Docs build

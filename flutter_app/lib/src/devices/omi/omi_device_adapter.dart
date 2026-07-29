@@ -475,9 +475,19 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     if (connector == null || _state != DeviceTransportState.connectedStandby) {
       throw StateError('No ready Bluetooth audio device is connected.');
     }
-    if (!(_decoder?.isSupported ?? false)) {
-      throw UnsupportedError(
-        '${connector.codec.name} cannot be decoded locally on this platform.',
+    final decoder = _decoder;
+    if (decoder == null || !await decoder.ensureSupported()) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'decoder_unavailable',
+        level: 'error',
+        details: <String, Object?>{
+          'codec': connector.codec.name,
+          'decoderStatus': wearableAudioCodecStatus,
+        },
+      );
+      throw StateError(
+        'The local audio decoder could not start. Restart NeoRecall and try again.',
       );
     }
     await connector.startRecording();

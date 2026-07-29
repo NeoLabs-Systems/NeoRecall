@@ -12,6 +12,7 @@ import 'src/background/background_capture_service.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
 import 'src/devices/audio_device_adapter.dart';
+import 'src/devices/audio_codec_decoder.dart';
 import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
 import 'src/models/chunk.dart';
@@ -591,7 +592,10 @@ class NeoRecallController extends ChangeNotifier {
     );
     return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
       'schemaVersion': 1,
-      'client': ClientDiagnosticLog.instance.clientSummary(),
+      'client': <String, Object?>{
+        ...ClientDiagnosticLog.instance.clientSummary(),
+        'wearableAudioCodec': wearableAudioCodecStatus,
+      },
       'backend': backend,
     });
   }
