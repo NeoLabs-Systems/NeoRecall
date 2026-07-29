@@ -54,7 +54,11 @@ jobs:
             dist/NeoRecall-Android-*.apk
           )
 
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh release upload \
+            "$RELEASE_TAG" \
+            "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
           declare -A uploaded_by_name=()
           while IFS= read -r name; do
