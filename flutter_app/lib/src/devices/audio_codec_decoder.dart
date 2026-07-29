@@ -9,7 +9,8 @@ import 'omi/device_models.dart';
 bool _opusInitialized = false;
 Object? _opusInitializationError;
 Future<bool>? _opusInitialization;
-const Duration wearableAudioCodecInitializationTimeout = Duration(seconds: 15);
+Future<Object>? _opusCodecLoadFuture;
+const Duration wearableAudioCodecInitializationTimeout = Duration(seconds: 30);
 const List<int> _opusSilenceProbe = <int>[0xf8, 0xff, 0xfe];
 
 Future<bool> initializeWearableAudioCodecs({bool retry = false}) async {
@@ -30,8 +31,9 @@ Future<bool> initializeWearableAudioCodecs({bool retry = false}) async {
 
 Future<bool> _initializeOpus() async {
   try {
+    _opusCodecLoadFuture ??= opus_codec.load();
     initOpus(
-      await opus_codec.load().timeout(wearableAudioCodecInitializationTimeout),
+      await _opusCodecLoadFuture!.timeout(wearableAudioCodecInitializationTimeout),
     );
     final probe = SimpleOpusDecoder(sampleRate: 16000, channels: 1);
     try {

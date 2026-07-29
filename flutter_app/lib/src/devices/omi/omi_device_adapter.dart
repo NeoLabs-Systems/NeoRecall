@@ -486,6 +486,7 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
           'decoderStatus': wearableAudioCodecStatus,
         },
       );
+      await disconnect();
       throw StateError(
         'The local audio decoder could not start. Restart NeoRecall and try again.',
       );
