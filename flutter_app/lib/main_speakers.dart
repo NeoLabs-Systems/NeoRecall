@@ -76,12 +76,16 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
     if (value?.isNotEmpty ?? false) await controller.renameSpeaker(id, value!);
   }
 
-  Future<void> _merge(BuildContext context, String targetId) async {
+  Future<void> _merge(
+    BuildContext context,
+    String targetId,
+    List<RecallSpeaker> speakers,
+  ) async {
     final sourceId = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Merge another voice into this speaker'),
-        children: controller.speakers
+        children: speakers
             .where((speaker) => speaker.id != targetId)
             .map(
               (speaker) => SimpleDialogOption(
@@ -136,6 +140,13 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final visibleSpeakers = controller.speakers
+        .where(
+          (speaker) =>
+              speaker.totalDurationMs != null &&
+              speaker.totalDurationMs! >= 5000,
+        )
+        .toList();
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
@@ -148,7 +159,7 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                 'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
           ),
           const SizedBox(height: 20),
-          if (controller.speakers.isEmpty)
+          if (visibleSpeakers.isEmpty)
             const GlassSurface(
               child: EmptyState(
                 icon: Icons.record_voice_over_outlined,
@@ -164,35 +175,63 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                 children: <Widget>[
                   for (
                     var index = 0;
-                    index < controller.speakers.length;
+                    index < visibleSpeakers.length;
                     index++
                   ) ...<Widget>[
                     _SpeakerRow(
-                      speaker: controller.speakers[index],
+                      speaker: visibleSpeakers[index],
                       palette: palette,
                       playing:
-                          _playingSpeakerId == controller.speakers[index].id &&
+                          _playingSpeakerId == visibleSpeakers[index].id &&
                           _player?.state == PlayerState.playing,
                       loading:
                           _loadingPreview &&
-                          _playingSpeakerId == controller.speakers[index].id,
+                          _playingSpeakerId == visibleSpeakers[index].id,
                       onPreview: () =>
-                          _togglePreview(controller.speakers[index]),
+                          _togglePreview(visibleSpeakers[index]),
                       onMatchingChanged: (value) =>
                           controller.setSpeakerMatching(
-                            controller.speakers[index].id,
+                            visibleSpeakers[index].id,
                             value,
                           ),
                       onRename: () => _rename(
                         context,
-                        controller.speakers[index].id,
-                        controller.speakers[index].name ?? '',
+                        visibleSpeakers[index].id,
+                        visibleSpeakers[index].name ?? '',
                       ),
-                      onMerge: controller.speakers.length > 1
-                          ? () => _merge(context, controller.speakers[index].id)
+                      onMerge: visibleSpeakers.length > 1
+                          ? () => _merge(
+                                context,
+                                visibleSpeakers[index].id,
+                                visibleSpeakers,
+                              )
                           : null,
+                      onDelete: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Delete speaker?'),
+                            content: const Text(
+                              'This will permanently delete this speaker profile. Associated transcript segments will no longer identify this speaker.',
+                            ),
+                            actions: <Widget>[
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) {
+                          await controller.deleteSpeaker(visibleSpeakers[index].id);
+                        }
+                      },
                     ),
-                    if (index < controller.speakers.length - 1)
+                    if (index < visibleSpeakers.length - 1)
                       Divider(height: 1, color: palette.border),
                   ],
                 ],
@@ -214,6 +253,7 @@ class _SpeakerRow extends StatelessWidget {
     required this.onMatchingChanged,
     required this.onRename,
     this.onMerge,
+    required this.onDelete,
   });
 
   final RecallSpeaker speaker;
@@ -224,6 +264,7 @@ class _SpeakerRow extends StatelessWidget {
   final ValueChanged<bool> onMatchingChanged;
   final VoidCallback onRename;
   final VoidCallback? onMerge;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -290,13 +331,18 @@ class _SpeakerRow extends StatelessWidget {
             onPressed: onRename,
             icon: const Icon(Icons.edit_outlined),
           ),
-          if (onMerge != null)
+            if (onMerge != null)
+              IconButton(
+                tooltip: 'Merge another voice into this speaker',
+                onPressed: onMerge,
+                icon: const Icon(Icons.merge_outlined),
+              ),
             IconButton(
-              tooltip: 'Merge another voice into this speaker',
-              onPressed: onMerge,
-              icon: const Icon(Icons.merge_outlined),
+              tooltip: 'Delete speaker',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
             ),
-        ];
+          ];
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 13, 10, 13),
           child: compact

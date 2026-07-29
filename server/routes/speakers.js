@@ -31,4 +31,6 @@ router.post('/:id/merge', requireScope('speakers:write'), validate(z.object({ so
   (req, res, next) => { try { res.json(service.merge(req.auth.userId, req.params.id, req.body.sourceId)); } catch (error) { next(error); } });
 router.post('/:id/assignments', requireScope('speakers:write'), validate(z.object({ turnIds: z.array(z.string().uuid()).min(1).max(1000) })),
   (req, res, next) => { try { res.json(service.assign(req.auth.userId, req.params.id, req.body.turnIds)); } catch (error) { next(error); } });
+router.delete('/:id', requireScope('speakers:write'),
+  (req, res, next) => { try { res.json(service.remove(req.auth.userId, req.params.id)); } catch (error) { next(error); } });
 module.exports = router;

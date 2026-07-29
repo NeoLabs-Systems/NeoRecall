@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:opus_codec/opus_codec.dart' as opus_codec;
 import 'package:opus_codec_dart/opus_codec_dart.dart';
 
+import '../diagnostics/client_diagnostic_log.dart';
 import 'omi/device_models.dart';
 
 bool _opusInitialized = false;
@@ -11,7 +12,6 @@ Object? _opusInitializationError;
 Future<bool>? _opusInitialization;
 Future<Object>? _opusCodecLoadFuture;
 const Duration wearableAudioCodecInitializationTimeout = Duration(seconds: 30);
-const List<int> _opusSilenceProbe = <int>[0xf8, 0xff, 0xfe];
 
 Future<bool> initializeWearableAudioCodecs({bool retry = false}) async {
   if (_opusInitialized) return true;
@@ -35,16 +35,19 @@ Future<bool> _initializeOpus() async {
     initOpus(
       await _opusCodecLoadFuture!.timeout(wearableAudioCodecInitializationTimeout),
     );
-    final probe = SimpleOpusDecoder(sampleRate: 16000, channels: 1);
-    try {
-      probe.decode(input: Uint8List.fromList(_opusSilenceProbe));
-    } finally {
-      probe.destroy();
-    }
     _opusInitializationError = null;
     _opusInitialized = true;
     return true;
-  } catch (error) {
+  } catch (error, stack) {
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      'opus_initialization_failed',
+      level: 'error',
+      details: <String, Object?>{
+        'error': error.toString(),
+        'stack': stack.toString(),
+      },
+    );
     _opusInitializationError = error;
     return false;
   }

@@ -11,6 +11,7 @@ class RecallSpeaker {
   final int occurrences;
   final bool matchingEnabled;
   final int? previewDurationMs;
+  final int? totalDurationMs;
   bool get hasPreview => previewDurationMs != null;
   factory RecallSpeaker.fromJson(Map<String, dynamic> json) => RecallSpeaker(
     id: json['id'] as String,
@@ -19,5 +20,6 @@ class RecallSpeaker {
     matchingEnabled:
         json['matching_enabled'] == 1 || json['matching_enabled'] == true,
     previewDurationMs: json['preview_duration_ms'] as int?,
+    totalDurationMs: json['total_duration_ms'] as int?,
   );
 }

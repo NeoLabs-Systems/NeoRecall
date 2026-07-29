@@ -1317,6 +1317,14 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
+  Future<void> deleteSpeaker(String id) async {
+    await api.request(
+      'DELETE',
+      '/api/v1/speakers/$id',
+    );
+    await refreshAll(silent: true);
+  }
+
   Future<void> setSpeakerMatching(String id, bool enabled) async {
     await api.request(
       'PATCH',

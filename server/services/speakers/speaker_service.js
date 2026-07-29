@@ -6,6 +6,7 @@ const { HttpError } = require('../../middleware/error_handler');
 function list(userId) {
   return getDatabase().prepare(`SELECT v.id,v.display_name,v.embedding_model,v.sample_count,v.matching_enabled,v.created_at,v.updated_at,
     (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count,
+    (SELECT SUM(end_ms - start_ms) FROM speaker_turns st WHERE st.voiceprint_id=v.id) total_duration_ms,
     p.duration_ms preview_duration_ms
     FROM voiceprints v
     LEFT JOIN speaker_previews p ON p.voiceprint_id=v.id
@@ -79,4 +80,11 @@ function assign(userId, voiceprintId, turnIds) {
   return { assigned: changed };
 }
 
-module.exports = { list, update, merge, assign };
+function remove(userId, id) {
+  const db = getDatabase();
+  const result = db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(id, userId);
+  if (result.changes === 0) throw new HttpError(404, 'NOT_FOUND', 'Speaker not found.');
+  return { success: true };
+}
+
+module.exports = { list, update, merge, assign, remove };
