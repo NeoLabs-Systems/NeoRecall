@@ -5,6 +5,7 @@ class RecallSpeaker {
     required this.occurrences,
     required this.matchingEnabled,
     this.previewDurationMs,
+    this.totalDurationMs,
   });
   final String id;
   final String? name;
