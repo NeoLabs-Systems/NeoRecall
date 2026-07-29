@@ -33,6 +33,10 @@ Every consolidation attempt, including a timeout, consumes its interval. It perf
 
 The admin dashboard can safely tune boundary, deduplication, speaker matching, and consolidation material thresholds. Values are validated and stored in SQLite. Environment defaults remain the source of truth until an administrator explicitly overrides a value.
 
+`NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
+`NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.
+Both are validated within the product's 5–10 second preview contract.
+
 ## NeoAgent connection
 
 NeoAgent connects through NeoRecall's companion OAuth flow. In NeoAgent, open

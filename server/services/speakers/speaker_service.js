@@ -5,8 +5,11 @@ const { HttpError } = require('../../middleware/error_handler');
 
 function list(userId) {
   return getDatabase().prepare(`SELECT v.id,v.display_name,v.embedding_model,v.sample_count,v.matching_enabled,v.created_at,v.updated_at,
-    (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count
-    FROM voiceprints v WHERE v.user_id=? ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId);
+    (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count,
+    p.duration_ms preview_duration_ms
+    FROM voiceprints v
+    LEFT JOIN speaker_previews p ON p.voiceprint_id=v.id
+    WHERE v.user_id=? ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId);
 }
 
 function getOwned(userId, id) {
@@ -43,6 +46,18 @@ function merge(userId, targetId, sourceId) {
   const centroid = mergedCentroid(target, source);
   const db = getDatabase();
   db.transaction(() => {
+    const targetPreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(targetId);
+    const sourcePreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(sourceId);
+    if (sourcePreview && (!targetPreview || sourcePreview.quality > targetPreview.quality)) {
+      db.prepare(`INSERT INTO speaker_previews
+        (voiceprint_id,user_id,audio,content_type,duration_ms,quality,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(voiceprint_id) DO UPDATE SET
+          audio=excluded.audio,content_type=excluded.content_type,duration_ms=excluded.duration_ms,
+          quality=excluded.quality,updated_at=excluded.updated_at`)
+        .run(targetId, userId, sourcePreview.audio, sourcePreview.content_type, sourcePreview.duration_ms,
+          sourcePreview.quality, sourcePreview.created_at, sourcePreview.updated_at);
+    }
     db.prepare('UPDATE speaker_turns SET voiceprint_id=? WHERE voiceprint_id=? AND user_id=?').run(targetId, sourceId, userId);
     db.prepare('UPDATE conversation_speakers SET voiceprint_id=? WHERE voiceprint_id=?').run(targetId, sourceId);
     db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=COALESCE(display_name,?),

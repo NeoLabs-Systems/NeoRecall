@@ -31,11 +31,14 @@ jobs:
           macos=(dist/NeoRecall-macOS-*.zip)
           windows=(dist/NeoRecall-Windows-x64-*.zip)
           android=(dist/NeoRecall-Android-*.apk)
-          if [ "${#macos[@]}" -ne 1 ] || [ "${#windows[@]}" -ne 1 ] || [ "${#android[@]}" -ne 1 ]; then
-            echo "Expected exactly one macOS, Windows, and Android app asset."
+          asset_count=$((${#macos[@]} + ${#windows[@]} + ${#android[@]}))
+          if [ "$asset_count" -eq 0 ]; then
+            echo "No successful app build produced a release asset."
             find dist -maxdepth 1 -type f -print
             exit 1
           fi
+          echo "Publishing $asset_count successful app asset(s)."
+          find dist -maxdepth 1 -type f -print
 
       - name: Upload apps to GitHub release
         uses: softprops/action-gh-release@v2

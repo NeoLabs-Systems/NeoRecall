@@ -5,9 +5,26 @@ const { z } = require('zod');
 const service = require('../services/speakers/speaker_service');
 const { requireAuth, requireScope } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { HttpError } = require('../middleware/error_handler');
+const previews = require('../services/speakers/speaker_preview_service');
 const router = express.Router();
 router.use(requireAuth);
 router.get('/', requireScope('speakers:read'), (req, res) => res.json({ speakers: service.list(req.auth.userId) }));
+router.get('/:id/preview', requireScope('speakers:read'), (req, res, next) => {
+  try {
+    const preview = previews.get(req.auth.userId, req.params.id);
+    if (!preview) throw new HttpError(404, 'NOT_FOUND', 'Speaker preview not found.');
+    res.set({
+      'Content-Type': preview.content_type,
+      'Content-Length': preview.audio.length,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(preview.audio);
+  } catch (error) {
+    next(error);
+  }
+});
 router.patch('/:id', requireScope('speakers:write'), validate(z.object({ displayName: z.string().min(1).max(120).nullable().optional(), matchingEnabled: z.boolean().optional() })),
   (req, res, next) => { try { res.json(service.update(req.auth.userId, req.params.id, req.body)); } catch (error) { next(error); } });
 router.post('/:id/merge', requireScope('speakers:write'), validate(z.object({ sourceId: z.string().uuid() })),

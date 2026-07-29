@@ -10,12 +10,18 @@ NeoRecall is designed for explicit, authorized recording. It does not determine 
 ## What the server stores
 
 - original-language transcript segments and timestamps;
-- anonymous speaker turns and optional user-named voiceprint centroids;
+- anonymous speaker turns, optional user-named voiceprint centroids, and one
+  derived 5–10 second clean voice preview per recurring speaker;
 - conversations, English memories, mini-memories, and daily summaries;
 - local search vectors and metadata;
 - operational audit, job, and AI-request records.
 
-The server does not keep audio after successful transcription. No API returns audio, and audio is never stored as a SQLite BLOB. Temporary files have restrictive permissions and are excluded from backups.
+The server does not keep original recording chunks after successful
+transcription. Before deleting a chunk, it can derive a mono speaker preview
+from non-overlapping diarized turns. That account-scoped WAV is the only
+intentionally retained audio and exists solely so the user can identify and
+name a recurring speaker. Temporary source files have restrictive permissions
+and are excluded from backups.
 
 ## Deletion receipt invariant
 
@@ -23,7 +29,9 @@ Transcript persistence and audio removal are intentionally separate crash-safe p
 
 ## Voiceprints and OpenRouter
 
-Recurring speaker matching stores biometric-like embeddings per user. It can be disabled without disabling anonymous diarization. Users can name, merge, or correct recurring identities.
+Recurring speaker matching stores biometric-like embeddings and the clean
+preview per user. It can be disabled without disabling anonymous diarization.
+Users can listen to, name, merge, or correct recurring identities.
 
 Only eligible memory consolidation and explicit Ask operations send text to OpenRouter. Audio is never sent. Ask sends retrieved text context and returns cited sources. OpenRouter access can be disabled completely by leaving its credentials unset.
 

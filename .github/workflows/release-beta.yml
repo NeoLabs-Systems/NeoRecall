@@ -113,6 +113,7 @@ jobs:
     needs:
       - release
       - build-apps
+    if: ${{ always() && needs.release.result == 'success' }}
     uses: ./.github/workflows/_publish-app-assets.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}

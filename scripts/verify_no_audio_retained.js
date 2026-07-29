@@ -27,7 +27,7 @@ function main() {
   const importFiles = fs.readdirSync(runtime.importTmp, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => require('node:path').join(runtime.importTmp, entry.name));
   const orphanImports = importFiles.filter((file) => !importReferences.has(file));
   if (orphanImports.length) throw new Error(`Unreferenced import audio remains: ${orphanImports.join(', ')}`);
-  process.stdout.write(`Verified ${db.prepare("SELECT COUNT(*) count FROM audio_chunks WHERE state IN ('transcribed','silent')").get().count} terminal chunks; no retained or embedded audio was found.\n`);
+  process.stdout.write(`Verified ${db.prepare("SELECT COUNT(*) count FROM audio_chunks WHERE state IN ('transcribed','silent')").get().count} terminal chunks; no original recording chunks or unreferenced temporary audio were found.\n`);
 }
 
 try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }

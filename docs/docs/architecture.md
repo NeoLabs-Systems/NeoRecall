@@ -13,6 +13,7 @@ Flutter durable ledger
   -> SQLite job lease
   -> inference host (VAD, ASR, diarization)
   -> FULL transcript transaction
+  -> optional clean speaker-preview derivation
   -> temporary audio unlink
   -> terminal receipt/outbox event
   -> local embeddings and boundaries
@@ -53,7 +54,7 @@ restriction as a recoverable guarantee.
 
 ## Processing pipeline
 
-Each logical audio channel is decoded to 16 kHz mono PCM. Silero VAD removes silence, Parakeet generates timestamped multilingual text, pyannote segmentation identifies speaker turns, and WeSpeaker embeddings support local clusters and optional cross-recording identities. Time-constrained token alignment removes overlap and cross-channel leakage without phrase lists.
+Each logical audio channel is decoded to 16 kHz mono PCM. Silero VAD removes silence, Parakeet generates timestamped multilingual text, pyannote segmentation identifies speaker turns, and WeSpeaker embeddings support local clusters and optional cross-recording identities. Before source deletion, clean non-overlapping turns can be combined into a bounded 16 kHz mono preview for that recurring speaker. Time-constrained token alignment removes overlap and cross-channel leakage without phrase lists.
 
 Boundary detection is token-free: hard time gaps, speaker-set changes, and embedding-similarity valleys create candidate conversations. Short fragments join their semantically closest neighbor. Every conversation remains visible even when the consolidation model marks it as not memory-worthy.
 

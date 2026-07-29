@@ -1,40 +1,65 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NeoRecall Admin</title>
-  <link rel="stylesheet" href="admin.css">
+  <link rel="icon" href="/admin/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script>
+    const adminColorScheme = window.matchMedia('(prefers-color-scheme: light)');
+    const syncAdminTheme = (isLight) => document.documentElement.setAttribute('data-theme', isLight ? 'light' : 'dark');
+    syncAdminTheme(adminColorScheme.matches);
+    adminColorScheme.addEventListener('change', (event) => syncAdminTheme(event.matches));
+  </script>
 </head>
 <body class="login-page">
-  <main class="login-card">
-    <div class="eyebrow">ADMIN</div>
-    <img src="logo.svg" alt="NeoRecall" width="56" height="56" style="margin-top:14px">
-    <h1>NeoRecall Admin</h1>
-    <p>Sign in to manage this private audio memory server.</p>
-    <form id="login-form">
-      <label>Username<input name="username" autocomplete="username" required></label>
-      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">Sign in</button>
-      <p class="error" id="error" role="alert"></p>
-    </form>
+  <main class="login-wrap">
+    <div class="login-card">
+      <div class="admin-hero">
+        <div class="admin-a-mark" aria-hidden="true">A</div>
+        <div class="brand">
+          <span class="brand-mark"><img src="/admin/logo.svg" width="32" height="32" alt=""></span>
+          <span><span class="brand-name">NeoRecall</span><span class="brand-sub">Admin</span></span>
+        </div>
+      </div>
+      <h1 class="login-heading">Sign in</h1>
+      <p class="login-sub">Access the private NeoRecall control surface.</p>
+      <div class="alert alert-error" id="error" role="alert"></div>
+      <form id="login-form" novalidate>
+        <div class="field"><label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username" autofocus required spellcheck="false"></div>
+        <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+        <button type="submit" class="btn btn-primary submit-btn" id="submit-btn">Sign in</button>
+      </form>
+    </div>
   </main>
   <script>
-    document.querySelector('#login-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      const r = await fetch('/admin/api/v1/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(f)),
-      });
-      const p = await r.json();
-      if (!r.ok) {
-        document.querySelector('#error').textContent = p.error?.message || 'Sign-in failed.';
-        return;
+    const form = document.querySelector('#login-form');
+    const submit = document.querySelector('#submit-btn');
+    const error = document.querySelector('#error');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      error.classList.remove('visible');
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+      try {
+        const fields = new FormData(form);
+        const response = await fetch('/admin/api/v1/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(Object.fromEntries(fields)),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error?.message || 'Sign-in failed.');
+        sessionStorage.setItem('neorecall_admin_token', payload.token);
+        location.replace('/admin/');
+      } catch (requestError) {
+        error.textContent = requestError.message || 'Unable to reach the server.';
+        error.classList.add('visible');
+      } finally {
+        submit.disabled = false;
+        submit.textContent = 'Sign in';
       }
-      sessionStorage.setItem('neorecall_admin_token', p.token);
-      location.href = '/admin/';
     });
   </script>
 </body>

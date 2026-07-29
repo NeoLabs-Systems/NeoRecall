@@ -43,6 +43,19 @@ class NeoRecallApiClient {
     return Uri.parse('$baseUrl$normalizedPath');
   }
 
+  Future<Uint8List> speakerPreview(String speakerId) async {
+    final response = await _client
+        .get(
+          _resolve('/api/v1/speakers/$speakerId/preview'),
+          headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      _decode(response);
+    }
+    return response.bodyBytes;
+  }
+
   Future<dynamic> request(String method, String path, {Object? body}) async {
     final uri = _resolve(path);
     final headers = <String, String>{

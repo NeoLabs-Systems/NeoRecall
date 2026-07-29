@@ -1,12 +1,45 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
+import 'src/models/speaker.dart';
 
-class SpeakersScreen extends StatelessWidget {
+class SpeakersScreen extends StatefulWidget {
   const SpeakersScreen({super.key, required this.controller});
+
   final NeoRecallController controller;
+
+  @override
+  State<SpeakersScreen> createState() => _SpeakersScreenState();
+}
+
+class _SpeakersScreenState extends State<SpeakersScreen> {
+  final AudioPlayer _player = AudioPlayer();
+  StreamSubscription<void>? _completeSubscription;
+  String? _playingSpeakerId;
+  bool _loadingPreview = false;
+
+  NeoRecallController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _completeSubscription = _player.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _playingSpeakerId = null);
+    });
+  }
+
+  @override
+  void dispose() {
+    _completeSubscription?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
   Future<void> _rename(BuildContext context, String id, String current) async {
     final field = TextEditingController(text: current);
     final value = await showDialog<String>(
@@ -53,6 +86,43 @@ class SpeakersScreen extends StatelessWidget {
     if (sourceId != null) await controller.mergeSpeaker(targetId, sourceId);
   }
 
+  Future<void> _togglePreview(RecallSpeaker speaker) async {
+    if (_loadingPreview || !speaker.hasPreview) return;
+    if (_playingSpeakerId == speaker.id) {
+      if (_player.state == PlayerState.playing) {
+        await _player.pause();
+        if (mounted) setState(() {});
+        return;
+      }
+      if (_player.state == PlayerState.paused) {
+        await _player.resume();
+        if (mounted) setState(() {});
+        return;
+      }
+    }
+    setState(() {
+      _loadingPreview = true;
+      _playingSpeakerId = speaker.id;
+    });
+    try {
+      await _player.stop();
+      await _player.play(
+        BytesSource(
+          await controller.api.speakerPreview(speaker.id),
+          mimeType: 'audio/wav',
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _playingSpeakerId = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Preview failed: $error')));
+    } finally {
+      if (mounted) setState(() => _loadingPreview = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
@@ -65,9 +135,9 @@ class SpeakersScreen extends StatelessWidget {
             eyebrow: 'SPEAKERS',
             title: 'Recurring voices',
             description:
-                'Voiceprints stay isolated per user. Anonymous labels remain conversation-local until you choose a name.',
+                'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           if (controller.speakers.isEmpty)
             const GlassSurface(
               child: EmptyState(
@@ -78,58 +148,171 @@ class SpeakersScreen extends StatelessWidget {
               ),
             )
           else
-            for (final speaker in controller.speakers)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: GlassSurface(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: <Widget>[
-                      CircleAvatar(
-                        backgroundColor: palette.accentSoft,
-                        child: const Icon(Icons.person_outline),
+            GlassSurface(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  for (
+                    var index = 0;
+                    index < controller.speakers.length;
+                    index++
+                  ) ...<Widget>[
+                    _SpeakerRow(
+                      speaker: controller.speakers[index],
+                      palette: palette,
+                      playing:
+                          _playingSpeakerId == controller.speakers[index].id &&
+                          _player.state == PlayerState.playing,
+                      loading:
+                          _loadingPreview &&
+                          _playingSpeakerId == controller.speakers[index].id,
+                      onPreview: () =>
+                          _togglePreview(controller.speakers[index]),
+                      onMatchingChanged: (value) =>
+                          controller.setSpeakerMatching(
+                            controller.speakers[index].id,
+                            value,
+                          ),
+                      onRename: () => _rename(
+                        context,
+                        controller.speakers[index].id,
+                        controller.speakers[index].name ?? '',
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              speaker.name ?? 'Unnamed recurring speaker',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              '${speaker.occurrences} stored turns',
-                              style: TextStyle(color: palette.textMuted),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: speaker.matchingEnabled,
-                        onChanged: (value) =>
-                            controller.setSpeakerMatching(speaker.id, value),
-                      ),
-                      IconButton(
-                        tooltip: 'Name speaker',
-                        onPressed: () =>
-                            _rename(context, speaker.id, speaker.name ?? ''),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                      if (controller.speakers.length > 1)
-                        IconButton(
-                          tooltip: 'Merge another voice into this speaker',
-                          onPressed: () => _merge(context, speaker.id),
-                          icon: const Icon(Icons.merge_outlined),
-                        ),
-                    ],
-                  ),
-                ),
+                      onMerge: controller.speakers.length > 1
+                          ? () => _merge(context, controller.speakers[index].id)
+                          : null,
+                    ),
+                    if (index < controller.speakers.length - 1)
+                      Divider(height: 1, color: palette.border),
+                  ],
+                ],
               ),
+            ),
         ],
       ),
+    );
+  }
+}
+
+class _SpeakerRow extends StatelessWidget {
+  const _SpeakerRow({
+    required this.speaker,
+    required this.palette,
+    required this.playing,
+    required this.loading,
+    required this.onPreview,
+    required this.onMatchingChanged,
+    required this.onRename,
+    this.onMerge,
+  });
+
+  final RecallSpeaker speaker;
+  final NeoRecallPalette palette;
+  final bool playing;
+  final bool loading;
+  final VoidCallback onPreview;
+  final ValueChanged<bool> onMatchingChanged;
+  final VoidCallback onRename;
+  final VoidCallback? onMerge;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = speaker.name ?? 'Unnamed recurring speaker';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 680;
+        final identity = Row(
+          children: <Widget>[
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: palette.accentSoft,
+              child: Text(
+                label.characters.first.toUpperCase(),
+                style: TextStyle(
+                  color: palette.accentHover,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    speaker.hasPreview
+                        ? '${speaker.occurrences} stored turns · ${(speaker.previewDurationMs! / 1000).toStringAsFixed(1)} s clean preview'
+                        : '${speaker.occurrences} stored turns · Preview pending a clean 5 s turn',
+                    style: TextStyle(color: palette.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+        final actions = <Widget>[
+          Tooltip(
+            message: speaker.hasPreview
+                ? (playing ? 'Pause voice preview' : 'Play voice preview')
+                : 'A clean 5–10 second turn is needed',
+            child: IconButton.filledTonal(
+              onPressed: speaker.hasPreview ? onPreview : null,
+              icon: loading
+                  ? const SizedBox.square(
+                      dimension: 17,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    ),
+            ),
+          ),
+          Switch(value: speaker.matchingEnabled, onChanged: onMatchingChanged),
+          IconButton(
+            tooltip: 'Name speaker',
+            onPressed: onRename,
+            icon: const Icon(Icons.edit_outlined),
+          ),
+          if (onMerge != null)
+            IconButton(
+              tooltip: 'Merge another voice into this speaker',
+              onPressed: onMerge,
+              icon: const Icon(Icons.merge_outlined),
+            ),
+        ];
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 13, 10, 13),
+          child: compact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    identity,
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: actions,
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  children: <Widget>[
+                    Expanded(child: identity),
+                    const SizedBox(width: 10),
+                    ...actions,
+                  ],
+                ),
+        );
+      },
     );
   }
 }

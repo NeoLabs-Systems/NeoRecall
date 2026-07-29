@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@450;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -28,6 +28,7 @@
         <a href="#privacy">Privacy</a>
         <a href="#install">Install</a>
         <a href="https://neolabs-systems.github.io/NeoRecall/docs/">Docs</a>
+        <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
       </nav>
       <div class="nav-actions">
         <a class="btn btn-ghost signin" href="/app/">Sign in</a>
@@ -44,7 +45,8 @@
       <a href="#privacy">Privacy</a>
       <a href="#install">Install</a>
       <a href="https://neolabs-systems.github.io/NeoRecall/docs/">Docs</a>
-      <a class="btn btn-primary signin" href="/app/">Open app</a>
+      <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
+      <a class="btn btn-primary signin" href="/app/">Sign in</a>
     </div>
   </header>
 
@@ -132,7 +134,7 @@
         <div class="reveal">
           <span class="eyebrow">Privacy by lifecycle</span>
           <h2>The receipt proves the audio is gone.</h2>
-          <p class="lede">The client retains each chunk until transcript data is durably committed and the server confirms its temporary file was deleted. NeoRecall stores transcripts, speaker embeddings, memories, and search vectors—not server-side audio.</p>
+          <p class="lede">The client retains each chunk until transcript data is durably committed and the server confirms its temporary file was deleted. NeoRecall keeps transcripts, memory data, and an explicit 5–10 second speaker-only preview per recognized voice—not the original recordings.</p>
         </div>
         <ol class="lifecycle reveal">
           <li><span>1</span>Capture into a durable local queue</li>
@@ -197,22 +199,22 @@ neorecall start</code></pre>
           <h4>Resources</h4>
           <nav class="footer-links" aria-label="Resources">
             <a href="https://neolabs-systems.github.io/NeoRecall/docs/">Documentation</a>
+            <a href="https://github.com/NeoLabs-Systems/NeoRecall/releases">Releases</a>
             <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
           </nav>
         </div>
         <div>
-          <h4>Platforms</h4>
-          <nav class="footer-links" aria-label="Platforms">
-            <span>Web</span>
-            <span>macOS 13+</span>
-            <span>Windows 10/11</span>
-            <span>Android</span>
+          <h4>Trust</h4>
+          <nav class="footer-links" aria-label="Trust">
+            <a href="#privacy">Privacy</a>
+            <a href="https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/SECURITY.md">Security</a>
+            <a href="https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/LICENSE">License</a>
           </nav>
         </div>
       </div>
       <div class="footer-bar">
-        <span>© 2026 NeoRecall · AGPL-3.0</span>
-        <span class="ops"><span class="d"></span> Local-first capture</span>
+        <span>© 2026 NeoRecall</span>
+        <span class="ops"><span class="d"></span> Local-first and operational</span>
       </div>
     </div>
   </footer>

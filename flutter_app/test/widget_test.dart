@@ -5,6 +5,8 @@ import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/main_timeline.dart';
+import 'package:neorecall/src/models/transcript.dart';
 
 void main() {
   test('web system-audio selection reaches the browser capture request', () {
@@ -96,6 +98,73 @@ void main() {
     expect(find.textContaining('Backend URL'), findsNothing);
     expect(find.text('Client'), findsNothing);
   });
+
+  testWidgets(
+    'timeline compacts and expands interleaved conversation segments',
+    (tester) async {
+      tester.view.physicalSize = const Size(1180, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final now = DateTime.now();
+      final controller = NeoRecallController()
+        ..transcript = <TranscriptSegment>[
+          TranscriptSegment(
+            id: 'a1',
+            text: 'First compact line',
+            startedAt: now.subtract(const Duration(minutes: 12)),
+            endedAt: now.subtract(const Duration(minutes: 11)),
+            speaker: 'Alex',
+            conversationId: 'conversation-a',
+          ),
+          TranscriptSegment(
+            id: 'b1',
+            text: 'A separate recent moment',
+            startedAt: now.subtract(const Duration(minutes: 8)),
+            endedAt: now.subtract(const Duration(minutes: 7)),
+            speaker: 'Morgan',
+            conversationId: 'conversation-b',
+          ),
+          TranscriptSegment(
+            id: 'a2',
+            text: 'Second compact line',
+            startedAt: now.subtract(const Duration(minutes: 10)),
+            endedAt: now.subtract(const Duration(minutes: 9)),
+            speaker: 'Alex',
+            conversationId: 'conversation-a',
+          ),
+          TranscriptSegment(
+            id: 'a3',
+            text: 'Hidden until expanded',
+            startedAt: now.subtract(const Duration(minutes: 9)),
+            endedAt: now.subtract(const Duration(minutes: 8)),
+            speaker: 'Sam',
+            conversationId: 'conversation-a',
+          ),
+        ]
+        ..conversations = <Map<String, dynamic>>[
+          <String, dynamic>{'id': 'conversation-a', 'state': 'complete'},
+          <String, dynamic>{'id': 'conversation-b', 'state': 'complete'},
+        ];
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildNeoRecallTheme(Brightness.light),
+          home: TimelineScreen(controller: controller),
+        ),
+      );
+
+      expect(find.text('2 moments · 4 segments'), findsOneWidget);
+      expect(find.text('1 more segment'), findsOneWidget);
+      expect(find.textContaining('Hidden until expanded'), findsNothing);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.text('1 more segment'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Hidden until expanded'), findsOneWidget);
+      expect(find.text('Show less'), findsOneWidget);
+    },
+  );
 
   testWidgets('account registration remains reachable in a short viewport', (
     tester,

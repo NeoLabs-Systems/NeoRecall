@@ -12,6 +12,24 @@ const settings = require('../../services/settings/settings_service');
 const searchIndex = require('../../embeddings/search_index_service');
 const deduper = require('../../transcription/token_deduper');
 const matching = require('../../transcription/speaker_matching');
+const speakerPreviews = require('../../services/speakers/speaker_preview_service');
+const { createLogger } = require('../../utils/logger');
+const logger = createLogger('transcribe-handler');
+
+function captureSpeakerPreviews(chunk, segmentCount) {
+  if (!segmentCount) return;
+  try {
+    speakerPreviews.captureFromChunk(chunk);
+  } catch (error) {
+    // A derived convenience sample must never block original-audio cleanup or
+    // the terminal receipt. A later chunk for the same voice can retry it.
+    logger.warn('Speaker preview extraction failed', {
+      chunkId: chunk.id,
+      errorCode: error.code || 'SPEAKER_PREVIEW_FAILED',
+      error,
+    });
+  }
+}
 
 function absoluteIso(sessionStart, monotonicOffsetMs, relativeMs) {
   return new Date(Date.parse(sessionStart) + monotonicOffsetMs + relativeMs).toISOString();
@@ -126,7 +144,10 @@ async function handle(job, inference) {
   const chunk = db.prepare('SELECT * FROM audio_chunks WHERE id=? AND user_id=?').get(job.resource_id, job.user_id);
   if (!chunk) return { deleted: true };
   if (receiptService.terminalStates.has(chunk.state)) return receiptService.receipt(chunk);
-  if (chunk.state === 'persisted_cleanup_pending') return finishCleanup(chunk, chunk.transcript_segment_count || 0);
+  if (chunk.state === 'persisted_cleanup_pending') {
+    captureSpeakerPreviews(chunk, chunk.transcript_segment_count);
+    return finishCleanup(chunk, chunk.transcript_segment_count || 0);
+  }
   if (!chunk.temporary_path) throw Object.assign(new Error('Server audio is missing and must be uploaded again.'), { code: 'AUDIO_REUPLOAD_REQUIRED', retryable: false });
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
@@ -135,6 +156,7 @@ async function handle(job, inference) {
   db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
     VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));
   const count = persistSegments(chunk, segments);
+  captureSpeakerPreviews(chunk, count);
   return finishCleanup(chunk, count);
 }
 
