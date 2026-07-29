@@ -70,6 +70,7 @@ jobs:
 
   desktop-compile:
     name: ${{ matrix.platform }} compile gate
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -99,6 +100,7 @@ jobs:
 
   android-compile:
     name: Android compile gate
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -123,6 +125,7 @@ jobs:
 
   docs:
     name: Docs build
+    if: github.event_name != 'push' || github.ref != 'refs/heads/beta'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -1,8 +1,6 @@
 name: Build Apps
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
     inputs:
       release_tag:
@@ -18,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-apps-${{ github.ref }}
+  group: build-apps-${{ inputs.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:

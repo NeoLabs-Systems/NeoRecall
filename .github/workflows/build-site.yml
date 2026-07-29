@@ -1,19 +1,17 @@
-name: Deploy Site
+name: Build Site
 
 on:
   push:
     branches: [beta]
-    paths: [docs/**, landing/**, README.md, .github/workflows/deploy-docs.yml]
+    paths: [docs/**, landing/**, README.md, .github/workflows/build-site.yml]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: github-pages
-  cancel-in-progress: false
+  group: build-site-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -25,7 +23,6 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: docs/package-lock.json
-      - uses: actions/configure-pages@v6
       - run: npm ci
         working-directory: docs
       - run: npm run build
@@ -34,15 +31,8 @@ jobs:
           mkdir -p _site/docs
           cp -R landing/. _site/
           cp -R docs/build/. _site/docs/
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-artifact@v4
         with:
+          name: neorecall-site
           path: _site
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
+          if-no-files-found: error

@@ -5,14 +5,15 @@ on:
 
 permissions:
   contents: write
-  issues: write
-  pull-requests: write
   id-token: write
+
+concurrency:
+  group: release-stable
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Promote beta and publish stable release
-    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
+    name: Prepare stable release
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.stable_version.outputs.release_tag }}
@@ -29,12 +30,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Promote beta to main
+      - name: Prepare beta promotion
+        id: promotion_source
+        shell: bash
         run: |
+          set -euo pipefail
           git fetch origin main beta --tags --force
           git checkout main
+          echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
           git merge --no-ff origin/beta -m "chore(release): promote beta to main [skip ci]"
-          git push origin HEAD:main
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -75,31 +79,47 @@ jobs:
         run: npm run build:web
 
       - name: Commit and tag stable release
+        shell: bash
         run: |
+          set -euo pipefail
           git add package.json package-lock.json
-          git commit -m "chore(release): ${{ steps.stable_version.outputs.release_tag }} [skip ci]" || true
+          git commit -m "chore(release): ${{ steps.stable_version.outputs.release_tag }} [skip ci]"
           git tag "${{ steps.stable_version.outputs.release_tag }}" -m "Release ${{ steps.stable_version.outputs.release_tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.stable_version.outputs.release_tag }}"
-
-      - name: Publish stable package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        if: env.NODE_AUTH_TOKEN != ''
-        run: npm publish --tag latest
-
-      - name: Create GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ steps.stable_version.outputs.release_tag }}" \
-            --title "Release ${{ steps.stable_version.outputs.release_tag }}" \
-            --generate-notes \
-            --latest
 
       - name: Capture release sha
         id: capture_release_sha
         run: echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push stable release atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_sha="$(
+            git ls-remote origin refs/heads/main |
+              awk '{print $1}'
+          )"
+          if [[ "$remote_sha" != "${{ steps.promotion_source.outputs.main_sha }}" ]]; then
+            echo "::error::main advanced to $remote_sha while this release was being prepared."
+            exit 1
+          fi
+          git push \
+            --atomic \
+            origin \
+            HEAD:refs/heads/main \
+            "refs/tags/${{ steps.stable_version.outputs.release_tag }}"
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.stable_version.outputs.release_tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --target "${{ steps.capture_release_sha.outputs.release_sha }}" \
+            --title "Release ${{ steps.stable_version.outputs.release_tag }}" \
+            --generate-notes \
+            --draft \
+            --latest=false
 
   build-apps:
     name: Build app binaries
@@ -109,22 +129,65 @@ jobs:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}
 
+  publish-package:
+    name: Publish stable package
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout release
+        if: env.NODE_AUTH_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.release_sha }}
+
+      - name: Set up Node.js
+        if: env.NODE_AUTH_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Set up Flutter
+        if: env.NODE_AUTH_TOKEN != ''
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Install dependencies
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm ci
+
+      - name: Install Flutter dependencies
+        if: env.NODE_AUTH_TOKEN != ''
+        working-directory: flutter_app
+        run: flutter pub get
+
+      - name: Publish package
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm publish --tag latest
+
   publish-app-assets:
-    name: Publish app binaries
+    name: Complete GitHub release
     needs:
       - release
       - build-apps
-    if: ${{ always() && needs.release.result == 'success' }}
+      - publish-package
     uses: ./.github/workflows/_publish-app-assets.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}
+      release_sha: ${{ needs.release.outputs.release_sha }}
+      prerelease: false
 
   notify-discord:
     name: Notify Discord
     needs:
       - release
       - publish-app-assets
-    if: needs.release.outputs.release_tag != ''
     uses: ./.github/workflows/discord-release.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}

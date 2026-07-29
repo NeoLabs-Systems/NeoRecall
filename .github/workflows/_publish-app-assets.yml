@@ -7,6 +7,14 @@ on:
         description: Existing GitHub release tag to receive app assets
         required: true
         type: string
+      release_sha:
+        description: Commit SHA the release tag must resolve to
+        required: true
+        type: string
+      prerelease:
+        description: Whether to publish the draft as a prerelease
+        required: true
+        type: boolean
 
 permissions:
   contents: write
@@ -16,6 +24,33 @@ jobs:
     name: Attach apps to release
     runs-on: ubuntu-latest
     steps:
+      - name: Verify draft release target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"
+          if [[ "$(jq -r '.draft' <<<"$release_json")" != "true" ]]; then
+            echo "::error::Release $RELEASE_TAG must remain a draft until all assets are attached."
+            exit 1
+          fi
+
+          tag_sha="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" \
+              --jq '.sha'
+          )"
+          if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::Release tag $RELEASE_TAG resolves to $tag_sha, expected $RELEASE_SHA."
+            exit 1
+          fi
+
       - name: Download app artifacts
         uses: actions/download-artifact@v4
         with:
@@ -25,19 +60,31 @@ jobs:
 
       - name: Verify app assets
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          macos=(dist/NeoRecall-macOS-*.dmg)
-          windows=(dist/NeoRecall-Windows-x64-*.zip)
-          android=(dist/NeoRecall-Android-*.apk)
-          asset_count=$((${#macos[@]} + ${#windows[@]} + ${#android[@]}))
-          if [ "$asset_count" -eq 0 ]; then
-            echo "No successful app build produced a release asset."
+          version="${RELEASE_TAG#v}"
+          expected_assets=(
+            "dist/NeoRecall-macOS-${version}.dmg"
+            "dist/NeoRecall-Windows-x64-${version}.zip"
+            "dist/NeoRecall-Android-${version}.apk"
+          )
+          for asset in "${expected_assets[@]}"; do
+            if [[ ! -f "$asset" ]]; then
+              echo "::error::Expected release asset is missing: $asset"
+              find dist -maxdepth 1 -type f -print
+              exit 1
+            fi
+          done
+
+          asset_count="$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "$asset_count" -ne "${#expected_assets[@]}" ]]; then
+            echo "::error::Unexpected files were downloaded with the release assets."
             find dist -maxdepth 1 -type f -print
             exit 1
           fi
-          echo "Publishing $asset_count successful app asset(s)."
+          echo "Publishing ${#expected_assets[@]} release asset(s)."
           find dist -maxdepth 1 -type f -print
 
       - name: Upload apps to GitHub release
@@ -47,11 +94,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
+          version="${RELEASE_TAG#v}"
           assets=(
-            dist/NeoRecall-macOS-*.dmg
-            dist/NeoRecall-Windows-x64-*.zip
-            dist/NeoRecall-Android-*.apk
+            "dist/NeoRecall-macOS-${version}.dmg"
+            "dist/NeoRecall-Windows-x64-${version}.zip"
+            "dist/NeoRecall-Android-${version}.apk"
           )
 
           gh release upload \
@@ -78,3 +125,36 @@ jobs:
           done
 
           echo "Verified ${#assets[@]} asset(s) on release $RELEASE_TAG."
+
+      - name: Publish completed GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          publish_args=(
+            "$RELEASE_TAG"
+            --repo "$GITHUB_REPOSITORY"
+            --draft=false
+          )
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            publish_args+=(--prerelease)
+          else
+            publish_args+=(--latest)
+          fi
+          gh release edit "${publish_args[@]}"
+
+          release_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"
+          if [[ "$(jq -r '.draft' <<<"$release_json")" != "false" ]]; then
+            echo "::error::Release $RELEASE_TAG is still a draft."
+            exit 1
+          fi
+          if [[ "$(jq -r '.prerelease' <<<"$release_json")" != "$IS_PRERELEASE" ]]; then
+            echo "::error::Release $RELEASE_TAG has the wrong release channel."
+            exit 1
+          fi
