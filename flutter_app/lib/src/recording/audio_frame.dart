@@ -38,11 +38,13 @@ class RecorderCapability {
     required this.systemAudio,
     required this.persistentStorage,
     required this.sampleRate,
+    required this.sourceKind,
     this.warning,
   });
   final bool microphone;
   final bool systemAudio;
   final bool persistentStorage;
   final int sampleRate;
+  final String sourceKind;
   final String? warning;
 }

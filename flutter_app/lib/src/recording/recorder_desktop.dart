@@ -11,7 +11,8 @@ RecallRecorder createRecorder() => DesktopRecallRecorder();
 
 class DesktopRecallRecorder implements RecallRecorder {
   CapturePipeline? _pipeline;
-  final List<StreamSubscription<dynamic>> _subs = <StreamSubscription<dynamic>>[];
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
   final StreamController<RecordedAudioChunk> _chunks =
       StreamController<RecordedAudioChunk>.broadcast();
   final StreamController<RecordedAudioChunk> _partials =
@@ -40,7 +41,9 @@ class DesktopRecallRecorder implements RecallRecorder {
   }) async {
     if (isRecording) throw StateError('Recorder is already active.');
     if (!microphone && !systemAudio) {
-      throw StateError('Select microphone and/or device audio before recording.');
+      throw StateError(
+        'Select microphone and/or device audio before recording.',
+      );
     }
 
     final sources = <CaptureSource>[];
@@ -49,15 +52,18 @@ class DesktopRecallRecorder implements RecallRecorder {
     if (microphone) {
       final source = createPlatformMicrophoneSource();
       if (source == null) {
-        throw StateError('Microphone capture is unavailable on this platform.');
+        notes.add('Microphone capture is unavailable on this platform.');
+      } else {
+        final allowed = await source.ensurePermission();
+        if (!allowed) {
+          notes.add(
+            'Microphone permission was not granted. Recording can continue with device audio only.',
+          );
+          await source.dispose();
+        } else {
+          sources.add(source);
+        }
       }
-      final allowed = await source.ensurePermission();
-      if (!allowed) {
-        throw StateError(
-          'Microphone permission is required. Enable it in system settings and try again.',
-        );
-      }
-      sources.add(source);
     }
 
     if (systemAudio) {
@@ -72,6 +78,7 @@ class DesktopRecallRecorder implements RecallRecorder {
           notes.add(
             'System audio permission was not granted. Recording continues with the microphone only.',
           );
+          await source.dispose();
         } else {
           sources.add(source);
         }
@@ -79,7 +86,9 @@ class DesktopRecallRecorder implements RecallRecorder {
     }
 
     if (sources.isEmpty) {
-      throw StateError(notes.isEmpty ? 'No audio source is available.' : notes.join(' '));
+      throw StateError(
+        notes.isEmpty ? 'No audio source is available.' : notes.join(' '),
+      );
     }
 
     final pipeline = CapturePipeline(
@@ -105,6 +114,7 @@ class DesktopRecallRecorder implements RecallRecorder {
         systemAudio: capability.systemAudio,
         persistentStorage: true,
         sampleRate: capability.sampleRate,
+        sourceKind: capability.sourceKind,
         warning: warning.isEmpty ? null : warning,
       );
     } catch (error) {

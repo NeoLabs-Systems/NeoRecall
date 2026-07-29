@@ -10,14 +10,19 @@ class BluetoothCaptureSource implements CaptureSource {
   BluetoothCaptureSource({
     required this.adapter,
     required this.device,
+    this.connectOnStart = true,
   });
 
   final AudioDeviceAdapter adapter;
   final AudioDeviceDescriptor device;
-  final List<StreamSubscription<dynamic>> _subs = <StreamSubscription<dynamic>>[];
-  final StreamController<Uint8List> _pcm = StreamController<Uint8List>.broadcast();
+  final bool connectOnStart;
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
+  final StreamController<Uint8List> _pcm =
+      StreamController<Uint8List>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings = StreamController<String>.broadcast();
+  final StreamController<String> _warnings =
+      StreamController<String>.broadcast();
   bool _active = false;
 
   @override
@@ -39,28 +44,37 @@ class BluetoothCaptureSource implements CaptureSource {
   @override
   Future<void> start({required int sampleRate, required int channels}) async {
     if (_active) return;
-    await adapter.connect(device);
-    _subs.add(adapter.pcm16Stream.listen((pcm) {
-      _pcm.add(pcm);
-      _emitLevel(pcm);
-    }, onError: (Object error) {
-      _warnings.add('Bluetooth audio stream interrupted: $error');
-    }));
-    _subs.add(adapter.transportStates.listen((state) {
-      if (state == DeviceTransportState.faulted ||
-          state == DeviceTransportState.disconnected) {
-        _warnings.add('Bluetooth device entered $state');
-      }
-    }));
-    _subs.add(adapter.controlEvents.listen((event) {
-      if (event.type == DeviceControlEventType.custom &&
-          event.payload['warning'] is String) {
-        _warnings.add(event.payload['warning'] as String);
-      }
-      if (event.type == DeviceControlEventType.stopRecording) {
-        _warnings.add('Hardware stop pressed on ${device.displayName}');
-      }
-    }));
+    if (connectOnStart) await adapter.connect(device);
+    _subs.add(
+      adapter.pcm16Stream.listen(
+        (pcm) {
+          _pcm.add(pcm);
+          _emitLevel(pcm);
+        },
+        onError: (Object error) {
+          _warnings.add('Bluetooth audio stream interrupted: $error');
+        },
+      ),
+    );
+    _subs.add(
+      adapter.transportStates.listen((state) {
+        if (state == DeviceTransportState.faulted ||
+            state == DeviceTransportState.disconnected) {
+          _warnings.add('Bluetooth device entered $state');
+        }
+      }),
+    );
+    _subs.add(
+      adapter.controlEvents.listen((event) {
+        if (event.type == DeviceControlEventType.custom &&
+            event.payload['warning'] is String) {
+          _warnings.add(event.payload['warning'] as String);
+        }
+        if (event.type == DeviceControlEventType.stopRecording) {
+          _warnings.add('Hardware stop pressed on ${device.displayName}');
+        }
+      }),
+    );
     await adapter.requestStartRecording();
     _active = true;
   }

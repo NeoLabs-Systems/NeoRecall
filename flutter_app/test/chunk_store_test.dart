@@ -5,6 +5,7 @@ void main() {
   test('interrupted offline session survives serialization', () {
     final session = LocalRecordingDeclaration(
       id: 'session',
+      accountId: 'account',
       sourceId: 'source',
       deviceId: 'device',
       deviceClientUuid: 'device-client',

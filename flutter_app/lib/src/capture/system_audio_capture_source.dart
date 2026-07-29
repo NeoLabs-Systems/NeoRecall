@@ -7,16 +7,19 @@ import 'capture_source.dart';
 /// Desktop system-audio source (ScreenCaptureKit / WASAPI loopback).
 class SystemAudioCaptureSource implements CaptureSource {
   SystemAudioCaptureSource({SystemAudioCapture? capture})
-      : _capture = capture ??
-            SystemAudioCapture(
-              config: SystemAudioConfig(sampleRate: 16000, channels: 1),
-            );
+    : _capture =
+          capture ??
+          SystemAudioCapture(
+            config: SystemAudioConfig(sampleRate: 16000, channels: 1),
+          );
 
   final SystemAudioCapture _capture;
   StreamSubscription<Uint8List>? _subscription;
-  final StreamController<Uint8List> _pcm = StreamController<Uint8List>.broadcast();
+  final StreamController<Uint8List> _pcm =
+      StreamController<Uint8List>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings = StreamController<String>.broadcast();
+  final StreamController<String> _warnings =
+      StreamController<String>.broadcast();
   bool _active = false;
 
   @override
@@ -36,16 +39,14 @@ class SystemAudioCaptureSource implements CaptureSource {
   Future<bool> ensurePermission() async {
     if (kIsWeb) return false;
     if (!(defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.linux)) {
+        defaultTargetPlatform == TargetPlatform.windows)) {
       return false;
     }
     try {
-      await _capture.requestPermissions();
-      return true;
-    } catch (_) {
-      // Fall through to startCapture, which will surface a friendly warning.
-      return true;
+      return await _capture.requestPermissions();
+    } catch (error) {
+      _warnings.add('System audio permission was not granted: $error');
+      return false;
     }
   }
 
@@ -56,12 +57,36 @@ class SystemAudioCaptureSource implements CaptureSource {
       throw StateError('System audio capture is unavailable on this platform.');
     }
     await _capture.startCapture();
-    _subscription = _capture.audioStream?.listen((data) {
-      _pcm.add(data);
-    }, onError: (Object error) {
-      _warnings.add('System audio capture interrupted: $error');
-    });
+    final stream = _capture.audioStream;
+    if (stream == null) {
+      await _capture.stopCapture();
+      throw StateError('System audio stream did not become available.');
+    }
+    _subscription = stream.listen(
+      (data) {
+        _pcm.add(data);
+        _emitLevel(data);
+      },
+      onError: (Object error) {
+        _warnings.add('System audio capture interrupted: $error');
+      },
+    );
     _active = true;
+  }
+
+  void _emitLevel(Uint8List data) {
+    if (data.length < 2) return;
+    final view = ByteData.sublistView(data);
+    var energy = 0.0;
+    var samples = 0;
+    for (var offset = 0; offset + 1 < data.length; offset += 8) {
+      final value = view.getInt16(offset, Endian.little) / 32768.0;
+      energy += value * value;
+      samples += 1;
+    }
+    if (samples > 0) {
+      _levels.add((energy / samples).clamp(0.0, 1.0));
+    }
   }
 
   @override
@@ -90,8 +115,7 @@ class SystemAudioCaptureSource implements CaptureSource {
 CaptureSource? createPlatformSystemAudioSource() {
   if (kIsWeb) return null;
   if (defaultTargetPlatform == TargetPlatform.macOS ||
-      defaultTargetPlatform == TargetPlatform.windows ||
-      defaultTargetPlatform == TargetPlatform.linux) {
+      defaultTargetPlatform == TargetPlatform.windows) {
     return SystemAudioCaptureSource();
   }
   return null;

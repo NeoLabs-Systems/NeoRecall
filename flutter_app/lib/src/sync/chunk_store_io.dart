@@ -27,7 +27,7 @@ class IoChunkStore implements ChunkStore {
       ..createSync(recursive: true);
     Future<void> createSessions(Database database) => database.execute(
       '''CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY, sourceId TEXT NOT NULL, deviceId TEXT NOT NULL, deviceClientUuid TEXT NOT NULL,
+        id TEXT PRIMARY KEY, accountId TEXT NOT NULL DEFAULT '', sourceId TEXT NOT NULL, deviceId TEXT NOT NULL, deviceClientUuid TEXT NOT NULL,
         deviceName TEXT NOT NULL, platform TEXT NOT NULL, startedAt TEXT NOT NULL, timezone TEXT NOT NULL,
         consentAttestedAt TEXT NOT NULL, sourceKind TEXT NOT NULL, channelLayout TEXT NOT NULL,
         sampleRate INTEGER NOT NULL DEFAULT 16000,
@@ -40,7 +40,7 @@ class IoChunkStore implements ChunkStore {
     _database = await databaseFactoryFfi.openDatabase(
       p.join(root.path, 'offline.sqlite3'),
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onCreate: (database, _) async {
           await database.execute('''CREATE TABLE chunks (
         id TEXT PRIMARY KEY, sessionId TEXT NOT NULL, sourceId TEXT NOT NULL, sequence INTEGER NOT NULL,
@@ -63,6 +63,11 @@ class IoChunkStore implements ChunkStore {
           if (oldVersion >= 2 && oldVersion < 5) {
             await database.execute(
               'ALTER TABLE sessions ADD COLUMN sampleRate INTEGER NOT NULL DEFAULT 16000',
+            );
+          }
+          if (oldVersion >= 2 && oldVersion < 6) {
+            await database.execute(
+              "ALTER TABLE sessions ADD COLUMN accountId TEXT NOT NULL DEFAULT ''",
             );
           }
         },
@@ -281,8 +286,23 @@ class IoChunkStore implements ChunkStore {
     conflictAlgorithm: ConflictAlgorithm.replace,
   );
   @override
-  Future<List<LocalRecordingDeclaration>> pendingSessions() async =>
-      (await db.query('sessions', where: 'synced=0', orderBy: 'startedAt'))
+  Future<void> claimLegacySessions(String accountId) async {
+    if (accountId.isEmpty) return;
+    await db.update('sessions', <String, Object?>{
+      'accountId': accountId,
+    }, where: "accountId=''");
+  }
+
+  @override
+  Future<List<LocalRecordingDeclaration>> pendingSessions(
+    String accountId,
+  ) async =>
+      (await db.query(
+            'sessions',
+            where: 'synced=0 AND accountId=?',
+            whereArgs: <Object?>[accountId],
+            orderBy: 'startedAt',
+          ))
           .map(
             (row) => LocalRecordingDeclaration.fromMap(
               Map<String, dynamic>.from(row),
@@ -304,19 +324,23 @@ class IoChunkStore implements ChunkStore {
     if (row['receipt'] != null) 'receipt': jsonDecode(row['receipt'] as String),
   };
   @override
-  Future<List<AudioChunk>> pending({int limit = 100}) async => (await db.query(
-    'chunks',
-    where: 'state IN (?,?,?,?,?)',
-    whereArgs: <Object?>[
-      LocalChunkState.ready.name,
-      LocalChunkState.uploading.name,
-      LocalChunkState.uploaded.name,
-      LocalChunkState.failed.name,
-      LocalChunkState.capturing.name,
-    ],
-    orderBy: 'createdAt,sourceId,sequence',
-    limit: limit,
-  )).map((row) => AudioChunk.fromMap(_map(row))).toList();
+  Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async =>
+      (await db.rawQuery(
+        '''SELECT c.* FROM chunks c
+       JOIN sessions s ON s.id=c.sessionId
+       WHERE s.accountId=? AND c.state IN (?,?,?,?,?)
+       ORDER BY c.createdAt,c.sourceId,c.sequence
+       LIMIT ?''',
+        <Object?>[
+          accountId,
+          LocalChunkState.ready.name,
+          LocalChunkState.uploading.name,
+          LocalChunkState.uploaded.name,
+          LocalChunkState.failed.name,
+          LocalChunkState.capturing.name,
+          limit,
+        ],
+      )).map((row) => AudioChunk.fromMap(_map(row))).toList();
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) =>
       File(chunk.filePath!).readAsBytes();
@@ -364,12 +388,12 @@ class IoChunkStore implements ChunkStore {
   }
 
   @override
-  Future<int> pendingBytes() async {
-    final rows = await db.query(
-      'chunks',
-      columns: <String>['filePath'],
-      where: 'state!=?',
-      whereArgs: <Object?>[LocalChunkState.released.name],
+  Future<int> pendingBytes(String accountId) async {
+    final rows = await db.rawQuery(
+      '''SELECT c.filePath FROM chunks c
+         JOIN sessions s ON s.id=c.sessionId
+         WHERE s.accountId=? AND c.state!=?''',
+      <Object?>[accountId, LocalChunkState.released.name],
     );
     final chunkBytes = rows.fold<int>(0, (sum, row) {
       final path = row['filePath'] as String?;
@@ -378,9 +402,11 @@ class IoChunkStore implements ChunkStore {
               ? File(path).lengthSync()
               : 0);
     });
-    final partials = await db.query(
-      'capture_partials',
-      columns: <String>['filePath'],
+    final partials = await db.rawQuery(
+      '''SELECT p.filePath FROM capture_partials p
+         JOIN sessions s ON s.sourceId=p.sourceId
+         WHERE s.accountId=?''',
+      <Object?>[accountId],
     );
     return chunkBytes +
         partials.fold<int>(0, (sum, row) {

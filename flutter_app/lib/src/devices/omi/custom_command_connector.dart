@@ -25,26 +25,28 @@ abstract class CustomCommandConnector extends WearableConnector {
       transport
           .getCharacteristicStream(serviceUuid, controlCharacteristicUuid)
           .listen((data) {
-        final response = parseResponse(data);
-        if (response['type'] == 'response') {
-          final code = response['code'] as int;
-          final payload = List<int>.from(response['payload'] as List? ?? const []);
-          final completer = _pending.remove(code);
-          if (completer != null && !completer.isCompleted) {
-            completer.complete(payload);
-          }
-        }
-      }),
+            final response = parseResponse(data);
+            if (response['type'] == 'response') {
+              final code = response['code'] as int;
+              final payload = List<int>.from(
+                response['payload'] as List? ?? const [],
+              );
+              final completer = _pending.remove(code);
+              if (completer != null && !completer.isCompleted) {
+                completer.complete(payload);
+              }
+            }
+          }),
     );
     track(
       transport
           .getCharacteristicStream(serviceUuid, audioCharacteristicUuid)
           .listen((data) {
-        final payload = processAudioPacket(data);
-        if (payload != null && payload.isNotEmpty) {
-          audioBytes.add(payload);
-        }
-      }),
+            final payload = processAudioPacket(data);
+            if (payload != null && payload.isNotEmpty) {
+              audioBytes.add(payload);
+            }
+          }),
     );
   }
 
@@ -176,8 +178,8 @@ class FieldyConnector extends WearableConnector {
             WearableDeviceUuids.fieldyAudio,
           )
           .listen((value) {
-        if (value.isNotEmpty) audioBytes.add(value);
-      }),
+            if (value.isNotEmpty) audioBytes.add(value);
+          }),
     );
     recording = true;
   }

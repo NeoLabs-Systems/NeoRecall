@@ -44,7 +44,10 @@ class LimitlessConnector extends WearableConnector {
     }
   }
 
-  Future<List<int>?> _send(int code, [List<int> payload = const <int>[]]) async {
+  Future<List<int>?> _send(
+    int code, [
+    List<int> payload = const <int>[],
+  ]) async {
     final completer = Completer<List<int>>();
     _pending[code] = completer;
     await transport.writeCharacteristic(

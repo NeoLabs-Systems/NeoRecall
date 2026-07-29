@@ -11,6 +11,7 @@ class UploadPump {
   final void Function()? onChanged;
   bool _running = false;
   Timer? _timer;
+  String? accountId;
 
   void start() {
     _timer ??= Timer.periodic(const Duration(seconds: 30), (_) => pump());
@@ -23,50 +24,67 @@ class UploadPump {
   }
 
   Future<void> pump() async {
-    if (_running || api.token == null) return;
+    final pumpingAccountId = accountId;
+    if (_running || api.token == null || pumpingAccountId == null) return;
     _running = true;
     try {
-      final sessions = await store.pendingSessions();
+      final sessions = await store.pendingSessions(pumpingAccountId);
+      final blockedSessionIds = <String>{};
       for (final session in sessions) {
+        if (!_isCurrent(pumpingAccountId)) return;
         try {
           await api.syncSession(session);
+          if (!_isCurrent(pumpingAccountId)) return;
           await store.markSessionSynced(session.id);
         } catch (_) {
           // Keep trying other sessions/devices. Network or one bad session
           // must not freeze the entire multi-device upload ledger.
+          blockedSessionIds.add(session.id);
           continue;
         }
       }
-      final chunks = await store.pending(limit: 200);
+      if (!_isCurrent(pumpingAccountId)) return;
+      final chunks = await store.pending(pumpingAccountId, limit: 200);
       final uploaded = chunks
-          .where((chunk) => chunk.state == LocalChunkState.uploaded)
+          .where(
+            (chunk) =>
+                !blockedSessionIds.contains(chunk.sessionId) &&
+                chunk.state == LocalChunkState.uploaded,
+          )
           .toList();
-      if (uploaded.isNotEmpty) await _poll(uploaded);
+      if (uploaded.isNotEmpty) await _poll(uploaded, pumpingAccountId);
       final ready = chunks
           .where(
-            (chunk) => <LocalChunkState>{
-              LocalChunkState.ready,
-              // A process crash can leave this durable state behind. The PUT is
-              // idempotent, so retrying is the only safe recovery action.
-              LocalChunkState.uploading,
-              LocalChunkState.failed,
-            }.contains(chunk.state),
+            (chunk) =>
+                !blockedSessionIds.contains(chunk.sessionId) &&
+                <LocalChunkState>{
+                  LocalChunkState.ready,
+                  // A process crash can leave this durable state behind. The PUT
+                  // is idempotent, so retrying is the only safe recovery action.
+                  LocalChunkState.uploading,
+                  LocalChunkState.failed,
+                }.contains(chunk.state),
           )
           .take(2);
-      await Future.wait(ready.map(_upload));
+      await Future.wait(ready.map((chunk) => _upload(chunk, pumpingAccountId)));
     } finally {
       _running = false;
       onChanged?.call();
     }
   }
 
-  Future<void> _upload(AudioChunk chunk) async {
+  bool _isCurrent(String pumpingAccountId) =>
+      api.token != null && accountId == pumpingAccountId;
+
+  Future<void> _upload(AudioChunk chunk, String pumpingAccountId) async {
+    if (!_isCurrent(pumpingAccountId)) return;
     try {
       await store.setState(chunk.id, LocalChunkState.uploading);
       final response = await api.uploadChunk(
         chunk,
         await store.readBytes(chunk),
       );
+      if (!_isCurrent(pumpingAccountId)) return;
       final receipt = Map<String, dynamic>.from(response['receipt'] as Map);
       await _acceptReceipt(chunk.id, receipt);
     } on ApiException catch (error) {
@@ -92,13 +110,15 @@ class UploadPump {
     }
   }
 
-  Future<void> _poll(List<AudioChunk> chunks) async {
+  Future<void> _poll(List<AudioChunk> chunks, String pumpingAccountId) async {
+    if (!_isCurrent(pumpingAccountId)) return;
     try {
       final serverToLocal = <String, String>{
         for (final chunk in chunks)
           (chunk.receipt?['chunkId'] as String? ?? chunk.id): chunk.id,
       };
       final receipts = await api.chunkStatuses(serverToLocal.keys.toList());
+      if (!_isCurrent(pumpingAccountId)) return;
       for (final receipt in receipts) {
         final localId = serverToLocal[receipt['chunkId'] as String?];
         if (localId != null) await _acceptReceipt(localId, receipt);

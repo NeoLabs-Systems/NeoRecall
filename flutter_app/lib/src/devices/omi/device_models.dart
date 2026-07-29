@@ -12,15 +12,7 @@ enum WearableDeviceType {
   custom,
 }
 
-enum WearableAudioCodec {
-  pcm8,
-  pcm16,
-  opus,
-  opusFs320,
-  aac,
-  lc3,
-  unknown,
-}
+enum WearableAudioCodec { pcm8, pcm16, opus, opusFs320, aac, lc3, unknown }
 
 class WearableDeviceUuids {
   static const omiService = '19b10000-e8f2-537e-4f6c-d104768a1214';
@@ -66,8 +58,8 @@ class DiscoveredWearable {
     final name = result.advertisementData.advName.isNotEmpty
         ? result.advertisementData.advName
         : (result.device.platformName.isNotEmpty
-            ? result.device.platformName
-            : 'Unknown device');
+              ? result.device.platformName
+              : 'Unknown device');
     final services = result.advertisementData.serviceUuids
         .map((uuid) => uuid.str128.toLowerCase())
         .toList(growable: false);

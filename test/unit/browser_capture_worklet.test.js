@@ -40,6 +40,18 @@ function loadCapture({ systemAudio = false } = {}) {
 
     disconnect() {}
   }
+  const recoveryDatabase = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore() {},
+    transaction() {
+      const transaction = {
+        objectStore: () => ({ delete() {}, put() {} }),
+      };
+      queueMicrotask(() => transaction.oncomplete?.());
+      return transaction;
+    },
+    close() {},
+  };
   const sandbox = {
     AudioContext,
     AudioWorkletNode,
@@ -55,6 +67,13 @@ function loadCapture({ systemAudio = false } = {}) {
     String,
     clearInterval() {},
     console,
+    indexedDB: {
+      open() {
+        const request = { result: recoveryDatabase };
+        queueMicrotask(() => request.onsuccess?.());
+        return request;
+      },
+    },
     navigator: {
       storage: {
         persist: async () => true,
@@ -106,6 +125,7 @@ function start(capture, options) {
 
 test('browser capture completes through callbacks without exposing a promise', async () => {
   const { capture } = loadCapture();
+  assert.equal(capture.protocolVersion, 2);
   const capability = await start(capture, {
     microphone: true,
     systemAudio: false,
@@ -122,6 +142,45 @@ test('browser capture completes through callbacks without exposing a promise', a
       sampleRate: 16000,
       warning: null,
     },
+  );
+});
+
+test('browser capture remains compatible with the legacy promise protocol', async () => {
+  const { capture, workletNode } = loadCapture();
+  const chunks = [];
+  capture.onChunk = (bytes, metadata) => chunks.push({ bytes, metadata });
+  const capability = await capture.start({
+    microphone: true,
+    systemAudio: false,
+    chunkMs: 1,
+    overlapMs: 0,
+  });
+
+  workletNode().port.onmessage({
+    data: {
+      microphone: new Float32Array(16).fill(0.25),
+      system: new Float32Array(16),
+    },
+  });
+
+  assert.equal(capability.microphone, true);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].metadata.channelLayout, 'mono');
+  assert.equal(chunks[0].metadata.durationMs, 1);
+  await capture.stop();
+  assert.equal(workletNode().port.onmessage, null);
+});
+
+test('browser capture rejects overlap that cannot advance the chunk clock', async () => {
+  const { capture } = loadCapture();
+  await assert.rejects(
+    capture.start({
+      microphone: true,
+      systemAudio: false,
+      chunkMs: 1000,
+      overlapMs: 1000,
+    }),
+    /Invalid capture timing configuration/,
   );
 });
 

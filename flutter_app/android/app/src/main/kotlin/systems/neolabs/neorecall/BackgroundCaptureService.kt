@@ -9,7 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -38,6 +40,10 @@ class BackgroundCaptureService : Service() {
         stopCapture()
         return START_NOT_STICKY
       }
+      ACTION_REQUEST_STOP -> {
+        requestGracefulStop()
+        return START_STICKY
+      }
       else -> {
         mode = intent?.getStringExtra(EXTRA_MODE) ?: mode
         startCapture(mode)
@@ -49,13 +55,17 @@ class BackgroundCaptureService : Service() {
   private fun startCapture(mode: String) {
     this.mode = mode
     val notification = buildNotification(mode)
+    val serviceType = if (mode == MODE_BLUETOOTH) {
+      ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+    } else {
+      ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       ServiceCompat.startForeground(
         this,
         NOTIFICATION_ID,
         notification,
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        serviceType,
       )
     } else {
       startForeground(NOTIFICATION_ID, notification)
@@ -86,8 +96,17 @@ class BackgroundCaptureService : Service() {
       "NeoRecall:BackgroundCapture",
     ).apply {
       setReferenceCounted(false)
-      acquire(6 * 60 * 60 * 1000L) // hard cap 6h; Flutter restarts as needed
+      acquire()
     }
+  }
+
+  private fun requestGracefulStop() {
+    (application as? NeoRecallApplication)
+      ?.backgroundCaptureChannel
+      ?.notifyStopRequested()
+    Handler(Looper.getMainLooper()).postDelayed({
+      if (isRunning(this)) stopCapture()
+    }, GRACEFUL_STOP_TIMEOUT_MS)
   }
 
   private fun releaseWakeLock() {
@@ -121,7 +140,7 @@ class BackgroundCaptureService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val stopIntent = Intent(this, BackgroundCaptureService::class.java).apply {
-      action = ACTION_STOP
+      action = ACTION_REQUEST_STOP
     }
     val stopPending = PendingIntent.getService(
       this,
@@ -130,7 +149,7 @@ class BackgroundCaptureService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val text = when (mode) {
-      "bluetooth" -> "Connected wearable audio is being captured"
+      MODE_BLUETOOTH -> "Connected wearable audio is being captured"
       else -> "Microphone audio is being captured"
     }
     return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -176,8 +195,16 @@ class BackgroundCaptureService : Service() {
     const val NOTIFICATION_ID = 45001
     const val EXTRA_MODE = "mode"
     const val ACTION_STOP = "systems.neolabs.neorecall.STOP_CAPTURE"
+    const val ACTION_REQUEST_STOP =
+      "systems.neolabs.neorecall.REQUEST_STOP_CAPTURE"
+    const val MODE_BLUETOOTH = "bluetooth"
+    private const val GRACEFUL_STOP_TIMEOUT_MS = 15_000L
     private const val PREFS = "neorecall_background_capture"
     private const val KEY_RUNNING = "running"
     private const val KEY_MODE = "mode"
+
+    fun isRunning(context: Context): Boolean =
+      context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getBoolean(KEY_RUNNING, false)
   }
 }

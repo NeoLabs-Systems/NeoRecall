@@ -22,8 +22,8 @@ class MobileRecallRecorder implements RecallRecorder {
     AudioDeviceAdapterRegistry? registry,
     DeviceSessionController? devices,
     BackgroundCaptureService? background,
-  })  : registry = registry ?? createDefaultDeviceRegistry(),
-        background = background ?? createBackgroundCaptureService() {
+  }) : registry = registry ?? createDefaultDeviceRegistry(),
+       background = background ?? createBackgroundCaptureService() {
     this.devices = devices ?? DeviceSessionController(registry: this.registry);
   }
 
@@ -32,7 +32,8 @@ class MobileRecallRecorder implements RecallRecorder {
   final BackgroundCaptureService background;
 
   CapturePipeline? _pipeline;
-  final List<StreamSubscription<dynamic>> _subs = <StreamSubscription<dynamic>>[];
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
   final StreamController<RecordedAudioChunk> _chunks =
       StreamController<RecordedAudioChunk>.broadcast();
   final StreamController<RecordedAudioChunk> _partials =
@@ -53,17 +54,30 @@ class MobileRecallRecorder implements RecallRecorder {
   @override
   bool get isRecording => _pipeline?.isRunning ?? false;
 
-  Future<void> initialize() async {
+  Future<void> initialize({String? accountId}) async {
     if (_initialized) return;
     await registry.initializeAll();
-    await devices.restore();
+    await devices.bindAccount(accountId);
     await background.initialize();
     _subs.add(devices.messages.listen(_warnings.add));
-    _subs.add(background.events.listen(_warnings.add));
+    _subs.add(
+      background.events.listen((event) {
+        final message = event.message;
+        if (message != null) _warnings.add(message);
+      }),
+    );
     if (devices.preferBluetooth && devices.hasPreferredDevice) {
-      unawaited(devices.connectPreferred());
+      await devices.connectPreferred();
     }
     _initialized = true;
+  }
+
+  Future<void> bindAccount(String? accountId) async {
+    if (!_initialized) {
+      await initialize(accountId: accountId);
+      return;
+    }
+    await devices.bindAccount(accountId);
   }
 
   @override
@@ -79,26 +93,24 @@ class MobileRecallRecorder implements RecallRecorder {
     final sources = <CaptureSource>[];
     final notes = <String>[];
     final preferBluetooth =
-        devices.preferBluetooth && devices.hasPreferredDevice;
-    final mode = preferBluetooth ? 'bluetooth' : 'microphone';
-
-    final backgroundStarted = await background.start(mode: mode);
-    if (!backgroundStarted) {
-      notes.add(
-        'Background capture host could not start. Recording continues while the app stays alive.',
-      );
-    }
+        !microphone && devices.preferBluetooth && devices.hasPreferredDevice;
 
     if (preferBluetooth) {
       final device = devices.preferredDevice!;
       final adapter = devices.activeAdapter ?? registry[device.adapterId];
       if (adapter != null) {
-        try {
-          await devices.connectPreferred();
-          sources.add(BluetoothCaptureSource(adapter: adapter, device: device));
-        } catch (error) {
+        final connected = await devices.connectPreferred();
+        if (connected) {
+          sources.add(
+            BluetoothCaptureSource(
+              adapter: adapter,
+              device: device,
+              connectOnStart: false,
+            ),
+          );
+        } else {
           notes.add(
-            'Bluetooth device unavailable ($error). Falling back to phone microphone.',
+            'Bluetooth device unavailable. Falling back to phone microphone.',
           );
         }
       } else {
@@ -118,26 +130,33 @@ class MobileRecallRecorder implements RecallRecorder {
       } else {
         final allowed = await mic.ensurePermission();
         if (!allowed) {
+          await mic.dispose();
           if (sources.isEmpty) {
             throw StateError(
               'Microphone permission is required for phone capture.',
             );
           }
-          notes.add('Microphone permission denied; using connected device only.');
+          notes.add(
+            'Microphone permission denied; using connected device only.',
+          );
         } else if (sources.isEmpty || microphone) {
-          // If bluetooth source already exists and user explicitly wants mic too,
-          // keep both. Otherwise use mic as fallback only.
-          if (sources.isEmpty || !preferBluetooth) {
-            sources.add(mic);
-          } else if (microphone) {
-            sources.add(mic);
-          }
+          sources.add(mic);
         }
       }
     }
 
     if (sources.isEmpty) {
       throw StateError('No mobile audio source is available.');
+    }
+
+    final actualMode = sources.first.kind == 'wearable'
+        ? 'bluetooth'
+        : 'microphone';
+    final backgroundStarted = await background.start(mode: actualMode);
+    if (!backgroundStarted) {
+      notes.add(
+        'Background capture host could not start. Recording continues while the app stays alive.',
+      );
     }
 
     final pipeline = CapturePipeline(
@@ -165,6 +184,7 @@ class MobileRecallRecorder implements RecallRecorder {
         systemAudio: false,
         persistentStorage: true,
         sampleRate: capability.sampleRate,
+        sourceKind: capability.sourceKind,
         warning: warning.isEmpty ? null : warning,
       );
     } catch (error) {
@@ -186,12 +206,16 @@ class MobileRecallRecorder implements RecallRecorder {
       await pipeline.stop();
       await pipeline.dispose();
     }
-    await background.stop();
   }
+
+  /// Release the native host only after the controller has durably finalized
+  /// the last chunk and session declaration.
+  Future<void> finishBackgroundHost() => background.stop();
 
   @override
   Future<void> dispose() async {
     await stop();
+    await finishBackgroundHost();
     for (final sub in _subs) {
       await sub.cancel();
     }

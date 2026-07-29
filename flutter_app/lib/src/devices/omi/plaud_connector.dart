@@ -66,7 +66,9 @@ class PlaudConnector extends WearableConnector {
       command,
     );
     try {
-      return await _queues[cmdId]!.stream.first.timeout(const Duration(seconds: 10));
+      return await _queues[cmdId]!.stream.first.timeout(
+        const Duration(seconds: 10),
+      );
     } on TimeoutException {
       return null;
     }
@@ -86,14 +88,11 @@ class PlaudConnector extends WearableConnector {
     final response = await _sendCommand(_cmdStartRecord, payload);
     if (response != null && response.length >= 4) {
       _sessionId = _toInt32(response.sublist(0, 4));
-      await _sendCommand(
-        _cmdSyncFileStart,
-        <int>[
-          ..._toBytes64(_sessionId!),
-          ..._toBytes64(0),
-          ..._toBytes64(0x7FFFFFFF),
-        ],
-      );
+      await _sendCommand(_cmdSyncFileStart, <int>[
+        ..._toBytes64(_sessionId!),
+        ..._toBytes64(0),
+        ..._toBytes64(0x7FFFFFFF),
+      ]);
       recording = true;
       return;
     }
@@ -110,10 +109,10 @@ class PlaudConnector extends WearableConnector {
         <int>[1, _cmdStopSync & 0xFF, (_cmdStopSync >> 8) & 0xFF, 1],
       );
       if (_sessionId != null) {
-        await _sendCommand(
-          _cmdStopRecord,
-          <int>[..._toBytes32(_sessionId!), ..._toBytes32(0)],
-        );
+        await _sendCommand(_cmdStopRecord, <int>[
+          ..._toBytes32(_sessionId!),
+          ..._toBytes32(0),
+        ]);
       }
     } finally {
       recording = false;
@@ -125,17 +124,11 @@ class PlaudConnector extends WearableConnector {
       bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
 
   List<int> _toBytes32(int value) => <int>[
-        value & 0xFF,
-        (value >> 8) & 0xFF,
-        (value >> 16) & 0xFF,
-        (value >> 24) & 0xFF,
-      ];
+    value & 0xFF,
+    (value >> 8) & 0xFF,
+    (value >> 16) & 0xFF,
+    (value >> 24) & 0xFF,
+  ];
 
-  List<int> _toBytes64(int value) => <int>[
-        ..._toBytes32(value),
-        0,
-        0,
-        0,
-        0,
-      ];
+  List<int> _toBytes64(int value) => <int>[..._toBytes32(value), 0, 0, 0, 0];
 }

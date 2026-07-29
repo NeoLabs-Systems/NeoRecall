@@ -24,6 +24,7 @@ class RecordingSession {
 class LocalRecordingDeclaration {
   const LocalRecordingDeclaration({
     required this.id,
+    required this.accountId,
     required this.sourceId,
     required this.deviceId,
     required this.deviceClientUuid,
@@ -41,6 +42,7 @@ class LocalRecordingDeclaration {
     this.synced = false,
   });
   final String id;
+  final String accountId;
   final String sourceId;
   final String deviceId;
   final String deviceClientUuid;
@@ -63,6 +65,7 @@ class LocalRecordingDeclaration {
     bool? synced,
   }) => LocalRecordingDeclaration(
     id: id,
+    accountId: accountId,
     sourceId: sourceId,
     deviceId: deviceId,
     deviceClientUuid: deviceClientUuid,
@@ -81,6 +84,7 @@ class LocalRecordingDeclaration {
   );
   Map<String, dynamic> toMap() => <String, dynamic>{
     'id': id,
+    'accountId': accountId,
     'sourceId': sourceId,
     'deviceId': deviceId,
     'deviceClientUuid': deviceClientUuid,
@@ -100,6 +104,7 @@ class LocalRecordingDeclaration {
   factory LocalRecordingDeclaration.fromMap(Map<String, dynamic> map) =>
       LocalRecordingDeclaration(
         id: map['id'] as String,
+        accountId: map['accountId'] as String? ?? '',
         sourceId: map['sourceId'] as String,
         deviceId: map['deviceId'] as String,
         deviceClientUuid: map['deviceClientUuid'] as String,

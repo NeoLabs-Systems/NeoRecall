@@ -31,8 +31,8 @@ class OmiConnector extends WearableConnector {
               WearableDeviceUuids.batteryLevel,
             )
             .listen((value) {
-          if (value.isNotEmpty) batteryLevels.add(value.first);
-        }),
+              if (value.isNotEmpty) batteryLevels.add(value.first);
+            }),
       );
     } catch (_) {}
     try {
@@ -43,15 +43,16 @@ class OmiConnector extends WearableConnector {
               WearableDeviceUuids.buttonTrigger,
             )
             .listen((value) {
-          if (value.isNotEmpty) buttonEvents.add(value);
-        }),
+              if (value.isNotEmpty) buttonEvents.add(value);
+            }),
       );
     } catch (_) {}
   }
 
   Future<void> _syncTime() async {
     try {
-      final epochSeconds = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+      final epochSeconds =
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
       final bytes = ByteData(4)..setUint32(0, epochSeconds, Endian.little);
       await transport.writeCharacteristic(
         WearableDeviceUuids.timeSyncService,
@@ -106,8 +107,8 @@ class OmiConnector extends WearableConnector {
             WearableDeviceUuids.omiAudioData,
           )
           .listen((value) {
-        if (value.isNotEmpty) audioBytes.add(value);
-      }),
+            if (value.isNotEmpty) audioBytes.add(value);
+          }),
     );
     recording = true;
   }

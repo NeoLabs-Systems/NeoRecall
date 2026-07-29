@@ -22,19 +22,25 @@ class FriendPendantConnector extends WearableConnector {
             WearableDeviceUuids.friendAudio,
           )
           .listen((data) {
-        final payload = _processAudioPacket(data);
-        if (payload == null || payload.isEmpty) return;
-        for (var i = 0; i + lc3FrameSize <= payload.length; i += lc3FrameSize) {
-          audioBytes.add(payload.sublist(i, i + lc3FrameSize));
-        }
-      }),
+            final payload = _processAudioPacket(data);
+            if (payload == null || payload.isEmpty) return;
+            for (
+              var i = 0;
+              i + lc3FrameSize <= payload.length;
+              i += lc3FrameSize
+            ) {
+              audioBytes.add(payload.sublist(i, i + lc3FrameSize));
+            }
+          }),
     );
     recording = true;
   }
 
   List<int>? _processAudioPacket(List<int> data) {
     if (data.length < packetSize) return null;
-    final packet = data.length == packetSize ? data : data.sublist(0, packetSize);
+    final packet = data.length == packetSize
+        ? data
+        : data.sublist(0, packetSize);
     return packet.sublist(0, lc3DataSize);
   }
 

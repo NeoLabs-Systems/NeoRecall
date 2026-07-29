@@ -18,12 +18,19 @@ class ApiException implements Exception {
 }
 
 class NeoRecallApiClient {
-  NeoRecallApiClient({required String baseUrl, this.token, http.Client? client})
-    : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
-      _client = client ?? http.Client();
+  NeoRecallApiClient({
+    required String baseUrl,
+    this.token,
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 30),
+    this.uploadTimeout = const Duration(minutes: 2),
+  }) : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), ''),
+       _client = client ?? http.Client();
   String baseUrl;
   String? token;
   final http.Client _client;
+  final Duration requestTimeout;
+  final Duration uploadTimeout;
 
   Map<String, String> get _headers => <String, String>{
     'Accept': 'application/json',
@@ -42,22 +49,23 @@ class NeoRecallApiClient {
       ..._headers,
       if (body != null) 'Content-Type': 'application/json',
     };
-    late http.Response response;
+    late Future<http.Response> responseFuture;
     final encoded = body == null ? null : jsonEncode(body);
     switch (method) {
       case 'GET':
-        response = await _client.get(uri, headers: headers);
+        responseFuture = _client.get(uri, headers: headers);
       case 'POST':
-        response = await _client.post(uri, headers: headers, body: encoded);
+        responseFuture = _client.post(uri, headers: headers, body: encoded);
       case 'PUT':
-        response = await _client.put(uri, headers: headers, body: encoded);
+        responseFuture = _client.put(uri, headers: headers, body: encoded);
       case 'PATCH':
-        response = await _client.patch(uri, headers: headers, body: encoded);
+        responseFuture = _client.patch(uri, headers: headers, body: encoded);
       case 'DELETE':
-        response = await _client.delete(uri, headers: headers, body: encoded);
+        responseFuture = _client.delete(uri, headers: headers, body: encoded);
       default:
         throw ArgumentError.value(method, 'method');
     }
+    final response = await responseFuture.timeout(requestTimeout);
     return _decode(response);
   }
 
@@ -105,8 +113,10 @@ class NeoRecallApiClient {
         filename: '${chunk.id}.${chunk.container}',
       ),
     );
-    final streamed = await _client.send(request);
-    final response = await http.Response.fromStream(streamed);
+    final streamed = await _client.send(request).timeout(uploadTimeout);
+    final response = await http.Response.fromStream(
+      streamed,
+    ).timeout(uploadTimeout);
     return Map<String, dynamic>.from(_decode(response) as Map);
   }
 
@@ -179,8 +189,8 @@ class NeoRecallApiClient {
         'kind': session.platform == 'web'
             ? 'browser'
             : (session.platform == 'android' || session.platform == 'ios')
-                ? 'mobile'
-                : 'desktop',
+            ? 'mobile'
+            : 'desktop',
         'capabilities': <String, dynamic>{
           'microphone': session.sourceKind != 'system',
           'systemAudio': <String>{
@@ -291,7 +301,11 @@ class NeoRecallApiClient {
           filename: '$filename.part-$part',
         ),
       );
-      _decode(await http.Response.fromStream(await _client.send(partRequest)));
+      _decode(
+        await http.Response.fromStream(
+          await _client.send(partRequest).timeout(uploadTimeout),
+        ).timeout(uploadTimeout),
+      );
     }
     await request('POST', '/api/v1/imports/$id/complete');
   }

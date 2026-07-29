@@ -237,6 +237,45 @@ void SystemAudioCapturePlugin::ApplyGainBoostAndConvertToMono(
   }
 }
 
+void SystemAudioCapturePlugin::ResampleAndConvertToMono(
+    const int16_t* input, size_t input_frame_count, int input_channels,
+    int16_t* output, size_t output_frame_count, float gain_boost) {
+  if (input_frame_count == 0 || output_frame_count == 0 ||
+      input_channels <= 0) {
+    return;
+  }
+  const float max_value = 32767.0f;
+  const float min_value = -32768.0f;
+  const double source_step =
+      static_cast<double>(input_frame_count) /
+      static_cast<double>(output_frame_count);
+  auto mono_at = [&](size_t frame) {
+    double sum = 0.0;
+    const size_t base = frame * static_cast<size_t>(input_channels);
+    for (int channel = 0; channel < input_channels; ++channel) {
+      sum += input[base + static_cast<size_t>(channel)];
+    }
+    return static_cast<float>(sum / input_channels);
+  };
+  for (size_t output_index = 0; output_index < output_frame_count;
+       ++output_index) {
+    const double source_position = output_index * source_step;
+    const size_t left_index =
+        (std::min)(static_cast<size_t>(source_position),
+                   input_frame_count - 1);
+    const size_t right_index = (std::min)(left_index + 1,
+                                          input_frame_count - 1);
+    const float fraction =
+        static_cast<float>(source_position - left_index);
+    const float interpolated =
+        mono_at(left_index) +
+        (mono_at(right_index) - mono_at(left_index)) * fraction;
+    const float sample = interpolated * gain_boost;
+    output[output_index] = static_cast<int16_t>(
+        (std::max)(min_value, (std::min)(max_value, sample)));
+  }
+}
+
 double SystemAudioCapturePlugin::CalculateDecibel(const int16_t* samples,
                                                    size_t sample_count) {
   if (sample_count == 0) {
@@ -599,8 +638,7 @@ void SystemAudioCapturePlugin::CaptureThread() {
     const WORD actual_channels = mix_format_->nChannels;
     const WORD actual_bits_per_sample = mix_format_->wBitsPerSample;
     
-    // FIX LATENCY 1: Giảm chunk size xuống tối đa 50ms để giảm delay
-    // Sử dụng chunk nhỏ hơn để gửi data nhanh hơn
+    // Keep native delivery frequent while leaving durable chunking to Dart.
     const int effective_chunk_ms = (std::max)(20, (std::min)(chunk_duration_ms_, 50));
     
     // Calculate smaller chunk size for lower latency
@@ -612,8 +650,7 @@ void SystemAudioCapturePlugin::CaptureThread() {
     std::vector<int16_t> output_buffer(output_frame_count);
     size_t raw_buffer_pos = 0;
 
-    // FIX LATENCY 2: Giảm sleep time xuống tối thiểu để giảm delay
-    const int sleep_time_ms = 1; // Giảm xuống 1ms để phản hồi nhanh hơn
+    const int sleep_time_ms = 1;
     
     while (!should_stop_) {
       UINT32 num_frames_available = 0;
@@ -623,7 +660,6 @@ void SystemAudioCapturePlugin::CaptureThread() {
         break;
       }
 
-      // FIX LATENCY 3: Process ngay khi có data, không đợi nhiều packets
       if (num_frames_available == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time_ms));
         continue;
@@ -645,7 +681,7 @@ void SystemAudioCapturePlugin::CaptureThread() {
 
         bool is_silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
         
-        if (!is_silent && data != nullptr && num_frames > 0) {
+        if (num_frames > 0 && (is_silent || data != nullptr)) {
           const size_t data_size = num_frames * frame_size;
           size_t data_offset = 0;
           
@@ -655,14 +691,17 @@ void SystemAudioCapturePlugin::CaptureThread() {
             const size_t copy_size = (std::min)(space_available, data_remaining);
             
             if (copy_size > 0) {
-              memcpy(raw_buffer.data() + raw_buffer_pos, 
-                     reinterpret_cast<const uint8_t*>(data) + data_offset, 
-                     copy_size);
+              if (is_silent) {
+                memset(raw_buffer.data() + raw_buffer_pos, 0, copy_size);
+              } else {
+                memcpy(raw_buffer.data() + raw_buffer_pos,
+                       reinterpret_cast<const uint8_t*>(data) + data_offset,
+                       copy_size);
+              }
               raw_buffer_pos += copy_size;
               data_offset += copy_size;
             }
 
-            // FIX LATENCY 4: Gửi data ngay khi đủ chunk nhỏ, không đợi buffer đầy
             if (raw_buffer_pos >= chunk_size_bytes) {
               const size_t input_frame_count = chunk_size_bytes / frame_size;
               const size_t total_samples = input_frame_count * actual_channels;
@@ -714,15 +753,16 @@ void SystemAudioCapturePlugin::CaptureThread() {
                 }
               }
 
-              const size_t frames_to_process = converted_samples.size() / actual_channels;
-              const size_t output_frames = (std::min)(frames_to_process, output_frame_count);
-
-              ApplyGainBoostAndConvertToMono(converted_samples.data(), output_buffer.data(),
-                                              output_frames, actual_channels, gain_boost_);
+              const size_t frames_to_process =
+                  converted_samples.size() / actual_channels;
+              const size_t output_frames = output_frame_count;
+              ResampleAndConvertToMono(
+                  converted_samples.data(), frames_to_process,
+                  actual_channels, output_buffer.data(), output_frames,
+                  gain_boost_);
 
               double decibel = CalculateDecibel(output_buffer.data(), output_frames);
 
-              // FIX LATENCY 5: Tối ưu mutex - giữ lock thời gian ngắn nhất
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (event_sink_) {
@@ -765,13 +805,10 @@ void SystemAudioCapturePlugin::CaptureThread() {
   }
 }
 
-// BONUS: Thêm method để set high priority cho thread để giảm latency
-// Gọi ở đầu CaptureThread() để giảm latency hơn nữa
 void SystemAudioCapturePlugin::SetThreadPriority() {
   HANDLE current_thread = GetCurrentThread();
-  // Sử dụng THREAD_PRIORITY_HIGHEST thay vì TIME_CRITICAL để tránh gây vấn đề
+  // High priority avoids underruns without the starvation risk of time-critical.
   ::SetThreadPriority(current_thread, THREAD_PRIORITY_HIGHEST);
 }
 
 }  // namespace audio_capture
-

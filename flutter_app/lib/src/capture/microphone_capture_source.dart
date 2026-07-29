@@ -7,13 +7,15 @@ import 'capture_source.dart';
 /// Shared microphone source used by desktop and mobile.
 class MicrophoneCaptureSource implements CaptureSource {
   MicrophoneCaptureSource({AudioRecorder? recorder})
-      : _recorder = recorder ?? AudioRecorder();
+    : _recorder = recorder ?? AudioRecorder();
 
   final AudioRecorder _recorder;
   StreamSubscription<Uint8List>? _subscription;
-  final StreamController<Uint8List> _pcm = StreamController<Uint8List>.broadcast();
+  final StreamController<Uint8List> _pcm =
+      StreamController<Uint8List>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings = StreamController<String>.broadcast();
+  final StreamController<String> _warnings =
+      StreamController<String>.broadcast();
   bool _active = false;
 
   @override
@@ -48,12 +50,15 @@ class MicrophoneCaptureSource implements CaptureSource {
         noiseSuppress: false,
       ),
     );
-    _subscription = stream.listen((data) {
-      _pcm.add(data);
-      _emitLevel(data);
-    }, onError: (Object error) {
-      _warnings.add('Microphone capture interrupted: $error');
-    });
+    _subscription = stream.listen(
+      (data) {
+        _pcm.add(data);
+        _emitLevel(data);
+      },
+      onError: (Object error) {
+        _warnings.add('Microphone capture interrupted: $error');
+      },
+    );
     _active = true;
   }
 

@@ -9,6 +9,11 @@ The web client supports microphone capture in modern browsers. Chrome and Edge c
 
 The macOS 13+ and Windows 10/11 x64 clients combine microphone and system audio into separate logical channels. Desktop is the v1 reference client for uninterrupted recording because browsers can suspend tabs and evict non-persistent storage.
 
+The desktop mixer waits for both selected sources rather than consuming a
+temporarily late channel as silence. If a source actually stops, its aligned
+tail is finalized and the remaining source continues. Windows loopback audio is
+resampled from the active output-device format to 16 kHz mono before mixing.
+
 ## Consent and indicators
 
 NeoRecall shows a first-run recording notice and a persistent recording state. It has no covert mode. Before recording, obtain the consent required in your jurisdiction and organization. Pause immediately when consent changes or sensitive material should not be retained.
@@ -24,6 +29,30 @@ Capture uses independently decodable WAV chunks, normally 30 seconds long with a
 
 NeoRecall never removes pending audio merely to satisfy a storage cap. If storage is exhausted, recording stops visibly and records a gap.
 Capture-gap records carry both monotonic time offsets and the exact missing sequence range. Later chunks remain blocked until every preceding sequence is terminal or explicitly covered by one of those gaps.
+
+Local pending-audio totals, sessions, and uploads are account-scoped. Logging
+out first finalizes an active recording and never hands its queued chunks to a
+subsequently signed-in account.
+
+## Mobile capture foundation
+
+Android phone-microphone capture uses a visible foreground service, an
+unbounded active wake lock, and a process-owned Flutter engine. Swipe-away does
+not destroy the recording engine. If Android later recreates the process while
+capture is still requested, NeoRecall closes the interrupted session and starts
+a new recovery session using the durable local intent. Network requests have
+bounded timeouts, and queued chunks remain on disk through offline periods.
+
+Bluetooth support is transport- and device-adapter based. Adapters normalize
+PCM, connection states, battery state, and physical start/stop/standby/wake
+events. Reconnect uses bounded exponential backoff. No Bluetooth protocol is
+enabled in the default registry until that device's audio framing and control
+semantics have been validated.
+
+Android cannot override a user Force stop, revoked permissions, exhausted
+storage, or some vendor battery-management policies. iOS cannot continue after
+a user force-quit. Those operating-system actions are shown as limitations,
+not described as guaranteed background execution.
 
 ## Importing existing audio
 

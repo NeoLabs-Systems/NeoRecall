@@ -4,22 +4,19 @@ import '../ble/ble_transport.dart';
 import 'device_models.dart';
 
 abstract class WearableConnector {
-  WearableConnector({
-    required this.device,
-    required this.transport,
-  });
+  WearableConnector({required this.device, required this.transport});
 
   final DiscoveredWearable device;
   final BleTransport transport;
 
   final StreamController<List<int>> audioBytes =
       StreamController<List<int>>.broadcast();
-  final StreamController<int> batteryLevels =
-      StreamController<int>.broadcast();
+  final StreamController<int> batteryLevels = StreamController<int>.broadcast();
   final StreamController<List<int>> buttonEvents =
       StreamController<List<int>>.broadcast();
 
-  final List<StreamSubscription<dynamic>> _subs = <StreamSubscription<dynamic>>[];
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
   bool recording = false;
 
   WearableDeviceType get type => device.type;

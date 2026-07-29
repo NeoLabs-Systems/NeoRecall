@@ -79,7 +79,8 @@ abstract class AudioDeviceAdapter {
 
 /// Registry so new wearable brands can be added without rewriting mobile UI.
 class AudioDeviceAdapterRegistry {
-  final Map<String, AudioDeviceAdapter> _adapters = <String, AudioDeviceAdapter>{};
+  final Map<String, AudioDeviceAdapter> _adapters =
+      <String, AudioDeviceAdapter>{};
 
   void register(AudioDeviceAdapter adapter) {
     _adapters[adapter.id] = adapter;

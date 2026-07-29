@@ -62,25 +62,25 @@ class NeoRecallPalette {
   Color get glassBorder => borderLight;
   Color get borderStrong => borderLight;
   Gradient get backgroundGradient => LinearGradient(
-        colors: <Color>[
-          bgPrimary,
-          Color.lerp(bgSecondary, accentAlt, 0.08)!.withValues(alpha: 0.98),
-          Color.lerp(bgPrimary, accent, 0.05)!,
-        ],
-        stops: const <double>[0, 0.52, 1],
-        begin: const Alignment(-0.95, -1),
-        end: const Alignment(1, 0.92),
-      );
+    colors: <Color>[
+      bgPrimary,
+      Color.lerp(bgSecondary, accentAlt, 0.08)!.withValues(alpha: 0.98),
+      Color.lerp(bgPrimary, accent, 0.05)!,
+    ],
+    stops: const <double>[0, 0.52, 1],
+    begin: const Alignment(-0.95, -1),
+    end: const Alignment(1, 0.92),
+  );
   Gradient get panelGradient => LinearGradient(
-        colors: <Color>[
-          Colors.white.withValues(alpha: 0.10),
-          bgCard.withValues(alpha: 0.94),
-          bgSecondary.withValues(alpha: 0.88),
-        ],
-        stops: const <double>[0, 0.2, 1],
-        begin: const Alignment(-0.85, -1),
-        end: const Alignment(1, 1),
-      );
+    colors: <Color>[
+      Colors.white.withValues(alpha: 0.10),
+      bgCard.withValues(alpha: 0.94),
+      bgSecondary.withValues(alpha: 0.88),
+    ],
+    stops: const <double>[0, 0.2, 1],
+    begin: const Alignment(-0.85, -1),
+    end: const Alignment(1, 1),
+  );
 }
 
 const NeoRecallPalette _darkPalette = NeoRecallPalette(
@@ -135,7 +135,8 @@ NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
 NeoRecallPalette neoRecallPaletteOf(BuildContext context) =>
     neoRecallPaletteFor(Theme.of(context).brightness);
 
-TextStyle sectionEyebrowStyle(NeoRecallPalette palette) => GoogleFonts.geistMono(
+TextStyle sectionEyebrowStyle(NeoRecallPalette palette) =>
+    GoogleFonts.geistMono(
       fontSize: 11,
       fontWeight: FontWeight.w600,
       letterSpacing: 1.7,
@@ -161,17 +162,17 @@ TextStyle heroTitleStyle(NeoRecallPalette palette, {double size = 24}) =>
     );
 
 List<BoxShadow> softPanelShadow(NeoRecallPalette palette) => <BoxShadow>[
-      BoxShadow(
-        color: Colors.black.withValues(alpha: 0.18),
-        blurRadius: 40,
-        offset: const Offset(0, 18),
-      ),
-      BoxShadow(
-        color: palette.accent.withValues(alpha: 0.07),
-        blurRadius: 28,
-        offset: const Offset(0, 8),
-      ),
-    ];
+  BoxShadow(
+    color: Colors.black.withValues(alpha: 0.18),
+    blurRadius: 40,
+    offset: const Offset(0, 18),
+  ),
+  BoxShadow(
+    color: palette.accent.withValues(alpha: 0.07),
+    blurRadius: 28,
+    offset: const Offset(0, 8),
+  ),
+];
 
 ThemeData buildNeoRecallTheme(Brightness brightness) {
   final palette = neoRecallPaletteFor(brightness);
@@ -195,10 +196,9 @@ ThemeData buildNeoRecallTheme(Brightness brightness) {
       onSurface: palette.textPrimary,
       error: palette.danger,
     ),
-    textTheme: GoogleFonts.geistTextTheme(base.textTheme).apply(
-      bodyColor: palette.textPrimary,
-      displayColor: palette.textPrimary,
-    ),
+    textTheme: GoogleFonts.geistTextTheme(
+      base.textTheme,
+    ).apply(bodyColor: palette.textPrimary, displayColor: palette.textPrimary),
     splashFactory: InkSparkle.splashFactory,
     cardTheme: CardThemeData(
       color: palette.bgCard.withValues(

@@ -22,12 +22,16 @@ class _UnsupportedChunkStore implements ChunkStore {
   Future<void> putSession(LocalRecordingDeclaration session) async =>
       _unsupported();
   @override
-  Future<List<LocalRecordingDeclaration>> pendingSessions() async =>
-      _unsupported();
+  Future<void> claimLegacySessions(String accountId) async => _unsupported();
+  @override
+  Future<List<LocalRecordingDeclaration>> pendingSessions(
+    String accountId,
+  ) async => _unsupported();
   @override
   Future<void> markSessionSynced(String id) async => _unsupported();
   @override
-  Future<List<AudioChunk>> pending({int limit = 100}) async => _unsupported();
+  Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async =>
+      _unsupported();
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) async => _unsupported();
   @override
@@ -40,7 +44,7 @@ class _UnsupportedChunkStore implements ChunkStore {
   @override
   Future<void> release(String id) async => _unsupported();
   @override
-  Future<int> pendingBytes() async => _unsupported();
+  Future<int> pendingBytes(String accountId) async => _unsupported();
   @override
   Future<void> close() async {}
 }

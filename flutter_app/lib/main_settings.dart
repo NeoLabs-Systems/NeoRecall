@@ -17,7 +17,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final server = TextEditingController();
   final timezone = TextEditingController();
 
-  bool get _canConfigureServer => widget.controller.allowsBackendUrlConfiguration;
+  bool get _canConfigureServer =>
+      widget.controller.allowsBackendUrlConfiguration;
 
   @override
   void initState() {
@@ -51,9 +52,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'chunkOverlapMs': settings!['chunkOverlapMs'],
     });
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
   }
 
   @override
@@ -137,7 +138,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: <Widget>[
                     Text(
                       'Chunk duration: ${((settings!['chunkTargetMs'] as int) / 1000).round()} seconds',
-                      style: TextStyle(color: palette.textSecondary, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: palette.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Slider(
                       min: (settings!['chunkMinMs'] as int) / 1000,
@@ -154,15 +158,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     Text(
                       'Boundary overlap: ${((settings!['chunkOverlapMs'] as int) / 1000).toStringAsFixed(1)} seconds',
-                      style: TextStyle(color: palette.textSecondary, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: palette.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Slider(
                       min: 0,
                       max: 5,
                       divisions: 10,
-                      value: ((settings!['chunkOverlapMs'] as int) / 1000).clamp(0, 5).toDouble(),
+                      value: ((settings!['chunkOverlapMs'] as int) / 1000)
+                          .clamp(0, 5)
+                          .toDouble(),
                       onChanged: (value) => setState(
-                        () => settings!['chunkOverlapMs'] = (value * 1000).round(),
+                        () => settings!['chunkOverlapMs'] = (value * 1000)
+                            .round(),
                       ),
                     ),
                   ],
@@ -178,20 +188,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: <Widget>[
                     Text(
                       'Interval: ${((settings!['consolidationIntervalMs'] as int) / 3600000).toStringAsFixed(1)} hours',
-                      style: TextStyle(color: palette.textSecondary, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: palette.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Slider(
-                      min: (settings!['effectiveConsolidationIntervalMs'] as int).toDouble(),
+                      min:
+                          (settings!['effectiveConsolidationIntervalMs'] as int)
+                              .toDouble(),
                       max: 24 * 3600000,
                       divisions: 23,
                       value: (settings!['consolidationIntervalMs'] as int)
                           .clamp(
-                            settings!['effectiveConsolidationIntervalMs'] as int,
+                            settings!['effectiveConsolidationIntervalMs']
+                                as int,
                             24 * 3600000,
                           )
                           .toDouble(),
                       onChanged: (value) => setState(
-                        () => settings!['consolidationIntervalMs'] = value.round(),
+                        () => settings!['consolidationIntervalMs'] = value
+                            .round(),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -216,17 +233,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: settings!['diarizationEnabled'] as bool? ?? true,
-                      onChanged: (value) => setState(() => settings!['diarizationEnabled'] = value),
+                      onChanged: (value) => setState(
+                        () => settings!['diarizationEnabled'] = value,
+                      ),
                       title: const Text('Speaker diarization'),
-                      subtitle: const Text('Separate overlapping speakers during transcription.'),
+                      subtitle: const Text(
+                        'Separate overlapping speakers during transcription.',
+                      ),
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      value: settings!['recurringSpeakerMatching'] as bool? ?? true,
-                      onChanged: (value) =>
-                          setState(() => settings!['recurringSpeakerMatching'] = value),
+                      value:
+                          settings!['recurringSpeakerMatching'] as bool? ??
+                          true,
+                      onChanged: (value) => setState(
+                        () => settings!['recurringSpeakerMatching'] = value,
+                      ),
                       title: const Text('Recurring speaker matching'),
-                      subtitle: const Text('Match known voiceprints across recordings.'),
+                      subtitle: const Text(
+                        'Match known voiceprints across recordings.',
+                      ),
                     ),
                   ],
                 ),
@@ -238,14 +264,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             spacing: 10,
             runSpacing: 10,
             children: <Widget>[
-              MetaPill(icon: Icons.devices_outlined, label: platformLabel, active: true),
               MetaPill(
-                icon: widget.controller.online ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+                icon: Icons.devices_outlined,
+                label: platformLabel,
+                active: true,
+              ),
+              MetaPill(
+                icon: widget.controller.online
+                    ? Icons.cloud_done_outlined
+                    : Icons.cloud_off_outlined,
                 label: widget.controller.online ? 'Online' : 'Offline',
                 active: widget.controller.online,
               ),
               if (widget.controller.username != null)
-                MetaPill(icon: Icons.person_outline, label: widget.controller.username!),
+                MetaPill(
+                  icon: Icons.person_outline,
+                  label: widget.controller.username!,
+                ),
             ],
           ),
         ),

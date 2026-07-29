@@ -16,12 +16,18 @@ class CapturePipeline {
     required this.chunkMs,
     required this.overlapMs,
     this.sampleRate = 16000,
+    this.flushInterval = const Duration(seconds: 1),
+    this.partialInterval = const Duration(seconds: 2),
+    this.sourceStallTimeout = const Duration(seconds: 5),
   });
 
   final List<CaptureSource> sources;
   final int chunkMs;
   final int overlapMs;
   final int sampleRate;
+  final Duration flushInterval;
+  final Duration partialInterval;
+  final Duration sourceStallTimeout;
 
   final StreamController<RecordedAudioChunk> chunks =
       StreamController<RecordedAudioChunk>.broadcast();
@@ -35,6 +41,9 @@ class CapturePipeline {
   final List<StreamSubscription<dynamic>> _subscriptions =
       <StreamSubscription<dynamic>>[];
   final List<CaptureSource> _activeSources = <CaptureSource>[];
+  final Map<String, DateTime> _lastDataAt = <String, DateTime>{};
+  final Set<String> _drainingSources = <String>{};
+  final Set<String> _excludedSources = <String>{};
   Timer? _chunkTimer;
   Timer? _partialTimer;
   DateTime? _startedAt;
@@ -48,6 +57,20 @@ class CapturePipeline {
   Future<RecorderCapability> start() async {
     if (_running) throw StateError('Capture pipeline is already running.');
     if (sources.isEmpty) throw StateError('No capture sources configured.');
+    if (chunkMs <= 0 ||
+        overlapMs < 0 ||
+        overlapMs >= chunkMs ||
+        sampleRate <= 0 ||
+        flushInterval <= Duration.zero ||
+        partialInterval <= Duration.zero ||
+        sourceStallTimeout <= Duration.zero) {
+      throw ArgumentError('Invalid capture timing configuration.');
+    }
+    if (sources.length > 2) {
+      throw StateError(
+        'A capture pipeline supports at most two synchronized audio sources.',
+      );
+    }
 
     String? warning;
     for (final source in sources) {
@@ -61,14 +84,32 @@ class CapturePipeline {
         }
         await source.start(sampleRate: sampleRate, channels: 1);
         _buffers[source.id] = <int>[];
+        _lastDataAt[source.id] = DateTime.now();
         _activeSources.add(source);
-        _subscriptions.add(source.pcm16Stream.listen((pcm) {
-          _buffers[source.id]?.addAll(pcm);
-        }, onError: (Object error) {
-          warnings.add('${source.kind} stream error: $error');
-        }, onDone: () {
-          warnings.add('${source.kind} stream ended; continuing with remaining sources when possible.');
-        }));
+        _subscriptions.add(
+          source.pcm16Stream.listen(
+            (pcm) {
+              if (pcm.isEmpty) return;
+              if (_excludedSources.remove(source.id)) {
+                _buffers[source.id]?.clear();
+                warnings.add('${source.kind} stream resumed.');
+              }
+              _drainingSources.remove(source.id);
+              _lastDataAt[source.id] = DateTime.now();
+              _buffers[source.id]?.addAll(pcm);
+            },
+            onError: (Object error) {
+              warnings.add('${source.kind} stream error: $error');
+              _drainingSources.add(source.id);
+            },
+            onDone: () {
+              warnings.add(
+                '${source.kind} stream ended; continuing with remaining sources when possible.',
+              );
+              _drainingSources.add(source.id);
+            },
+          ),
+        );
         _subscriptions.add(source.levelStream.listen(levels.add));
         _subscriptions.add(source.warningStream.listen(warnings.add));
       } catch (error) {
@@ -84,30 +125,66 @@ class CapturePipeline {
     _startedAt = DateTime.now().toUtc();
     _offsetMs = 0;
     _running = true;
-    _chunkTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _flushComplete());
-    _partialTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) => _emitPartial());
+    _chunkTimer = Timer.periodic(flushInterval, (_) {
+      _checkSourceHealth();
+      _flushComplete();
+    });
+    _partialTimer = Timer.periodic(partialInterval, (_) => _emitPartial());
 
     final hasMic = _activeSources.any((source) => source.kind == 'microphone');
     final hasSystem = _activeSources.any((source) => source.kind == 'system');
-    final hasWearable = _activeSources.any((source) => source.kind == 'wearable');
+    final hasWearable = _activeSources.any(
+      (source) => source.kind == 'wearable',
+    );
     return RecorderCapability(
       microphone: hasMic || hasWearable,
       systemAudio: hasSystem,
       persistentStorage: true,
       sampleRate: sampleRate,
+      sourceKind: hasWearable
+          ? 'wearable'
+          : hasMic && hasSystem
+          ? 'combined'
+          : hasSystem
+          ? 'system'
+          : 'microphone',
       warning: warning,
     );
   }
 
   int get _bytesPerMs => sampleRate * 2 ~/ 1000;
 
+  List<String> get _participatingIds => _buffers.keys
+      .where((id) => !_excludedSources.contains(id))
+      .toList(growable: false);
+
   int get _availableBytes {
-    if (_buffers.isEmpty) return 0;
-    return _buffers.values
-        .map((buffer) => buffer.length)
-        .reduce((left, right) => left > right ? left : right);
+    final ids = _participatingIds;
+    if (ids.isEmpty) return 0;
+    final lengths = ids.map((id) => _buffers[id]!.length);
+    if (ids.any(_drainingSources.contains)) {
+      return lengths.reduce((left, right) => left > right ? left : right);
+    }
+    return lengths.reduce((left, right) => left < right ? left : right);
+  }
+
+  void _checkSourceHealth() {
+    if (!_running || _participatingIds.length < 2) return;
+    final now = DateTime.now();
+    for (final source in _activeSources) {
+      if (_excludedSources.contains(source.id) ||
+          _drainingSources.contains(source.id)) {
+        continue;
+      }
+      final lastDataAt = _lastDataAt[source.id];
+      if (lastDataAt != null &&
+          now.difference(lastDataAt) >= sourceStallTimeout) {
+        _drainingSources.add(source.id);
+        warnings.add(
+          '${source.kind} stopped delivering audio; its aligned tail will be finalized and remaining sources will continue.',
+        );
+      }
+    }
   }
 
   Uint8List _takeOrPad(List<int> input, int length) {
@@ -125,7 +202,10 @@ class CapturePipeline {
     final sourceBytes = _bytesPerMs * durationMs;
     final chunkStartOffset = _offsetMs;
     final startedAt = _startedAt!.add(Duration(milliseconds: chunkStartOffset));
-    final ids = _buffers.keys.toList(growable: false);
+    final ids = _participatingIds;
+    if (ids.isEmpty) {
+      throw StateError('No active audio buffer is available.');
+    }
     late Uint8List pcm;
     late String layout;
 
@@ -162,13 +242,18 @@ class CapturePipeline {
       layout = 'mono';
     }
 
-    final overlap = (!isFinal && chunkStartOffset > 0) ? overlapMs : 0;
+    final overlap = chunkStartOffset > 0 ? overlapMs : 0;
     if (consume) {
       final advanceMs = isFinal ? durationMs : (durationMs - overlapMs);
       final remove = (_bytesPerMs * advanceMs).clamp(0, sourceBytes);
       for (final buffer in _buffers.values) {
         final end = remove.clamp(0, buffer.length);
         if (end > 0) buffer.removeRange(0, end);
+      }
+      for (final id in ids.where(_drainingSources.contains)) {
+        _buffers[id]?.clear();
+        _drainingSources.remove(id);
+        _excludedSources.add(id);
       }
       _offsetMs = chunkStartOffset + advanceMs;
     }
@@ -190,9 +275,9 @@ class CapturePipeline {
 
   void _flushComplete() {
     final needed = _bytesPerMs * chunkMs;
-    if (_availableBytes < needed) return;
-    if (chunks.isClosed) return;
-    chunks.add(_build(chunkMs, isFinal: false, consume: true));
+    while (_availableBytes >= needed && !chunks.isClosed) {
+      chunks.add(_build(chunkMs, isFinal: false, consume: true));
+    }
   }
 
   void _emitPartial() {
@@ -214,14 +299,19 @@ class CapturePipeline {
     for (final source in _activeSources) {
       await source.stop();
     }
-    final durationMs = _availableBytes ~/ _bytesPerMs;
-    if (durationMs > 0 && !chunks.isClosed) {
+    _drainingSources.addAll(_participatingIds);
+    while (_availableBytes > 0 && !chunks.isClosed) {
+      final durationMs = _availableBytes ~/ _bytesPerMs;
+      if (durationMs <= 0) break;
       chunks.add(_build(durationMs, isFinal: true, consume: true));
     }
     for (final buffer in _buffers.values) {
       buffer.clear();
     }
     _activeSources.clear();
+    _lastDataAt.clear();
+    _drainingSources.clear();
+    _excludedSources.clear();
     _running = false;
   }
 

@@ -250,7 +250,29 @@ class WebChunkStore implements ChunkStore {
   }
 
   @override
-  Future<List<LocalRecordingDeclaration>> pendingSessions() async {
+  Future<void> claimLegacySessions(String accountId) async {
+    if (accountId.isEmpty) return;
+    final transaction = db.transaction('sessions', 'readwrite');
+    final store = transaction.objectStore('sessions');
+    final values = await store.getAll();
+    for (final value in values.cast<Map>()) {
+      final session = LocalRecordingDeclaration.fromMap(
+        Map<String, dynamic>.from(value),
+      );
+      if (session.accountId.isEmpty) {
+        await store.put(<String, dynamic>{
+          ...session.toMap(),
+          'accountId': accountId,
+        });
+      }
+    }
+    await transaction.completed;
+  }
+
+  @override
+  Future<List<LocalRecordingDeclaration>> pendingSessions(
+    String accountId,
+  ) async {
     final transaction = db.transaction('sessions', 'readonly');
     final values = await transaction.objectStore('sessions').getAll();
     await transaction.completed;
@@ -261,7 +283,7 @@ class WebChunkStore implements ChunkStore {
             Map<String, dynamic>.from(value),
           ),
         )
-        .where((session) => !session.synced)
+        .where((session) => session.accountId == accountId && !session.synced)
         .toList();
   }
 
@@ -280,24 +302,44 @@ class WebChunkStore implements ChunkStore {
   }
 
   @override
-  Future<List<AudioChunk>> pending({int limit = 100}) => _withStore(
-    'readonly',
-    (store) async {
+  Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async {
+    final sessionTransaction = db.transaction('sessions', 'readonly');
+    final sessionValues = await sessionTransaction
+        .objectStore('sessions')
+        .getAll();
+    await sessionTransaction.completed;
+    final sessionIds = sessionValues
+        .cast<Map>()
+        .map(
+          (value) => LocalRecordingDeclaration.fromMap(
+            Map<String, dynamic>.from(value),
+          ),
+        )
+        .where((session) => session.accountId == accountId)
+        .map((session) => session.id)
+        .toSet();
+    return _withStore('readonly', (store) async {
       final values = await store.getAll();
-      return values
-          .cast<Map>()
-          .map((value) => AudioChunk.fromMap(Map<String, dynamic>.from(value)))
-          .where(
-            (chunk) => !<LocalChunkState>{
-              LocalChunkState.terminal,
-              LocalChunkState.released,
-            }.contains(chunk.state),
-          )
-          .take(limit)
-          .toList()
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    },
-  );
+      final chunks =
+          values
+              .cast<Map>()
+              .map(
+                (value) => AudioChunk.fromMap(Map<String, dynamic>.from(value)),
+              )
+              .where(
+                (chunk) =>
+                    sessionIds.contains(chunk.sessionId) &&
+                    !<LocalChunkState>{
+                      LocalChunkState.terminal,
+                      LocalChunkState.released,
+                    }.contains(chunk.state),
+              )
+              .toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return chunks.take(limit).toList();
+    });
+  }
+
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) async =>
       chunk.bytes ?? (throw StateError('Chunk has no browser audio bytes.'));
@@ -326,13 +368,33 @@ class WebChunkStore implements ChunkStore {
     });
   });
   @override
-  Future<int> pendingBytes() => _withStore('readonly', (store) async {
-    final values = await store.getAll();
-    return values.cast<Map>().fold<int>(
-      0,
-      (sum, value) => sum + ((value['bytes'] as Uint8List?)?.length ?? 0),
-    );
-  });
+  Future<int> pendingBytes(String accountId) async {
+    final transaction = db.transaction('sessions', 'readonly');
+    final values = await transaction.objectStore('sessions').getAll();
+    await transaction.completed;
+    final sessionIds = values
+        .cast<Map>()
+        .map(
+          (value) => LocalRecordingDeclaration.fromMap(
+            Map<String, dynamic>.from(value),
+          ),
+        )
+        .where((session) => session.accountId == accountId)
+        .map((session) => session.id)
+        .toSet();
+    return _withStore('readonly', (store) async {
+      final values = await store.getAll();
+      return values.cast<Map>().fold<int>(
+        0,
+        (sum, value) =>
+            sum +
+            (sessionIds.contains(value['sessionId'])
+                ? (value['bytes'] as Uint8List?)?.length ?? 0
+                : 0),
+      );
+    });
+  }
+
   @override
   Future<void> close() async {
     db.close();

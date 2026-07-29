@@ -64,10 +64,7 @@ class BleTransport {
       _connected = state == BluetoothConnectionState.connected;
       if (!_connectionStates.isClosed) _connectionStates.add(state);
     });
-    await _device!.connect(
-      autoConnect: false,
-      timeout: timeout,
-    );
+    await _device!.connect(autoConnect: false, timeout: timeout);
     await _device!.discoverServices();
     if (requiresBond) {
       try {
@@ -168,8 +165,10 @@ class BleTransport {
     _streams[key] = controller;
     () async {
       try {
-        final characteristic =
-            _findCharacteristic(serviceUuid, characteristicUuid);
+        final characteristic = _findCharacteristic(
+          serviceUuid,
+          characteristicUuid,
+        );
         if (characteristic == null) {
           controller.addError(
             StateError('Characteristic not found: $characteristicUuid'),

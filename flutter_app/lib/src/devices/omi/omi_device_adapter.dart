@@ -91,14 +91,16 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       _initialized = true;
       return;
     }
-    await BleTransport.ensurePermissions();
     _initialized = true;
   }
 
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     await initialize();
     if (kIsWeb) return;
+    await BleTransport.ensurePermissions();
     if (!await BleTransport.isAdapterOn()) {
       throw StateError('Bluetooth is turned off.');
     }
@@ -134,13 +136,16 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   @override
   Future<void> connect(AudioDeviceDescriptor device) async {
     await initialize();
+    await BleTransport.ensurePermissions();
     await stopScan();
-    final discovered = _found[device.deviceKey] ??
+    final discovered =
+        _found[device.deviceKey] ??
         DiscoveredWearable(
           id: device.deviceKey,
           name: device.displayName,
           type: WearableDeviceType.values.firstWhere(
-            (value) => value.name == (device.metadata['type'] as String? ?? 'omi'),
+            (value) =>
+                value.name == (device.metadata['type'] as String? ?? 'omi'),
             orElse: () => WearableDeviceType.omi,
           ),
           rssi: device.metadata['rssi'] as int? ?? 0,
@@ -154,7 +159,8 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     try {
       await connector.connect();
       _connector = connector;
-      final isOmiFamily = discovered.type == WearableDeviceType.omi ||
+      final isOmiFamily =
+          discovered.type == WearableDeviceType.omi ||
           discovered.type == WearableDeviceType.omiGlass;
       _decoder = WearableAudioDecoder(
         codec: connector.codec,
@@ -281,9 +287,6 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     }
     await connector.startRecording();
     _setState(DeviceTransportState.recording);
-    _controlEvents.add(
-      const DeviceControlEvent(type: DeviceControlEventType.startRecording),
-    );
   }
 
   @override
@@ -292,9 +295,6 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     if (connector == null) return;
     await connector.stopRecording();
     _setState(DeviceTransportState.connectedStandby);
-    _controlEvents.add(
-      const DeviceControlEvent(type: DeviceControlEventType.stopRecording),
-    );
   }
 
   @override

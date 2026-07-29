@@ -11,9 +11,11 @@ class _FakeSource implements CaptureSource {
   final String id;
   @override
   final String kind;
-  final StreamController<Uint8List> _pcm = StreamController<Uint8List>.broadcast();
+  final StreamController<Uint8List> _pcm =
+      StreamController<Uint8List>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings = StreamController<String>.broadcast();
+  final StreamController<String> _warnings =
+      StreamController<String>.broadcast();
   bool _active = false;
 
   @override
@@ -30,10 +32,12 @@ class _FakeSource implements CaptureSource {
   Future<void> start({required int sampleRate, required int channels}) async {
     _active = true;
   }
+
   @override
   Future<void> stop() async {
     _active = false;
   }
+
   @override
   Future<void> dispose() async {
     await stop();
@@ -46,36 +50,105 @@ class _FakeSource implements CaptureSource {
     final bytes = Uint8List(sampleRate * 2 * ms ~/ 1000);
     _pcm.add(bytes);
   }
+
+  Future<void> endPcm() => _pcm.close();
 }
 
 void main() {
-  test('pipeline emits independently decodable chunks from dual sources', () async {
+  test(
+    'pipeline emits independently decodable chunks from dual sources',
+    () async {
+      final mic = _FakeSource('mic', 'microphone');
+      final sys = _FakeSource('sys', 'system');
+      final pipeline = CapturePipeline(
+        sources: <CaptureSource>[mic, sys],
+        chunkMs: 1000,
+        overlapMs: 200,
+        sampleRate: 16000,
+      );
+      final chunks = <int>[];
+      final sub = pipeline.chunks.stream.listen((chunk) {
+        chunks.add(chunk.bytes.length);
+        expect(chunk.channelLayout, 'microphone_left_system_right');
+        expect(chunk.bytes.length, greaterThan(44));
+      });
+
+      final capability = await pipeline.start();
+      expect(capability.microphone, isTrue);
+      expect(capability.systemAudio, isTrue);
+
+      mic.pushSilenceMs(1200);
+      sys.pushSilenceMs(1200);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await pipeline.stop();
+      await sub.cancel();
+      await pipeline.dispose();
+
+      expect(chunks, isNotEmpty);
+    },
+  );
+
+  test('pipeline waits for a temporarily lagging sibling source', () async {
     final mic = _FakeSource('mic', 'microphone');
     final sys = _FakeSource('sys', 'system');
     final pipeline = CapturePipeline(
       sources: <CaptureSource>[mic, sys],
-      chunkMs: 1000,
-      overlapMs: 200,
+      chunkMs: 100,
+      overlapMs: 0,
       sampleRate: 16000,
+      flushInterval: const Duration(milliseconds: 10),
+      partialInterval: const Duration(seconds: 10),
+      sourceStallTimeout: const Duration(seconds: 1),
     );
     final chunks = <int>[];
-    final sub = pipeline.chunks.stream.listen((chunk) {
-      chunks.add(chunk.bytes.length);
-      expect(chunk.channelLayout, 'microphone_left_system_right');
-      expect(chunk.bytes.length, greaterThan(44));
-    });
+    final sub = pipeline.chunks.stream.listen(
+      (chunk) => chunks.add(chunk.durationMs),
+    );
+    await pipeline.start();
 
-    final capability = await pipeline.start();
-    expect(capability.microphone, isTrue);
-    expect(capability.systemAudio, isTrue);
+    mic.pushSilenceMs(120);
+    sys.pushSilenceMs(40);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(chunks, isEmpty);
 
-    mic.pushSilenceMs(1200);
-    sys.pushSilenceMs(1200);
-    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    sys.pushSilenceMs(80);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(chunks, <int>[100]);
+
     await pipeline.stop();
     await sub.cancel();
     await pipeline.dispose();
-
-    expect(chunks, isNotEmpty);
   });
+
+  test(
+    'pipeline finalizes a failed source tail and keeps its sibling running',
+    () async {
+      final mic = _FakeSource('mic', 'microphone');
+      final sys = _FakeSource('sys', 'system');
+      final pipeline = CapturePipeline(
+        sources: <CaptureSource>[mic, sys],
+        chunkMs: 100,
+        overlapMs: 0,
+        sampleRate: 16000,
+        flushInterval: const Duration(milliseconds: 10),
+        partialInterval: const Duration(seconds: 10),
+        sourceStallTimeout: const Duration(milliseconds: 30),
+      );
+      final layouts = <String>[];
+      final sub = pipeline.chunks.stream.listen(
+        (chunk) => layouts.add(chunk.channelLayout),
+      );
+      await pipeline.start();
+
+      mic.pushSilenceMs(220);
+      sys.pushSilenceMs(40);
+      await sys.endPcm();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(layouts, <String>['microphone_left_system_right', 'mono']);
+      await pipeline.stop();
+      await sub.cancel();
+      await pipeline.dispose();
+    },
+  );
 }

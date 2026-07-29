@@ -13,9 +13,10 @@ abstract class ChunkStore {
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes);
   Future<void> clearPartial(String sourceId);
   Future<void> putSession(LocalRecordingDeclaration session);
-  Future<List<LocalRecordingDeclaration>> pendingSessions();
+  Future<void> claimLegacySessions(String accountId);
+  Future<List<LocalRecordingDeclaration>> pendingSessions(String accountId);
   Future<void> markSessionSynced(String id);
-  Future<List<AudioChunk>> pending({int limit = 100});
+  Future<List<AudioChunk>> pending(String accountId, {int limit = 100});
   Future<Uint8List> readBytes(AudioChunk chunk);
   Future<void> setState(
     String id,
@@ -24,7 +25,7 @@ abstract class ChunkStore {
     String? error,
   });
   Future<void> release(String id);
-  Future<int> pendingBytes();
+  Future<int> pendingBytes(String accountId);
   Future<void> close();
 }
 

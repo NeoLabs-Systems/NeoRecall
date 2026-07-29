@@ -46,6 +46,9 @@ class SystemAudioCapturePlugin : public flutter::Plugin {
   void ApplyGainBoostAndConvertToMono(const int16_t* input, int16_t* output,
                                       size_t frame_count, int input_channels,
                                       float gain_boost);
+  void ResampleAndConvertToMono(
+      const int16_t* input, size_t input_frame_count, int input_channels,
+      int16_t* output, size_t output_frame_count, float gain_boost);
   void SendStatusUpdate(bool is_active);
   void SendDecibelUpdate(double decibel);
 
@@ -84,4 +87,3 @@ class SystemAudioCapturePlugin : public flutter::Plugin {
 }  // namespace audio_capture
 
 #endif  // FLUTTER_PLUGIN_SYSTEM_AUDIO_CAPTURE_PLUGIN_H_
-

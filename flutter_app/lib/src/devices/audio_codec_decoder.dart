@@ -44,7 +44,10 @@ class WearableAudioDecoder {
   }
 
   /// Omi BLE packets: [packet_id_low, packet_id_high, packet_index, ...audio]
-  static List<int> stripHeaderIfPresent(List<int> raw, {required bool enabled}) {
+  static List<int> stripHeaderIfPresent(
+    List<int> raw, {
+    required bool enabled,
+  }) {
     if (!enabled || raw.length <= 3) return raw;
     // Heuristic: multi-byte audio frames with tiny leading counters.
     return raw.sublist(3);

@@ -1,9 +1,11 @@
 import 'audio_device_adapter.dart';
-import 'omi/omi_device_adapter.dart';
 
-/// Registers all built-in wearable adapters.
+/// Application-level registry bootstrap.
+///
+/// Concrete device protocols are registered here only after their wire format,
+/// lifecycle, and button semantics have been validated. Keeping the default
+/// empty prevents an unknown Bluetooth device from being treated as a
+/// compatible audio source.
 AudioDeviceAdapterRegistry createDefaultDeviceRegistry() {
-  final registry = AudioDeviceAdapterRegistry();
-  registry.register(OmiDeviceAdapter());
-  return registry;
+  return AudioDeviceAdapterRegistry();
 }

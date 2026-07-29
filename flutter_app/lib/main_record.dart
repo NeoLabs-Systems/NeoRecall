@@ -48,7 +48,8 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<bool> _consent() async {
     if (widget.controller.consentAccepted) return true;
-    final accepted = await showDialog<bool>(
+    final accepted =
+        await showDialog<bool>(
           context: context,
           barrierDismissible: false,
           builder: (context) => AlertDialog(
@@ -90,9 +91,9 @@ class _RecordScreenState extends State<RecordScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
 
@@ -106,7 +107,9 @@ class _RecordScreenState extends State<RecordScreen> {
     await widget.controller.importAudio(
       file!.bytes!,
       file.name,
-      file.extension == 'wav' ? 'audio/wav' : 'audio/${file.extension ?? 'mpeg'}',
+      file.extension == 'wav'
+          ? 'audio/wav'
+          : 'audio/${file.extension ?? 'mpeg'}',
     );
   }
 
@@ -125,8 +128,8 @@ class _RecordScreenState extends State<RecordScreen> {
             description: _isMobile
                 ? 'Mobile capture prefers a connected Bluetooth device and falls back to the phone microphone. Android keeps a foreground service alive while recording.'
                 : _isDesktop
-                    ? 'Desktop can capture microphone and system audio together. Permissions are requested up front and recording stays visibly active.'
-                    : 'Browser capture supports microphone and optional tab/system audio through the browser permission flow.',
+                ? 'Desktop can capture microphone and system audio together. Permissions are requested up front and recording stays visibly active.'
+                : 'Browser capture supports microphone and optional tab/system audio through the browser permission flow.',
           ),
           const SizedBox(height: 24),
           if (controller.warning != null) ...<Widget>[
@@ -149,10 +152,11 @@ class _RecordScreenState extends State<RecordScreen> {
                   height: 156,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: (controller.isRecording
-                            ? palette.secondary
-                            : palette.surfaceMuted)
-                        .withValues(alpha: .18),
+                    color:
+                        (controller.isRecording
+                                ? palette.secondary
+                                : palette.surfaceMuted)
+                            .withValues(alpha: .18),
                     border: Border.all(
                       color: controller.isRecording
                           ? palette.secondary
@@ -212,10 +216,13 @@ class _RecordScreenState extends State<RecordScreen> {
                   const SizedBox(height: 10),
                   Text(
                     controller.preferredDeviceLabel == null
-                        ? 'Bluetooth is preferred. No device is linked yet, so the phone microphone is used until an adapter registers one.'
+                        ? 'Bluetooth is preferred. Connect a supported device, or select the phone microphone to record now.'
                         : 'Preferred device: ${controller.preferredDeviceLabel}',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: palette.textSecondary, height: 1.45),
+                    style: TextStyle(
+                      color: palette.textSecondary,
+                      height: 1.45,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -224,7 +231,9 @@ class _RecordScreenState extends State<RecordScreen> {
                     runSpacing: 10,
                     children: <Widget>[
                       OutlinedButton.icon(
-                        onPressed: controller.isRecording || controller.scanningWearables
+                        onPressed:
+                            controller.isRecording ||
+                                controller.scanningWearables
                             ? null
                             : () async {
                                 final messenger = ScaffoldMessenger.of(context);
@@ -240,7 +249,9 @@ class _RecordScreenState extends State<RecordScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.bluetooth_searching),
                         label: Text(
@@ -254,10 +265,10 @@ class _RecordScreenState extends State<RecordScreen> {
                         onSelected: controller.isRecording
                             ? null
                             : (value) => setState(() {
-                                  bluetoothPreferred = true;
-                                  microphone = true;
-                                  systemAudio = false;
-                                }),
+                                bluetoothPreferred = true;
+                                microphone = true;
+                                systemAudio = false;
+                              }),
                         avatar: const Icon(Icons.bluetooth_connected),
                         label: const Text('Bluetooth device'),
                       ),
@@ -266,10 +277,10 @@ class _RecordScreenState extends State<RecordScreen> {
                         onSelected: controller.isRecording
                             ? null
                             : (value) => setState(() {
-                                  bluetoothPreferred = false;
-                                  microphone = true;
-                                  systemAudio = false;
-                                }),
+                                bluetoothPreferred = false;
+                                microphone = true;
+                                systemAudio = false;
+                              }),
                         avatar: const Icon(Icons.mic_none_rounded),
                         label: const Text('Phone microphone'),
                       ),
@@ -286,7 +297,9 @@ class _RecordScreenState extends State<RecordScreen> {
                           selected
                               ? Icons.bluetooth_connected
                               : Icons.bluetooth,
-                          color: selected ? palette.accentHover : palette.textSecondary,
+                          color: selected
+                              ? palette.accentHover
+                              : palette.textSecondary,
                         ),
                         title: Text(device.displayName),
                         subtitle: Text(
@@ -298,9 +311,12 @@ class _RecordScreenState extends State<RecordScreen> {
                                 onPressed: controller.isRecording
                                     ? null
                                     : () async {
-                                        final messenger = ScaffoldMessenger.of(context);
+                                        final messenger = ScaffoldMessenger.of(
+                                          context,
+                                        );
                                         try {
-                                          await controller.preferBluetoothDevice(device);
+                                          await controller
+                                              .preferBluetoothDevice(device);
                                           if (!mounted) return;
                                           setState(() {
                                             bluetoothPreferred = true;
@@ -309,7 +325,9 @@ class _RecordScreenState extends State<RecordScreen> {
                                           });
                                         } catch (error) {
                                           messenger.showSnackBar(
-                                            SnackBar(content: Text(error.toString())),
+                                            SnackBar(
+                                              content: Text(error.toString()),
+                                            ),
                                           );
                                         }
                                       },
@@ -342,7 +360,9 @@ class _RecordScreenState extends State<RecordScreen> {
                               ? Icons.desktop_windows_outlined
                               : Icons.headphones_outlined,
                         ),
-                        label: Text(_isDesktop ? 'Device audio' : 'Tab/system audio'),
+                        label: Text(
+                          _isDesktop ? 'Device audio' : 'Tab/system audio',
+                        ),
                       ),
                     ],
                   ),

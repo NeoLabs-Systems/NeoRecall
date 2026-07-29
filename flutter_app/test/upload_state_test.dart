@@ -12,6 +12,7 @@ class _Api extends NeoRecallApiClient {
   Map<String, dynamic> receipt = <String, dynamic>{};
   List<String> statusIds = <String>[];
   List<String> releasedIds = <String>[];
+  bool failSessionSync = false;
   @override
   Future<List<Map<String, dynamic>>> chunkStatuses(List<String> ids) async {
     statusIds = ids;
@@ -22,16 +23,27 @@ class _Api extends NeoRecallApiClient {
   Future<void> releaseChunks(List<String> ids) async {
     releasedIds.addAll(ids);
   }
+
+  @override
+  Future<void> syncSession(LocalRecordingDeclaration session) async {
+    if (failSessionSync) {
+      throw const ApiException(503, 'UNAVAILABLE', 'server unavailable');
+    }
+  }
 }
 
 class _Store implements ChunkStore {
   _Store(this.chunk);
   AudioChunk chunk;
   bool audioDeleted = false;
+  final List<String> requestedAccounts = <String>[];
+  List<LocalRecordingDeclaration> sessions = <LocalRecordingDeclaration>[];
   @override
-  Future<List<AudioChunk>> pending({int limit = 100}) async => <AudioChunk>[
-    chunk,
-  ];
+  Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async {
+    requestedAccounts.add(accountId);
+    return <AudioChunk>[chunk];
+  }
+
   @override
   Future<void> setState(
     String id,
@@ -51,8 +63,11 @@ class _Store implements ChunkStore {
   }
 
   @override
-  Future<List<LocalRecordingDeclaration>> pendingSessions() async =>
-      <LocalRecordingDeclaration>[];
+  Future<void> claimLegacySessions(String accountId) async {}
+  @override
+  Future<List<LocalRecordingDeclaration>> pendingSessions(
+    String accountId,
+  ) async => sessions;
   @override
   Future<void> initialize() async {}
   @override
@@ -68,7 +83,7 @@ class _Store implements ChunkStore {
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) async => Uint8List(0);
   @override
-  Future<int> pendingBytes() async => 0;
+  Future<int> pendingBytes(String accountId) async => 0;
   @override
   Future<void> close() async {}
 }
@@ -94,6 +109,21 @@ AudioChunk _chunk() => AudioChunk(
   },
 );
 
+LocalRecordingDeclaration _session() => LocalRecordingDeclaration(
+  id: 'session',
+  accountId: 'account',
+  sourceId: 'source',
+  deviceId: 'device',
+  deviceClientUuid: 'device-client',
+  deviceName: 'Device',
+  platform: 'android',
+  startedAt: DateTime.utc(2026, 7, 13),
+  timezone: 'UTC',
+  consentAttestedAt: DateTime.utc(2026, 7, 13),
+  sourceKind: 'microphone',
+  channelLayout: 'mono',
+);
+
 void main() {
   test(
     'client releases audio only after every terminal proof field exists',
@@ -101,6 +131,7 @@ void main() {
       final api = _Api();
       final store = _Store(_chunk());
       final pump = UploadPump(store: store, api: api);
+      pump.accountId = 'account';
       api.receipt = <String, dynamic>{
         'chunkId': 'server-chunk',
         'state': 'transcribed',
@@ -119,4 +150,36 @@ void main() {
       expect(api.releasedIds, <String>['server-chunk']);
     },
   );
+
+  test(
+    'upload pump never reads a ledger without an authenticated owner',
+    () async {
+      final api = _Api();
+      final store = _Store(_chunk());
+      final pump = UploadPump(store: store, api: api);
+
+      await pump.pump();
+      expect(store.requestedAccounts, isEmpty);
+      expect(api.statusIds, isEmpty);
+
+      pump.accountId = 'account-b';
+      api.receipt = <String, dynamic>{
+        'chunkId': 'server-chunk',
+        'state': 'uploaded',
+      };
+      await pump.pump();
+      expect(store.requestedAccounts, <String>['account-b']);
+    },
+  );
+
+  test('chunks wait until their own session declaration succeeds', () async {
+    final api = _Api()..failSessionSync = true;
+    final store = _Store(_chunk())
+      ..sessions = <LocalRecordingDeclaration>[_session()];
+    final pump = UploadPump(store: store, api: api)..accountId = 'account';
+
+    await pump.pump();
+    expect(api.statusIds, isEmpty);
+    expect(store.audioDeleted, isFalse);
+  });
 }

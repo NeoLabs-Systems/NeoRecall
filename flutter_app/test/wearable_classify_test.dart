@@ -48,32 +48,49 @@ void main() {
     );
   });
 
-  test('does not claim Apple Watch or Ray-Ban Meta as supported BLE devices', () {
-    expect(
-      DiscoveredWearable.classify(
-        name: 'Apple Watch',
-        serviceUuids: const <String>[],
-      ),
-      isNot(WearableDeviceType.omi),
-    );
-    // Without service match, unknown names become custom (not silently omi).
-    expect(
-      DiscoveredWearable.classify(
-        name: 'Ray-Ban Meta',
-        serviceUuids: const <String>[],
-      ),
-      WearableDeviceType.custom,
-    );
-  });
+  test(
+    'does not claim Apple Watch or Ray-Ban Meta as supported BLE devices',
+    () {
+      expect(
+        DiscoveredWearable.classify(
+          name: 'Apple Watch',
+          serviceUuids: const <String>[],
+        ),
+        isNot(WearableDeviceType.omi),
+      );
+      // Without service match, unknown names become custom (not silently omi).
+      expect(
+        DiscoveredWearable.classify(
+          name: 'Ray-Ban Meta',
+          serviceUuids: const <String>[],
+        ),
+        WearableDeviceType.custom,
+      );
+    },
+  );
 
   test('pcm8 and pcm16 decoding produce PCM16 output', () {
-    final pcm8 = WearableAudioDecoder(codec: WearableAudioCodec.pcm8, stripBleHeader: false);
+    final pcm8 = WearableAudioDecoder(
+      codec: WearableAudioCodec.pcm8,
+      stripBleHeader: false,
+    );
     final decoded8 = pcm8.decodePacket(<int>[128, 129, 127, 130])!;
     expect(decoded8.length, 8);
 
-    final pcm16 = WearableAudioDecoder(codec: WearableAudioCodec.pcm16, stripBleHeader: true);
+    final pcm16 = WearableAudioDecoder(
+      codec: WearableAudioCodec.pcm16,
+      stripBleHeader: true,
+    );
     // header(3) + two int16 samples
-    final decoded16 = pcm16.decodePacket(<int>[1, 0, 0, 0x10, 0x00, 0x20, 0x00])!;
+    final decoded16 = pcm16.decodePacket(<int>[
+      1,
+      0,
+      0,
+      0x10,
+      0x00,
+      0x20,
+      0x00,
+    ])!;
     expect(decoded16, <int>[0x10, 0x00, 0x20, 0x00]);
 
     final assembler = OmiFrameAssembler();
