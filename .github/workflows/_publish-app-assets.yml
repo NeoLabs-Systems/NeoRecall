@@ -110,18 +110,21 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
-          declare -A uploaded_by_name=()
-          while IFS= read -r name; do
-            uploaded_by_name["$name"]=1
-          done < <(
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-              --jq '.assets[].name'
-          )
+          uploaded_assets="$(
+            gh release view \
+              "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets
+          )"
 
           for asset in "${assets[@]}"; do
             name="$(basename "$asset")"
-            if [[ -z "${uploaded_by_name[$name]:-}" ]]; then
+            if ! jq \
+              --exit-status \
+              --arg name "$name" \
+              '.assets | map(.name) | index($name) != null' \
+              <<<"$uploaded_assets" \
+              >/dev/null; then
               echo "::error::Release asset was not attached: $name"
               exit 1
             fi
