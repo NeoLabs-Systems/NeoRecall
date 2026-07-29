@@ -167,6 +167,10 @@ jobs:
 
   publish-app-assets:
     name: Complete GitHub prerelease
+    if: >-
+      always() &&
+      needs.release.result == 'success' &&
+      needs.publish-package.result == 'success'
     needs:
       - release
       - build-apps

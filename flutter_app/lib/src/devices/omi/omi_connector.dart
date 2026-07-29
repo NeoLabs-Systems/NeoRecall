@@ -9,6 +9,8 @@ class OmiConnector extends WearableConnector {
 
   WearableAudioCodec _codec = WearableAudioCodec.pcm8;
 
+  WearableAudioCodec get fallbackCodec => WearableAudioCodec.pcm8;
+
   @override
   WearableAudioCodec get codec => _codec;
 
@@ -25,26 +27,22 @@ class OmiConnector extends WearableConnector {
     } catch (_) {}
     try {
       track(
-        transport
-            .getCharacteristicStream(
-              WearableDeviceUuids.batteryService,
-              WearableDeviceUuids.batteryLevel,
-            )
-            .listen((value) {
-              if (value.isNotEmpty) batteryLevels.add(value.first);
-            }),
+        (await transport.characteristicStream(
+          WearableDeviceUuids.batteryService,
+          WearableDeviceUuids.batteryLevel,
+        )).listen((value) {
+          if (value.isNotEmpty) batteryLevels.add(value.first);
+        }),
       );
     } catch (_) {}
     try {
       track(
-        transport
-            .getCharacteristicStream(
-              WearableDeviceUuids.buttonService,
-              WearableDeviceUuids.buttonTrigger,
-            )
-            .listen((value) {
-              if (value.isNotEmpty) buttonEvents.add(value);
-            }),
+        (await transport.characteristicStream(
+          WearableDeviceUuids.buttonService,
+          WearableDeviceUuids.buttonTrigger,
+        )).listen((value) {
+          if (value.isNotEmpty) buttonEvents.add(value);
+        }),
       );
     } catch (_) {}
   }
@@ -68,7 +66,8 @@ class OmiConnector extends WearableConnector {
         WearableDeviceUuids.omiService,
         WearableDeviceUuids.omiAudioCodec,
       );
-      final codecId = value.isNotEmpty ? value.first : 1;
+      if (value.isEmpty) return fallbackCodec;
+      final codecId = value.first;
       switch (codecId) {
         case 1:
           return WearableAudioCodec.pcm8;
@@ -77,10 +76,10 @@ class OmiConnector extends WearableConnector {
         case 21:
           return WearableAudioCodec.opusFs320;
         default:
-          return WearableAudioCodec.unknown;
+          return fallbackCodec;
       }
     } catch (_) {
-      return WearableAudioCodec.pcm8;
+      return fallbackCodec;
     }
   }
 
@@ -100,25 +99,27 @@ class OmiConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    track(
-      transport
-          .getCharacteristicStream(
-            WearableDeviceUuids.omiService,
-            WearableDeviceUuids.omiAudioData,
-          )
-          .listen((value) {
-            if (value.isNotEmpty) audioBytes.add(value);
-          }),
+    trackRecording(
+      (await transport.characteristicStream(
+        WearableDeviceUuids.omiService,
+        WearableDeviceUuids.omiAudioData,
+      )).listen((value) {
+        if (value.isNotEmpty) audioBytes.add(value);
+      }),
     );
     recording = true;
   }
 
   @override
   Future<void> stopRecording() async {
+    await cancelRecordingSubscriptions();
     recording = false;
   }
 }
 
 class OmiGlassConnector extends OmiConnector {
   OmiGlassConnector({required super.device, required super.transport});
+
+  @override
+  WearableAudioCodec get fallbackCodec => WearableAudioCodec.opus;
 }

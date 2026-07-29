@@ -4,6 +4,9 @@ import 'dart:js' as js;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 
+import '../capture/bluetooth_capture_source.dart';
+import '../capture/capture_pipeline.dart';
+import '../devices/audio_device_adapter.dart';
 import 'audio_frame.dart';
 import 'recorder.dart';
 
@@ -15,6 +18,9 @@ class WebRecallRecorder implements RecallRecorder {
   final StreamController<String> _warnings =
       StreamController<String>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
+  CapturePipeline? _bluetoothPipeline;
+  final List<StreamSubscription<dynamic>> _bluetoothSubscriptions =
+      <StreamSubscription<dynamic>>[];
   bool _recording = false;
   @override
   Stream<RecordedAudioChunk> get chunks => _chunks.stream;
@@ -33,7 +39,43 @@ class WebRecallRecorder implements RecallRecorder {
     required bool systemAudio,
     required int chunkMs,
     required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
   }) async {
+    if (externalDevice != null) {
+      if (microphone || systemAudio) {
+        throw StateError(
+          'Browser Bluetooth capture is an alternative source; disable browser microphone and tab audio first.',
+        );
+      }
+      final pipeline = CapturePipeline(
+        sources: <BluetoothCaptureSource>[
+          BluetoothCaptureSource(
+            adapter: externalDevice.adapter,
+            device: externalDevice.descriptor,
+            connectOnStart: false,
+          ),
+        ],
+        chunkMs: chunkMs,
+        overlapMs: overlapMs,
+      );
+      _bluetoothSubscriptions
+        ..add(pipeline.chunks.stream.listen(_chunks.add))
+        ..add(pipeline.warnings.stream.listen(_warnings.add))
+        ..add(pipeline.levels.stream.listen(_levels.add));
+      try {
+        final capability = await pipeline.start();
+        _bluetoothPipeline = pipeline;
+        _recording = true;
+        return capability;
+      } catch (_) {
+        await pipeline.dispose();
+        for (final subscription in _bluetoothSubscriptions) {
+          await subscription.cancel();
+        }
+        _bluetoothSubscriptions.clear();
+        rethrow;
+      }
+    }
     final capture = js_util.getProperty<Object?>(
       js_util.globalThis,
       'NeoRecallCapture',
@@ -206,6 +248,18 @@ class WebRecallRecorder implements RecallRecorder {
   @override
   Future<void> stop() async {
     if (!_recording) return;
+    final bluetoothPipeline = _bluetoothPipeline;
+    if (bluetoothPipeline != null) {
+      _bluetoothPipeline = null;
+      await bluetoothPipeline.stop();
+      await bluetoothPipeline.dispose();
+      for (final subscription in _bluetoothSubscriptions) {
+        await subscription.cancel();
+      }
+      _bluetoothSubscriptions.clear();
+      _recording = false;
+      return;
+    }
     final capture = js_util.getProperty<Object?>(
       js_util.globalThis,
       'NeoRecallCapture',

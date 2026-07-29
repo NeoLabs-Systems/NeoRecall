@@ -26,7 +26,11 @@ class NeoRecallApplication : Application() {
     loader.startInitialization(this)
     loader.ensureInitializationComplete(this, null)
 
-    flutterEngine = FlutterEngine(this)
+    // This process-owned engine is registered exactly once below. Leaving the
+    // constructor's automatic registration enabled and then invoking the
+    // generated registrant again can leave global plugin channels (notably
+    // audioplayers) attached inconsistently across Activity reattachments.
+    flutterEngine = FlutterEngine(this, null, false)
     GeneratedPluginRegistrant.registerWith(flutterEngine)
     backgroundCaptureChannel = BackgroundCaptureChannel(this).also {
       it.register(flutterEngine.dartExecutor.binaryMessenger)

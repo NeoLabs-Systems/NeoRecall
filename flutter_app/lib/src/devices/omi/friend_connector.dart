@@ -15,23 +15,17 @@ class FriendPendantConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    track(
-      transport
-          .getCharacteristicStream(
-            WearableDeviceUuids.friendService,
-            WearableDeviceUuids.friendAudio,
-          )
-          .listen((data) {
-            final payload = _processAudioPacket(data);
-            if (payload == null || payload.isEmpty) return;
-            for (
-              var i = 0;
-              i + lc3FrameSize <= payload.length;
-              i += lc3FrameSize
-            ) {
-              audioBytes.add(payload.sublist(i, i + lc3FrameSize));
-            }
-          }),
+    trackRecording(
+      (await transport.characteristicStream(
+        WearableDeviceUuids.friendService,
+        WearableDeviceUuids.friendAudio,
+      )).listen((data) {
+        final payload = _processAudioPacket(data);
+        if (payload == null || payload.isEmpty) return;
+        for (var i = 0; i + lc3FrameSize <= payload.length; i += lc3FrameSize) {
+          audioBytes.add(payload.sublist(i, i + lc3FrameSize));
+        }
+      }),
     );
     recording = true;
   }
@@ -46,6 +40,7 @@ class FriendPendantConnector extends WearableConnector {
 
   @override
   Future<void> stopRecording() async {
+    await cancelRecordingSubscriptions();
     recording = false;
   }
 }

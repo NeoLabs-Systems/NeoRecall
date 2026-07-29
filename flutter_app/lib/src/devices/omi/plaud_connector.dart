@@ -11,24 +11,28 @@ class PlaudConnector extends WearableConnector {
   static const int _cmdStopRecord = 23;
   static const int _cmdSyncFileStart = 28;
   static const int _cmdStopSync = 30;
+  static const int _audioFrameBytes = 80;
+  static const int _sessionSetupAttempts = 3;
+  static const Duration _notificationReadyDelay = Duration(seconds: 2);
+  static const Duration _commandTimeout = Duration(seconds: 10);
+  static const Duration _recordResetDelay = Duration(milliseconds: 500);
+  static const Duration _syncReadyDelay = Duration(seconds: 1);
 
-  final Map<int, StreamController<List<int>>> _queues =
-      <int, StreamController<List<int>>>{};
+  final Map<int, Completer<List<int>>> _pending = <int, Completer<List<int>>>{};
   StreamSubscription<List<int>>? _notificationSub;
   int? _sessionId;
+  final List<int> _audioBuffer = <int>[];
 
   @override
-  WearableAudioCodec get codec => WearableAudioCodec.opus;
+  WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
 
   @override
   Future<void> onConnected() async {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    _notificationSub = transport
-        .getCharacteristicStream(
-          WearableDeviceUuids.plaudService,
-          WearableDeviceUuids.plaudNotify,
-        )
-        .listen(_handleNotification);
+    await Future<void>.delayed(_notificationReadyDelay);
+    _notificationSub = (await transport.characteristicStream(
+      WearableDeviceUuids.plaudService,
+      WearableDeviceUuids.plaudNotify,
+    )).listen(_handleNotification);
     track(_notificationSub!);
   }
 
@@ -36,15 +40,20 @@ class PlaudConnector extends WearableConnector {
     if (data.isEmpty) return;
     if (data[0] == 2) {
       final chunk = _parseAudioChunk(data.sublist(1));
-      if (chunk != null) audioBytes.add(chunk);
+      if (chunk != null) {
+        _audioBuffer.addAll(chunk);
+        while (_audioBuffer.length >= _audioFrameBytes) {
+          audioBytes.add(_audioBuffer.sublist(0, _audioFrameBytes));
+          _audioBuffer.removeRange(0, _audioFrameBytes);
+        }
+      }
       return;
     }
     if (data.length >= 3) {
       final cmdId = data[1] | (data[2] << 8);
       final payload = data.length > 3 ? data.sublist(3) : <int>[];
-      _queues
-          .putIfAbsent(cmdId, () => StreamController<List<int>>.broadcast())
-          .add(payload);
+      final pending = _pending.remove(cmdId);
+      if (pending != null && !pending.isCompleted) pending.complete(payload);
     }
   }
 
@@ -58,19 +67,23 @@ class PlaudConnector extends WearableConnector {
   }
 
   Future<List<int>?> _sendCommand(int cmdId, List<int> payload) async {
-    _queues.putIfAbsent(cmdId, () => StreamController<List<int>>.broadcast());
+    if (_pending.containsKey(cmdId)) {
+      throw StateError('PLAUD command $cmdId is already pending.');
+    }
+    final pending = Completer<List<int>>();
+    _pending[cmdId] = pending;
     final command = <int>[1, cmdId & 0xFF, (cmdId >> 8) & 0xFF, ...payload];
-    await transport.writeCharacteristic(
-      WearableDeviceUuids.plaudService,
-      WearableDeviceUuids.plaudWrite,
-      command,
-    );
     try {
-      return await _queues[cmdId]!.stream.first.timeout(
-        const Duration(seconds: 10),
+      await transport.writeCharacteristic(
+        WearableDeviceUuids.plaudService,
+        WearableDeviceUuids.plaudWrite,
+        command,
       );
+      return await pending.future.timeout(_commandTimeout);
     } on TimeoutException {
       return null;
+    } finally {
+      if (identical(_pending[cmdId], pending)) _pending.remove(cmdId);
     }
   }
 
@@ -84,19 +97,39 @@ class PlaudConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    final payload = <int>[..._toBytes32(1), ..._toBytes32(0), ..._toBytes32(0)];
-    final response = await _sendCommand(_cmdStartRecord, payload);
-    if (response != null && response.length >= 4) {
-      _sessionId = _toInt32(response.sublist(0, 4));
-      await _sendCommand(_cmdSyncFileStart, <int>[
-        ..._toBytes64(_sessionId!),
-        ..._toBytes64(0),
+    for (var attempt = 0; attempt < _sessionSetupAttempts; attempt += 1) {
+      if (attempt > 0) {
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
+      await _sendCommand(_cmdStopRecord, <int>[
+        ..._toBytes32(0),
+        ..._toBytes32(0),
+      ]);
+      await Future<void>.delayed(_recordResetDelay);
+      final response = await _sendCommand(_cmdStartRecord, <int>[
+        ..._toBytes32(1),
+        ..._toBytes32(0),
+        ..._toBytes32(0),
+      ]);
+      if (response == null || response.length < 10) continue;
+      final sessionId = _toInt32(response.sublist(0, 4));
+      final startTime = _toInt32(response.sublist(4, 8));
+      await Future<void>.delayed(_syncReadyDelay);
+      final syncResponse = await _sendCommand(_cmdSyncFileStart, <int>[
+        ..._toBytes64(sessionId),
+        ..._toBytes64(startTime),
         ..._toBytes64(0x7FFFFFFF),
       ]);
-      recording = true;
-      return;
+      if (syncResponse != null) {
+        _sessionId = sessionId;
+        recording = true;
+        return;
+      }
     }
-    throw StateError('PLAUD failed to start recording.');
+    throw StateError(
+      'PLAUD failed to establish a recording session after '
+      '$_sessionSetupAttempts attempts.',
+    );
   }
 
   @override
@@ -115,6 +148,7 @@ class PlaudConnector extends WearableConnector {
         ]);
       }
     } finally {
+      _audioBuffer.clear();
       recording = false;
       _sessionId = null;
     }
@@ -130,5 +164,27 @@ class PlaudConnector extends WearableConnector {
     (value >> 24) & 0xFF,
   ];
 
-  List<int> _toBytes64(int value) => <int>[..._toBytes32(value), 0, 0, 0, 0];
+  List<int> _toBytes64(int value) => <int>[
+    value & 0xFF,
+    (value >> 8) & 0xFF,
+    (value >> 16) & 0xFF,
+    (value >> 24) & 0xFF,
+    (value >> 32) & 0xFF,
+    (value >> 40) & 0xFF,
+    (value >> 48) & 0xFF,
+    (value >> 56) & 0xFF,
+  ];
+
+  @override
+  Future<void> dispose() async {
+    await super.dispose();
+    for (final pending in _pending.values) {
+      if (!pending.isCompleted) {
+        pending.completeError(
+          StateError('PLAUD disconnected before the command completed.'),
+        );
+      }
+    }
+    _pending.clear();
+  }
 }

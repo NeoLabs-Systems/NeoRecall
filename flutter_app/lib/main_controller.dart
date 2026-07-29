@@ -9,6 +9,9 @@ import 'package:uuid/uuid.dart';
 import 'src/api_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/desktop/startup.dart';
+import 'src/devices/audio_device_adapter.dart';
+import 'src/devices/device_registry_bootstrap.dart';
+import 'src/devices/device_session_controller.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
@@ -19,7 +22,6 @@ import 'src/recording/audio_frame.dart';
 import 'src/recording/audio_level_scale.dart';
 import 'src/recording/recorder.dart';
 import 'src/recording/recorder_mobile.dart';
-import 'src/devices/audio_device_adapter.dart';
 import 'src/sync/chunk_store.dart';
 import 'src/sync/sync_coordinator.dart';
 
@@ -38,9 +40,23 @@ class NeoRecallController extends ChangeNotifier {
     NeoRecallApiClient? api,
     ChunkStore? store,
     RecallRecorder? recorder,
+    AudioDeviceAdapterRegistry? audioDeviceRegistry,
+    DeviceSessionController? audioDeviceSessions,
   }) : api = api ?? NeoRecallApiClient(baseUrl: _defaultBackendUrl),
        store = store ?? createChunkStore(),
-       recorder = recorder ?? createRecorder();
+       recorder = recorder ?? createRecorder() {
+    final mobileRecorder = this.recorder;
+    if (mobileRecorder is MobileRecallRecorder) {
+      this.audioDeviceRegistry = mobileRecorder.registry;
+      this.audioDeviceSessions = mobileRecorder.devices;
+    } else {
+      this.audioDeviceRegistry =
+          audioDeviceRegistry ?? createDefaultDeviceRegistry();
+      this.audioDeviceSessions =
+          audioDeviceSessions ??
+          DeviceSessionController(registry: this.audioDeviceRegistry);
+    }
+  }
 
   static const String _configuredBackendUrl = String.fromEnvironment(
     'NEORECALL_API_URL',
@@ -113,6 +129,8 @@ class NeoRecallController extends ChangeNotifier {
   final NeoRecallApiClient api;
   final ChunkStore store;
   final RecallRecorder recorder;
+  late final AudioDeviceAdapterRegistry audioDeviceRegistry;
+  late final DeviceSessionController audioDeviceSessions;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final Uuid _uuid = const Uuid();
   final AudioLevelScale _audioLevelScale = const AudioLevelScale();
@@ -170,7 +188,7 @@ class NeoRecallController extends ChangeNotifier {
   String? _pendingPassword;
   bool _initializing = false;
   bool _syncInitialized = false;
-  bool _mobileInitialized = false;
+  bool _deviceRuntimeInitialized = false;
   bool _runtimeSubscriptionsReady = false;
   String? initializationError;
 
@@ -285,26 +303,36 @@ class NeoRecallController extends ChangeNotifier {
           await _preferences!.remove('username');
         }
       }
-      if (recorder is MobileRecallRecorder && !_mobileInitialized) {
-        final mobile = recorder as MobileRecallRecorder;
-        await mobile.initialize(accountId: accountId);
-        _mobileInitialized = true;
-        preferBluetoothCapture = mobile.devices.preferBluetooth;
-        preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
-        _deviceStateSubscription = mobile.devices.states.listen((state) {
-          preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+      if (!_deviceRuntimeInitialized) {
+        if (recorder is MobileRecallRecorder) {
+          await (recorder as MobileRecallRecorder).initialize(
+            accountId: accountId,
+          );
+        } else {
+          await audioDeviceRegistry.initializeAll();
+          await audioDeviceSessions.bindAccount(accountId);
+        }
+        _deviceRuntimeInitialized = true;
+        preferBluetoothCapture = audioDeviceSessions.preferBluetooth;
+        preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
+        _deviceStateSubscription = audioDeviceSessions.states.listen((state) {
+          preferredDeviceLabel =
+              audioDeviceSessions.preferredDevice?.displayName;
           _handleDeviceTransportState(state);
           notifyListeners();
         });
-        _deviceControlSubscription = mobile.devices.controlEvents.listen(
+        _deviceControlSubscription = audioDeviceSessions.controlEvents.listen(
           _handleDeviceControlEvent,
         );
-        _backgroundSubscription = mobile.background.events.listen((event) {
-          if (event.type == BackgroundCaptureEventType.stopRequested &&
-              isRecording) {
-            unawaited(stopRecording());
-          }
-        });
+        if (recorder is MobileRecallRecorder) {
+          final mobile = recorder as MobileRecallRecorder;
+          _backgroundSubscription = mobile.background.events.listen((event) {
+            if (event.type == BackgroundCaptureEventType.stopRequested &&
+                isRecording) {
+              unawaited(stopRecording());
+            }
+          });
+        }
       }
       if (!_runtimeSubscriptionsReady) {
         _attachRuntimeSubscriptions();
@@ -485,12 +513,9 @@ class NeoRecallController extends ChangeNotifier {
     accountId = user['id'] as String;
     username = user['username'] as String;
     sync.pump.accountId = accountId;
-    if (recorder is MobileRecallRecorder) {
-      final mobile = recorder as MobileRecallRecorder;
-      await mobile.bindAccount(accountId);
-      preferBluetoothCapture = mobile.devices.preferBluetooth;
-      preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
-    }
+    await audioDeviceSessions.bindAccount(accountId);
+    preferBluetoothCapture = audioDeviceSessions.preferBluetooth;
+    preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
     await _secureStorage.write(key: 'sessionToken', value: api.token);
     await _preferences?.setString('accountId', accountId!);
     await _preferences?.setString('username', username!);
@@ -500,10 +525,8 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<void> logout() async {
     if (isRecording) await stopRecording();
-    if (recorder is MobileRecallRecorder) {
-      await (recorder as MobileRecallRecorder).bindAccount(null);
-      preferredDeviceLabel = null;
-    }
+    await audioDeviceSessions.bindAccount(null);
+    preferredDeviceLabel = null;
     try {
       await api.request('POST', '/api/v1/auth/logout');
     } catch (_) {}
@@ -584,39 +607,27 @@ class NeoRecallController extends ChangeNotifier {
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get hasPreferredBluetoothDevice =>
-      recorder is MobileRecallRecorder &&
-      (recorder as MobileRecallRecorder).devices.hasPreferredDevice;
+      audioDeviceSessions.hasPreferredDevice;
 
   Future<void> setPreferBluetoothCapture(bool enabled) async {
     preferBluetoothCapture = enabled;
-    if (recorder is MobileRecallRecorder) {
-      final mobile = recorder as MobileRecallRecorder;
-      await mobile.devices.setPreferBluetooth(enabled);
-      if (enabled && mobile.devices.hasPreferredDevice) {
-        await mobile.devices.connectPreferred();
-      }
-      preferredDeviceLabel = mobile.devices.preferredDevice?.displayName;
+    await audioDeviceSessions.setPreferBluetooth(enabled);
+    if (enabled && audioDeviceSessions.hasPreferredDevice) {
+      await audioDeviceSessions.connectPreferred();
     }
+    preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
     notifyListeners();
   }
 
   Future<void> preferBluetoothDevice(AudioDeviceDescriptor device) async {
-    if (recorder is! MobileRecallRecorder) {
-      throw StateError(
-        'Bluetooth capture is only available on mobile clients.',
-      );
-    }
-    final mobile = recorder as MobileRecallRecorder;
-    await mobile.devices.prefer(device);
+    await audioDeviceSessions.prefer(device);
     preferBluetoothCapture = true;
     preferredDeviceLabel = device.displayName;
     notifyListeners();
   }
 
   Future<void> clearPreferredBluetoothDevice() async {
-    if (recorder is! MobileRecallRecorder) return;
-    final mobile = recorder as MobileRecallRecorder;
-    await mobile.devices.clearPreferred();
+    await audioDeviceSessions.clearPreferred();
     preferredDeviceLabel = null;
     notifyListeners();
   }
@@ -627,9 +638,7 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> scanForWearables({
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    if (recorder is! MobileRecallRecorder) return;
-    final mobile = recorder as MobileRecallRecorder;
-    if (mobile.registry.adapters.isEmpty) {
+    if (audioDeviceRegistry.adapters.isEmpty) {
       throw StateError(
         'No validated Bluetooth device protocol is installed yet.',
       );
@@ -638,8 +647,9 @@ class NeoRecallController extends ChangeNotifier {
     discoveredWearables = <AudioDeviceDescriptor>[];
     notifyListeners();
     final subs = <StreamSubscription<dynamic>>[];
+    final firstWebDiscovery = Completer<void>();
     try {
-      for (final adapter in mobile.registry.adapters) {
+      for (final adapter in audioDeviceRegistry.adapters) {
         subs.add(
           adapter.discoveries.listen((device) {
             if (discoveredWearables.any(
@@ -657,14 +667,24 @@ class NeoRecallController extends ChangeNotifier {
                 device,
               ];
             }
+            if (kIsWeb && !firstWebDiscovery.isCompleted) {
+              firstWebDiscovery.complete();
+            }
             notifyListeners();
           }),
         );
         await adapter.startScan(timeout: timeout);
       }
-      await Future<void>.delayed(timeout);
+      if (kIsWeb) {
+        await Future.any<void>(<Future<void>>[
+          Future<void>.delayed(timeout),
+          firstWebDiscovery.future,
+        ]);
+      } else {
+        await Future<void>.delayed(timeout);
+      }
     } finally {
-      for (final adapter in mobile.registry.adapters) {
+      for (final adapter in audioDeviceRegistry.adapters) {
         await adapter.stopScan();
       }
       for (final sub in subs) {
@@ -678,31 +698,48 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> startRecording({
     required bool microphone,
     required bool systemAudio,
-    bool? mobileBluetooth,
+    bool? bluetooth,
   }) async {
     if (!consentAccepted) {
       throw StateError('Recording consent must be acknowledged first.');
     }
+    final useBluetooth =
+        bluetooth ?? (!microphone && !systemAudio && preferBluetoothCapture);
+    ExternalAudioCaptureDevice? externalDevice;
+    if (useBluetooth) {
+      final descriptor = audioDeviceSessions.preferredDevice;
+      final adapter =
+          audioDeviceSessions.activeAdapter ??
+          (descriptor == null
+              ? null
+              : audioDeviceRegistry[descriptor.adapterId]);
+      if (descriptor == null || adapter == null) {
+        throw StateError(
+          'Connect a supported Bluetooth device before starting capture.',
+        );
+      }
+      final transportReady =
+          audioDeviceSessions.state == DeviceTransportState.connectedStandby ||
+          audioDeviceSessions.state == DeviceTransportState.recording ||
+          await audioDeviceSessions.connectPreferred();
+      if (!transportReady) {
+        throw StateError(
+          'The Bluetooth device could not be connected. Keep it nearby and try again.',
+        );
+      }
+      externalDevice = ExternalAudioCaptureDevice(
+        adapter: adapter,
+        descriptor: descriptor,
+      );
+      microphone = false;
+      systemAudio = false;
+    }
     if (isMobileCapturePlatform) {
       // Mobile never uses desktop system-audio capture.
       systemAudio = false;
-      final useBluetooth = mobileBluetooth ?? preferBluetoothCapture;
-      if (useBluetooth) {
-        if (!hasPreferredBluetoothDevice) {
-          throw StateError(
-            'Connect a supported Bluetooth device or select the phone microphone.',
-          );
-        }
-        microphone = false;
-      } else {
-        microphone = true;
-      }
+      if (!useBluetooth) microphone = true;
     }
-    if (!microphone &&
-        !systemAudio &&
-        !(isMobileCapturePlatform &&
-            (mobileBluetooth ?? preferBluetoothCapture) &&
-            hasPreferredBluetoothDevice)) {
+    if (!microphone && !systemAudio && externalDevice == null) {
       throw StateError('Select at least one capture source.');
     }
     error = null;
@@ -730,8 +767,7 @@ class NeoRecallController extends ChangeNotifier {
           ? 'combined'
           : systemAudio
           ? 'system'
-          : isMobileCapturePlatform &&
-                (mobileBluetooth ?? preferBluetoothCapture)
+          : useBluetooth
           ? 'wearable'
           : 'microphone';
       _activeSession = LocalRecordingDeclaration(
@@ -765,6 +801,7 @@ class NeoRecallController extends ChangeNotifier {
         overlapMs:
             settings['chunkOverlapMs'] as int? ??
             _fallbackSettings['chunkOverlapMs']! as int,
+        externalDevice: externalDevice,
       );
       warning = capability!.warning;
       final layout = capability!.systemAudio && capability!.microphone
@@ -942,7 +979,7 @@ class NeoRecallController extends ChangeNotifier {
       await startRecording(
         microphone: mode == 'microphone',
         systemAudio: false,
-        mobileBluetooth: mode == 'bluetooth',
+        bluetooth: mode == 'bluetooth',
       );
       notice =
           'Background recording recovered after the app process restarted.';
@@ -971,12 +1008,12 @@ class NeoRecallController extends ChangeNotifier {
         if (isRecording) unawaited(stopRecording());
       case DeviceControlEventType.powerOn:
       case DeviceControlEventType.wake:
-        if (recorder is MobileRecallRecorder) {
-          unawaited(
-            (recorder as MobileRecallRecorder).devices.connectPreferred(),
-          );
-        }
+        unawaited(audioDeviceSessions.connectPreferred());
       case DeviceControlEventType.battery:
+      case DeviceControlEventType.singlePress:
+      case DeviceControlEventType.doublePress:
+      case DeviceControlEventType.longPress:
+      case DeviceControlEventType.buttonRelease:
       case DeviceControlEventType.custom:
         break;
     }
@@ -989,6 +1026,16 @@ class NeoRecallController extends ChangeNotifier {
     if (!isRecording) {
       if (_supportsDurableMobileResume && connected) {
         unawaited(_resumeMobileCaptureIfRequested());
+      }
+      return;
+    }
+    if (!isMobileCapturePlatform) {
+      if ((state == DeviceTransportState.disconnected ||
+              state == DeviceTransportState.faulted) &&
+          capability?.sourceKind == 'wearable') {
+        warning =
+            'The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.';
+        notifyListeners();
       }
       return;
     }
@@ -1012,7 +1059,7 @@ class NeoRecallController extends ChangeNotifier {
       await startRecording(
         microphone: !useBluetooth,
         systemAudio: false,
-        mobileBluetooth: useBluetooth,
+        bluetooth: useBluetooth,
       );
       notice = useBluetooth
           ? 'Recording moved back to the reconnected Bluetooth device.'
@@ -1251,6 +1298,11 @@ class NeoRecallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _disposeExternalDeviceRuntime() async {
+    await audioDeviceSessions.dispose();
+    await audioDeviceRegistry.disposeAll();
+  }
+
   @override
   void dispose() {
     _chunkSubscription?.cancel();
@@ -1263,6 +1315,9 @@ class NeoRecallController extends ChangeNotifier {
     _backgroundSubscription?.cancel();
     sync.close();
     recorder.dispose();
+    if (recorder is! MobileRecallRecorder) {
+      unawaited(_disposeExternalDeviceRuntime());
+    }
     super.dispose();
   }
 }

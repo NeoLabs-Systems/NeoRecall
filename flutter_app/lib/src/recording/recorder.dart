@@ -1,4 +1,5 @@
 import 'audio_frame.dart';
+import '../devices/audio_device_adapter.dart';
 import 'recorder_stub.dart'
     if (dart.library.html) 'recorder_web.dart'
     if (dart.library.io) 'recorder_io.dart'
@@ -15,6 +16,7 @@ abstract class RecallRecorder {
     required bool systemAudio,
     required int chunkMs,
     required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
   });
   Future<void> stop();
   Future<void> dispose();

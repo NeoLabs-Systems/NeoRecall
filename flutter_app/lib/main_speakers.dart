@@ -18,7 +18,7 @@ class SpeakersScreen extends StatefulWidget {
 }
 
 class _SpeakersScreenState extends State<SpeakersScreen> {
-  final AudioPlayer _player = AudioPlayer();
+  AudioPlayer? _player;
   StreamSubscription<void>? _completeSubscription;
   String? _playingSpeakerId;
   bool _loadingPreview = false;
@@ -28,16 +28,25 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
   @override
   void initState() {
     super.initState();
-    _completeSubscription = _player.onPlayerComplete.listen((_) {
-      if (mounted) setState(() => _playingSpeakerId = null);
-    });
   }
 
   @override
   void dispose() {
     _completeSubscription?.cancel();
-    _player.dispose();
+    final player = _player;
+    if (player != null) unawaited(player.dispose());
     super.dispose();
+  }
+
+  AudioPlayer _ensurePlayer() {
+    final existing = _player;
+    if (existing != null) return existing;
+    final player = AudioPlayer();
+    _player = player;
+    _completeSubscription = player.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _playingSpeakerId = null);
+    });
+    return player;
   }
 
   Future<void> _rename(BuildContext context, String id, String current) async {
@@ -88,14 +97,15 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
 
   Future<void> _togglePreview(RecallSpeaker speaker) async {
     if (_loadingPreview || !speaker.hasPreview) return;
+    final player = _ensurePlayer();
     if (_playingSpeakerId == speaker.id) {
-      if (_player.state == PlayerState.playing) {
-        await _player.pause();
+      if (player.state == PlayerState.playing) {
+        await player.pause();
         if (mounted) setState(() {});
         return;
       }
-      if (_player.state == PlayerState.paused) {
-        await _player.resume();
+      if (player.state == PlayerState.paused) {
+        await player.resume();
         if (mounted) setState(() {});
         return;
       }
@@ -105,8 +115,8 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
       _playingSpeakerId = speaker.id;
     });
     try {
-      await _player.stop();
-      await _player.play(
+      await player.stop();
+      await player.play(
         BytesSource(
           await controller.api.speakerPreview(speaker.id),
           mimeType: 'audio/wav',
@@ -162,7 +172,7 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                       palette: palette,
                       playing:
                           _playingSpeakerId == controller.speakers[index].id &&
-                          _player.state == PlayerState.playing,
+                          _player?.state == PlayerState.playing,
                       loading:
                           _loadingPreview &&
                           _playingSpeakerId == controller.speakers[index].id,

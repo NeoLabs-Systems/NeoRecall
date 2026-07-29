@@ -61,7 +61,8 @@ jobs:
           pattern: neorecall-*-app
           merge-multiple: true
 
-      - name: Verify app assets
+      - name: Inventory app assets
+        id: app_assets
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -73,36 +74,47 @@ jobs:
             "dist/NeoRecall-Windows-x64-${version}.zip"
             "dist/NeoRecall-Android-${version}.apk"
           )
+          available_assets=()
+          missing_assets=()
           for asset in "${expected_assets[@]}"; do
-            if [[ ! -f "$asset" ]]; then
-              echo "::error::Expected release asset is missing: $asset"
-              find dist -maxdepth 1 -type f -print
-              exit 1
+            if [[ -f "$asset" ]]; then
+              available_assets+=("$asset")
+            else
+              missing_assets+=("$asset")
             fi
           done
 
-          asset_count="$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
-          if [[ "$asset_count" -ne "${#expected_assets[@]}" ]]; then
-            echo "::error::Unexpected files were downloaded with the release assets."
-            find dist -maxdepth 1 -type f -print
+          if [[ "${#available_assets[@]}" -eq 0 ]]; then
+            echo "::error::No app build produced an artifact."
             exit 1
           fi
-          echo "Publishing ${#expected_assets[@]} release asset(s)."
-          find dist -maxdepth 1 -type f -print
 
-      - name: Upload apps to GitHub release
+          {
+            echo "available<<EOF"
+            printf '%s\n' "${available_assets[@]}"
+            echo "EOF"
+            echo "missing_count=${#missing_assets[@]}"
+            echo "missing<<EOF"
+            printf '%s\n' "${missing_assets[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Attaching ${#available_assets[@]} successful app build(s)."
+          printf '%s\n' "${available_assets[@]}"
+          if [[ "${#missing_assets[@]}" -gt 0 ]]; then
+            echo "::warning::Some platform builds failed or produced no artifact:"
+            printf '%s\n' "${missing_assets[@]}"
+          fi
+
+      - name: Attach successful apps to GitHub release
         shell: bash
         env:
+          AVAILABLE_ASSETS: ${{ steps.app_assets.outputs.available }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          assets=(
-            "dist/NeoRecall-macOS-${version}.dmg"
-            "dist/NeoRecall-Windows-x64-${version}.zip"
-            "dist/NeoRecall-Android-${version}.apk"
-          )
+          mapfile -t assets <<< "$AVAILABLE_ASSETS"
 
           gh release upload \
             "$RELEASE_TAG" \
@@ -133,6 +145,7 @@ jobs:
           echo "Verified ${#assets[@]} asset(s) on release $RELEASE_TAG."
 
       - name: Publish completed GitHub release
+        if: steps.app_assets.outputs.missing_count == '0'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,3 +180,13 @@ jobs:
             echo "::error::Release $RELEASE_TAG has the wrong release channel."
             exit 1
           fi
+
+      - name: Keep incomplete release as draft
+        if: steps.app_assets.outputs.missing_count != '0'
+        shell: bash
+        env:
+          MISSING_ASSETS: ${{ steps.app_assets.outputs.missing }}
+        run: |
+          echo "::error::Successful binaries were attached, but the release remains a draft because these builds are missing:"
+          printf '%s\n' "$MISSING_ASSETS"
+          exit 1

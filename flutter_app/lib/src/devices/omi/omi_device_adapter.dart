@@ -1,17 +1,31 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'dart:typed_data';
 
 import '../audio_codec_decoder.dart';
 import '../audio_device_adapter.dart';
-import '../ble/ble_transport.dart';
+import '../ble/gatt_connector_transport.dart';
+import '../ble/gatt_transport.dart';
 import 'base_connector.dart';
 import 'device_factory.dart';
 import 'device_models.dart';
 
-/// Integrates all supported Omi-family wearable connectors into NeoRecall.
+/// Shared GATT adapter for the capture-capable protocols derived from Omi.
+///
+/// There is deliberately one scanner and connection owner for the complete
+/// family. This avoids competing browser choosers/native scans while keeping
+/// every device's wire protocol in its own connector.
 class OmiDeviceAdapter implements AudioDeviceAdapter {
+  OmiDeviceAdapter({GattTransport? gatt})
+    : _gatt = gatt ?? createGattTransport();
+
+  static const List<String> _serviceUuids = <String>[
+    WearableDeviceUuids.omiService,
+    WearableDeviceUuids.plaudService,
+    WearableDeviceUuids.fieldyService,
+    WearableDeviceUuids.limitlessService,
+  ];
+
+  final GattTransport _gatt;
   final StreamController<AudioDeviceDescriptor> _discoveries =
       StreamController<AudioDeviceDescriptor>.broadcast();
   final StreamController<DeviceControlEvent> _controlEvents =
@@ -20,9 +34,10 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       StreamController<Uint8List>.broadcast();
   final StreamController<DeviceTransportState> _states =
       StreamController<DeviceTransportState>.broadcast();
-
   final Map<String, DiscoveredWearable> _found = <String, DiscoveredWearable>{};
-  StreamSubscription<List<ScanResult>>? _scanSub;
+
+  StreamSubscription<GattPeripheral>? _scanSub;
+  StreamSubscription<bool>? _connectionSub;
   StreamSubscription<List<int>>? _audioSub;
   StreamSubscription<List<int>>? _buttonSub;
   StreamSubscription<int>? _batterySub;
@@ -30,13 +45,16 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   WearableAudioDecoder? _decoder;
   WearableAudioDecoder? _frameDecoder;
   OmiFrameAssembler? _assembler;
-  DeviceTransportState state = DeviceTransportState.disconnected;
+  DeviceTransportState _state = DeviceTransportState.disconnected;
   bool _initialized = false;
+  bool _disposed = false;
+  bool _resumeRecordingAfterReconnect = false;
+  bool _intentionalDisconnect = false;
 
   @override
   String get id => 'omi_family';
   @override
-  String get displayName => 'Omi-compatible wearables';
+  String get displayName => 'Bluetooth audio devices';
   @override
   String get transport => 'bluetooth_le';
   @override
@@ -49,47 +67,18 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   Stream<DeviceTransportState> get transportStates => _states.stream;
 
   void _setState(DeviceTransportState next) {
-    state = next;
+    if (_state == next) return;
+    _state = next;
     if (!_states.isClosed) _states.add(next);
-  }
-
-  AudioDeviceDescriptor _toDescriptor(DiscoveredWearable device) {
-    return AudioDeviceDescriptor(
-      adapterId: id,
-      deviceKey: device.id,
-      displayName: device.name,
-      transport: transport,
-      supportsMicrophone: true,
-      supportsSystemAudio: false,
-      supportsHardwareButtons: true,
-      metadata: <String, Object?>{
-        'type': device.type.name,
-        'rssi': device.rssi,
-        'serviceUuids': device.serviceUuids,
-      },
-    );
-  }
-
-  bool _isSupported(DiscoveredWearable wearable) {
-    switch (wearable.type) {
-      case WearableDeviceType.omi:
-      case WearableDeviceType.omiGlass:
-      case WearableDeviceType.bee:
-      case WearableDeviceType.plaud:
-      case WearableDeviceType.fieldy:
-      case WearableDeviceType.friendPendant:
-      case WearableDeviceType.limitless:
-        return true;
-      case WearableDeviceType.custom:
-        return wearable.serviceUuids.isNotEmpty;
-    }
   }
 
   @override
   Future<void> initialize() async {
-    if (_initialized || kIsWeb) {
-      _initialized = true;
-      return;
+    if (_initialized) return;
+    if (_disposed) throw StateError('OmiDeviceAdapter is already disposed.');
+    final availability = await _gatt.availability();
+    if (availability == GattAvailability.unsupported) {
+      throw UnsupportedError('Bluetooth LE is unavailable on this platform.');
     }
     _initialized = true;
   }
@@ -99,156 +88,266 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     Duration timeout = const Duration(seconds: 12),
   }) async {
     await initialize();
-    if (kIsWeb) return;
-    await BleTransport.ensurePermissions();
-    if (!await BleTransport.isAdapterOn()) {
+    await _gatt.requestAccess();
+    final availability = await _gatt.availability();
+    if (availability == GattAvailability.poweredOff) {
       throw StateError('Bluetooth is turned off.');
+    }
+    if (availability == GattAvailability.unauthorized) {
+      throw StateError('Bluetooth permission was not granted.');
     }
     await stopScan();
     _found.clear();
-    await FlutterBluePlus.startScan(
-      timeout: timeout,
-      androidUsesFineLocation: true,
+    _scanSub = _gatt.discoveries.listen(
+      _handlePeripheral,
+      onError: _discoveries.addError,
     );
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
-      for (final result in results) {
-        final wearable = DiscoveredWearable.fromScanResult(result);
-        if (!_isSupported(wearable) || wearable.name.trim().isEmpty) continue;
-        final previous = _found[wearable.id];
-        if (previous != null && previous.rssi == wearable.rssi) continue;
-        _found[wearable.id] = wearable;
-        if (!_discoveries.isClosed) {
-          _discoveries.add(_toDescriptor(wearable));
-        }
-      }
-    });
+    await _gatt.startScan(
+      const GattScanSpec(
+        serviceUuids: _serviceUuids,
+        // PLAUD firmware versions do not consistently advertise their primary
+        // service, so the documented product prefix is included.
+        namePrefixes: <String>[
+          'PLAUD',
+          'Compass',
+          'Fieldy',
+          'Limitless',
+          'Pendant',
+        ],
+      ),
+      timeout: timeout,
+    );
+  }
+
+  void _handlePeripheral(GattPeripheral peripheral) {
+    final name = peripheral.name.trim();
+    if (name.isEmpty) return;
+    final services = peripheral.serviceUuids
+        .map((value) => value.toLowerCase())
+        .toList(growable: false);
+    final type = DiscoveredWearable.classify(
+      name: name,
+      serviceUuids: services,
+    );
+    final wearable = DiscoveredWearable(
+      id: peripheral.id,
+      name: name,
+      type: type,
+      rssi: peripheral.rssi ?? 0,
+      serviceUuids: services,
+    );
+    if (!_hasValidatedIdentity(wearable) || !_hasLocalDecoder(type)) return;
+    final old = _found[wearable.id];
+    if (old != null && old.rssi == wearable.rssi) return;
+    _found[wearable.id] = wearable;
+    if (!_discoveries.isClosed) _discoveries.add(_toDescriptor(wearable));
+  }
+
+  bool _hasValidatedIdentity(DiscoveredWearable device) {
+    bool has(String uuid) => device.serviceUuids.contains(uuid.toLowerCase());
+    final name = device.name.toLowerCase();
+    return switch (device.type) {
+      WearableDeviceType.omi => has(WearableDeviceUuids.omiService),
+      WearableDeviceType.omiGlass =>
+        has(WearableDeviceUuids.omiService) &&
+            (name.startsWith('omiglass') || name.startsWith('openglass')),
+      WearableDeviceType.bee =>
+        has(WearableDeviceUuids.beeService) || name.startsWith('bee'),
+      WearableDeviceType.plaud =>
+        has(WearableDeviceUuids.plaudService) || name.startsWith('plaud'),
+      WearableDeviceType.fieldy =>
+        has(WearableDeviceUuids.fieldyService) ||
+            name == 'fieldy' ||
+            name == 'compass',
+      WearableDeviceType.friendPendant =>
+        has(WearableDeviceUuids.friendService) || name.startsWith('friend_'),
+      WearableDeviceType.limitless =>
+        has(WearableDeviceUuids.limitlessService) ||
+            name.startsWith('limitless') ||
+            name == 'pendant',
+      WearableDeviceType.custom => false,
+    };
+  }
+
+  bool _hasLocalDecoder(WearableDeviceType type) {
+    return switch (type) {
+      WearableDeviceType.omi ||
+      WearableDeviceType.omiGlass ||
+      WearableDeviceType.plaud ||
+      WearableDeviceType.fieldy ||
+      WearableDeviceType.limitless => true,
+      WearableDeviceType.bee ||
+      WearableDeviceType.friendPendant ||
+      WearableDeviceType.custom => false,
+    };
+  }
+
+  AudioDeviceDescriptor _toDescriptor(DiscoveredWearable device) {
+    return AudioDeviceDescriptor(
+      adapterId: id,
+      deviceKey: device.id,
+      displayName: device.name,
+      transport: transport,
+      supportsHardwareButtons:
+          device.type == WearableDeviceType.omi ||
+          device.type == WearableDeviceType.omiGlass ||
+          device.type == WearableDeviceType.limitless,
+      metadata: <String, Object?>{
+        'type': device.type.name,
+        'rssi': device.rssi,
+        'serviceUuids': device.serviceUuids,
+      },
+    );
   }
 
   @override
   Future<void> stopScan() async {
     await _scanSub?.cancel();
     _scanSub = null;
-    try {
-      await FlutterBluePlus.stopScan();
-    } catch (_) {}
+    await _gatt.stopScan();
   }
 
   @override
   Future<void> connect(AudioDeviceDescriptor device) async {
     await initialize();
-    await BleTransport.ensurePermissions();
+    if (device.adapterId != id) {
+      throw ArgumentError.value(device.adapterId, 'device.adapterId');
+    }
     await stopScan();
-    final discovered =
-        _found[device.deviceKey] ??
-        DiscoveredWearable(
-          id: device.deviceKey,
-          name: device.displayName,
-          type: WearableDeviceType.values.firstWhere(
-            (value) =>
-                value.name == (device.metadata['type'] as String? ?? 'omi'),
-            orElse: () => WearableDeviceType.omi,
-          ),
-          rssi: device.metadata['rssi'] as int? ?? 0,
-          serviceUuids: List<String>.from(
-            device.metadata['serviceUuids'] as List? ?? const <String>[],
-          ),
-        );
+    final resumeRecording = _resumeRecordingAfterReconnect;
+    await _disconnectProtocol(clearResumeIntent: false);
+    final wearable = _found[device.deviceKey] ?? _restoreDescriptor(device);
+    if (!_hasValidatedIdentity(wearable) || !_hasLocalDecoder(wearable.type)) {
+      throw UnsupportedError(
+        '${wearable.name} has no fully local, validated capture pipeline.',
+      );
+    }
 
     _setState(DeviceTransportState.connecting);
-    final connector = createWearableConnector(discovered);
+    final wearableTransport = GattConnectorTransport(
+      gatt: _gatt,
+      deviceId: wearable.id,
+    );
+    final connector = createWearableConnector(wearable, wearableTransport);
+    _connectionSub = wearableTransport.connectionStateStream.listen((
+      connected,
+    ) {
+      if (!connected &&
+          !_intentionalDisconnect &&
+          _state != DeviceTransportState.connecting) {
+        if (_state == DeviceTransportState.recording) {
+          _resumeRecordingAfterReconnect = true;
+        }
+        _setState(DeviceTransportState.disconnected);
+      }
+    });
+
     try {
-      await connector.connect();
+      await connector.connect(
+        requiresPairing: wearable.type == WearableDeviceType.limitless,
+      );
       _connector = connector;
-      final isOmiFamily =
-          discovered.type == WearableDeviceType.omi ||
-          discovered.type == WearableDeviceType.omiGlass;
+      final omiFraming =
+          wearable.type == WearableDeviceType.omi ||
+          wearable.type == WearableDeviceType.omiGlass;
       _decoder = WearableAudioDecoder(
         codec: connector.codec,
-        // Direct packets may still include transport headers for non-assembled paths.
-        stripBleHeader: isOmiFamily,
+        stripBleHeader: omiFraming,
       );
       _frameDecoder = WearableAudioDecoder(
         codec: connector.codec,
         stripBleHeader: false,
       );
-      _assembler = isOmiFamily ? OmiFrameAssembler() : null;
-
-      await _audioSub?.cancel();
-      await _buttonSub?.cancel();
-      await _batterySub?.cancel();
-
-      _audioSub = connector.audioBytes.stream.listen((packet) {
-        _handleAudioPacket(packet);
-      });
-      _buttonSub = connector.buttonEvents.stream.listen((value) {
-        final code = value.isNotEmpty ? value.first : 0;
-        final type = switch (code) {
-          1 => DeviceControlEventType.startRecording,
-          2 => DeviceControlEventType.stopRecording,
-          3 => DeviceControlEventType.standby,
-          4 => DeviceControlEventType.wake,
-          _ => DeviceControlEventType.custom,
-        };
-        _controlEvents.add(
-          DeviceControlEvent(
-            type: type,
-            payload: <String, Object?>{'raw': value},
-            receivedAt: DateTime.now().toUtc(),
-          ),
-        );
-      });
-      _batterySub = connector.batteryLevels.stream.listen((level) {
-        _controlEvents.add(
-          DeviceControlEvent(
-            type: DeviceControlEventType.battery,
-            payload: <String, Object?>{'level': level},
-            receivedAt: DateTime.now().toUtc(),
-          ),
-        );
-      });
+      _assembler = omiFraming ? OmiFrameAssembler() : null;
+      _audioSub = connector.audioBytes.stream.listen(_handleAudioPacket);
+      _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
+      _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
       _setState(DeviceTransportState.connectedStandby);
-    } catch (error) {
-      await connector.dispose();
-      _connector = null;
-      _decoder?.dispose();
-      _decoder = null;
-      _assembler = null;
+      if (resumeRecording) {
+        await connector.startRecording();
+        _setState(DeviceTransportState.recording);
+      }
+    } catch (_) {
+      try {
+        await connector.dispose();
+      } catch (_) {
+        // Preserve the connection/setup error while still clearing local state.
+      }
+      await _clearProtocolState();
       _setState(DeviceTransportState.faulted);
       rethrow;
     }
   }
 
+  DiscoveredWearable _restoreDescriptor(AudioDeviceDescriptor device) {
+    final typeName = device.metadata['type'] as String?;
+    final type = WearableDeviceType.values.firstWhere(
+      (value) => value.name == typeName,
+      orElse: () => WearableDeviceType.custom,
+    );
+    return DiscoveredWearable(
+      id: device.deviceKey,
+      name: device.displayName,
+      type: type,
+      rssi: device.metadata['rssi'] as int? ?? 0,
+      serviceUuids: List<String>.from(
+        device.metadata['serviceUuids'] as List? ?? const <String>[],
+      ),
+    );
+  }
+
   void _handleAudioPacket(List<int> packet) {
     final decoder = _decoder;
     if (decoder == null) return;
-
-    if (_assembler != null) {
-      final assembled = _assembler!.accept(packet);
-      if (assembled == null) return;
-      final frameDecoder = _frameDecoder ?? decoder;
-      final pcm = frameDecoder.decodePacket(assembled);
-      if (pcm != null && pcm.isNotEmpty && !_pcm.isClosed) {
-        _pcm.add(pcm);
-      } else if (frameDecoder.lastWarning != null) {
-        _controlEvents.add(
-          DeviceControlEvent(
-            type: DeviceControlEventType.custom,
-            payload: <String, Object?>{'warning': frameDecoder.lastWarning},
-            receivedAt: DateTime.now().toUtc(),
-          ),
-        );
-      }
-      return;
+    final assembled = _assembler?.accept(packet);
+    if (_assembler != null && assembled == null) return;
+    final activeDecoder = assembled == null ? decoder : _frameDecoder!;
+    final pcm = activeDecoder.decodePacket(assembled ?? packet);
+    if (pcm != null && pcm.isNotEmpty && !_pcm.isClosed) {
+      _pcm.add(pcm);
+    } else if (activeDecoder.lastWarning != null) {
+      _emitProtocolWarning(activeDecoder.lastWarning!);
     }
+  }
 
-    final pcm = decoder.decodePacket(packet);
-    if (pcm != null && pcm.isNotEmpty) {
-      if (!_pcm.isClosed) _pcm.add(pcm);
-    } else if (decoder.lastWarning != null) {
+  void _handleButton(List<int> value) {
+    final code = value.isEmpty ? 0 : value.first;
+    final type = switch (code) {
+      1 => DeviceControlEventType.singlePress,
+      2 => DeviceControlEventType.doublePress,
+      3 => DeviceControlEventType.longPress,
+      5 => DeviceControlEventType.buttonRelease,
+      _ => DeviceControlEventType.custom,
+    };
+    if (!_controlEvents.isClosed) {
+      _controlEvents.add(
+        DeviceControlEvent(
+          type: type,
+          payload: <String, Object?>{'raw': value},
+          receivedAt: DateTime.now().toUtc(),
+        ),
+      );
+    }
+  }
+
+  void _handleBattery(int level) {
+    if (!_controlEvents.isClosed) {
+      _controlEvents.add(
+        DeviceControlEvent(
+          type: DeviceControlEventType.battery,
+          payload: <String, Object?>{'level': level},
+          receivedAt: DateTime.now().toUtc(),
+        ),
+      );
+    }
+  }
+
+  void _emitProtocolWarning(String warning) {
+    if (!_controlEvents.isClosed) {
       _controlEvents.add(
         DeviceControlEvent(
           type: DeviceControlEventType.custom,
-          payload: <String, Object?>{'warning': decoder.lastWarning},
+          payload: <String, Object?>{'warning': warning},
           receivedAt: DateTime.now().toUtc(),
         ),
       );
@@ -256,51 +355,84 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   }
 
   @override
-  Future<void> disconnect() async {
-    await _audioSub?.cancel();
-    await _buttonSub?.cancel();
-    await _batterySub?.cancel();
-    _audioSub = null;
-    _buttonSub = null;
-    _batterySub = null;
-    await _connector?.dispose();
-    _connector = null;
-    _decoder?.dispose();
-    _decoder = null;
-    _frameDecoder?.dispose();
-    _frameDecoder = null;
-    _assembler?.reset();
-    _assembler = null;
-    _setState(DeviceTransportState.disconnected);
-  }
-
-  @override
   Future<void> requestStartRecording() async {
     final connector = _connector;
-    if (connector == null) {
-      throw StateError('No wearable is connected.');
+    if (connector == null || _state != DeviceTransportState.connectedStandby) {
+      throw StateError('No ready Bluetooth audio device is connected.');
     }
-    if (!_decoder!.isSupported) {
-      throw StateError(
-        'Connected device codec (${connector.codec.name}) is not decodable yet.',
+    if (!(_decoder?.isSupported ?? false)) {
+      throw UnsupportedError(
+        '${connector.codec.name} cannot be decoded locally on this platform.',
       );
     }
     await connector.startRecording();
+    _resumeRecordingAfterReconnect = true;
     _setState(DeviceTransportState.recording);
   }
 
   @override
   Future<void> requestStopRecording() async {
+    _resumeRecordingAfterReconnect = false;
     final connector = _connector;
-    if (connector == null) return;
+    if (connector == null || _state != DeviceTransportState.recording) return;
     await connector.stopRecording();
     _setState(DeviceTransportState.connectedStandby);
   }
 
   @override
+  Future<void> disconnect() async {
+    await _disconnectProtocol(clearResumeIntent: true);
+  }
+
+  Future<void> _disconnectProtocol({required bool clearResumeIntent}) async {
+    if (clearResumeIntent) _resumeRecordingAfterReconnect = false;
+    final connector = _connector;
+    _connector = null;
+    _intentionalDisconnect = true;
+    try {
+      if (connector != null) await connector.dispose();
+    } finally {
+      try {
+        await _clearProtocolState();
+        _setState(DeviceTransportState.disconnected);
+      } finally {
+        _intentionalDisconnect = false;
+      }
+    }
+  }
+
+  Future<void> _clearProtocolState() async {
+    await _cancelSafely(_audioSub);
+    await _cancelSafely(_buttonSub);
+    await _cancelSafely(_batterySub);
+    await _cancelSafely(_connectionSub);
+    _audioSub = null;
+    _buttonSub = null;
+    _batterySub = null;
+    _connectionSub = null;
+    _decoder?.dispose();
+    _frameDecoder?.dispose();
+    _decoder = null;
+    _frameDecoder = null;
+    _assembler?.reset();
+    _assembler = null;
+  }
+
+  Future<void> _cancelSafely(StreamSubscription<dynamic>? subscription) async {
+    try {
+      await subscription?.cancel();
+    } catch (_) {
+      // Cleanup must continue after a transport/plugin failure.
+    }
+  }
+
+  @override
   Future<void> dispose() async {
+    if (_disposed) return;
     await stopScan();
     await disconnect();
+    await _gatt.dispose();
+    _disposed = true;
     await _discoveries.close();
     await _controlEvents.close();
     await _pcm.close();

@@ -37,10 +37,10 @@ class _RecordScreenState extends State<RecordScreen> {
   @override
   void initState() {
     super.initState();
-    bluetoothPreferred = widget.controller.preferBluetoothCapture;
+    bluetoothPreferred = _isMobile && widget.controller.preferBluetoothCapture;
     if (_isMobile) {
       systemAudio = false;
-      microphone = true;
+      microphone = !bluetoothPreferred;
     }
   }
 
@@ -88,9 +88,7 @@ class _RecordScreenState extends State<RecordScreen> {
     }
     if (!await _consent()) return;
     try {
-      if (_isMobile) {
-        await controller.setPreferBluetoothCapture(bluetoothPreferred);
-      }
+      await controller.setPreferBluetoothCapture(bluetoothPreferred);
       await controller.startRecording(
         microphone: microphone,
         systemAudio: shouldRequestSystemAudio(
@@ -98,6 +96,7 @@ class _RecordScreenState extends State<RecordScreen> {
           web: kIsWeb,
           desktop: _isDesktop,
         ),
+        bluetooth: bluetoothPreferred,
       );
     } catch (error) {
       if (!mounted) return;
@@ -222,12 +221,99 @@ class _RecordScreenState extends State<RecordScreen> {
                   style: TextStyle(color: palette.textMuted),
                 ),
                 const SizedBox(height: 22),
-                if (_isMobile) ...<Widget>[
-                  Text('MOBILE CAPTURE', style: sectionEyebrowStyle(palette)),
+                Text(
+                  _isMobile ? 'CAPTURE SOURCE' : 'CAPTURE SOURCES',
+                  style: sectionEyebrowStyle(palette),
+                ),
+                const SizedBox(height: 10),
+                if (!_isMobile)
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 10,
+                    children: <Widget>[
+                      FilterChip(
+                        selected: microphone && !bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                microphone = value;
+                                if (value) bluetoothPreferred = false;
+                              }),
+                        avatar: const Icon(Icons.mic_outlined),
+                        label: const Text('Microphone'),
+                      ),
+                      FilterChip(
+                        selected: systemAudio && !bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                systemAudio = value;
+                                if (value) bluetoothPreferred = false;
+                              }),
+                        avatar: Icon(
+                          _isDesktop
+                              ? Icons.desktop_windows_outlined
+                              : Icons.headphones_outlined,
+                        ),
+                        label: Text(
+                          _isDesktop ? 'Device audio' : 'Tab/system audio',
+                        ),
+                      ),
+                      FilterChip(
+                        selected: bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                bluetoothPreferred = value;
+                                if (value) {
+                                  microphone = false;
+                                  systemAudio = false;
+                                }
+                              }),
+                        avatar: const Icon(Icons.bluetooth_connected),
+                        label: const Text('Bluetooth device'),
+                      ),
+                    ],
+                  )
+                else
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: <Widget>[
+                      ChoiceChip(
+                        selected: bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                bluetoothPreferred = true;
+                                microphone = false;
+                                systemAudio = false;
+                              }),
+                        avatar: const Icon(Icons.bluetooth_connected),
+                        label: const Text('Bluetooth device'),
+                      ),
+                      ChoiceChip(
+                        selected: !bluetoothPreferred,
+                        onSelected: controller.isRecording
+                            ? null
+                            : (value) => setState(() {
+                                bluetoothPreferred = false;
+                                microphone = true;
+                                systemAudio = false;
+                              }),
+                        avatar: const Icon(Icons.mic_none_rounded),
+                        label: const Text('Phone microphone'),
+                      ),
+                    ],
+                  ),
+                if (bluetoothPreferred ||
+                    controller.preferredDeviceLabel != null) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
                     controller.preferredDeviceLabel == null
-                        ? 'Bluetooth is preferred. Connect a supported device, or select the phone microphone to record now.'
+                        ? 'Connect a supported Bluetooth device before starting this source.'
                         : 'Preferred device: ${controller.preferredDeviceLabel}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -271,30 +357,6 @@ class _RecordScreenState extends State<RecordScreen> {
                               : 'Scan for wearables',
                         ),
                       ),
-                      ChoiceChip(
-                        selected: bluetoothPreferred,
-                        onSelected: controller.isRecording
-                            ? null
-                            : (value) => setState(() {
-                                bluetoothPreferred = true;
-                                microphone = true;
-                                systemAudio = false;
-                              }),
-                        avatar: const Icon(Icons.bluetooth_connected),
-                        label: const Text('Bluetooth device'),
-                      ),
-                      ChoiceChip(
-                        selected: !bluetoothPreferred,
-                        onSelected: controller.isRecording
-                            ? null
-                            : (value) => setState(() {
-                                bluetoothPreferred = false;
-                                microphone = true;
-                                systemAudio = false;
-                              }),
-                        avatar: const Icon(Icons.mic_none_rounded),
-                        label: const Text('Phone microphone'),
-                      ),
                     ],
                   ),
                   if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
@@ -331,7 +393,7 @@ class _RecordScreenState extends State<RecordScreen> {
                                           if (!mounted) return;
                                           setState(() {
                                             bluetoothPreferred = true;
-                                            microphone = true;
+                                            microphone = false;
                                             systemAudio = false;
                                           });
                                         } catch (error) {
@@ -347,35 +409,13 @@ class _RecordScreenState extends State<RecordScreen> {
                       );
                     }),
                   ],
-                ] else ...<Widget>[
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 12,
-                    runSpacing: 10,
-                    children: <Widget>[
-                      FilterChip(
-                        selected: microphone,
-                        onSelected: controller.isRecording
-                            ? null
-                            : (value) => setState(() => microphone = value),
-                        avatar: const Icon(Icons.mic_outlined),
-                        label: const Text('Microphone'),
-                      ),
-                      FilterChip(
-                        selected: systemAudio,
-                        onSelected: controller.isRecording
-                            ? null
-                            : (value) => setState(() => systemAudio = value),
-                        avatar: Icon(
-                          _isDesktop
-                              ? Icons.desktop_windows_outlined
-                              : Icons.headphones_outlined,
-                        ),
-                        label: Text(
-                          _isDesktop ? 'Device audio' : 'Tab/system audio',
-                        ),
-                      ),
-                    ],
+                ],
+                if (kIsWeb && bluetoothPreferred) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Text(
+                    'The browser opens its Bluetooth chooser from the scan button. Capture continues only while this web app remains active.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: palette.textMuted, height: 1.4),
                   ),
                 ],
                 const SizedBox(height: 22),

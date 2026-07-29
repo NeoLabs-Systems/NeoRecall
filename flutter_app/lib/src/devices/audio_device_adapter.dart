@@ -19,6 +19,10 @@ enum DeviceControlEventType {
   standby,
   wake,
   battery,
+  singlePress,
+  doublePress,
+  longPress,
+  buttonRelease,
   custom,
 }
 
@@ -54,6 +58,21 @@ class AudioDeviceDescriptor {
   final bool supportsSystemAudio;
   final bool supportsHardwareButtons;
   final Map<String, Object?> metadata;
+}
+
+/// A validated protocol adapter paired with the descriptor it discovered.
+///
+/// Recorder implementations consume this platform-neutral value, so mobile,
+/// desktop, and web all use the same device flow without importing a concrete
+/// Bluetooth package or vendor protocol.
+class ExternalAudioCaptureDevice {
+  const ExternalAudioCaptureDevice({
+    required this.adapter,
+    required this.descriptor,
+  });
+
+  final AudioDeviceAdapter adapter;
+  final AudioDeviceDescriptor descriptor;
 }
 
 /// One transport-specific integration (BLE classic, BLE GATT, Wi-Fi, USB, …).

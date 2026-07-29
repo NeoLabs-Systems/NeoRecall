@@ -6,6 +6,8 @@ import 'device_models.dart';
 abstract class CustomCommandConnector extends WearableConnector {
   CustomCommandConnector({required super.device, required super.transport});
 
+  static const Duration commandTimeout = Duration(seconds: 8);
+
   String get serviceUuid;
   String get controlCharacteristicUuid;
   String get audioCharacteristicUuid;
@@ -22,48 +24,54 @@ abstract class CustomCommandConnector extends WearableConnector {
   @override
   Future<void> onConnected() async {
     track(
-      transport
-          .getCharacteristicStream(serviceUuid, controlCharacteristicUuid)
-          .listen((data) {
-            final response = parseResponse(data);
-            if (response['type'] == 'response') {
-              final code = response['code'] as int;
-              final payload = List<int>.from(
-                response['payload'] as List? ?? const [],
-              );
-              final completer = _pending.remove(code);
-              if (completer != null && !completer.isCompleted) {
-                completer.complete(payload);
-              }
-            }
-          }),
+      (await transport.characteristicStream(
+        serviceUuid,
+        controlCharacteristicUuid,
+      )).listen((data) {
+        final response = parseResponse(data);
+        if (response['type'] == 'response') {
+          final code = response['code'] as int;
+          final payload = List<int>.from(
+            response['payload'] as List? ?? const [],
+          );
+          final completer = _pending.remove(code);
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(payload);
+          }
+        }
+      }),
     );
     track(
-      transport
-          .getCharacteristicStream(serviceUuid, audioCharacteristicUuid)
-          .listen((data) {
-            final payload = processAudioPacket(data);
-            if (payload != null && payload.isNotEmpty) {
-              audioBytes.add(payload);
-            }
-          }),
+      (await transport.characteristicStream(
+        serviceUuid,
+        audioCharacteristicUuid,
+      )).listen((data) {
+        final payload = processAudioPacket(data);
+        if (payload != null && payload.isNotEmpty) {
+          audioBytes.add(payload);
+        }
+      }),
     );
   }
 
   Future<List<int>?> sendCommand(int code, List<int> payload) async {
+    if (_pending.containsKey(code)) {
+      throw StateError('Wearable command $code is already pending.');
+    }
     final completer = Completer<List<int>>();
     _pending[code] = completer;
     final packet = <int>[code & 0xFF, (code >> 8) & 0xFF, ...payload];
-    await transport.writeCharacteristic(
-      serviceUuid,
-      controlCharacteristicUuid,
-      packet,
-    );
     try {
-      return await completer.future.timeout(const Duration(seconds: 8));
+      await transport.writeCharacteristic(
+        serviceUuid,
+        controlCharacteristicUuid,
+        packet,
+      );
+      return await completer.future.timeout(commandTimeout);
     } on TimeoutException {
-      _pending.remove(code);
       return null;
+    } finally {
+      if (identical(_pending[code], completer)) _pending.remove(code);
     }
   }
 
@@ -171,21 +179,28 @@ class FieldyConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    track(
-      transport
-          .getCharacteristicStream(
-            WearableDeviceUuids.fieldyService,
-            WearableDeviceUuids.fieldyAudio,
-          )
-          .listen((value) {
-            if (value.isNotEmpty) audioBytes.add(value);
-          }),
+    trackRecording(
+      (await transport.characteristicStream(
+        WearableDeviceUuids.fieldyService,
+        WearableDeviceUuids.fieldyAudio,
+      )).listen((value) {
+        const frameSize = 40;
+        var offset = 0;
+        while (offset + frameSize <= value.length) {
+          audioBytes.add(value.sublist(offset, offset + frameSize));
+          offset += frameSize;
+        }
+        if (offset < value.length && value[offset] == 0xb8) {
+          audioBytes.add(value.sublist(offset));
+        }
+      }),
     );
     recording = true;
   }
 
   @override
   Future<void> stopRecording() async {
+    await cancelRecordingSubscriptions();
     recording = false;
   }
 }

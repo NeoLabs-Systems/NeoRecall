@@ -1,5 +1,3 @@
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
 /// Device types supported by the Omi connector port.
 enum WearableDeviceType {
   omi,
@@ -54,24 +52,6 @@ class DiscoveredWearable {
   final int rssi;
   final List<String> serviceUuids;
 
-  factory DiscoveredWearable.fromScanResult(ScanResult result) {
-    final name = result.advertisementData.advName.isNotEmpty
-        ? result.advertisementData.advName
-        : (result.device.platformName.isNotEmpty
-              ? result.device.platformName
-              : 'Unknown device');
-    final services = result.advertisementData.serviceUuids
-        .map((uuid) => uuid.str128.toLowerCase())
-        .toList(growable: false);
-    return DiscoveredWearable(
-      id: result.device.remoteId.str,
-      name: name,
-      type: classify(name: name, serviceUuids: services),
-      rssi: result.rssi,
-      serviceUuids: services,
-    );
-  }
-
   static WearableDeviceType classify({
     required String name,
     required List<String> serviceUuids,
@@ -81,7 +61,7 @@ class DiscoveredWearable {
     bool has(String uuid) =>
         serviceUuids.any((value) => value.toLowerCase() == uuid.toLowerCase());
 
-    if (lower.contains('bee') || has(WearableDeviceUuids.beeService)) {
+    if (lower.startsWith('bee') || has(WearableDeviceUuids.beeService)) {
       return WearableDeviceType.bee;
     }
     if (upper.startsWith('PLAUD') || has(WearableDeviceUuids.plaudService)) {
@@ -95,17 +75,15 @@ class DiscoveredWearable {
     if (lower.startsWith('friend_') || has(WearableDeviceUuids.friendService)) {
       return WearableDeviceType.friendPendant;
     }
-    if (lower.contains('limitless') ||
-        lower.contains('pendant') ||
+    if (lower.startsWith('limitless') ||
+        lower == 'pendant' ||
         has(WearableDeviceUuids.limitlessService)) {
       return WearableDeviceType.limitless;
     }
-    if (lower.contains('openglass') ||
-        lower.contains('omiglass') ||
-        lower.contains('glass')) {
+    if (lower.startsWith('openglass') || lower.startsWith('omiglass')) {
       return WearableDeviceType.omiGlass;
     }
-    if (has(WearableDeviceUuids.omiService) || lower.contains('omi')) {
+    if (has(WearableDeviceUuids.omiService) || lower.startsWith('omi')) {
       return WearableDeviceType.omi;
     }
     return WearableDeviceType.custom;

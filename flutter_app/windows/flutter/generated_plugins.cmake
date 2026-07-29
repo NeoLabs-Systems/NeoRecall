@@ -11,6 +11,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   record_windows
   screen_retriever_windows
   tray_manager
+  universal_ble
   window_manager
 )
 

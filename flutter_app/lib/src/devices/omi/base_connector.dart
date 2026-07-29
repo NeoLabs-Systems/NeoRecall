@@ -1,13 +1,13 @@
 import 'dart:async';
 
-import '../ble/ble_transport.dart';
+import '../ble/gatt_connector_transport.dart';
 import 'device_models.dart';
 
 abstract class WearableConnector {
   WearableConnector({required this.device, required this.transport});
 
   final DiscoveredWearable device;
-  final BleTransport transport;
+  final WearableTransport transport;
 
   final StreamController<List<int>> audioBytes =
       StreamController<List<int>>.broadcast();
@@ -17,14 +17,16 @@ abstract class WearableConnector {
 
   final List<StreamSubscription<dynamic>> _subs =
       <StreamSubscription<dynamic>>[];
+  final List<StreamSubscription<dynamic>> _recordingSubs =
+      <StreamSubscription<dynamic>>[];
   bool recording = false;
 
   WearableDeviceType get type => device.type;
   bool get isRecording => recording;
   WearableAudioCodec get codec;
 
-  Future<void> connect() async {
-    await transport.connect();
+  Future<void> connect({bool requiresPairing = false}) async {
+    await transport.connect(requiresPairing: requiresPairing);
     await onConnected();
   }
 
@@ -37,13 +39,35 @@ abstract class WearableConnector {
       } catch (_) {}
     }
     for (final sub in _subs) {
-      await sub.cancel();
+      try {
+        await sub.cancel();
+      } catch (_) {
+        // Continue releasing the remaining protocol resources.
+      }
     }
     _subs.clear();
-    await transport.disconnect();
+    await cancelRecordingSubscriptions();
+    try {
+      await transport.disconnect();
+    } catch (_) {
+      // The transport may already be gone; local cleanup is still complete.
+    }
   }
 
   void track(StreamSubscription<dynamic> sub) => _subs.add(sub);
+  void trackRecording(StreamSubscription<dynamic> sub) =>
+      _recordingSubs.add(sub);
+
+  Future<void> cancelRecordingSubscriptions() async {
+    for (final sub in _recordingSubs) {
+      try {
+        await sub.cancel();
+      } catch (_) {
+        // Continue releasing the remaining recording subscriptions.
+      }
+    }
+    _recordingSubs.clear();
+  }
 
   Future<int> readBatteryLevel() async => -1;
 

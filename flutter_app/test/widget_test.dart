@@ -36,6 +36,56 @@ void main() {
     expect(find.text('NeoRecall'), findsOneWidget);
   });
 
+  testWidgets('desktop exposes Bluetooth in the shared capture flow', (
+    tester,
+  ) async {
+    final controller = NeoRecallController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: RecordScreen(controller: controller)),
+      ),
+    );
+
+    expect(find.text('Bluetooth device'), findsOneWidget);
+    await tester.tap(find.text('Bluetooth device'));
+    await tester.pump();
+    expect(find.text('Scan for wearables'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'mobile without a saved device exposes Bluetooth setup and microphone fallback',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        final controller = NeoRecallController();
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildNeoRecallTheme(Brightness.light),
+            home: Scaffold(body: RecordScreen(controller: controller)),
+          ),
+        );
+
+        expect(find.text('Bluetooth device'), findsOneWidget);
+        expect(find.text('Phone microphone'), findsOneWidget);
+        expect(find.text('Scan for wearables'), findsOneWidget);
+        expect(
+          find.text(
+            'Connect a supported Bluetooth device before starting this source.',
+          ),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
   for (final size in <Size>[const Size(390, 844), const Size(1180, 780)]) {
     testWidgets('every app screen lays out at ${size.width.toInt()}px', (
       tester,

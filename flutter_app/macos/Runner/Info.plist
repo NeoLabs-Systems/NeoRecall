@@ -26,6 +26,10 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NeoRecall uses the microphone only while visible recording is active so it can create local transcripts and memories.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>NeoRecall connects to supported recording devices selected by you.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>NeoRecall connects to supported recording devices selected by you.</string>
 	<key>NSScreenCaptureDescription</key>
 	<string>NeoRecall uses Screen Recording permission only to capture device audio selected by you; display video is never stored or uploaded.</string>
 	<key>NSMainNibFile</key>

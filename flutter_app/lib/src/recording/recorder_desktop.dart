@@ -4,6 +4,8 @@ import '../capture/capture_pipeline.dart';
 import '../capture/capture_source.dart';
 import '../capture/microphone_capture_source.dart';
 import '../capture/system_audio_capture_source.dart';
+import '../capture/bluetooth_capture_source.dart';
+import '../devices/audio_device_adapter.dart';
 import 'audio_frame.dart';
 import 'recorder.dart';
 
@@ -38,9 +40,10 @@ class DesktopRecallRecorder implements RecallRecorder {
     required bool systemAudio,
     required int chunkMs,
     required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
   }) async {
     if (isRecording) throw StateError('Recorder is already active.');
-    if (!microphone && !systemAudio) {
+    if (!microphone && !systemAudio && externalDevice == null) {
       throw StateError(
         'Select microphone and/or device audio before recording.',
       );
@@ -48,6 +51,16 @@ class DesktopRecallRecorder implements RecallRecorder {
 
     final sources = <CaptureSource>[];
     final notes = <String>[];
+
+    if (externalDevice != null) {
+      sources.add(
+        BluetoothCaptureSource(
+          adapter: externalDevice.adapter,
+          device: externalDevice.descriptor,
+          connectOnStart: false,
+        ),
+      );
+    }
 
     if (microphone) {
       final source = createPlatformMicrophoneSource();

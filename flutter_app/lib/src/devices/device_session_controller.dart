@@ -31,6 +31,7 @@ class DeviceSessionController {
   Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
   bool _connecting = false;
+  bool _disconnecting = false;
   String? _accountId;
 
   Stream<DeviceTransportState> get states => _states.stream;
@@ -148,6 +149,7 @@ class DeviceSessionController {
         _reconnectTimer?.cancel();
       }
       if (autoReconnect &&
+          !_disconnecting &&
           value == DeviceTransportState.disconnected &&
           preferredDevice != null) {
         _scheduleReconnect();
@@ -185,12 +187,18 @@ class DeviceSessionController {
   }
 
   Future<void> disconnect() async {
+    if (_disconnecting) return;
+    _disconnecting = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _reconnectAttempt = 0;
-    await activeAdapter?.disconnect();
-    state = DeviceTransportState.disconnected;
-    _states.add(state);
+    try {
+      await activeAdapter?.disconnect();
+    } finally {
+      state = DeviceTransportState.disconnected;
+      _states.add(state);
+      _disconnecting = false;
+    }
   }
 
   Future<void> dispose() async {

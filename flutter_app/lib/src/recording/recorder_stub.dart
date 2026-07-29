@@ -1,5 +1,6 @@
 import 'audio_frame.dart';
 import 'recorder.dart';
+import '../devices/audio_device_adapter.dart';
 
 RecallRecorder createRecorder() => _UnsupportedRecorder();
 
@@ -22,6 +23,7 @@ class _UnsupportedRecorder implements RecallRecorder {
     required bool systemAudio,
     required int chunkMs,
     required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
   }) => throw UnsupportedError('Recording is unsupported on this platform.');
   @override
   Future<void> stop() async {}

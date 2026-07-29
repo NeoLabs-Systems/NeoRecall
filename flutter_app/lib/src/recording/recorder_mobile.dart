@@ -86,6 +86,7 @@ class MobileRecallRecorder implements RecallRecorder {
     required bool systemAudio,
     required int chunkMs,
     required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
   }) async {
     if (!_initialized) await initialize();
     if (isRecording) throw StateError('Recorder is already active.');
@@ -93,13 +94,19 @@ class MobileRecallRecorder implements RecallRecorder {
     final sources = <CaptureSource>[];
     final notes = <String>[];
     final preferBluetooth =
-        !microphone && devices.preferBluetooth && devices.hasPreferredDevice;
+        externalDevice != null ||
+        (!microphone && devices.preferBluetooth && devices.hasPreferredDevice);
 
     if (preferBluetooth) {
-      final device = devices.preferredDevice!;
-      final adapter = devices.activeAdapter ?? registry[device.adapterId];
+      final device = externalDevice?.descriptor ?? devices.preferredDevice!;
+      final adapter =
+          externalDevice?.adapter ??
+          devices.activeAdapter ??
+          registry[device.adapterId];
       if (adapter != null) {
-        final connected = await devices.connectPreferred();
+        final connected = externalDevice != null
+            ? true
+            : await devices.connectPreferred();
         if (connected) {
           sources.add(
             BluetoothCaptureSource(

@@ -1,4 +1,4 @@
-import '../ble/ble_transport.dart';
+import '../ble/gatt_connector_transport.dart';
 import 'base_connector.dart';
 import 'custom_command_connector.dart';
 import 'device_models.dart';
@@ -7,11 +7,10 @@ import 'limitless_connector.dart';
 import 'omi_connector.dart';
 import 'plaud_connector.dart';
 
-WearableConnector createWearableConnector(DiscoveredWearable device) {
-  final transport = BleTransport(
-    device.id,
-    requiresBond: device.type == WearableDeviceType.limitless,
-  );
+WearableConnector createWearableConnector(
+  DiscoveredWearable device,
+  WearableTransport transport,
+) {
   switch (device.type) {
     case WearableDeviceType.omi:
       return OmiConnector(device: device, transport: transport);
@@ -28,6 +27,8 @@ WearableConnector createWearableConnector(DiscoveredWearable device) {
     case WearableDeviceType.limitless:
       return LimitlessConnector(device: device, transport: transport);
     case WearableDeviceType.custom:
-      return OmiConnector(device: device, transport: transport);
+      throw UnsupportedError(
+        'No validated wearable protocol matches ${device.name}.',
+      );
   }
 }

@@ -26,6 +26,7 @@ import androidx.core.app.ServiceCompat
 class BackgroundCaptureService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
   private var mode: String = "microphone"
+  private var explicitlyStopped = false
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -45,7 +46,10 @@ class BackgroundCaptureService : Service() {
         return START_STICKY
       }
       else -> {
-        mode = intent?.getStringExtra(EXTRA_MODE) ?: mode
+        mode = intent?.getStringExtra(EXTRA_MODE)
+          ?: getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_MODE, mode)
+          ?: mode
         startCapture(mode)
       }
     }
@@ -53,6 +57,7 @@ class BackgroundCaptureService : Service() {
   }
 
   private fun startCapture(mode: String) {
+    explicitlyStopped = false
     this.mode = mode
     val notification = buildNotification(mode)
     val serviceType = if (mode == MODE_BLUETOOTH) {
@@ -79,6 +84,7 @@ class BackgroundCaptureService : Service() {
   }
 
   private fun stopCapture() {
+    explicitlyStopped = true
     releaseWakeLock()
     getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .edit()
@@ -167,10 +173,15 @@ class BackgroundCaptureService : Service() {
 
   override fun onDestroy() {
     releaseWakeLock()
-    getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_RUNNING, false)
-      .apply()
+    // Preserve the requested capture intent when Android reclaims the service.
+    // START_STICKY can then recreate it with a null Intent and restore KEY_MODE.
+    // Explicit user/app stops clear the flag in stopCapture().
+    if (explicitlyStopped) {
+      getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(KEY_RUNNING, false)
+        .apply()
+    }
     super.onDestroy()
   }
 
