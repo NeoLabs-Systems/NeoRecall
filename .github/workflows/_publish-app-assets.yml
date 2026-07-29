@@ -34,9 +34,12 @@ jobs:
           set -euo pipefail
 
           release_json="$(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+            gh release view \
+              "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json databaseId,isDraft,isPrerelease,tagName
           )"
-          if [[ "$(jq -r '.draft' <<<"$release_json")" != "true" ]]; then
+          if [[ "$(jq -r '.isDraft' <<<"$release_json")" != "true" ]]; then
             echo "::error::Release $RELEASE_TAG must remain a draft until all assets are attached."
             exit 1
           fi
@@ -148,13 +151,16 @@ jobs:
           gh release edit "${publish_args[@]}"
 
           release_json="$(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+            gh release view \
+              "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,isPrerelease,tagName
           )"
-          if [[ "$(jq -r '.draft' <<<"$release_json")" != "false" ]]; then
+          if [[ "$(jq -r '.isDraft' <<<"$release_json")" != "false" ]]; then
             echo "::error::Release $RELEASE_TAG is still a draft."
             exit 1
           fi
-          if [[ "$(jq -r '.prerelease' <<<"$release_json")" != "$IS_PRERELEASE" ]]; then
+          if [[ "$(jq -r '.isPrerelease' <<<"$release_json")" != "$IS_PRERELEASE" ]]; then
             echo "::error::Release $RELEASE_TAG has the wrong release channel."
             exit 1
           fi
