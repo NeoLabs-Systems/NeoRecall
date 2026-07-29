@@ -9,7 +9,7 @@ const { localDateTimeToUtc } = require('../../server/utils/time');
 
 test('legacy string aliases are normalized without changing their meaning', () => {
   const parsed = consolidationSchema.parse({
-    conversationAssessments: [],
+    conversationSections: [{ titleEn: 'Introduction', summaryEn: 'Mira introduced herself.', memoryWorthy: true, topics: [], sourceSegmentIds: ['segment-1'] }],
     entities: [{ ref: 'person-1', kind: 'person', canonicalNameEn: 'Mira Chen', displayName: 'Mira', aliases: ['Mira'] }],
     memories: [], dailySummary: null,
   });
@@ -32,26 +32,24 @@ test('consolidation input uses compact aliases and restores durable IDs', () => 
   assert.equal(payload.conversations[0].segments[0].speaker, 'speaker1');
   assert.equal(prepared.messages[1].content.includes(conversationId), false);
   assert.equal(prepared.messages[1].content.includes(segmentId), false);
-  const output = { conversationAssessments: [{ conversationId: 'c1', memoryWorthy: true }], memories: [{
-    sourceConversationIds: ['c1'], sourceSegmentIds: ['s1'], miniMemories: [{ sourceSegmentIds: ['s1'] }],
+  const output = { conversationSections: [{
+    titleEn: 'Task assignment', summaryEn: 'Mira accepted a task.', memoryWorthy: true, topics: ['Planning'], sourceSegmentIds: ['s1'],
+  }], memories: [{
+    sourceSegmentIds: ['s1'], miniMemories: [{ sourceSegmentIds: ['s1'] }],
   }] };
   restoreReferenceIds(output, prepared.references);
-  assert.equal(output.conversationAssessments[0].conversationId, conversationId);
-  assert.deepEqual(output.memories[0].sourceConversationIds, [conversationId]);
+  assert.deepEqual(output.conversationSections[0].sourceSegmentIds, [segmentId]);
   assert.deepEqual(output.memories[0].sourceSegmentIds, [segmentId]);
   assert.deepEqual(output.memories[0].miniMemories[0].sourceSegmentIds, [segmentId]);
 });
 
-test('dynamic consolidation schema restricts aliases and assessment count', () => {
-  const schema = consolidationJsonSchemaFor(['c1', 'c2'], ['s1', 's2']);
-  assert.equal(schema.properties.conversationAssessments.minItems, 2);
-  assert.equal(schema.properties.conversationAssessments.maxItems, 2);
-  assert.deepEqual(schema.properties.conversationAssessments.items.properties.conversationId.enum, ['c1', 'c2']);
-  assert.deepEqual(schema.properties.memories.items.properties.sourceConversationIds.items.enum, ['c1', 'c2']);
+test('dynamic consolidation schema restricts every transcript reference to compact segment aliases', () => {
+  const schema = consolidationJsonSchemaFor(['s1', 's2']);
+  assert.deepEqual(schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
   assert.deepEqual(schema.properties.memories.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
-  assert.notStrictEqual(schema.properties.memories.items.properties.sourceConversationIds.items,
+  assert.notStrictEqual(schema.properties.conversationSections.items.properties.sourceSegmentIds.items,
     schema.properties.memories.items.properties.sourceSegmentIds.items);
-  assert.equal(consolidationJsonSchema.properties.conversationAssessments.minItems, undefined);
+  assert.equal(consolidationJsonSchema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, undefined);
 });
 
 test('local timestamp context includes daylight-saving offsets', () => {

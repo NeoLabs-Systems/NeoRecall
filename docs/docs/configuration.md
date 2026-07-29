@@ -29,9 +29,13 @@ Set `OPENROUTER_API_KEY` and `AI_DEFAULT_MODEL` to enable memory generation. `NE
 
 Every consolidation attempt, including a timeout, consumes its interval. It performs one outbound request with no LLM repair retry. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter.
 
+`AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` provides a hard completion budget for that one request. Conversation titles, summaries, and topic arrays are also schema-bounded, while redundant model-generated timestamps and conversation IDs are omitted and derived from cited segments on the server.
+
 ## Operational thresholds
 
 The admin dashboard can safely tune boundary, deduplication, speaker matching, and consolidation material thresholds. Values are validated and stored in SQLite. Environment defaults remain the source of truth until an administrator explicitly overrides a value.
+
+Conversation boundaries expose separate controls for hard and soft silence gaps, contextual embedding similarity and valley prominence, the number of neighboring segments used as semantic context, and maximum duration/character safety ceilings. `NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS` must not exceed `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS`, ensuring one provisional conversation always fits in a bounded consolidation request.
 
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.

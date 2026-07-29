@@ -11,7 +11,7 @@ function extractContent(payload) {
   throw Object.assign(new Error('OpenRouter returned no message content.'), { code: 'AI_EMPTY_RESPONSE' });
 }
 
-async function chatJSON({ userId, purpose, messages, model, responseFormat = null }) {
+async function chatJSON({ userId, purpose, messages, model, responseFormat = null, maxTokens = null }) {
   const config = getConfig();
   if (!config.openRouterApiKey) throw Object.assign(new Error('OPENROUTER_API_KEY is not configured.'), { code: 'AI_NOT_CONFIGURED' });
   if (!model) throw Object.assign(new Error('AI_DEFAULT_MODEL is not configured.'), { code: 'AI_MODEL_NOT_CONFIGURED' });
@@ -31,6 +31,7 @@ async function chatJSON({ userId, purpose, messages, model, responseFormat = nul
       },
       body: JSON.stringify({
         model, messages, response_format: responseFormat || { type: 'json_object' },
+        ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(responseFormat?.type === 'json_schema' ? { provider: { require_parameters: true } } : {}),
       }),
     });

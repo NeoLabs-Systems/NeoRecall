@@ -14,6 +14,7 @@ function compactInput(conversations, timezone) {
   const conversationAliases = new Map();
   const segmentAliases = new Map();
   const speakerAliases = new Map();
+  const streamAliases = new Map();
   const reverseConversationAliases = new Map();
   const reverseSegmentAliases = new Map();
   let segmentOrdinal = 0;
@@ -23,8 +24,11 @@ function compactInput(conversations, timezone) {
     conversationAliases.set(conversation.id, conversationAlias);
     reverseConversationAliases.set(conversationAlias, conversation.id);
     const conversationStart = Date.parse(conversation.startedAt);
+    const streamKey = conversation.sessionId || conversation.id;
+    if (!streamAliases.has(streamKey)) streamAliases.set(streamKey, `stream${streamAliases.size + 1}`);
     return {
       id: conversationAlias,
+      stream: streamAliases.get(streamKey),
       recorded: {
         startedAtUtc: conversation.startedAt,
         endedAtUtc: conversation.endedAt,
@@ -53,7 +57,13 @@ function compactInput(conversations, timezone) {
     };
   });
 
-  return { compactConversations, conversationAliases, segmentAliases, reverseConversationAliases, reverseSegmentAliases };
+  return {
+    compactConversations,
+    conversationAliases,
+    segmentAliases,
+    reverseConversationAliases,
+    reverseSegmentAliases,
+  };
 }
 
 function consolidationMessages({ conversations, previousDailySummary, timezone }, preparedReferences = null) {
@@ -71,31 +81,37 @@ function consolidationMessages({ conversations, previousDailySummary, timezone }
       role: 'system',
       content: `You consolidate personal transcripts into reliable memories. Return one JSON object matching the supplied contract.
 All titles, summaries, topics, canonical entity names, and mini-memory text MUST be English, even when the source transcript is German or another language. Preserve proper names accurately.
-Create episodic memories only for meaningful material. Ordinary ambient speech may be assessed as not memory-worthy. Split conversations by topic when appropriate. Mini-memories must be atomic and evidence-backed.
+The input conversation objects are provisional local groups, not authoritative conversation boundaries. Produce conversationSections that partition the transcript into coherent real-world conversations or topic areas. You may merge adjacent input conversations when they belong to the same stream and same real conversation, and split any input conversation when its topic or real-world conversation changes. Never combine segments from different streams. A speaker change alone, a brief aside, or a short pause is not a topic boundary. Do not force a fixed number or duration of sections.
+Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories must be atomic and evidence-backed.
 Extract each distinct durable fact, decision, measurable requirement, task, promise, deadline, scheduled event, person or relationship, and location that is useful to recall. Perform a segment-by-segment completeness check so secondary assignees and commitments are not omitted merely because the parent memory mentions the topic. Each mini-memory must contain exactly one independently searchable assertion; never combine distinct requirements, decisions, assignments, or promises in one mini-memory. Do not turn proposals, questions, negations, or uncertain statements into established facts. If the source explicitly says there is no task, do not create a task or promise from the negative instruction.
 When the evidence names the actor for a task or promise, include that actor in textEn as well as in the entity relation. Do not rely on entity metadata to make an atomic memory understandable. If the actor is not identifiable from the evidence, do not invent one.
-When one input conversation contains unrelated topics, create separate memories with the specific supporting segment IDs for each topic.
-Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. Memory startedAt and endedAt remain ISO-8601 UTC timestamps.
+When one input conversation contains unrelated topics, create separate sections and memories with the specific supporting segment IDs for each topic.
+Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. NeoRecall derives all output time ranges from cited segment IDs, so do not produce redundant timestamps.
 For mini-memory dueAt and occurredAt, NEVER calculate UTC. Return null or an object containing the exact local wall-clock value without an offset plus the applicable IANA timezone. Use the supplied user timezone for unqualified times. For a date-only deadline use 23:59:59 local time; for a date-only event use 00:00:00 local time. When the source gives only a vague part of day, retain that wording in text and return null rather than inventing an exact clock time. NeoRecall converts the object to UTC deterministically. Use null when the evidence does not support a date.
-Memory startedAt and endedAt describe when the cited recorded episode occurred, not a future event discussed during it.
 Use dueAt for task or promise deadlines. Use occurredAt for events and past occurrences. Status is only for tasks and promises; use null for other kinds.
-Daily summary text and sourceCount cover memory-worthy material only. Exclude conversations assessed as not memory-worthy. If there is no memory-worthy material and no previous daily summary, return dailySummary as null.
-Return exactly one conversationAssessments entry for EVERY input conversation, including material that is not memory-worthy. Keep the input order. Never omit or duplicate an input conversation.
-Use only conversation and segment IDs present in the input. Never invent facts or IDs. Importance is 1–10. Confidence reflects evidential certainty. Return no prose outside JSON.`,
+Daily summary text covers memory-worthy material only. Exclude sections marked not memory-worthy. If there is no memory-worthy material and no previous daily summary, return dailySummary as null.
+Across conversationSections, include EVERY input segment ID exactly once. Each section must contain a non-empty, chronologically contiguous range from one stream. Preserve segment order. Never omit, duplicate, reorder, or invent segment IDs.
+Use only segment IDs present in the input. Never invent facts or IDs. Importance is 1–10. Confidence reflects evidential certainty. Return no prose outside JSON.`,
     },
     {
       role: 'user',
       content: JSON.stringify({ timezone, previousDailySummary: compactPreviousSummary, conversations: references.compactConversations, outputContract: {
-        conversationAssessments: [{ conversationId: 'input ID', memoryWorthy: true }],
+        conversationSections: [{
+          titleEn: 'Concise English title',
+          summaryEn: 'Faithful English summary',
+          memoryWorthy: true,
+          topics: ['English topic'],
+          sourceSegmentIds: ['contiguous input segment IDs'],
+        }],
         entities: [{ ref: 'response-local ID', kind: 'person|organization|project|location|other', canonicalNameEn: 'English canonical name', displayName: null,
           aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }] }],
         memories: [{ type: 'meeting|conversation|project_discussion|introduction|decision|experience|other', titleEn: 'English', summaryEn: 'English', importance: 1,
-          startedAt: 'ISO timestamp', endedAt: 'ISO timestamp', sourceConversationIds: ['input ID'], sourceSegmentIds: ['input ID'], topics: ['English'],
+          sourceSegmentIds: ['input segment ID'], topics: ['English'],
           entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: 'fact|event|location|person|relationship|task|promise',
             textEn: 'English atomic statement', importance: 1, confidence: 0.5,
             dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: null,
-            sourceSegmentIds: ['input ID'], entities: [] }] }],
-        dailySummary: { localDate: 'YYYY-MM-DD', timezone, summaryEn: 'English cumulative summary', coverageStartedAt: null, coverageEndedAt: null, sourceCount: 0 },
+            sourceSegmentIds: ['input segment ID'], entities: [] }] }],
+        dailySummary: { localDate: 'YYYY-MM-DD', timezone, summaryEn: 'English cumulative summary' },
       } }),
     },
   ];
@@ -108,11 +124,11 @@ function prepareConsolidationRequest(input) {
 }
 
 function restoreReferenceIds(output, references) {
-  const conversationId = (alias) => references.reverseConversationAliases.get(alias) || alias;
   const segmentId = (alias) => references.reverseSegmentAliases.get(alias) || alias;
-  for (const assessment of output.conversationAssessments) assessment.conversationId = conversationId(assessment.conversationId);
+  for (const section of output.conversationSections) {
+    section.sourceSegmentIds = section.sourceSegmentIds.map(segmentId);
+  }
   for (const memory of output.memories) {
-    memory.sourceConversationIds = memory.sourceConversationIds.map(conversationId);
     memory.sourceSegmentIds = memory.sourceSegmentIds.map(segmentId);
     for (const miniMemory of memory.miniMemories) miniMemory.sourceSegmentIds = miniMemory.sourceSegmentIds.map(segmentId);
   }

@@ -9,6 +9,7 @@ const processingSettings = require('../settings/processing_settings_service');
 const jobs = require('../jobs/job_service');
 const ai = require('../../ai/ai_engine');
 const searchIndex = require('../../embeddings/search_index_service');
+const refinement = require('../conversations/conversation_refinement_service');
 
 function localDate(iso, timezone) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso));
@@ -22,7 +23,10 @@ function lastOutbound(userId) {
 
 function candidateConversations(userId) {
   const db = getDatabase();
-  const conversations = db.prepare(`SELECT c.* FROM conversations c WHERE c.user_id=? AND c.state='closed'
+  const conversations = db.prepare(`SELECT c.*,
+    (SELECT ac.session_id FROM transcript_segments ts JOIN audio_chunks ac ON ac.id=ts.chunk_id
+      WHERE ts.conversation_id=c.id ORDER BY ts.started_at LIMIT 1) session_id
+    FROM conversations c WHERE c.user_id=? AND c.state='closed'
     ORDER BY c.started_at`).all(userId);
   return conversations.filter((conversation) => {
     const segments = db.prepare('SELECT chunk_id FROM transcript_segments WHERE conversation_id=? AND user_id=?').all(conversation.id, userId);
@@ -41,10 +45,17 @@ function buildCandidates(userId) {
   let characters = 0;
   for (const conversation of candidateConversations(userId)) {
     const segments = db.prepare(`SELECT public_id id,started_at,ended_at,text,language,speaker_cluster_id speakerClusterId
-      FROM transcript_segments WHERE conversation_id=? AND user_id=? ORDER BY started_at`).all(conversation.id, userId);
+      FROM transcript_segments WHERE conversation_id=? AND user_id=?
+      ORDER BY started_at,ended_at,public_id`).all(conversation.id, userId);
     const size = segments.reduce((sum, segment) => sum + segment.text.length, 0);
     if (output.length && characters + size > maxCharacters) break;
-    output.push({ id: conversation.id, startedAt: conversation.started_at, endedAt: conversation.ended_at, segments });
+    output.push({
+      id: conversation.id,
+      sessionId: conversation.session_id,
+      startedAt: conversation.started_at,
+      endedAt: conversation.ended_at,
+      segments,
+    });
     characters += size;
   }
   return { conversations: output, characters };
@@ -94,16 +105,22 @@ function normalizeIdentity(value) {
 }
 
 function validateReferences(output, conversations) {
-  const conversationIds = new Set(conversations.map((conversation) => conversation.id));
   const segmentIds = new Set(conversations.flatMap((conversation) => conversation.segments.map((segment) => segment.id)));
-  const assessments = new Set(output.conversationAssessments.map((item) => item.conversationId));
-  if (assessments.size !== conversationIds.size || [...assessments].some((id) => !conversationIds.has(id))) throw Object.assign(new Error('Consolidation assessments must cover exactly the input conversations.'), { code: 'AI_REFERENCE_INVALID' });
+  refinement.validateConversationSections(output.conversationSections, conversations);
+  const worthySegmentIds = new Set(output.conversationSections
+    .filter((section) => section.memoryWorthy)
+    .flatMap((section) => section.sourceSegmentIds));
   const entityRefs = new Set(output.entities.map((entity) => entity.ref));
   for (const memory of output.memories) {
-    if (memory.sourceConversationIds.some((id) => !conversationIds.has(id)) || memory.sourceSegmentIds.some((id) => !segmentIds.has(id))) throw Object.assign(new Error('A memory cited a source outside the consolidation input.'), { code: 'AI_REFERENCE_INVALID' });
+    if (memory.sourceSegmentIds.some((id) => !segmentIds.has(id) || !worthySegmentIds.has(id))) {
+      throw Object.assign(new Error('A memory cited a source outside a memory-worthy conversation section.'), { code: 'AI_REFERENCE_INVALID' });
+    }
     if (memory.entities.some((item) => !entityRefs.has(item.ref))) throw Object.assign(new Error('A memory cited an undefined entity.'), { code: 'AI_REFERENCE_INVALID' });
     for (const mini of memory.miniMemories) {
-      if (mini.sourceSegmentIds.some((id) => !segmentIds.has(id)) || mini.entities.some((item) => !entityRefs.has(item.ref))) throw Object.assign(new Error('A mini-memory cited an invalid source or entity.'), { code: 'AI_REFERENCE_INVALID' });
+      if (mini.sourceSegmentIds.some((id) => !segmentIds.has(id) || !worthySegmentIds.has(id))
+        || mini.entities.some((item) => !entityRefs.has(item.ref))) {
+        throw Object.assign(new Error('A mini-memory cited an invalid or non-memory-worthy source.'), { code: 'AI_REFERENCE_INVALID' });
+      }
     }
   }
 }
@@ -123,14 +140,21 @@ function persist(userId, runId, output, conversations, aiRequestId) {
   anchorMemoryRanges(output, conversations);
   const db = getDatabase();
   const userSettings = settings.get(userId);
-  const worthyConversationIds = new Set(output.conversationAssessments.filter((assessment) => assessment.memoryWorthy).map((assessment) => assessment.conversationId));
-  const worthyConversations = conversations.filter((conversation) => worthyConversationIds.has(conversation.id));
-  if (!worthyConversations.length) output.dailySummary = null;
-  if (worthyConversations.length && !output.dailySummary) {
+  const hasWorthySections = output.conversationSections.some((section) => section.memoryWorthy);
+  if (!hasWorthySections) output.dailySummary = null;
+  if (hasWorthySections && !output.dailySummary) {
     throw Object.assign(new Error('Memory-worthy material requires a daily summary update.'), { code: 'AI_REFERENCE_INVALID' });
   }
   const entityIds = new Map();
   db.transaction(() => {
+    const refined = refinement.applyConversationSections(
+      db,
+      userId,
+      runId,
+      output.conversationSections,
+      conversations,
+    );
+    const worthyConversations = refined.conversations.filter((conversation) => conversation.memoryWorthy);
     for (const entity of output.entities) {
       const identity = normalizeIdentity(entity.canonicalNameEn);
       let row = db.prepare('SELECT id FROM entities WHERE user_id=? AND kind=? AND normalized_identity_key=?').get(userId, entity.kind, identity);
@@ -151,8 +175,13 @@ function persist(userId, runId, output, conversations, aiRequestId) {
         VALUES (?,?,?,?,?,?,?,?,?)`).run(publicId, userId, memory.type, memory.titleEn, memory.summaryEn, memory.importance, memory.startedAt, memory.endedAt, runId);
       const memoryId = Number(result.lastInsertRowid);
       const sourceInsert = db.prepare('INSERT OR IGNORE INTO memory_sources (memory_id,conversation_id,segment_id) VALUES (?,?,?)');
-      for (const conversationId of memory.sourceConversationIds) sourceInsert.run(memoryId, conversationId, null);
-      for (const segmentPublicId of memory.sourceSegmentIds) sourceInsert.run(memoryId, null, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
+      const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(
+        (segmentPublicId) => refined.segmentConversationIds.get(segmentPublicId),
+      ))];
+      for (const conversationId of sourceConversationIds) sourceInsert.run(memoryId, conversationId, null);
+      for (const segmentPublicId of memory.sourceSegmentIds) {
+        sourceInsert.run(memoryId, null, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
+      }
       const topicInsert = db.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
       for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
       const memoryEntityInsert = db.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
@@ -172,8 +201,6 @@ function persist(userId, runId, output, conversations, aiRequestId) {
       }
       searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: memory.titleEn, body: memory.summaryEn, occurredAt: memory.startedAt, importance: memory.importance }, db);
     }
-    for (const assessment of output.conversationAssessments) db.prepare("UPDATE conversations SET state=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?")
-      .run(assessment.memoryWorthy ? 'consolidated' : 'not_memory_worthy', assessment.conversationId, userId);
     if (output.dailySummary) {
       if (output.dailySummary.timezone !== userSettings.timezone) throw Object.assign(new Error('Daily summary timezone differs from the user setting.'), { code: 'AI_REFERENCE_INVALID' });
       const newestWorthyConversation = worthyConversations.reduce((latest, conversation) => !latest || Date.parse(conversation.endedAt) > Date.parse(latest.endedAt) ? conversation : latest, null);
@@ -202,15 +229,38 @@ function persist(userId, runId, output, conversations, aiRequestId) {
       completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(aiRequestId, output.memories.length,
       output.memories.reduce((sum, memory) => sum + memory.miniMemories.length, 0), runId, userId);
     db.prepare(`INSERT INTO event_outbox (user_id,event_type,resource_type,resource_id,payload_json,expires_at)
-      VALUES (?,'consolidation.completed','consolidation_run',?,?,?)`).run(userId, runId, JSON.stringify({ runId, memories: output.memories.length }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
+      VALUES (?,'consolidation.completed','consolidation_run',?,?,?)`).run(userId, runId, JSON.stringify({
+      runId,
+      memories: output.memories.length,
+      conversations: refined.conversations.length,
+    }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
   })();
 }
 
-async function execute(runId) {
+async function execute(runId, reservedConversationIds = null) {
   const db = getDatabase();
   const run = db.prepare("SELECT * FROM consolidation_runs WHERE id=? AND state='reserved'").get(runId);
   if (!run) throw Object.assign(new Error('Consolidation run is not reserved.'), { code: 'RUN_NOT_RESERVED' });
-  const conversations = buildCandidates(run.user_id).conversations.filter((conversation) => Date.parse(conversation.startedAt) >= Date.parse(run.candidate_started_at) && Date.parse(conversation.endedAt) <= Date.parse(run.candidate_ended_at));
+  let requestedIds = reservedConversationIds;
+  if (!requestedIds) {
+    const queuedJob = db.prepare("SELECT payload_json FROM jobs WHERE type='consolidate_memories' AND resource_id=? ORDER BY created_at DESC LIMIT 1").get(runId);
+    requestedIds = queuedJob ? JSON.parse(queuedJob.payload_json).conversationIds : null;
+  }
+  const available = new Map(buildCandidates(run.user_id).conversations.map((conversation) => [conversation.id, conversation]));
+  const conversations = requestedIds?.length
+    ? requestedIds.map((id) => available.get(id)).filter(Boolean)
+    : [...available.values()].filter((conversation) => (
+      Date.parse(conversation.startedAt) >= Date.parse(run.candidate_started_at)
+      && Date.parse(conversation.endedAt) <= Date.parse(run.candidate_ended_at)
+    ));
+  if (!conversations.length || (requestedIds?.length && conversations.length !== requestedIds.length)) {
+    db.prepare(`UPDATE consolidation_runs SET state='failed',error_code='CONSOLIDATION_INPUT_CHANGED',
+      completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(runId);
+    throw Object.assign(new Error('The reserved conversation set changed before consolidation could start.'), {
+      code: 'CONSOLIDATION_INPUT_CHANGED',
+      retryable: false,
+    });
+  }
   db.prepare("UPDATE consolidation_runs SET state='running',started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(runId);
   let aiRequestId = null;
   try {

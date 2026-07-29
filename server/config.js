@@ -37,7 +37,7 @@ function getConfig() {
   const searchWeightTotal = relevanceWeight + recencyWeight + importanceWeight;
   if (searchWeightTotal <= 0) throw new Error('At least one search weight must be greater than zero.');
 
-  return Object.freeze({
+  const config = {
     host: process.env.NEORECALL_HOST || '127.0.0.1',
     port: integer('NEORECALL_PORT', 4500, { min: 1, max: 65535 }),
     publicUrl: process.env.NEORECALL_PUBLIC_URL || null,
@@ -71,9 +71,15 @@ function getConfig() {
     diarizationMinimumOnSeconds: number('NEORECALL_DIARIZATION_MIN_ON_SECONDS', 0.3, { min: 0 }),
     diarizationMinimumOffSeconds: number('NEORECALL_DIARIZATION_MIN_OFF_SECONDS', 0.2, { min: 0 }),
     conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
+    conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
     conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),
     conversationQuietCloseMs: integer('NEORECALL_CONVERSATION_QUIET_CLOSE_MS', 300_000, { min: 1_000 }),
     conversationValleyQuantile: number('NEORECALL_CONVERSATION_VALLEY_QUANTILE', 0.25, { min: 0, max: 1 }),
+    conversationSemanticSimilarityThreshold: number('NEORECALL_CONVERSATION_SEMANTIC_SIMILARITY_THRESHOLD', 0.58, { min: -1, max: 1 }),
+    conversationSemanticValleyProminence: number('NEORECALL_CONVERSATION_SEMANTIC_VALLEY_PROMINENCE', 0.1, { min: 0, max: 2 }),
+    conversationSemanticContextSegments: integer('NEORECALL_CONVERSATION_SEMANTIC_CONTEXT_SEGMENTS', 3, { min: 1, max: 20 }),
+    conversationMaximumMs: integer('NEORECALL_CONVERSATION_MAXIMUM_MS', 4 * 60 * 60_000, { min: 60_000 }),
+    conversationMaximumCharacters: integer('NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS', 40_000, { min: 1_000 }),
     embeddingModel: process.env.NEORECALL_EMBEDDING_MODEL || 'Xenova/multilingual-e5-small',
     embeddingDimensions: integer('NEORECALL_EMBEDDING_DIMENSIONS', 384, { min: 1 }),
     requireVector: boolean('NEORECALL_REQUIRE_VECTOR', process.env.NODE_ENV === 'production'),
@@ -88,6 +94,7 @@ function getConfig() {
     aiDefaultModel: process.env.AI_DEFAULT_MODEL || null,
     aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 120_000, { min: 1_000 }),
     aiMaxRetries: integer('AI_MAX_RETRIES', 2, { min: 0, max: 10 }),
+    aiConsolidationMaxOutputTokens: integer('AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 8_000, { min: 512, max: 32_768 }),
     openRouterApiKey: process.env.OPENROUTER_API_KEY || null,
     openRouterBaseUrl: (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
     minConsolidationIntervalMs: integer('NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS', 3_600_000, { min: 0 }),
@@ -97,7 +104,20 @@ function getConfig() {
     askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 5, { min: 0 }),
     jobLeaseMs: integer('NEORECALL_JOB_LEASE_MS', 300_000, { min: 10_000 }),
     jobMaxAttempts: integer('NEORECALL_JOB_MAX_ATTEMPTS', 5, { min: 1, max: 100 }),
-  });
+  };
+  if (config.conversationSoftGapMs >= config.conversationHardGapMs) {
+    throw new Error('NEORECALL_CONVERSATION_SOFT_GAP_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.conversationMinimumMs >= config.conversationHardGapMs) {
+    throw new Error('NEORECALL_CONVERSATION_MINIMUM_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.conversationMaximumMs <= config.conversationMinimumMs) {
+    throw new Error('NEORECALL_CONVERSATION_MAXIMUM_MS must be longer than NEORECALL_CONVERSATION_MINIMUM_MS.');
+  }
+  if (config.conversationMaximumCharacters > config.maxConsolidationInputChars) {
+    throw new Error('NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS must not exceed NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS.');
+  }
+  return Object.freeze(config);
 }
 
 module.exports = { getConfig, integer, number, boolean };

@@ -3,6 +3,7 @@
 const { getDatabase } = require('../../db/database');
 const processingSettings = require('../../services/settings/processing_settings_service');
 const boundary = require('../../services/conversations/boundary_service');
+const membership = require('../../services/conversations/conversation_membership_service');
 const vectors = require('../../transcription/speaker_embeddings');
 
 function blocksForSegments(database, segments) {
@@ -12,20 +13,18 @@ function blocksForSegments(database, segments) {
     return {
       id: segment.id, segmentIds: [segment.id], startedAt: segment.started_at, endedAt: segment.ended_at,
       speakerId: segment.speaker_cluster_id, embedding: embedded ? vectors.fromBuffer(embedded.embedding) : null,
+      characterCount: segment.text.length,
     };
   });
 }
 
 function insertConversation(database, userId, group, state) {
   database.prepare(`INSERT INTO conversations (id,user_id,started_at,ended_at,state,boundary_method,boundary_score,boundary_version)
-    VALUES (?,?,?,?,?,'time-speaker-embedding',NULL,'1')`).run(group.id, userId, group.startedAt, group.endedAt, state);
-  const update = database.prepare('UPDATE transcript_segments SET conversation_id=? WHERE id=? AND user_id=?');
-  for (const segmentId of group.segmentIds) update.run(group.id, segmentId, userId);
-  const speakers = database.prepare(`SELECT DISTINCT t.speaker_cluster_id cluster_id,st.voiceprint_id
-    FROM transcript_segments t LEFT JOIN speaker_turns st ON st.chunk_id=t.chunk_id AND st.cluster_id=t.speaker_cluster_id
-    WHERE t.conversation_id=? AND t.user_id=? AND t.speaker_cluster_id IS NOT NULL ORDER BY t.started_at`).all(group.id, userId);
-  const insertSpeaker = database.prepare('INSERT OR IGNORE INTO conversation_speakers (conversation_id,cluster_id,voiceprint_id,local_label) VALUES (?,?,?,?)');
-  speakers.forEach((speaker, index) => insertSpeaker.run(group.id, speaker.cluster_id, speaker.voiceprint_id || null, `Speaker ${index + 1}`));
+    VALUES (?,?,?,?,?,'time-context-embedding',?,'2')`).run(
+    group.id, userId, group.startedAt, group.endedAt, state, group.boundaryScore ?? null,
+  );
+  membership.assignSegments(database, userId, group.id, group.segmentIds);
+  membership.rebuildConversationSpeakers(database, userId, group.id);
 }
 
 async function handle(job) {
@@ -49,8 +48,13 @@ async function handle(job) {
       const segments = [...existing, ...unassigned].sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
       if (!segments.length) continue;
       const groups = boundary.detectBoundaries(blocksForSegments(db, segments), {
-        hardGapMs: config.conversationHardGapMs, minimumDurationMs: config.conversationMinimumMs,
-        valleyQuantile: config.conversationValleyQuantile,
+        hardGapMs: config.conversationHardGapMs, softGapMs: config.conversationSoftGapMs,
+        minimumDurationMs: config.conversationMinimumMs, valleyQuantile: config.conversationValleyQuantile,
+        semanticSimilarityThreshold: config.conversationSemanticSimilarityThreshold,
+        semanticValleyProminence: config.conversationSemanticValleyProminence,
+        semanticContextSegments: config.conversationSemanticContextSegments,
+        maximumDurationMs: config.conversationMaximumMs,
+        maximumCharacters: config.conversationMaximumCharacters,
       });
       groups.forEach((group, index) => {
         const quiet = Date.now() - Date.parse(group.endedAt) >= config.conversationQuietCloseMs;

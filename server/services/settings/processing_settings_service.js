@@ -12,9 +12,15 @@ const schema = z.object({
   dedupeTokenSimilarity: z.number().min(0).max(1).optional(),
   dedupeTimeToleranceMs: z.number().int().min(0).max(30_000).optional(),
   conversationHardGapMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
+  conversationSoftGapMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
   conversationMinimumMs: z.number().int().min(1_000).max(60 * 60_000).optional(),
   conversationQuietCloseMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
   conversationValleyQuantile: z.number().min(0).max(1).optional(),
+  conversationSemanticSimilarityThreshold: z.number().min(-1).max(1).optional(),
+  conversationSemanticValleyProminence: z.number().min(0).max(2).optional(),
+  conversationSemanticContextSegments: z.number().int().min(1).max(20).optional(),
+  conversationMaximumMs: z.number().int().min(60_000).max(24 * 60 * 60_000).optional(),
+  conversationMaximumCharacters: z.number().int().min(1_000).max(2_000_000).optional(),
   minNewMaterialChars: z.number().int().min(1).max(1_000_000).optional(),
   maxConsolidationInputChars: z.number().int().min(1_000).max(2_000_000).optional(),
 }).strict();
@@ -39,6 +45,15 @@ function update(input) {
   }
   if (next.conversationMinimumMs >= next.conversationHardGapMs) {
     throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The minimum conversation duration must be shorter than the hard boundary gap.');
+  }
+  if (next.conversationSoftGapMs >= next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The soft conversation gap must be shorter than the hard boundary gap.');
+  }
+  if (next.conversationMaximumMs <= next.conversationMinimumMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The maximum conversation duration must be longer than the minimum duration.');
+  }
+  if (next.conversationMaximumCharacters > next.maxConsolidationInputChars) {
+    throw new HttpError(400, 'INVALID_MATERIAL_LIMITS', 'The conversation character limit must not exceed the consolidation input limit.');
   }
   const db = getDatabase();
   db.transaction(() => {

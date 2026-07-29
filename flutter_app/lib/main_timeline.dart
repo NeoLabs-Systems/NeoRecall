@@ -231,6 +231,13 @@ class _TimelineEntry extends StatelessWidget {
     final visible = expanded ? group.segments : group.segments.take(2).toList();
     final remaining = group.segments.length - visible.length;
     final state = conversation?['state']?.toString();
+    final generatedTitle = conversation?['title_en']?.toString().trim();
+    final generatedSummary = conversation?['summary_en']?.toString().trim();
+    final topics = ((conversation?['topics'] as List?) ?? const <dynamic>[])
+        .map((topic) => topic.toString())
+        .where((topic) => topic.trim().isNotEmpty)
+        .take(3)
+        .toList();
     final compact = MediaQuery.sizeOf(context).width < 680;
 
     final timeLabel = TimeOfDay.fromDateTime(
@@ -320,6 +327,8 @@ class _TimelineEntry extends StatelessWidget {
                           child: Text(
                             group.conversationId == null
                                 ? 'Unsorted transcript'
+                                : generatedTitle?.isNotEmpty == true
+                                ? generatedTitle!
                                 : 'Conversation${state == null ? '' : ' · $state'}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -353,6 +362,36 @@ class _TimelineEntry extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (generatedSummary?.isNotEmpty == true) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Text(
+                        generatedSummary!,
+                        maxLines: expanded ? null : 2,
+                        overflow: expanded
+                            ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: palette.textSecondary,
+                          height: 1.38,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                    if (topics.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 5,
+                        children: topics
+                            .map(
+                              (topic) => _TopicChip(
+                                label: topic,
+                                palette: palette,
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
                     if (speakers.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 7),
                       Wrap(
@@ -418,6 +457,31 @@ class _TimelineEntry extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TopicChip extends StatelessWidget {
+  const _TopicChip({required this.label, required this.palette});
+
+  final String label;
+  final NeoRecallPalette palette;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: palette.secondary.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: palette.secondary.withValues(alpha: 0.18)),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        color: palette.textSecondary,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }
 
 class _SpeakerChip extends StatelessWidget {

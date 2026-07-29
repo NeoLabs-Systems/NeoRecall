@@ -49,14 +49,26 @@ function openRouterMock() {
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')); const system = payload.messages[0].content; const input = JSON.parse(payload.messages[1].content);
     requests += 1; let output;
     if (system.includes('consolidate personal transcripts')) {
-      const conversation = input.conversations[0]; const segment = conversation.segments[0];
-      const startedAt = conversation.recorded.startedAtUtc; const endedAt = conversation.recorded.endedAtUtc;
+      const conversation = input.conversations[0];
+      const sectionsByStream = new Map();
+      for (const item of input.conversations) {
+        if (!sectionsByStream.has(item.stream)) sectionsByStream.set(item.stream, []);
+        sectionsByStream.get(item.stream).push(...item.segments.map((segment) => segment.id));
+      }
+      const sourceSegmentIds = [...sectionsByStream.values()].flat();
+      const segment = conversation.segments[0];
       output = {
-        conversationAssessments: input.conversations.map((item) => ({ conversationId: item.id, memoryWorthy: true })),
+        conversationSections: [...sectionsByStream.values()].map((segmentIds) => ({
+          titleEn: 'Project discussion',
+          summaryEn: 'A bilingual project discussion assigned follow-up work.',
+          memoryWorthy: true,
+          topics: ['Project planning'],
+          sourceSegmentIds: segmentIds,
+        })),
         entities: [], memories: [{ type: 'project_discussion', titleEn: 'Project discussion', summaryEn: 'A bilingual project discussion assigned follow-up work.', importance: 7,
-          startedAt, endedAt, sourceConversationIds: [conversation.id], sourceSegmentIds: [segment.id], topics: ['Project planning'], entities: [],
+          sourceSegmentIds, topics: ['Project planning'], entities: [],
           miniMemories: [{ kind: 'task', textEn: 'Follow up on the discussed project work.', importance: 7, confidence: 0.8, dueAt: null, occurredAt: null, status: 'open', sourceSegmentIds: [segment.id], entities: [] }] }],
-        dailySummary: { localDate: conversation.recorded.localStartedAt.slice(0, 10), timezone: input.timezone, summaryEn: 'A bilingual project discussion produced follow-up work.', coverageStartedAt: startedAt, coverageEndedAt: endedAt, sourceCount: 1 },
+        dailySummary: { localDate: conversation.recorded.localStartedAt.slice(0, 10), timezone: input.timezone, summaryEn: 'A bilingual project discussion produced follow-up work.' },
       };
     } else {
       output = { answer: 'The recalled discussion concerned project work and a follow-up.', citations: input.context.length ? [{ sourceId: input.context[0].sourceId }] : [] };
@@ -114,6 +126,8 @@ async function main() {
     const queued = await api(baseUrl, 'POST', '/api/v1/memories/consolidations', token, {}); assert(queued.queued, 'Consolidation did not queue.');
     await poll('memory consolidation', () => api(baseUrl, 'GET', '/api/v1/memories/consolidations/latest', token), (value) => value.run?.state === 'succeeded');
     const memories = await api(baseUrl, 'GET', '/api/v1/memories', token); assert(memories.items?.[0]?.title_en === 'Project discussion', 'English memory was not persisted.');
+    const refined = await api(baseUrl, 'GET', '/api/v1/conversations?state=consolidated', token);
+    assert(refined.items?.[0]?.title_en === 'Project discussion' && refined.items?.[0]?.summary_en, 'Conversation refinement was not persisted.');
     const daily = await api(baseUrl, 'GET', '/api/v1/daily-summaries', token); assert(daily.items?.length, 'Incremental daily summary was not persisted.');
     progress('running cited Ask over the local retrieval result');
     const answer = await api(baseUrl, 'POST', '/api/v1/search/ask', token, { question: 'What was discussed?' }); assert(answer.answer && answer.citations.length, 'Ask did not return cited context.');

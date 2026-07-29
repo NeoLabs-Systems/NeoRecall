@@ -56,11 +56,13 @@ restriction as a recoverable guarantee.
 
 Each logical audio channel is decoded to 16 kHz mono PCM. Silero VAD removes silence, Parakeet generates timestamped multilingual text, pyannote segmentation identifies speaker turns, and WeSpeaker embeddings support local clusters and optional cross-recording identities. Before source deletion, clean non-overlapping turns can be combined into a bounded 16 kHz mono preview for that recurring speaker. Time-constrained token alignment removes overlap and cross-channel leakage without phrase lists.
 
-Boundary detection is token-free: hard time gaps, speaker-set changes, and embedding-similarity valleys create candidate conversations. Short fragments join their semantically closest neighbor. Every conversation remains visible even when the consolidation model marks it as not memory-worthy.
+Boundary detection is hybrid. The continuous, token-free path uses hard and soft time gaps plus contextual embedding valleys to create provisional conversations without relying on keywords or speaker changes. Configurable duration and character ceilings prevent an uninterrupted 24/7 stream from creating an unbounded model input. Short fragments join their semantically closest neighbor.
 
 ## Memory and token budget
 
-The SQLite budget gate is per user and survives restarts. A consolidation is eligible only after the effective interval, sufficient complete material, and OpenRouter configuration. One structured response creates English episodic memories, atomic mini-memories, entities, importance values, and an incremental daily summary. Zod validation and source-ID checks prevent partial or unsupported records.
+The SQLite budget gate is per user and survives restarts. A consolidation is eligible only after the effective interval, sufficient complete material, and OpenRouter configuration. The same single structured response refines provisional boundaries, writes a title and summary for every final conversation, and creates English episodic memories, atomic mini-memories, entities, importance values, and an incremental daily summary. The model may split a long provisional conversation or merge adjacent provisional conversations from the same recording stream.
+
+Refinement is evidence-addressed and transactional. The model must partition every input segment exactly once into chronological, contiguous, single-stream sections. Server-side validation rejects missing, duplicated, reordered, invented, or cross-device segment references before any conversation is changed. Segment membership, conversation speakers, summaries, topics, memories, and source links then commit together or roll back together.
 
 ## Search
 

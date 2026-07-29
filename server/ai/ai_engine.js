@@ -13,13 +13,14 @@ function markValidationFailed(requestId, code) {
 }
 
 async function consolidate(userId, input) {
+  const config = getConfig();
   const prepared = prepareConsolidationRequest(input);
-  const conversationIds = [...prepared.references.reverseConversationAliases.keys()];
   const segmentIds = [...prepared.references.reverseSegmentAliases.keys()];
   const response = await provider().chatJSON({
-    userId, purpose: 'consolidation', model: getConfig().aiDefaultModel, messages: prepared.messages,
+    userId, purpose: 'consolidation', model: config.aiDefaultModel, messages: prepared.messages,
+    maxTokens: config.aiConsolidationMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
-      schema: consolidationJsonSchemaFor(conversationIds, segmentIds) } },
+      schema: consolidationJsonSchemaFor(segmentIds) } },
   });
   const parsed = consolidationSchema.safeParse(response.value);
   if (!parsed.success) {

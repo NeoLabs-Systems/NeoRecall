@@ -3,6 +3,10 @@
 const { z } = require('zod');
 const { localDateTimeToUtc } = require('../../utils/time');
 
+const TITLE_MAX_LENGTH = 160;
+const SUMMARY_MAX_LENGTH = 2_000;
+const TOPIC_MAX_LENGTH = 100;
+const TOPIC_MAX_COUNT = 12;
 const sourceIds = z.array(z.string().min(1)).min(1);
 const aliases = z.preprocess((value) => {
   if (!Array.isArray(value)) return value;
@@ -19,32 +23,40 @@ const temporalReference = z.union([
     timezone: z.string().min(1),
   }),
 ]).nullable();
+const entityReference = z.object({ ref: z.string().min(1), role: z.string().min(1) });
 const miniMemory = z.object({
   kind: z.enum(['fact', 'event', 'location', 'person', 'relationship', 'task', 'promise']),
   textEn: z.string().min(1), importance: z.number().min(1).max(10), confidence: z.number().min(0).max(1),
   dueAt: temporalReference.optional(), occurredAt: temporalReference.optional(),
   status: z.enum(['open', 'completed', 'cancelled']).nullable().optional(), sourceSegmentIds: sourceIds,
-  entities: z.array(z.object({ ref: z.string().min(1), role: z.string().min(1) })).default([]),
+  entities: z.array(entityReference).default([]),
 });
 const memory = z.object({
   type: z.enum(['meeting', 'conversation', 'project_discussion', 'introduction', 'decision', 'experience', 'other']),
-  titleEn: z.string().min(1), summaryEn: z.string().min(1), importance: z.number().min(1).max(10),
-  startedAt: z.string().datetime(), endedAt: z.string().datetime(), sourceConversationIds: z.array(z.string().min(1)).min(1),
-  sourceSegmentIds: sourceIds, topics: z.array(z.string().min(1)).default([]),
-  entities: z.array(z.object({ ref: z.string().min(1), role: z.string().min(1) })).default([]),
-  miniMemories: z.array(miniMemory).default([]),
+  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH), summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH), importance: z.number().min(1).max(10),
+  sourceSegmentIds: sourceIds, topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
+  entities: z.array(entityReference).default([]), miniMemories: z.array(miniMemory).default([]),
+});
+const conversationSection = z.object({
+  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH),
+  summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH),
+  memoryWorthy: z.boolean(),
+  topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
+  sourceSegmentIds: sourceIds,
 });
 
 const consolidationSchema = z.object({
-  conversationAssessments: z.array(z.object({ conversationId: z.string().min(1), memoryWorthy: z.boolean() })),
-  entities: z.array(entity).default([]), memories: z.array(memory).default([]),
-  dailySummary: z.object({ localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timezone: z.string().min(1),
-    summaryEn: z.string().min(1), coverageStartedAt: z.string().datetime().nullable(), coverageEndedAt: z.string().datetime().nullable(),
-    sourceCount: z.number().int().nonnegative() }).nullable(),
+  conversationSections: z.array(conversationSection).min(1),
+  entities: z.array(entity).default([]),
+  memories: z.array(memory).default([]),
+  dailySummary: z.object({
+    localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    timezone: z.string().min(1),
+    summaryEn: z.string().min(1),
+  }).nullable(),
 });
 
 const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
-const nullableDateTime = { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] };
 const temporalReferenceJsonSchema = { anyOf: [{ type: 'null' }, {
   type: 'object', additionalProperties: false, required: ['localDateTime', 'timezone'],
   properties: {
@@ -60,13 +72,23 @@ const sourceIdsJsonSchema = { type: 'array', minItems: 1, items: { type: 'string
 
 const consolidationJsonSchema = {
   type: 'object', additionalProperties: false,
-  required: ['conversationAssessments', 'entities', 'memories', 'dailySummary'],
+  required: ['conversationSections', 'entities', 'memories', 'dailySummary'],
   properties: {
-    conversationAssessments: {
-      type: 'array',
+    conversationSections: {
+      type: 'array', minItems: 1,
       items: {
-        type: 'object', additionalProperties: false, required: ['conversationId', 'memoryWorthy'],
-        properties: { conversationId: { type: 'string', minLength: 1 }, memoryWorthy: { type: 'boolean' } },
+        type: 'object', additionalProperties: false,
+        required: ['titleEn', 'summaryEn', 'memoryWorthy', 'topics', 'sourceSegmentIds'],
+        properties: {
+          titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
+          summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
+          memoryWorthy: { type: 'boolean' },
+          topics: {
+            type: 'array', maxItems: TOPIC_MAX_COUNT,
+            items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
+          },
+          sourceSegmentIds: sourceIdsJsonSchema,
+        },
       },
     },
     entities: {
@@ -92,14 +114,17 @@ const consolidationJsonSchema = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['type', 'titleEn', 'summaryEn', 'importance', 'startedAt', 'endedAt', 'sourceConversationIds', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
+        required: ['type', 'titleEn', 'summaryEn', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
         properties: {
           type: { type: 'string', enum: ['meeting', 'conversation', 'project_discussion', 'introduction', 'decision', 'experience', 'other'] },
-          titleEn: { type: 'string', minLength: 1 }, summaryEn: { type: 'string', minLength: 1 },
+          titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
+          summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
           importance: { type: 'number', minimum: 1, maximum: 10 },
-          startedAt: { type: 'string', format: 'date-time' }, endedAt: { type: 'string', format: 'date-time' },
-          sourceConversationIds: sourceIdsJsonSchema, sourceSegmentIds: sourceIdsJsonSchema,
-          topics: { type: 'array', items: { type: 'string', minLength: 1 } },
+          sourceSegmentIds: sourceIdsJsonSchema,
+          topics: {
+            type: 'array', maxItems: TOPIC_MAX_COUNT,
+            items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
+          },
           entities: { type: 'array', items: entityReferenceJsonSchema },
           miniMemories: {
             type: 'array',
@@ -121,29 +146,23 @@ const consolidationJsonSchema = {
     dailySummary: {
       anyOf: [{ type: 'null' }, {
         type: 'object', additionalProperties: false,
-        required: ['localDate', 'timezone', 'summaryEn', 'coverageStartedAt', 'coverageEndedAt', 'sourceCount'],
+        required: ['localDate', 'timezone', 'summaryEn'],
         properties: {
-          localDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, timezone: { type: 'string', minLength: 1 },
-          summaryEn: { type: 'string', minLength: 1 }, coverageStartedAt: nullableDateTime, coverageEndedAt: nullableDateTime,
-          sourceCount: { type: 'integer', minimum: 0 },
+          localDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          timezone: { type: 'string', minLength: 1 },
+          summaryEn: { type: 'string', minLength: 1 },
         },
       }],
     },
   },
 };
 
-function consolidationJsonSchemaFor(conversationIds, segmentIds) {
-  // JSON serialization intentionally breaks shared object references in the static schema.
-  // Each source-ID field needs its own enum in the provider contract.
+function consolidationJsonSchemaFor(segmentIds) {
   const schema = JSON.parse(JSON.stringify(consolidationJsonSchema));
-  const assessments = schema.properties.conversationAssessments;
-  assessments.minItems = conversationIds.length;
-  assessments.maxItems = conversationIds.length;
-  assessments.items.properties.conversationId.enum = conversationIds;
-  const memory = schema.properties.memories.items;
-  memory.properties.sourceConversationIds.items.enum = conversationIds;
-  memory.properties.sourceSegmentIds.items.enum = segmentIds;
-  memory.properties.miniMemories.items.properties.sourceSegmentIds.items.enum = segmentIds;
+  schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum = segmentIds;
+  const memorySchema = schema.properties.memories.items;
+  memorySchema.properties.sourceSegmentIds.items.enum = segmentIds;
+  memorySchema.properties.miniMemories.items.properties.sourceSegmentIds.items.enum = segmentIds;
   return schema;
 }
 
@@ -154,8 +173,8 @@ function normalizeTemporalReference(value) {
 }
 
 function normalizeConsolidationTimestamps(output) {
-  for (const memory of output.memories) {
-    for (const mini of memory.miniMemories) {
+  for (const memoryItem of output.memories) {
+    for (const mini of memoryItem.miniMemories) {
       mini.dueAt = normalizeTemporalReference(mini.dueAt);
       mini.occurredAt = normalizeTemporalReference(mini.occurredAt);
       if (!['task', 'promise'].includes(mini.kind)) mini.status = null;
@@ -164,4 +183,9 @@ function normalizeConsolidationTimestamps(output) {
   return output;
 }
 
-module.exports = { consolidationSchema, consolidationJsonSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps };
+module.exports = {
+  consolidationSchema,
+  consolidationJsonSchema,
+  consolidationJsonSchemaFor,
+  normalizeConsolidationTimestamps,
+};
