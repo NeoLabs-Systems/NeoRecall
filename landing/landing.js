@@ -1,6 +1,8 @@
 const nav = document.querySelector('[data-nav]') || document.querySelector('nav');
 const progress = document.querySelector('.progress-bar');
 const reveals = document.querySelectorAll('.reveal');
+const navToggle = document.querySelector('[data-nav-toggle]');
+const mobileMenu = document.querySelector('[data-mobile-menu]');
 
 function onScroll() {
   const max = document.documentElement.scrollHeight - window.innerHeight;
@@ -9,6 +11,27 @@ function onScroll() {
 }
 window.addEventListener('scroll', onScroll, { passive: true });
 onScroll();
+
+if (navToggle && nav) {
+  navToggle.addEventListener('click', () => {
+    const open = nav.classList.toggle('open');
+    navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    navToggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  mobileMenu?.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', () => {
+      nav.classList.remove('open');
+      navToggle.setAttribute('aria-expanded', 'false');
+      navToggle.setAttribute('aria-label', 'Open menu');
+    });
+  });
+}
+
+if (location.hostname.includes('github.io')) {
+  document.querySelectorAll('a.signin').forEach((link) => {
+    link.style.display = 'none';
+  });
+}
 
 if ('IntersectionObserver' in window) {
   const observer = new IntersectionObserver((entries) => {

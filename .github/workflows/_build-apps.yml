@@ -86,7 +86,7 @@ jobs:
 
   build-windows:
     name: Build Windows app
-    runs-on: windows-2025
+    runs-on: windows-2022
     defaults:
       run:
         working-directory: flutter_app

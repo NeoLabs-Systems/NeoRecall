@@ -41,6 +41,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/logo.svg
+    - assets/branding/logo.png
     - assets/branding/tray_idle.png
     - assets/branding/tray_idle.ico
     - assets/branding/tray_recording.png

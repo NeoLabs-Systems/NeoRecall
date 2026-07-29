@@ -84,7 +84,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
-    final wide = MediaQuery.sizeOf(context).width >= 980;
 
     final card = GlassSurface(
       padding: const EdgeInsets.all(30),
@@ -94,7 +93,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                const BrandLockup(logoSize: 56),
+                const Center(child: BrandLockup(logoSize: 56)),
                 const SizedBox(height: 26),
                 Text(
                   awaitingTwoFactor
@@ -108,7 +107,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       ? 'Enter 2FA code'
                       : registerMode
                       ? 'Create your NeoRecall account'
-                      : 'Welcome back',
+                      : 'Sign in',
                   style: displayTitleStyle(palette, size: 30),
                 ),
                 const SizedBox(height: 8),
@@ -117,7 +116,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       ? 'Open your authenticator app and enter the current NeoRecall code.'
                       : registerMode
                       ? 'Your first account becomes the NeoRecall administrator for this server.'
-                      : 'Sign in to your private NeoRecall control surface.',
+                      : 'Enter your NeoRecall account details.',
                   style: TextStyle(color: palette.textSecondary, height: 1.5),
                 ),
                 const SizedBox(height: 20),
@@ -131,11 +130,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                     labelText: awaitingTwoFactor
                         ? '2FA or recovery code'
                         : 'Username',
-                    prefixIcon: Icon(
-                      awaitingTwoFactor
-                          ? Icons.verified_user_outlined
-                          : Icons.person_outline,
-                    ),
                   ),
                 ),
                 if (registerMode && !awaitingTwoFactor) ...<Widget>[
@@ -145,7 +139,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
                       labelText: 'Email (optional)',
-                      prefixIcon: Icon(Icons.alternate_email),
                     ),
                   ),
                 ],
@@ -154,10 +147,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   TextField(
                     controller: _password,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outline),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Password'),
                   ),
                   if (registerMode) ...<Widget>[
                     const SizedBox(height: 14),
@@ -166,7 +156,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       obscureText: true,
                       decoration: const InputDecoration(
                         labelText: 'Confirm password',
-                        prefixIcon: Icon(Icons.lock_outline),
                       ),
                     ),
                   ],
@@ -199,8 +188,8 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       }),
                       child: Text(
                         registerMode
-                            ? 'Already have an account?'
-                            : 'Create account',
+                            ? 'Already have an account? Sign in'
+                            : 'Need a new account? Register',
                       ),
                     ),
                     if (_canConfigureServer)
@@ -230,69 +219,14 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 ),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: wide ? 1080 : 480),
-                    child: wide
-                        ? Row(
-                            children: <Widget>[
-                              Expanded(child: _heroPanel(palette)),
-                              const SizedBox(width: 28),
-                              SizedBox(width: 440, child: card),
-                            ],
-                          )
-                        : card,
+                    constraints: const BoxConstraints(maxWidth: 468),
+                    child: card,
                   ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _heroPanel(NeoRecallPalette palette) {
-    return GlassSurface(
-      padding: const EdgeInsets.all(34),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text('CONTROL SURFACE', style: sectionEyebrowStyle(palette)),
-          const SizedBox(height: 14),
-          Text(
-            'Private audio memory that stays under your control.',
-            style: displayTitleStyle(palette, size: 40),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Record anywhere, transcribe locally, and recall the day without keeping server-side audio after processing.',
-            style: TextStyle(
-              color: palette.textSecondary,
-              height: 1.55,
-              fontSize: 16,
-            ),
-          ),
-          const SizedBox(height: 28),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: const <Widget>[
-              MetaPill(
-                icon: Icons.mic_none_rounded,
-                label: 'Local capture',
-                active: true,
-              ),
-              MetaPill(
-                icon: Icons.lock_outline,
-                label: 'Receipt-gated release',
-              ),
-              MetaPill(
-                icon: Icons.auto_awesome_outlined,
-                label: 'Hybrid recall',
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }

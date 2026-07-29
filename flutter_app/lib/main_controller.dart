@@ -16,6 +16,7 @@ import 'src/models/speaker.dart';
 import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
+import 'src/recording/audio_level_scale.dart';
 import 'src/recording/recorder.dart';
 import 'src/recording/recorder_mobile.dart';
 import 'src/devices/audio_device_adapter.dart';
@@ -111,6 +112,7 @@ class NeoRecallController extends ChangeNotifier {
   final RecallRecorder recorder;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final Uuid _uuid = const Uuid();
+  final AudioLevelScale _audioLevelScale = const AudioLevelScale();
   late final SyncCoordinator sync = SyncCoordinator(
     store: store,
     api: api,
@@ -299,7 +301,10 @@ class NeoRecallController extends ChangeNotifier {
       notifyListeners();
     });
     _levelSubscription = recorder.levels.listen((value) {
-      audioLevel = value;
+      audioLevel = _audioLevelScale.smooth(
+        audioLevel,
+        _audioLevelScale.normalizeRms(value),
+      );
       notifyListeners();
     });
     _networkSubscription = networkAvailability().listen((available) {

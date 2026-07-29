@@ -6,6 +6,12 @@ import 'main_controller.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
 
+bool shouldRequestSystemAudio({
+  required bool selected,
+  required bool web,
+  required bool desktop,
+}) => selected && (web || desktop);
+
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key, required this.controller});
   final NeoRecallController controller;
@@ -87,7 +93,11 @@ class _RecordScreenState extends State<RecordScreen> {
       }
       await controller.startRecording(
         microphone: microphone,
-        systemAudio: _isDesktop ? systemAudio : false,
+        systemAudio: shouldRequestSystemAudio(
+          selected: systemAudio,
+          web: kIsWeb,
+          desktop: _isDesktop,
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -196,12 +206,13 @@ class _RecordScreenState extends State<RecordScreen> {
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
-                    width: 260,
+                    width: 320,
                     child: LinearProgressIndicator(
                       value: controller.audioLevel.clamp(0, 1),
-                      minHeight: 7,
-                      borderRadius: BorderRadius.circular(8),
+                      minHeight: 10,
+                      borderRadius: BorderRadius.circular(10),
                       color: palette.secondary,
+                      backgroundColor: palette.border,
                     ),
                   ),
                 ],

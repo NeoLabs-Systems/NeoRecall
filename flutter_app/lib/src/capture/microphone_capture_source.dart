@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
@@ -73,7 +75,7 @@ class MicrophoneCaptureSource implements CaptureSource {
       samples += 1;
     }
     if (samples > 0) {
-      _levels.add((energy / samples).clamp(0.0, 1.0));
+      _levels.add(math.sqrt(energy / samples).clamp(0.0, 1.0));
     }
   }
 

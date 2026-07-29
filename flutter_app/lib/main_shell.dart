@@ -1,40 +1,36 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
-import 'main_devices.dart';
 import 'main_memories.dart';
 import 'main_record.dart';
 import 'main_search.dart';
 import 'main_settings.dart';
 import 'main_shared.dart';
-import 'main_spacing.dart';
 import 'main_speakers.dart';
 import 'main_theme.dart';
 import 'main_timeline.dart';
 
 class NeoRecallShell extends StatelessWidget {
   const NeoRecallShell({super.key, required this.controller});
+
   final NeoRecallController controller;
 
-  static const items = <(RecallPage, IconData, String, String)>[
-    (
-      RecallPage.record,
-      Icons.radio_button_checked_rounded,
-      'Record',
-      'Capture',
-    ),
-    (RecallPage.timeline, Icons.view_timeline_outlined, 'Timeline', 'Review'),
-    (RecallPage.memories, Icons.auto_awesome_outlined, 'Memories', 'Recall'),
-    (RecallPage.search, Icons.search_rounded, 'Search', 'Find'),
-    (
-      RecallPage.speakers,
-      Icons.record_voice_over_outlined,
-      'Speakers',
-      'People',
-    ),
-    (RecallPage.devices, Icons.devices_outlined, 'Devices', 'Sources'),
-    (RecallPage.settings, Icons.tune_rounded, 'Settings', 'Control'),
+  static const items = <(RecallPage, IconData, String)>[
+    (RecallPage.record, Icons.radio_button_checked_rounded, 'Record'),
+    (RecallPage.timeline, Icons.timeline_rounded, 'Timeline'),
+    (RecallPage.memories, Icons.auto_awesome_outlined, 'Memories'),
+    (RecallPage.search, Icons.search_rounded, 'Search'),
+    (RecallPage.speakers, Icons.record_voice_over_outlined, 'Speakers'),
   ];
+
+  String get _pageTitle => switch (controller.page) {
+    RecallPage.record => 'Record',
+    RecallPage.timeline => 'Timeline',
+    RecallPage.memories => 'Memories',
+    RecallPage.search => 'Search',
+    RecallPage.speakers => 'Speakers',
+    RecallPage.devices || RecallPage.settings => 'Settings',
+  };
 
   Widget _screen() => switch (controller.page) {
     RecallPage.record => RecordScreen(controller: controller),
@@ -42,7 +38,10 @@ class NeoRecallShell extends StatelessWidget {
     RecallPage.memories => MemoriesScreen(controller: controller),
     RecallPage.search => SearchScreen(controller: controller),
     RecallPage.speakers => SpeakersScreen(controller: controller),
-    RecallPage.devices => DevicesScreen(controller: controller),
+    RecallPage.devices => SettingsScreen(
+      controller: controller,
+      initialSection: SettingsSection.devices,
+    ),
     RecallPage.settings => SettingsScreen(controller: controller),
   };
 
@@ -51,44 +50,54 @@ class NeoRecallShell extends StatelessWidget {
     return AmbientBackdrop(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < AppBreakpoints.mobile;
-          final rail = constraints.maxWidth < AppBreakpoints.labeled;
+          final wide = constraints.maxWidth >= 1080;
           final content = AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
             child: KeyedSubtree(
               key: ValueKey(controller.page),
               child: _screen(),
             ),
           );
 
-          if (compact) {
+          if (wide) {
             return Scaffold(
               backgroundColor: Colors.transparent,
-              appBar: AppBar(
-                backgroundColor: Colors.transparent,
-                title: const BrandLockup(logoSize: 34),
+              body: Row(
+                children: <Widget>[
+                  _Sidebar(controller: controller),
+                  Expanded(child: ClipRect(child: content)),
+                ],
               ),
-              drawer: Drawer(
-                child: SafeArea(
-                  child: _Sidebar(
-                    controller: controller,
-                    labeled: true,
-                    drawer: true,
-                  ),
-                ),
-              ),
-              body: content,
             );
           }
 
           return Scaffold(
             backgroundColor: Colors.transparent,
+            drawer: Drawer(
+              child: SafeArea(
+                child: _Sidebar(controller: controller, drawer: true),
+              ),
+            ),
+            appBar: AppBar(
+              toolbarHeight: 52,
+              titleSpacing: 0,
+              leadingWidth: 46,
+              title: Text(
+                _pageTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             body: SafeArea(
-              child: Row(
-                children: <Widget>[
-                  _Sidebar(controller: controller, labeled: !rail),
-                  Expanded(child: content),
-                ],
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: content,
+                ),
               ),
             ),
           );
@@ -99,95 +108,181 @@ class NeoRecallShell extends StatelessWidget {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.controller,
-    required this.labeled,
-    this.drawer = false,
-  });
+  const _Sidebar({required this.controller, this.drawer = false});
 
   final NeoRecallController controller;
-  final bool labeled;
   final bool drawer;
+
+  void _select(BuildContext context, RecallPage page) {
+    controller.selectPage(page);
+    if (drawer) Navigator.of(context).pop();
+  }
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final accountLabel = controller.username?.trim();
+    final safeLabel = accountLabel?.isNotEmpty == true
+        ? accountLabel!
+        : 'Account';
+    final initial = safeLabel.characters.first.toUpperCase();
+
     return Container(
-      width: labeled ? 248 : 84,
-      margin: drawer ? EdgeInsets.zero : const EdgeInsets.all(12),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
+      width: 276,
       decoration: BoxDecoration(
-        color: palette.glassFill,
-        borderRadius: drawer
-            ? BorderRadius.zero
-            : BorderRadius.circular(AppRadius.panel),
-        border: drawer ? null : Border.all(color: palette.glassBorder),
-        boxShadow: drawer ? null : softPanelShadow(palette),
+        color: palette.bgSecondary.withValues(alpha: 0.96),
+        border: Border(right: BorderSide(color: palette.border)),
+        boxShadow: drawer
+            ? null
+            : <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 24,
+                  offset: const Offset(4, 0),
+                ),
+              ],
       ),
       child: Column(
         children: <Widget>[
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              labeled ? 8 : 0,
-              4,
-              labeled ? 8 : 0,
-              18,
+            padding: const EdgeInsets.fromLTRB(18, 18, 16, 14),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: palette.border),
+                gradient: LinearGradient(
+                  colors: <Color>[
+                    palette.bgCard.withValues(alpha: 0.9),
+                    palette.bgSecondary.withValues(alpha: 0.55),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: palette.accent.withValues(alpha: 0.05),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: <Widget>[
+                  const BrandLockup(logoSize: 38, showName: false),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          'NeoRecall',
+                          style: TextStyle(
+                            color: palette.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.35,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'CONTROL SURFACE',
+                          style: sectionEyebrowStyle(
+                            palette,
+                          ).copyWith(fontSize: 9.5, letterSpacing: 1.8),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: BrandLockup(logoSize: labeled ? 42 : 36, showName: labeled),
           ),
-          if (labeled)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 12, bottom: 10),
-                child: Text(
-                  'CONTROL SURFACE',
-                  style: sectionEyebrowStyle(palette),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+              children: <Widget>[
+                for (final item in NeoRecallShell.items)
+                  _SidebarButton(
+                    selected: controller.page == item.$1,
+                    icon: item.$2,
+                    label: item.$3,
+                    onTap: () => _select(context, item.$1),
+                  ),
+              ],
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: palette.border),
+              color: palette.bgCard.withValues(alpha: 0.72),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
                 ),
-              ),
+              ],
             ),
-          for (final item in NeoRecallShell.items)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: _SidebarButton(
-                labeled: labeled,
-                selected: controller.page == item.$1,
-                icon: item.$2,
-                label: item.$3,
-                caption: item.$4,
-                onTap: () {
-                  controller.selectPage(item.$1);
-                  if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-            ),
-          const Spacer(),
-          if (labeled) ...<Widget>[
-            MetaPill(
-              icon: controller.online
-                  ? Icons.cloud_done_outlined
-                  : Icons.cloud_off_outlined,
-              label: controller.online ? 'Connected' : 'Offline',
-              active: controller.online,
-            ),
-            const SizedBox(height: 10),
-            if (controller.username != null)
-              Text(
-                controller.username!,
-                style: TextStyle(
-                  color: palette.textMuted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: controller.page == RecallPage.settings
+                        ? palette.accentMuted
+                        : palette.bgCard,
+                    border: Border.all(
+                      color: controller.page == RecallPage.settings
+                          ? palette.accent
+                          : palette.borderLight,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    initial,
+                    style: TextStyle(
+                      color: palette.textPrimary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
-            const SizedBox(height: 8),
-          ],
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: controller.logout,
-            icon: const Icon(Icons.logout_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    safeLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: palette.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                _SidebarIconButton(
+                  tooltip: 'Settings',
+                  icon: Icons.settings_outlined,
+                  onTap: () => _select(context, RecallPage.settings),
+                ),
+                const SizedBox(width: 4),
+                _SidebarIconButton(
+                  tooltip: 'Sign out',
+                  icon: Icons.logout,
+                  onTap: () async {
+                    if (drawer) Navigator.of(context).pop();
+                    await controller.logout();
+                  },
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -195,70 +290,146 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _SidebarButton extends StatelessWidget {
+class _SidebarButton extends StatefulWidget {
   const _SidebarButton({
-    required this.labeled,
     required this.selected,
     required this.icon,
     required this.label,
-    required this.caption,
     required this.onTap,
   });
 
-  final bool labeled;
   final bool selected;
   final IconData icon;
   final String label;
-  final String caption;
+  final VoidCallback onTap;
+
+  @override
+  State<_SidebarButton> createState() => _SidebarButtonState();
+}
+
+class _SidebarButtonState extends State<_SidebarButton> {
+  bool hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final radius = BorderRadius.circular(14);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => hovering = true),
+        onExit: (_) => setState(() => hovering = false),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                color: widget.selected
+                    ? palette.bgCard.withValues(alpha: 0.96)
+                    : hovering
+                    ? palette.bgTertiary.withValues(alpha: 0.66)
+                    : Colors.transparent,
+                border: Border.all(
+                  color: widget.selected
+                      ? palette.borderLight
+                      : hovering
+                      ? palette.border
+                      : Colors.transparent,
+                ),
+                boxShadow: widget.selected
+                    ? <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 12,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(11),
+                      color: widget.selected
+                          ? palette.accent.withValues(alpha: 0.12)
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: widget.selected
+                            ? palette.accent.withValues(alpha: 0.22)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Icon(
+                      widget.icon,
+                      size: 18,
+                      color: widget.selected
+                          ? palette.accent
+                          : palette.textMuted,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: widget.selected
+                            ? palette.textPrimary
+                            : palette.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarIconButton extends StatelessWidget {
+  const _SidebarIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    return Material(
-      color: selected ? palette.accentMuted : Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadius.input),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.input),
-        onTap: onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: labeled ? 12 : 10,
-            vertical: labeled ? 12 : 14,
-          ),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                icon,
-                color: selected ? palette.accentHover : palette.textSecondary,
-              ),
-              if (labeled) ...<Widget>[
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        label,
-                        style: TextStyle(
-                          color: selected
-                              ? palette.textPrimary
-                              : palette.textSecondary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        caption,
-                        style: TextStyle(
-                          color: palette.textMuted,
-                          fontSize: 11.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(9),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(9),
+          onTap: onTap,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: palette.bgSecondary.withValues(alpha: 0.55),
+              border: Border.all(color: palette.border),
+            ),
+            child: Icon(icon, size: 17, color: palette.textSecondary),
           ),
         ),
       ),

@@ -99,34 +99,20 @@ class BrandLockup extends StatelessWidget {
           width: logoSize,
           height: logoSize,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(logoSize * 0.28),
-            gradient: LinearGradient(
-              colors: <Color>[palette.accent, palette.accentAlt],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            borderRadius: BorderRadius.circular(logoSize * 0.24),
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: palette.accent.withValues(alpha: 0.28),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+                color: palette.accent.withValues(alpha: 0.18),
+                blurRadius: 14,
               ),
             ],
           ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: <Widget>[
-              Icon(
-                Icons.radio_button_checked_rounded,
-                color: palette.onAccent.withValues(alpha: 0.92),
-                size: logoSize * 0.52,
-              ),
-              Icon(
-                Icons.circle,
-                color: palette.secondary,
-                size: logoSize * 0.14,
-              ),
-            ],
+          clipBehavior: Clip.antiAlias,
+          child: Image.asset(
+            'assets/branding/logo.png',
+            width: logoSize,
+            height: logoSize,
+            filterQuality: FilterQuality.high,
           ),
         ),
         if (showName) ...<Widget>[
