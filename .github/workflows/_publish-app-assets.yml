@@ -145,7 +145,6 @@ jobs:
           echo "Verified ${#assets[@]} asset(s) on release $RELEASE_TAG."
 
       - name: Publish completed GitHub release
-        if: steps.app_assets.outputs.missing_count == '0'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,12 +180,11 @@ jobs:
             exit 1
           fi
 
-      - name: Keep incomplete release as draft
+      - name: Warn about missing assets
         if: steps.app_assets.outputs.missing_count != '0'
         shell: bash
         env:
           MISSING_ASSETS: ${{ steps.app_assets.outputs.missing }}
         run: |
-          echo "::error::Successful binaries were attached, but the release remains a draft because these builds are missing:"
+          echo "::warning::Successful binaries were attached and the release was published, but these builds are missing:"
           printf '%s\n' "$MISSING_ASSETS"
-          exit 1

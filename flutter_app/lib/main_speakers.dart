@@ -300,7 +300,7 @@ class _SpeakerRow extends StatelessWidget {
                   Text(
                     speaker.hasPreview
                         ? '${speaker.occurrences} stored turns · ${(speaker.previewDurationMs! / 1000).toStringAsFixed(1)} s clean preview'
-                        : '${speaker.occurrences} stored turns · Preview pending a clean 5 s turn',
+                        : '${speaker.occurrences} stored turns · Preview pending a clean sample',
                     style: TextStyle(color: palette.textMuted, fontSize: 12),
                   ),
                 ],
@@ -312,7 +312,7 @@ class _SpeakerRow extends StatelessWidget {
           Tooltip(
             message: speaker.hasPreview
                 ? (playing ? 'Pause voice preview' : 'Play voice preview')
-                : 'A clean 5–10 second turn is needed',
+                : 'A clean 1–10 second sample is needed',
             child: IconButton.filledTonal(
               onPressed: speaker.hasPreview ? onPreview : null,
               icon: loading

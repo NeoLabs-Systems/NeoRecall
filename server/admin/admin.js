@@ -171,7 +171,7 @@ document.querySelector('#save-settings').addEventListener('click', async () => {
     showError(error);
   }
 });
-document.querySelector('#refresh').addEventListener('click', () => load({ announce: true }).catch(showError));
+
 document.querySelector('#logout').addEventListener('click', async () => {
   try { await api('/logout', { method: 'POST' }); } finally {
     sessionStorage.removeItem('neorecall_admin_token');
