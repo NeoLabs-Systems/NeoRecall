@@ -195,31 +195,37 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
         });
         
         const sequence = userSource.sequence++;
-        const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.ogg`);
+        const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.wav`);
         const fileStream = fs.createWriteStream(tempPath);
         
-        const oggStream = new prism.opus.OggLogicalBitstream({
-          opusHead: new prism.opus.OpusHead({ channelCount: 2, sampleRate: 48000 })
-        });
-        
-        const startTime = Date.now();
-        audioStream.pipe(oggStream).pipe(fileStream);
-        
-        fileStream.on('finish', async () => {
-           const durationMs = Date.now() - startTime;
-           const stat = fs.statSync(tempPath);
-           if (stat.size === 0) return;
-           
-           const hash = crypto.createHash('sha256');
-           const fileBuffer = fs.readFileSync(tempPath);
-           hash.update(fileBuffer);
-           const sha256Hex = hash.digest('hex');
-           
-           try {
-             await ingest.acceptChunk(source.user_id, sessionId, userSource.id, sequence, {
-               idempotencyKey: `${sessionId}-${userSource.id}-${sequence}`,
-               container: 'ogg',
-               codec: 'opus',
+        try {
+          const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+          const encoder = new prism.FFmpeg({
+            args: [
+              '-f', 's16le', '-ar', '48000', '-ac', '2',
+              '-i', 'pipe:0',
+              '-f', 'wav', 'pipe:1'
+            ]
+          });
+          
+          const startTime = Date.now();
+          audioStream.pipe(decoder).pipe(encoder).pipe(fileStream);
+          
+          fileStream.on('finish', async () => {
+             const durationMs = Date.now() - startTime;
+             const stat = fs.statSync(tempPath);
+             if (stat.size === 0) return;
+             
+             const hash = crypto.createHash('sha256');
+             const fileBuffer = fs.readFileSync(tempPath);
+             hash.update(fileBuffer);
+             const sha256Hex = hash.digest('hex');
+             
+             try {
+               await ingest.acceptChunk(source.user_id, sessionId, userSource.id, sequence, {
+                 idempotencyKey: `${sessionId}-${userSource.id}-${sequence}`,
+                 container: 'wav',
+                 codec: 'pcm_s16le',
                channelLayout: 'stereo',
                deviceStartedAt: new Date(startTime).toISOString(),
                monotonicOffsetMs: 0,
@@ -231,10 +237,12 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
            } catch (e) {
              console.error(`[DiscordSource] Failed to ingest chunk for ${userId}:`, e.message);
            }
-        });
+         });
+        } catch (err) {
+          console.error(`[DiscordSource] Error creating pipeline:`, err);
+        }
       }
     });
-
   } catch (error) {
     console.error(`[DiscordSource] Failed to join voice channel:`, error.message);
   }
