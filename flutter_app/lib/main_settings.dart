@@ -38,7 +38,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       timezone.text = value['timezone'] as String? ?? 'UTC';
       setState(() => settings = value);
     });
-    widget.controller.fetchTwoFactorStatus();
+    // fetchTwoFactorStatus flips a flag and notifies synchronously; deferring to
+    // after this frame avoids "setState during build" when the screen is first
+    // inflated in response to a navigation rebuild.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.controller.fetchTwoFactorStatus();
+    });
   }
 
   @override

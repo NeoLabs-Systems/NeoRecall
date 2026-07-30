@@ -51,7 +51,11 @@ class GattConnectorTransport implements WearableTransport {
     bool requiresPairing = false,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    await _gatt.connect(deviceId, autoReconnect: true, timeout: timeout);
+    // App-managed reconnect only: the device adapter/session controller owns the
+    // reconnect+resume lifecycle (with backoff and recording-resume intent).
+    // Leaving OS-level auto-reconnect on would race the app's own reconnect and
+    // duplicate sessions, so it is explicitly disabled here.
+    await _gatt.connect(deviceId, autoReconnect: false, timeout: timeout);
     final negotiatedMtu = await _gatt.requestMtu(deviceId, preferredMtu);
     ClientDiagnosticLog.instance.record(
       'bluetooth',

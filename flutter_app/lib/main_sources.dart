@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'main_controller.dart';
 import 'main_theme.dart';
-import 'main_shared.dart';
 
 class SourcesScreen extends StatefulWidget {
   const SourcesScreen({super.key, required this.controller});
@@ -160,12 +158,15 @@ class _SourcesScreenState extends State<SourcesScreen> {
                       children: [
                         Row(
                           children: [
-                            Text(
-                              integration['name'],
-                              style: TextStyle(
-                                color: palette.textPrimary,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                            Flexible(
+                              child: Text(
+                                integration['name'],
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: palette.textPrimary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                             if (isConnected) ...[
@@ -174,9 +175,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.1),
+                                    color: Colors.red.withValues(alpha:0.1),
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.red.withOpacity(0.5)),
+                                    border: Border.all(color: Colors.red.withValues(alpha:0.5)),
                                   ),
                                   child: const Text(
                                     'Error',
@@ -187,9 +188,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.green.withOpacity(0.1),
+                                    color: Colors.green.withValues(alpha:0.1),
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.green.withOpacity(0.5)),
+                                    border: Border.all(color: Colors.green.withValues(alpha:0.5)),
                                   ),
                                   child: const Text(
                                     'Connected',
@@ -231,7 +232,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                         Switch(
                           value: activeSource['enabled'],
                           onChanged: (val) => _toggleSource(activeSource, val),
-                          activeColor: palette.accent,
+                          activeThumbColor: palette.accent,
                         ),
                         IconButton(
                           icon: Icon(Icons.link_off, color: palette.danger),
@@ -270,7 +271,7 @@ class _DiscordSetupDialog extends StatefulWidget {
 }
 
 class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
-  final _nameController = TextEditingController(text: 'My Discord Account');
+  final _nameController = TextEditingController(text: 'My Discord Bot');
   final _usersController = TextEditingController();
   final _tokenController = TextEditingController();
   bool _saving = false;
@@ -297,7 +298,7 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
         'name': name,
         'config': {
           'token': token,
-          'targetUsers': users,
+          'triggerUsernames': users,
         },
       });
       if (mounted) Navigator.of(context).pop(true);
@@ -315,7 +316,7 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Connect Discord Account'),
+      title: const Text('Connect Discord Bot'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -324,18 +325,18 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.1),
-                border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                color: Theme.of(context).colorScheme.primary.withValues(alpha:0.08),
+                border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha:0.3)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
+                  Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary, size: 20),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Warning: Automating user accounts is against Discord\'s Terms of Service. This bot will silently monitor all channels and auto-join to record specified users. Use at your own risk.',
-                      style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
+                      'Uses a Discord bot you create and invite to your server. When a trigger user joins a voice channel, the bot joins and records everyone in that channel, then leaves when they leave.',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                 ],
@@ -345,8 +346,8 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(
-                labelText: 'Account Name',
-                hintText: 'e.g. Main Discord Account',
+                labelText: 'Name',
+                hintText: 'e.g. Team Standup Bot',
               ),
               enabled: !_saving,
             ),
@@ -354,61 +355,37 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
             TextField(
               controller: _usersController,
               decoration: const InputDecoration(
-                labelText: 'Target User IDs',
-                hintText: 'Comma separated IDs to record',
-                helperText: 'Right-click a user and select "Copy User ID"',
+                labelText: 'Trigger Username(s)',
+                hintText: 'e.g. frank, bob',
+                helperText: 'Bot joins when one of these users joins a voice channel, and records everyone there',
               ),
               enabled: !_saving,
             ),
             const SizedBox(height: 16),
-            const SizedBox(height: 16),
             TextField(
               controller: _tokenController,
               decoration: const InputDecoration(
-                labelText: 'Discord Token',
-                hintText: 'Your Discord User Token',
-                helperText: 'Do not share this token with anyone else',
+                labelText: 'Bot Token',
+                hintText: 'From your Discord application\'s Bot page',
+                helperText: 'Keep this secret — do not share it with anyone',
               ),
               enabled: !_saving,
               obscureText: true,
             ),
             const SizedBox(height: 16),
             ExpansionTile(
-              title: const Text('How to get your token', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              title: const Text('How to create the bot', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               tilePadding: EdgeInsets.zero,
               children: [
                 const Text(
-                  '1. Open the Discord Web App in your browser.\n'
-                  '2. Press Ctrl+Shift+I (or Cmd+Option+I) to open Developer Tools.\n'
-                  '3. Go to the "Console" tab.\n'
-                  '4. Paste the following script and hit Enter.',
+                  '1. Go to discord.com/developers/applications and click "New Application".\n'
+                  '2. Open the "Bot" tab, then "Reset Token" and copy the token into the field above.\n'
+                  '3. In "OAuth2 → URL Generator", tick the "bot" scope and the '
+                  '"View Channels", "Connect", and "Speak" permissions.\n'
+                  '4. Open the generated URL and invite the bot to your server.\n'
+                  '\n'
+                  'No privileged intents are required. The bot only listens — it never speaks.',
                   style: TextStyle(fontSize: 13, height: 1.5),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const SelectableText(
-                    'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && typeof m.default.getToken === "function") { try { let v = m.default.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } if (m && typeof m.getToken === "function") { try { let v = m.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }',
-                    style: TextStyle(fontFamily: 'monospace', fontSize: 11),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(const ClipboardData(text: 'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && typeof m.default.getToken === "function") { try { let v = m.default.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } if (m && typeof m.getToken === "function") { try { let v = m.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }'));
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Script copied to clipboard!')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy Script'),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Important: Do not log out of Discord from your browser after copying the token. If you manually log out, Discord will invalidate this token and NeoRecall will stop working. Just close the tab instead.',
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary, fontStyle: FontStyle.italic),
                 ),
               ],
             ),

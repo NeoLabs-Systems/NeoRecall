@@ -11,8 +11,6 @@ class PlaudConnector extends WearableConnector {
   static const int _cmdStopRecord = 23;
   static const int _cmdSyncFileStart = 28;
   static const int _cmdStopSync = 30;
-  static const int _audioFrameBytes = 80;
-  static const int _sessionSetupAttempts = 3;
   static const Duration _notificationReadyDelay = Duration(seconds: 2);
   static const Duration _commandTimeout = Duration(seconds: 10);
   static const Duration _recordResetDelay = Duration(milliseconds: 500);
@@ -21,7 +19,6 @@ class PlaudConnector extends WearableConnector {
   final Map<int, Completer<List<int>>> _pending = <int, Completer<List<int>>>{};
   StreamSubscription<List<int>>? _notificationSub;
   int? _sessionId;
-  final List<int> _audioBuffer = <int>[];
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
@@ -39,14 +36,13 @@ class PlaudConnector extends WearableConnector {
   void _handleNotification(List<int> data) {
     if (data.isEmpty) return;
     if (data[0] == 2) {
+      // Each parsed chunk is a self-contained Opus FS320 frame whose length the
+      // device declares (byte 8). Emit it directly — the PLAUD path has no frame
+      // assembler downstream, so concatenating chunks into fixed blocks would
+      // hand the packet-based Opus decoder two frames as one. Matches Omi's
+      // reference connector, which forwards each chunk as-is.
       final chunk = _parseAudioChunk(data.sublist(1));
-      if (chunk != null) {
-        _audioBuffer.addAll(chunk);
-        while (_audioBuffer.length >= _audioFrameBytes) {
-          audioBytes.add(_audioBuffer.sublist(0, _audioFrameBytes));
-          _audioBuffer.removeRange(0, _audioFrameBytes);
-        }
-      }
+      if (chunk != null) audioBytes.add(chunk);
       return;
     }
     if (data.length >= 3) {
@@ -99,41 +95,53 @@ class PlaudConnector extends WearableConnector {
   Future<void> startRecording() async {
     if (recording) return;
     recording = true;
-    _startRecordingLoop();
+    // Await the first setup attempt so the caller (and tests) observe the
+    // session sync write. If the device does not respond, keep retrying in the
+    // background without blocking the caller.
+    final established = await _attemptSessionSetup();
+    if (!established && recording) {
+      unawaited(_retrySessionSetup());
+    }
   }
 
-  Future<void> _startRecordingLoop() async {
-    for (var attempt = 0; recording; attempt += 1) {
-      if (attempt > 0) {
-        await Future<void>.delayed(const Duration(seconds: 2));
-      }
+  Future<void> _retrySessionSetup() async {
+    while (recording) {
+      await Future<void>.delayed(const Duration(seconds: 2));
       if (!recording) return;
-      await _sendCommand(_cmdStopRecord, <int>[
-        ..._toBytes32(0),
-        ..._toBytes32(0),
-      ]);
-      await Future<void>.delayed(_recordResetDelay);
-      if (!recording) return;
-      final response = await _sendCommand(_cmdStartRecord, <int>[
-        ..._toBytes32(1),
-        ..._toBytes32(0),
-        ..._toBytes32(0),
-      ]);
-      if (response == null || response.length < 10) continue;
-      final sessionId = _toInt32(response.sublist(0, 4));
-      final startTime = _toInt32(response.sublist(4, 8));
-      await Future<void>.delayed(_syncReadyDelay);
-      if (!recording) return;
-      final syncResponse = await _sendCommand(_cmdSyncFileStart, <int>[
-        ..._toBytes64(sessionId),
-        ..._toBytes64(startTime),
-        ..._toBytes64(0x7FFFFFFF),
-      ]);
-      if (syncResponse != null && recording) {
-        _sessionId = sessionId;
-        return;
-      }
+      if (await _attemptSessionSetup()) return;
     }
+  }
+
+  /// Runs one stop→start→sync handshake. Returns true once the device confirms
+  /// the sync-file-start command, echoing back its session id and start time.
+  Future<bool> _attemptSessionSetup() async {
+    if (!recording) return false;
+    await _sendCommand(_cmdStopRecord, <int>[
+      ..._toBytes32(0),
+      ..._toBytes32(0),
+    ]);
+    await Future<void>.delayed(_recordResetDelay);
+    if (!recording) return false;
+    final response = await _sendCommand(_cmdStartRecord, <int>[
+      ..._toBytes32(1),
+      ..._toBytes32(0),
+      ..._toBytes32(0),
+    ]);
+    if (response == null || response.length < 10) return false;
+    final sessionId = _toInt32(response.sublist(0, 4));
+    final startTime = _toInt32(response.sublist(4, 8));
+    await Future<void>.delayed(_syncReadyDelay);
+    if (!recording) return false;
+    final syncResponse = await _sendCommand(_cmdSyncFileStart, <int>[
+      ..._toBytes64(sessionId),
+      ..._toBytes64(startTime),
+      ..._toBytes64(0x7FFFFFFF),
+    ]);
+    if (syncResponse != null && recording) {
+      _sessionId = sessionId;
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -152,7 +160,6 @@ class PlaudConnector extends WearableConnector {
         ]);
       }
     } finally {
-      _audioBuffer.clear();
       recording = false;
       _sessionId = null;
     }

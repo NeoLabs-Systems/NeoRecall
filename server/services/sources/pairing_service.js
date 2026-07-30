@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const sourcesService = require('./index');
 
 // In-memory store for pairing tokens
-// Key: token -> Value: { userId, name, targetUsers, createdAt, status }
+// Key: token -> Value: { userId, name, triggerUsernames, createdAt, status }
 const pairings = new Map();
 
 // Tokens expire after 10 minutes
@@ -23,7 +23,9 @@ function createPairing(userId, data) {
   pairings.set(token, {
     userId,
     name: data.name,
-    targetUsers: data.targetUsers,
+    // Usernames of the trigger user(s) the bot follows into voice channels.
+    // `targetUsers` is accepted as a legacy alias.
+    triggerUsernames: data.triggerUsernames ?? data.targetUsers,
     createdAt: now,
     status: 'pending' // pending -> success
   });
@@ -50,7 +52,7 @@ function consumePairing(token, discordToken) {
     enabled: true,
     config: {
       token: discordToken,
-      targetUsers: pairing.targetUsers,
+      triggerUsernames: pairing.triggerUsernames,
     }
   });
 

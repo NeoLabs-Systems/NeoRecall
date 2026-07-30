@@ -638,7 +638,7 @@ class NeoRecallController extends ChangeNotifier {
     isConfiguringTwoFactor = true;
     notifyListeners();
     try {
-      await api.request('DELETE', '/api/v1/settings/2fa', body: {'password': password, if (code != null) 'code': code});
+      await api.request('DELETE', '/api/v1/settings/2fa', body: {'password': password, 'code': ?code});
       await fetchTwoFactorStatus();
     } catch (e) {
       error = e.toString();

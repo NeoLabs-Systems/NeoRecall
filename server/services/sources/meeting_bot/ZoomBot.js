@@ -1,54 +1,58 @@
 'use strict';
 
 const AbstractBot = require('./AbstractBot');
+const { clickButtonByTexts, bodyIncludesAny, turnOffToggles, waitForAdmission, sanitizeDisplayName, humanFill } = require('./meet_helpers');
+
+const JOIN_AUDIO = ['Join Audio by Computer', 'Join with Computer Audio', 'Per Computer dem Audio beitreten', 'Computeraudio'];
+const CANNOT_JOIN = ['This meeting has not started', 'Invalid meeting ID', 'is not valid', 'Dieses Meeting hat noch nicht begonnen'];
+const MUTE_TOGGLES = [
+  { name: 'microphone', re: /^Mute$|Mute my microphone|Stummschalten/i },
+  { name: 'camera', re: /Stop Video|Video beenden/i },
+];
+const ADMITTED_SELECTOR = 'button[aria-label*="Leave" i], button[aria-label*="Verlassen" i]';
 
 class ZoomBot extends AbstractBot {
   async joinMeeting() {
     console.log(`[ZoomBot] Joining ${this.url}`);
-    
-    // Zoom URLs often look like https://zoom.us/j/123456789?pwd=...
-    // The web client URL is https://zoom.us/wc/join/123456789
-    let wcUrl = this.url;
-    if (this.url.includes('/j/')) {
-      wcUrl = this.url.replace('/j/', '/wc/join/');
-    }
-
+    // Prefer the web-client join URL (https://zoom.us/wc/join/<id>).
+    const wcUrl = this.url.includes('/j/') ? this.url.replace('/j/', '/wc/join/') : this.url;
     await this.page.goto(wcUrl, { waitUntil: 'domcontentloaded' });
-    
-    // 1. Accept Cookies
-    try {
-      const acceptCookies = this.page.locator('#onetrust-accept-btn-handler');
-      await acceptCookies.waitFor({ state: 'visible', timeout: 5000 });
-      await acceptCookies.click();
-    } catch (e) {}
 
-    // 2. Type Name
-    const nameInput = this.page.locator('input[name="inputname"]');
-    await nameInput.waitFor({ state: 'visible', timeout: 15000 });
-    await nameInput.fill(this.botName);
+    // OneTrust cookie banner, if present.
+    const cookies = this.page.locator('#onetrust-accept-btn-handler');
+    if (await cookies.isVisible({ timeout: 5000 }).catch(() => false)) await cookies.click().catch(() => {});
 
-    // 3. Join Button
-    const joinBtn = this.page.locator('button#joinBtn');
-    await joinBtn.click();
-    
-    console.log(`[ZoomBot] Clicked Join, waiting for admission...`);
-    
-    // 4. Accept Audio / Join Audio by Computer
+    const nameInput = this.page.locator('#input-for-name, input[name="inputname"], input[type="text"]').first();
     try {
-      const joinAudioBtn = this.page.locator('button:has-text("Join Audio by Computer")');
-      await joinAudioBtn.waitFor({ state: 'visible', timeout: 60000 });
-      await joinAudioBtn.click();
+      await nameInput.waitFor({ state: 'visible', timeout: 20000 });
     } catch (e) {
-      console.log(`[ZoomBot] Join audio button not found, might already be connected.`);
+      const refused = await bodyIncludesAny(this.page, CANNOT_JOIN);
+      throw new Error(`[ZoomBot] Pre-join name field never appeared${refused ? ` ("${refused}")` : ' (Zoom UI change or meeting not started)'}.`);
     }
+    await humanFill(nameInput, sanitizeDisplayName(this.botName));
 
-    console.log(`[ZoomBot] Admitted to meeting!`);
-    this.isRecording = true;
-    
-    // Start audio capture
-    await this.page.evaluate(() => {
-       if (window.startAudioCapture) window.startAudioCapture();
+    const clicked = await clickButtonByTexts(this.page, ['Join', 'Beitreten']);
+    if (!clicked) {
+      const joinBtn = this.page.locator('button#joinBtn');
+      if (await joinBtn.isVisible({ timeout: 3000 }).catch(() => false)) await joinBtn.click();
+      else throw new Error('[ZoomBot] Could not find the Join button.');
+    }
+    console.log('[ZoomBot] Clicked join, waiting for admission...');
+
+    await waitForAdmission(this.page, {
+      admittedSelector: ADMITTED_SELECTOR,
+      meetingHost: 'zoom.us',
+      cannotJoinTexts: CANNOT_JOIN,
     });
+
+    // Connect computer audio so remote audio is audible/capturable, but keep the
+    // bot itself muted (mic + camera off).
+    await clickButtonByTexts(this.page, JOIN_AUDIO);
+    const off = await turnOffToggles(this.page, MUTE_TOGGLES);
+    if (off.length) console.log(`[ZoomBot] Turned off: ${off.join(', ')}`);
+
+    console.log('[ZoomBot] Admitted to meeting!');
+    this.isRecording = true;
   }
 }
 

@@ -59,16 +59,13 @@ class LimitlessConnector extends WearableConnector {
     } catch (_) {
       // Battery is optional and must never block audio capture.
     }
+    // Only the clock is synced at connect time. The audio data stream is
+    // enabled on startRecording and disabled on stopRecording so the pendant
+    // does not stream (and drain battery) while the app is merely paired.
     await transport.writeCharacteristic(
       WearableDeviceUuids.limitlessService,
       WearableDeviceUuids.limitlessTx,
       _encodeSetCurrentTime(DateTime.now().millisecondsSinceEpoch),
-    );
-    await Future<void>.delayed(_gattReadyDelay);
-    await transport.writeCharacteristic(
-      WearableDeviceUuids.limitlessService,
-      WearableDeviceUuids.limitlessTx,
-      _encodeEnableDataStream(enable: true),
     );
   }
 
@@ -107,12 +104,26 @@ class LimitlessConnector extends WearableConnector {
   Future<void> startRecording() async {
     if (recording) return;
     recording = true;
+    await transport.writeCharacteristic(
+      WearableDeviceUuids.limitlessService,
+      WearableDeviceUuids.limitlessTx,
+      _encodeEnableDataStream(enable: true),
+    );
   }
 
   @override
   Future<void> stopRecording() async {
     if (!recording) return;
     recording = false;
+    try {
+      await transport.writeCharacteristic(
+        WearableDeviceUuids.limitlessService,
+        WearableDeviceUuids.limitlessTx,
+        _encodeEnableDataStream(enable: false),
+      );
+    } catch (_) {
+      // Best-effort stop; the pendant stops streaming on disconnect anyway.
+    }
     _fragments.clear();
   }
 

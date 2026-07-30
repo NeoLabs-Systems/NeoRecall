@@ -1,59 +1,54 @@
 'use strict';
 
 const AbstractBot = require('./AbstractBot');
+const { clickButtonByTexts, turnOffToggles, waitForAdmission, sanitizeDisplayName, humanFill } = require('./meet_helpers');
+
+const CONTINUE_ON_WEB = ['Continue on this browser', 'In diesem Browser fortfahren'];
+const JOIN_BUTTONS = ['Join now', 'Jetzt teilnehmen'];
+const CANNOT_JOIN = ['meeting is full', 'The meeting has ended', 'Das Meeting wurde beendet', 'nicht zulässig'];
+const MUTE_TOGGLES = [
+  { name: 'microphone', re: /^Mute$|Mute microphone|Mikrofon (deaktivieren|stummschalten)/i },
+  { name: 'camera', re: /Turn camera off|Kamera deaktivieren/i },
+];
+const ADMITTED_SELECTOR = 'button[aria-label*="Leave" i], button[aria-label*="Verlassen" i]';
 
 class TeamsBot extends AbstractBot {
+  // Teams needs fake media devices to drive its pre-join mic/camera toggles.
+  extraChromiumArgs() {
+    return ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'];
+  }
+
   async joinMeeting() {
     console.log(`[TeamsBot] Joining ${this.url}`);
-    
     await this.page.goto(this.url, { waitUntil: 'domcontentloaded' });
-    
-    // 1. "Continue on this browser"
-    try {
-      const continueBtn = this.page.locator('button[data-tid="joinOnWeb"]');
-      await continueBtn.waitFor({ state: 'visible', timeout: 15000 });
-      await continueBtn.click();
-    } catch (e) {
-      console.log(`[TeamsBot] Continue on web button not found, maybe already there.`);
-    }
 
-    // Teams uses an iframe for the meeting view
-    // 2. Wait for name input
-    const frame = this.page.frameLocator('iframe[name="experience-container-frame"]');
-    let nameInput = null;
-    
-    try {
-      nameInput = frame.locator('input[placeholder*="name" i], input[aria-label*="name" i]');
-      await nameInput.waitFor({ state: 'visible', timeout: 20000 });
-    } catch (e) {
-      nameInput = this.page.locator('input[placeholder*="name" i], input[aria-label*="name" i]');
-      await nameInput.waitFor({ state: 'visible', timeout: 20000 });
-    }
+    await clickButtonByTexts(this.page, CONTINUE_ON_WEB);
 
-    await nameInput.fill(this.botName);
+    // Older Teams builds render the pre-join UI inside an iframe; newer ones are
+    // inline. Operate on whichever holds it (Frame and Page share the same API).
+    const scope = this.page.frame({ name: 'experience-container-frame' }) || this.page;
 
-    // 3. Click Join Now
-    let joinBtn = null;
-    try {
-      joinBtn = frame.locator('button:has-text("Join now")');
-      await joinBtn.waitFor({ state: 'visible', timeout: 5000 });
-    } catch (e) {
-      joinBtn = this.page.locator('button:has-text("Join now")');
-    }
-    
-    await joinBtn.click();
-    console.log(`[TeamsBot] Clicked Join, waiting for admission...`);
-    
-    // 4. Wait to be admitted
-    await this.page.waitForFunction(() => document.querySelectorAll('audio, video').length > 0, { timeout: 60000 });
-    
-    console.log(`[TeamsBot] Admitted to meeting!`);
-    this.isRecording = true;
-    
-    // Start audio capture
-    await this.page.evaluate(() => {
-       if (window.startAudioCapture) window.startAudioCapture();
+    const nameInput = scope.locator('input[placeholder*="name" i], input[aria-label*="name" i], input[type="text"]').first();
+    await nameInput.waitFor({ state: 'visible', timeout: 25000 });
+    await humanFill(nameInput, sanitizeDisplayName(this.botName));
+
+    // Passive recorder: mic + camera off before joining.
+    const off = await turnOffToggles(scope, MUTE_TOGGLES);
+    if (off.length) console.log(`[TeamsBot] Turned off: ${off.join(', ')}`);
+
+    const clicked = await clickButtonByTexts(scope, JOIN_BUTTONS);
+    if (!clicked) throw new Error('[TeamsBot] Could not find the "Join now" button.');
+    console.log('[TeamsBot] Clicked join, waiting for admission...');
+
+    await waitForAdmission(this.page, {
+      admittedSelector: ADMITTED_SELECTOR,
+      meetingHost: 'teams.',
+      cannotJoinTexts: CANNOT_JOIN,
+      scope,
     });
+
+    console.log('[TeamsBot] Admitted to meeting!');
+    this.isRecording = true;
   }
 }
 

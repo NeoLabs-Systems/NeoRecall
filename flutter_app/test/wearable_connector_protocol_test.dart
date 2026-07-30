@@ -72,7 +72,10 @@ void main() {
       0,
     ]);
 
-    final audioFuture = connector.audioBytes.stream.first;
+    // Each device-declared chunk is a self-contained Opus frame and must be
+    // forwarded as its own packet (matching Omi's reference), not concatenated.
+    final frames = <List<int>>[];
+    final audioSub = connector.audioBytes.stream.listen(frames.add);
     transport.emit(
       WearableDeviceUuids.plaudService,
       WearableDeviceUuids.plaudNotify,
@@ -83,7 +86,11 @@ void main() {
       WearableDeviceUuids.plaudNotify,
       <int>[2, 0, 0, 0, 0, 40, 0, 0, 0, 40, ...List<int>.filled(40, 0x78)],
     );
-    expect((await audioFuture).length, 80);
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.map((frame) => frame.length), <int>[40, 40]);
+    expect(frames[0].every((byte) => byte == 0xb8), isTrue);
+    expect(frames[1].every((byte) => byte == 0x78), isTrue);
+    await audioSub.cancel();
     await connector.dispose();
   });
 
