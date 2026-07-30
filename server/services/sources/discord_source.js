@@ -1,15 +1,20 @@
 'use strict';
 
 const { Client } = require('discord.js-selfbot-v13');
-const { joinVoiceChannel, EndBehaviorType, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
+const { joinVoiceChannel, EndBehaviorType, createAudioPlayer, createAudioResource, StreamType, VoiceConnectionStatus } = require('@discordjs/voice');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const prism = require('prism-media');
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const ingest = require('../ingest/ingest_service');
 
+// Upper bound for how long a single speaking burst may hold the per-user
+// capture guard before it is force-released. Derived from the configured
+// maximum chunk length plus headroom for decode/transcode drain.
+const CAPTURE_WATCHDOG_MS = getConfig().chunkMaxMs + 30_000;
 
 function ensureDevice(source) {
   const db = getDatabase();
@@ -169,6 +174,18 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
     instance.connection = connection;
     console.log(`[DiscordSource] Joined voice channel ${voiceState.channelId}`);
 
+    // Diagnostic: surface the voice connection lifecycle so we can tell whether the
+    // UDP/encryption handshake actually reaches Ready (required before any audio flows).
+    connection.on('stateChange', (oldS, newS) => {
+      console.log(`[DiscordSource] Connection state: ${oldS.status} -> ${newS.status}`);
+    });
+    connection.on('error', (err) => {
+      console.error(`[DiscordSource] Connection error:`, err.message);
+    });
+    connection.on(VoiceConnectionStatus.Ready, () => {
+      console.log(`[DiscordSource] Voice connection READY (handshake complete, audio can flow).`);
+    });
+
     const deviceId = ensureDevice(source);
     const sessionId = crypto.randomUUID();
     instance.sessionId = sessionId;
@@ -190,8 +207,20 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
       try {
         if (targetUsers.includes(userId)) {
           if (activeStreams.has(userId)) return; // Already capturing for this user!
-          activeStreams.set(userId, true);
-          
+
+          // Watchdog: if the pipeline never invokes its callback (e.g. a hung
+          // ffmpeg/decoder), the capture guard would otherwise stay set forever
+          // and this speaker would never be recorded again for the session.
+          // Clearing it after a bounded ceiling fails safe toward re-capture.
+          const guardTimeout = setTimeout(() => {
+            if (activeStreams.has(userId)) {
+              console.warn(`[DiscordSource] Capture watchdog fired for user ${userId}; releasing guard.`);
+              activeStreams.delete(userId);
+            }
+          }, CAPTURE_WATCHDOG_MS);
+          if (typeof guardTimeout.unref === 'function') guardTimeout.unref();
+          activeStreams.set(userId, guardTimeout);
+
           console.log(`[DiscordSource] Target user ${userId} started speaking. Capturing...`);
           
           let userSource = activeSources.get(userId);
@@ -216,25 +245,39 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
               duration: 1000,
             },
           });
-          
+
+          // Diagnostic: count opus packets actually delivered to us. If DAVE were still
+          // dropping them this stays at 0; a non-zero count proves audio is flowing.
+          let packetCount = 0;
+          audioStream.on('data', () => { packetCount++; });
+          audioStream.on('end', () => {
+            console.log(`[DiscordSource] Receive stream ended for ${userId} after ${packetCount} opus packet(s).`);
+          });
+          audioStream.on('error', (err) => {
+            console.error(`[DiscordSource] Receive stream error for ${userId}:`, err.message);
+          });
+
           const sequence = userSource.sequence++;
           const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.wav`);
           const fileStream = fs.createWriteStream(tempPath);
           
                     try {
             const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+            // NOTE: prism.FFmpeg auto-appends 'pipe:1' as the output (see
+            // prism-media core/FFmpeg.js create()). Do NOT add 'pipe:1' here or the
+            // command gets two outputs ('-f wav pipe:1 pipe:1'); the second has no
+            // format, ffmpeg exits, and every chunk dies with `write EPIPE`.
             const encoder = new prism.FFmpeg({
               args: [
                 '-f', 's16le', '-ar', '48000', '-ac', '2',
                 '-i', 'pipe:0',
-                '-f', 'wav', 'pipe:1'
+                '-f', 'wav'
               ]
             });
             
             const startTime = Date.now();
             const { pipeline } = require('stream');
-            
-            audioStream.on('data', chunk => console.log(`[DiscordSource] Received opus packet of size ${chunk.length}`));
+
             pipeline(audioStream, decoder, encoder, fileStream, async (err) => {
               try {
                if (err) {
@@ -274,11 +317,14 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
                  console.error(`[DiscordSource] Failed to ingest chunk for ${userId}:`, e.message);
                }
               } finally {
+                clearTimeout(guardTimeout);
                 activeStreams.delete(userId);
               }
             });
           } catch (err) {
             console.error(`[DiscordSource] Error creating pipeline:`, err);
+            clearTimeout(guardTimeout);
+            activeStreams.delete(userId);
           }
         }
       } catch (err) {

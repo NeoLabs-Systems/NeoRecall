@@ -7,18 +7,34 @@ const sourcesService = {
   init() {
     try {
       const db = getDatabase();
-      const stmt = db.prepare('SELECT * FROM sources WHERE enabled = 1 AND type = ?');
-      const rows = stmt.all('discord');
+      const rows = db.prepare('SELECT * FROM sources WHERE enabled = 1').all();
       for (const row of rows) {
-        const source = {
-          ...row,
-          config: JSON.parse(row.config_json),
-          enabled: row.enabled === 1,
-        };
-        if (source.type === 'discord') {
-          require('./discord_source').startSource(source);
-        } else if (source.type === 'meeting') {
-          require('./meeting_source').startSource(source);
+        let source;
+        try {
+          source = {
+            ...row,
+            config: JSON.parse(row.config_json),
+            enabled: row.enabled === 1,
+          };
+        } catch (parseError) {
+          console.error(`[Sources] Skipping source ${row.id} with invalid config:`, parseError.message);
+          continue;
+        }
+        // Start each source in isolation so one failing connector cannot
+        // prevent the others from resuming after a server restart. startSource
+        // is async, so guard against both synchronous throws and rejections.
+        const onStartError = (startError) =>
+          console.error(`[Sources] Failed to start source ${source.id} (${source.type}):`, startError.message);
+        try {
+          let started;
+          if (source.type === 'discord') {
+            started = require('./discord_source').startSource(source);
+          } else if (source.type === 'meeting') {
+            started = require('./meeting_source').startSource(source);
+          }
+          Promise.resolve(started).catch(onStartError);
+        } catch (startError) {
+          onStartError(startError);
         }
       }
     } catch (error) {
