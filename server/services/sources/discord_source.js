@@ -209,6 +209,10 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
           });
           
           const startTime = Date.now();
+          decoder.on('error', err => console.error('[DiscordSource] Decoder error:', err));
+          encoder.on('error', err => console.error('[DiscordSource] Encoder error:', err));
+          fileStream.on('error', err => console.error('[DiscordSource] FileStream error:', err));
+          audioStream.on('error', err => console.error('[DiscordSource] AudioStream error:', err));
           audioStream.pipe(decoder).pipe(encoder).pipe(fileStream);
           
           fileStream.on('finish', async () => {
