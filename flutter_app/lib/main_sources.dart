@@ -321,8 +321,16 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
 
   String get _jsSnippet {
     return '''(function() {
-  var t=(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken();
-  if (!t) return alert("Failed to find Discord token.");
+  let t;
+  try {
+    var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]);
+    for (let c in req.c) {
+      let m = req.c[c].exports;
+      if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; }
+      if (m && m.getToken) { t = m.getToken(); break; }
+    }
+  } catch(e) { console.error("Error extracting token", e); }
+  if (!t) return alert("Failed to automatically find Discord token. Discord may have updated their web app.");
   fetch('$_backendUrl/api/v1/sources/discord/pair', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
