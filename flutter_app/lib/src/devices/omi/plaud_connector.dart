@@ -67,8 +67,9 @@ class PlaudConnector extends WearableConnector {
   }
 
   Future<List<int>?> _sendCommand(int cmdId, List<int> payload) async {
-    if (_pending.containsKey(cmdId)) {
-      throw StateError('PLAUD command $cmdId is already pending.');
+    final existing = _pending[cmdId];
+    if (existing != null) {
+      return existing.future;
     }
     final pending = Completer<List<int>>();
     _pending[cmdId] = pending;
@@ -97,15 +98,22 @@ class PlaudConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    for (var attempt = 0; attempt < _sessionSetupAttempts; attempt += 1) {
+    recording = true;
+    _startRecordingLoop();
+  }
+
+  Future<void> _startRecordingLoop() async {
+    for (var attempt = 0; recording; attempt += 1) {
       if (attempt > 0) {
-        await Future<void>.delayed(Duration(seconds: attempt));
+        await Future<void>.delayed(const Duration(seconds: 2));
       }
+      if (!recording) return;
       await _sendCommand(_cmdStopRecord, <int>[
         ..._toBytes32(0),
         ..._toBytes32(0),
       ]);
       await Future<void>.delayed(_recordResetDelay);
+      if (!recording) return;
       final response = await _sendCommand(_cmdStartRecord, <int>[
         ..._toBytes32(1),
         ..._toBytes32(0),
@@ -115,21 +123,17 @@ class PlaudConnector extends WearableConnector {
       final sessionId = _toInt32(response.sublist(0, 4));
       final startTime = _toInt32(response.sublist(4, 8));
       await Future<void>.delayed(_syncReadyDelay);
+      if (!recording) return;
       final syncResponse = await _sendCommand(_cmdSyncFileStart, <int>[
         ..._toBytes64(sessionId),
         ..._toBytes64(startTime),
         ..._toBytes64(0x7FFFFFFF),
       ]);
-      if (syncResponse != null) {
+      if (syncResponse != null && recording) {
         _sessionId = sessionId;
-        recording = true;
         return;
       }
     }
-    throw StateError(
-      'PLAUD failed to establish a recording session after '
-      '$_sessionSetupAttempts attempts.',
-    );
   }
 
   @override

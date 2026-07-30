@@ -165,7 +165,8 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     bool has(String uuid) => device.serviceUuids.contains(uuid.toLowerCase());
     final name = device.name.toLowerCase();
     return switch (device.type) {
-      WearableDeviceType.omi => has(WearableDeviceUuids.omiService),
+      WearableDeviceType.omi =>
+        has(WearableDeviceUuids.omiService) || name.startsWith('omi'),
       WearableDeviceType.omiGlass =>
         has(WearableDeviceUuids.omiService) &&
             (name.startsWith('omiglass') || name.startsWith('openglass')),

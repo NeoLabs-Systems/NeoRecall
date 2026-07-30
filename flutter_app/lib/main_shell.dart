@@ -6,6 +6,7 @@ import 'main_record.dart';
 import 'main_search.dart';
 import 'main_settings.dart';
 import 'main_shared.dart';
+import 'main_sources.dart';
 import 'main_speakers.dart';
 import 'main_theme.dart';
 import 'main_timeline.dart';
@@ -21,6 +22,7 @@ class NeoRecallShell extends StatelessWidget {
     (RecallPage.memories, Icons.auto_awesome_outlined, 'Memories'),
     (RecallPage.search, Icons.search_rounded, 'Search'),
     (RecallPage.speakers, Icons.record_voice_over_outlined, 'Speakers'),
+    (RecallPage.sources, Icons.input_rounded, 'Sources'),
   ];
 
   String get _pageTitle => switch (controller.page) {
@@ -29,6 +31,7 @@ class NeoRecallShell extends StatelessWidget {
     RecallPage.memories => 'Memories',
     RecallPage.search => 'Search',
     RecallPage.speakers => 'Speakers',
+    RecallPage.sources => 'Sources',
     RecallPage.devices || RecallPage.settings => 'Settings',
   };
 
@@ -38,6 +41,7 @@ class NeoRecallShell extends StatelessWidget {
     RecallPage.memories => MemoriesScreen(controller: controller),
     RecallPage.search => SearchScreen(controller: controller),
     RecallPage.speakers => SpeakersScreen(controller: controller),
+    RecallPage.sources => SourcesScreen(controller: controller),
     RecallPage.devices => SettingsScreen(
       controller: controller,
       initialSection: SettingsSection.devices,

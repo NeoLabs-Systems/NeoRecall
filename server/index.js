@@ -14,6 +14,7 @@ if (!process.env.NEORECALL_ROLE) {
   const adminAuth = require('./services/auth/admin_auth_service');
   const logger = createLogger('server');
   adminAuth.bootstrap().then(() => {
+    require('./services/sources').init();
     const config = getConfig();
     const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));

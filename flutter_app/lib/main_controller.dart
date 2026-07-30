@@ -34,6 +34,7 @@ enum RecallPage {
   memories,
   search,
   speakers,
+  sources,
   devices,
   settings,
 }

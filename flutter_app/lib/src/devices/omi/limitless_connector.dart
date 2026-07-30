@@ -64,6 +64,12 @@ class LimitlessConnector extends WearableConnector {
       WearableDeviceUuids.limitlessTx,
       _encodeSetCurrentTime(DateTime.now().millisecondsSinceEpoch),
     );
+    await Future<void>.delayed(_gattReadyDelay);
+    await transport.writeCharacteristic(
+      WearableDeviceUuids.limitlessService,
+      WearableDeviceUuids.limitlessTx,
+      _encodeEnableDataStream(enable: true),
+    );
   }
 
   void _handleNotification(List<int> data) {
@@ -100,27 +106,14 @@ class LimitlessConnector extends WearableConnector {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    await transport.writeCharacteristic(
-      WearableDeviceUuids.limitlessService,
-      WearableDeviceUuids.limitlessTx,
-      _encodeEnableDataStream(enable: true),
-    );
     recording = true;
   }
 
   @override
   Future<void> stopRecording() async {
     if (!recording) return;
-    try {
-      await transport.writeCharacteristic(
-        WearableDeviceUuids.limitlessService,
-        WearableDeviceUuids.limitlessTx,
-        _encodeEnableDataStream(enable: false),
-      );
-    } finally {
-      recording = false;
-      _fragments.clear();
-    }
+    recording = false;
+    _fragments.clear();
   }
 
   _LimitlessBlePacket? _parseBlePacket(List<int> data) {
@@ -316,7 +309,7 @@ class LimitlessConnector extends WearableConnector {
 
   List<int> _encodeEnableDataStream({required bool enable}) {
     final message = <int>[
-      ..._encodeField(1, 0, const <int>[0]),
+      ..._encodeField(1, 0, const <int>[1]),
       ..._encodeField(2, 0, <int>[enable ? 1 : 0]),
     ];
     return _encodeBleWrapper(<int>[

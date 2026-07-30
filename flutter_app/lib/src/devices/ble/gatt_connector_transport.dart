@@ -51,7 +51,7 @@ class GattConnectorTransport implements WearableTransport {
     bool requiresPairing = false,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    await _gatt.connect(deviceId, autoReconnect: false, timeout: timeout);
+    await _gatt.connect(deviceId, autoReconnect: true, timeout: timeout);
     final negotiatedMtu = await _gatt.requestMtu(deviceId, preferredMtu);
     ClientDiagnosticLog.instance.record(
       'bluetooth',
