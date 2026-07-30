@@ -44,35 +44,38 @@ async function startSource(source) {
     if (newState.id === client.user.id) return; // Ignore self
     if (!targetUsers.includes(newState.id)) return; // Only target users
 
-    
-    // User left voice channel
-    if (oldState.channelId && !newState.channelId) {
-      if (targetUsers.includes(newState.id)) {
-        const channel = client.channels.cache.get(oldState.channelId);
-        if (channel) {
-          const targetsRemaining = channel.members.some(m => targetUsers.includes(m.id) && m.id !== client.user.id);
-          if (!targetsRemaining) {
-             console.log(`[DiscordSource] All targets left channel ${oldState.channelId}. Disconnecting...`);
-             const instance = activeClients.get(source.id);
-             if (instance && instance.connection && instance.connection.joinConfig.channelId === oldState.channelId) {
-               instance.connection.destroy();
-               instance.connection = null;
-               if (instance.sessionId) {
-                 ingest.closeSession(source.user_id, instance.sessionId, { endedAt: new Date().toISOString() });
-                 instance.sessionId = null;
+    try {
+      // User left voice channel
+      if (oldState.channelId && !newState.channelId) {
+        if (targetUsers.includes(newState.id)) {
+          const channel = client.channels.cache.get(oldState.channelId);
+          if (channel) {
+            const targetsRemaining = channel.members.some(m => targetUsers.includes(m.id) && m.id !== client.user.id);
+            if (!targetsRemaining) {
+               console.log(`[DiscordSource] All targets left channel ${oldState.channelId}. Disconnecting...`);
+               const instance = activeClients.get(source.id);
+               if (instance && instance.connection && instance.connection.joinConfig.channelId === oldState.channelId) {
+                 instance.connection.destroy();
+                 instance.connection = null;
+                 if (instance.sessionId) {
+                   ingest.closeSession(source.user_id, instance.sessionId, { endedAt: new Date().toISOString() });
+                   instance.sessionId = null;
+                 }
                }
-             }
+            }
           }
         }
       }
-    }
 
-    // User joined or moved to a voice channel
-    if (newState.channelId && oldState.channelId !== newState.channelId) {
-      console.log(`[DiscordSource] Target user ${newState.id} joined channel ${newState.channelId}. Joining in 2 seconds...`);
-      setTimeout(() => {
-        joinAndRecord(client, newState, source, targetUsers);
-      }, 2000);
+      // User joined or moved to a voice channel
+      if (newState.channelId && oldState.channelId !== newState.channelId) {
+        console.log(`[DiscordSource] Target user ${newState.id} joined channel ${newState.channelId}. Joining in 2 seconds...`);
+        setTimeout(() => {
+          joinAndRecord(client, newState, source, targetUsers);
+        }, 2000);
+      }
+    } catch (e) {
+      console.error('[DiscordSource] Error in voiceStateUpdate:', e);
     }
   });
 
@@ -157,6 +160,7 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
       clientUuid: sessionId,
       startedAt: new Date().toISOString(),
       timezone: 'UTC',
+      consentAttestedAt: new Date().toISOString(),
       sources: []
     });
 
