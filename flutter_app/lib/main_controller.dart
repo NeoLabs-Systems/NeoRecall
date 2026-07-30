@@ -16,6 +16,7 @@ import 'src/devices/audio_device_adapter.dart';
 import 'src/devices/audio_codec_decoder.dart';
 import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
+import 'src/devices/omi/offline_sync.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
@@ -196,6 +197,13 @@ class NeoRecallController extends ChangeNotifier {
   int failedUploadCount = 0;
   // True when Android/OEM battery optimization may suspend always-on capture.
   bool backgroundCaptureAtRisk = false;
+  // Offline device-storage sync (recordings held on the wearable's own flash).
+  bool deviceStorageSyncing = false;
+  int deviceStorageSyncedCount = 0;
+  int deviceStoragePendingCount = 0;
+  String? deviceStorageSyncError;
+  bool _deviceStorageAutoSyncArmed = true;
+  static const int _deviceStorageMinBytes = 2048;
   double audioLevel = 0;
   DateTime? recordingStartedAt;
   RecorderCapability? capability;
@@ -213,6 +221,35 @@ class NeoRecallController extends ChangeNotifier {
 
   bool get authenticated => api.token != null && accountId != null;
   bool get isRecording => recorder.isRecording;
+
+  // Devices that record on-device (button-triggered) rather than streaming live;
+  // for these, pulling stored recordings is the primary action, not live capture.
+  static const Set<String> _offlineFirstDeviceTypes = <String>{
+    'heyPocket',
+    'limitless',
+    'plaud',
+  };
+
+  /// True when the connected wearable is an offline-first (button-record-on-
+  /// device) type, so the UI can present "sync recordings" as the primary flow.
+  bool get preferredDeviceIsOfflineFirst {
+    final type = audioDeviceSessions.preferredDevice?.metadata['type'];
+    return type is String && _offlineFirstDeviceTypes.contains(type);
+  }
+
+  /// True when a connected wearable exposes on-board storage that can be synced,
+  /// so the UI can offer a manual "sync device recordings" action.
+  bool get deviceStorageSyncAvailable {
+    final adapter = audioDeviceSessions.activeAdapter;
+    if (adapter is! StorageSyncCapableAdapter) return false;
+    if ((adapter as StorageSyncCapableAdapter).offlineSyncConnector == null) {
+      return false;
+    }
+    // Only offer a sync while idle: an offline drain and a live capture must not
+    // run at once (they share the wearable's BLE channel), so the action is
+    // unavailable during recording.
+    return audioDeviceSessions.state == DeviceTransportState.connectedStandby;
+  }
   String get backendUrl {
     if (api.baseUrl.isNotEmpty) return api.baseUrl;
     if (kIsWeb) return _sameOriginBackendUrl;
@@ -885,6 +922,10 @@ class NeoRecallController extends ChangeNotifier {
           'The Bluetooth device could not be connected. Keep it nearby and try again.',
         );
       }
+      // A live capture and an offline drain must never run together (they share
+      // the BLE channel/buffer on several wearables). If a device-storage sync
+      // is in flight, stop it before taking the stream over for live capture.
+      await _stopDeviceStorageSyncForCapture(adapter);
       externalDevice = ExternalAudioCaptureDevice(
         adapter: adapter,
         descriptor: descriptor,
@@ -1180,6 +1221,15 @@ class NeoRecallController extends ChangeNotifier {
   }
 
   void _handleDeviceTransportState(DeviceTransportState state) {
+    if (state == DeviceTransportState.disconnected ||
+        state == DeviceTransportState.faulted) {
+      _deviceStorageAutoSyncArmed = true;
+    } else if (state == DeviceTransportState.connectedStandby &&
+        _deviceStorageAutoSyncArmed) {
+      // §9: after each (re)connect, pull anything the device recorded offline.
+      _deviceStorageAutoSyncArmed = false;
+      unawaited(syncDeviceStorage());
+    }
     final connected =
         state == DeviceTransportState.connectedStandby ||
         state == DeviceTransportState.recording;
@@ -1445,6 +1495,83 @@ class NeoRecallController extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  /// Aborts an in-flight device-storage drain so a live capture can take over
+  /// the wearable's BLE channel. Returns once the connector has stopped routing
+  /// stored audio (so a subsequent live subscription can never be cross-fed).
+  /// Safe to call when nothing is syncing.
+  Future<void> _stopDeviceStorageSyncForCapture(
+    AudioDeviceAdapter adapter,
+  ) async {
+    if (!deviceStorageSyncing) return;
+    if (adapter is! StorageSyncCapableAdapter) return;
+    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+    if (storage == null) return;
+    try {
+      await storage.cancelStoredSync();
+    } catch (_) {
+      // Best-effort: the drain also unwinds on its own timeout/disconnect.
+    }
+  }
+
+  /// Pulls recordings held on the connected wearable's on-board storage and
+  /// ingests them through the durable import pipeline, deleting each file from
+  /// the device only once its import is accepted. Idempotent and interruption
+  /// safe: re-running re-imports the same content under the same import id.
+  Future<void> syncDeviceStorage() async {
+    // Never drain on-device storage during a live recording: the two share the
+    // wearable's BLE channel/buffer and would corrupt each other.
+    if (deviceStorageSyncing || !authenticated || isRecording) return;
+    final adapter = audioDeviceSessions.activeAdapter;
+    if (adapter is! StorageSyncCapableAdapter) return;
+    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+    if (storage == null) return;
+
+    deviceStorageSyncing = true;
+    deviceStorageSyncError = null;
+    deviceStorageSyncedCount = 0;
+    deviceStoragePendingCount = 0;
+    notifyListeners();
+    try {
+      // The connector owns its device protocol (file list/download/delete,
+      // ring-buffer drain, or flash-page batch) and hands back complete
+      // recordings; each is ingested through the durable import pipeline before
+      // the connector removes it from the device.
+      await storage.drainStoredAudio(
+        (recording) async {
+          await _ingestDeviceRecording(recording);
+          deviceStorageSyncedCount += 1;
+          notifyListeners();
+        },
+        minBytes: _deviceStorageMinBytes,
+      );
+      if (deviceStorageSyncedCount > 0) {
+        notice =
+            '$deviceStorageSyncedCount device recording(s) synced and queued for transcription.';
+        await refreshAll(silent: true);
+      }
+    } catch (error) {
+      deviceStorageSyncError = error.toString();
+    } finally {
+      deviceStorageSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _ingestDeviceRecording(WearableRecording recording) async {
+    final contentHash = sha256.convert(recording.bytes).toString();
+    final importId = _uuid.v5(
+      Namespace.url.value,
+      '$backendUrl:${username ?? ''}:device:$contentHash:${recording.bytes.length}',
+    );
+    await api.importAudio(
+      importId: importId,
+      bytes: recording.bytes,
+      filename: recording.filename,
+      contentType: recording.contentType,
+      captureTime: recording.capturedAt,
+    );
   }
 
   Future<void> renameSpeaker(String id, String name) async {

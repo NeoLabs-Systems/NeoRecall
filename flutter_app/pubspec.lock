@@ -415,6 +415,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.16.0"
+  minimp3_dart:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: aa7d15582363c63f9a101b87ca5bab6b68b3e6e9
+      resolved-ref: aa7d15582363c63f9a101b87ca5bab6b68b3e6e9
+      url: "https://github.com/Telosnex/minimp3_dart.git"
+    source: git
+    version: "0.0.1-dev"
   nm:
     dependency: transitive
     description:

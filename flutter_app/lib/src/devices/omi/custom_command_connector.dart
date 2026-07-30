@@ -90,93 +90,45 @@ abstract class CustomCommandConnector extends WearableConnector {
   }
 }
 
-class BeeConnector extends CustomCommandConnector {
-  BeeConnector({required super.device, required super.transport});
-  final List<int> _frameBuffer = <int>[];
-
-  @override
-  String get serviceUuid => WearableDeviceUuids.beeService;
-  @override
-  String get controlCharacteristicUuid => WearableDeviceUuids.beeControl;
-  @override
-  String get audioCharacteristicUuid => WearableDeviceUuids.beeAudio;
-  @override
-  WearableAudioCodec get codec => WearableAudioCodec.aac;
-  @override
-  int get unmuteCommandCode => 0xC006;
-  @override
-  int get muteCommandCode => 0xC006;
-  @override
-  List<int> get unmuteCommandData => <int>[0x01];
-  @override
-  List<int> get muteCommandData => <int>[0x00];
-
-  @override
-  Map<String, dynamic> parseResponse(List<int> data) {
-    if (data.length < 2) return <String, dynamic>{'type': 'unknown'};
-    final responseCode = data[0] | (data[1] << 8);
-    final payload = data.length > 2 ? data.sublist(2) : <int>[];
-    if (responseCode == 0x8000 && payload.length >= 2) {
-      final echoed = payload[0] | (payload[1] << 8);
-      return <String, dynamic>{
-        'type': 'response',
-        'code': echoed,
-        'payload': payload.length > 2 ? payload.sublist(2) : <int>[],
-      };
-    }
-    return <String, dynamic>{
-      'type': 'response',
-      'code': responseCode,
-      'payload': payload,
-    };
-  }
-
-  @override
-  List<int>? processAudioPacket(List<int> data) {
-    if (data.length < 2) return null;
-    _frameBuffer.addAll(data.sublist(2));
-    while (_frameBuffer.length >= 7) {
-      if (_frameBuffer[0] != 0xFF || (_frameBuffer[1] & 0xF0) != 0xF0) {
-        _frameBuffer.removeAt(0);
-        continue;
-      }
-      final frameLength =
-          ((_frameBuffer[3] & 0x03) << 11) |
-          (_frameBuffer[4] << 3) |
-          ((_frameBuffer[5] & 0xE0) >> 5);
-      if (frameLength <= 0 || frameLength > 4096) {
-        _frameBuffer.removeAt(0);
-        continue;
-      }
-      if (_frameBuffer.length >= frameLength) {
-        final frame = _frameBuffer.sublist(0, frameLength);
-        _frameBuffer.removeRange(0, frameLength);
-        return frame;
-      }
-      break;
-    }
-    return null;
-  }
-}
-
 class FieldyConnector extends WearableConnector {
   FieldyConnector({required super.device, required super.transport});
   static const frameSize = 40;
   static const opusToc = 0xb8;
+  static const Duration _batteryPollInterval = Duration(seconds: 60);
   final List<int> _frameBuffer = <int>[];
+  Timer? _batteryTimer;
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
 
   @override
   Future<void> onConnected() async {
+    await _readBattery();
+    // Fieldy exposes no battery notify characteristic; poll it like the
+    // reference so the level stays current across a long session.
+    _batteryTimer = Timer.periodic(
+      _batteryPollInterval,
+      (_) => unawaited(_readBattery()),
+    );
+  }
+
+  Future<void> _readBattery() async {
     try {
       final level = await transport.readCharacteristic(
         WearableDeviceUuids.batteryService,
         WearableDeviceUuids.batteryLevel,
       );
       if (level.isNotEmpty) batteryLevels.add(level.first);
-    } catch (_) {}
+    } catch (_) {
+      // Battery telemetry is informational; a failed read is ignored.
+    }
+  }
+
+  @override
+  Future<void> dispose() async {
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
+    await super.dispose();
   }
 
   @override

@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'base_connector.dart';
 import 'device_models.dart';
+import 'offline_audio.dart';
+import 'offline_sync.dart';
 
 /// Capture-critical Limitless Pendant protocol.
 ///
 /// Commands and notifications use protobuf wire encoding inside a fragmented
 /// BLE wrapper. This implementation follows the pinned Omi protocol source;
-/// it does not use guessed one-byte start/stop commands.
-class LimitlessConnector extends WearableConnector {
+/// it does not use guessed one-byte start/stop commands. Offline recordings held
+/// in the pendant's flash are pulled via batch mode (see [drainStoredAudio]).
+class LimitlessConnector extends WearableConnector with WearableOfflineSync {
   LimitlessConnector({required super.device, required super.transport});
 
   static const int _maximumFragmentsPerMessage = 128;
@@ -16,6 +19,10 @@ class LimitlessConnector extends WearableConnector {
   static const int _minimumOpusFrameBytes = 10;
   static const int _maximumOpusFrameBytes = 200;
   static const Duration _gattReadyDelay = Duration(seconds: 1);
+  // Offline drain: end the batch dump after this long with no new flash page,
+  // and never wait longer than the overall cap.
+  static const Duration _drainQuietGap = Duration(seconds: 3);
+  static const Duration _drainOverallTimeout = Duration(minutes: 8);
   static const Set<int> _validOpusToc = <int>{
     0xb8,
     0x78,
@@ -28,6 +35,14 @@ class LimitlessConnector extends WearableConnector {
   final Map<int, Map<int, List<int>>> _fragments = <int, Map<int, List<int>>>{};
   int _messageIndex = 0;
   int _requestId = 0;
+
+  // Offline batch-drain state. While _drainSink is non-null, reassembled
+  // payloads are parsed as flash-page storage buffers instead of live audio.
+  OfflineWavAssembler? _drainSink;
+  Completer<void>? _drainDone;
+  Timer? _drainQuietTimer;
+  int _drainMaxIndex = -1;
+  int _drainFrameCount = 0;
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
@@ -91,6 +106,13 @@ class LimitlessConnector extends WearableConnector {
     }
     _fragments.remove(index);
 
+    if (_drainSink != null) {
+      // In batch mode the payload carries flash-page storage buffers, not live
+      // audio: route it to the offline drain instead of the capture stream.
+      _handleBatchPayload(payload);
+      return;
+    }
+
     final frames = _extractFlashPageFrames(payload);
     if (frames.isEmpty) {
       frames.addAll(_extractMarkerFrames(payload));
@@ -125,6 +147,197 @@ class LimitlessConnector extends WearableConnector {
       // Best-effort stop; the pendant stops streaming on disconnect anyway.
     }
     _fragments.clear();
+  }
+
+  // --- Offline batch drain (WearableOfflineSync) ---
+
+  @override
+  Future<int> drainStoredAudio(
+    Future<void> Function(WearableRecording recording) onRecording, {
+    int minBytes = 0,
+  }) async {
+    // Live capture and the offline batch drain share the pendant's TX/RX
+    // channel, so they must never run at the same time.
+    if (recording) return 0;
+    final assembler = OfflineWavAssembler(
+      codec: WearableAudioCodec.opusFs320,
+      stripBleHeader: false,
+    );
+    if (!await assembler.ensureSupported()) {
+      assembler.dispose();
+      return 0;
+    }
+    _drainSink = assembler;
+    _drainMaxIndex = -1;
+    _drainFrameCount = 0;
+    final done = Completer<void>();
+    _drainDone = done;
+    _resetDrainQuiet();
+    try {
+      // Ask the pendant to dump its stored flash pages over the notify channel.
+      await _writeTx(_encodeDownloadFlashPages(batchMode: true, realTime: false));
+      await done.future.timeout(_drainOverallTimeout, onTimeout: () {});
+    } finally {
+      _drainQuietTimer?.cancel();
+      _drainQuietTimer = null;
+      _drainSink = null;
+      _drainDone = null;
+    }
+
+    // Return the pendant to live/idle streaming. This is a mode change only —
+    // it does not free any stored pages — so it is safe to do before ingest.
+    try {
+      await _writeTx(
+        _encodeDownloadFlashPages(batchMode: false, realTime: recording),
+      );
+    } catch (_) {}
+
+    final pcmBytes = assembler.pcmByteLength;
+    final wav = assembler.toWav();
+    assembler.dispose();
+    if (_drainFrameCount == 0 || pcmBytes < minBytes) return 0;
+    // Durability invariant: ingest BEFORE acknowledging the flash pages. The
+    // ACK is what advances the pendant's read cursor past them, so it must run
+    // only after the recording is durably stored. If the ingest throws, the
+    // pages are left un-acked and re-downloaded next sync (idempotent import),
+    // never skipped/lost.
+    await onRecording(
+      WearableRecording(
+        id: 'limitless-flash-$_drainMaxIndex',
+        bytes: wav,
+        contentType: 'audio/wav',
+        filename: 'limitless-offline.wav',
+      ),
+    );
+    // We only ack indexes actually received, so the worst case is a harmless
+    // re-download, never skipped audio.
+    if (_drainMaxIndex >= 0) {
+      try {
+        await _writeTx(_encodeAcknowledgeProcessedData(_drainMaxIndex));
+      } catch (_) {}
+    }
+    return 1;
+  }
+
+  @override
+  Future<void> cancelStoredSync() async {
+    final done = _drainDone;
+    _drainQuietTimer?.cancel();
+    _drainQuietTimer = null;
+    // Stop routing frames into the drain, but do not dispose the assembler here:
+    // drainStoredAudio owns its lifecycle and disposes it once (disposing here
+    // too would double-dispose).
+    _drainSink = null;
+    _drainDone = null;
+    if (done != null && !done.isCompleted) done.complete();
+    try {
+      await _writeTx(
+        _encodeDownloadFlashPages(batchMode: false, realTime: recording),
+      );
+    } catch (_) {}
+  }
+
+  void _resetDrainQuiet() {
+    _drainQuietTimer?.cancel();
+    _drainQuietTimer = Timer(_drainQuietGap, () {
+      final done = _drainDone;
+      if (done != null && !done.isCompleted) done.complete();
+    });
+  }
+
+  Future<void> _writeTx(List<int> bytes) => transport.writeCharacteristic(
+    WearableDeviceUuids.limitlessService,
+    WearableDeviceUuids.limitlessTx,
+    bytes,
+  );
+
+  /// Parses a batch payload: field 2 (length-delimited) carries each flash-page
+  /// storage buffer.
+  void _handleBatchPayload(List<int> payload) {
+    var position = 0;
+    try {
+      while (position < payload.length) {
+        final tag = payload[position++];
+        final field = tag >> 3;
+        final wireType = tag & 7;
+        if (wireType == 2) {
+          final length = _decodeVarint(payload, position);
+          position = length.next;
+          final end = position + length.value;
+          if (end > payload.length) return;
+          if (field == 2) _handleStorageBuffer(payload.sublist(position, end));
+          position = end;
+        } else if (wireType == 0) {
+          position = _decodeVarint(payload, position).next;
+        } else {
+          return;
+        }
+      }
+    } on FormatException {
+      return;
+    }
+  }
+
+  /// Parses one flash-page storage buffer: field 5 = page index (for ACK),
+  /// field 6 = the flash-page whose Opus frames are decoded into the drain.
+  void _handleStorageBuffer(List<int> data) {
+    var position = 0;
+    int? pageIndex;
+    List<int>? flashPageData;
+    try {
+      while (position < data.length) {
+        final tag = data[position++];
+        final field = tag >> 3;
+        final wireType = tag & 7;
+        if (wireType == 0) {
+          final value = _decodeVarint(data, position);
+          position = value.next;
+          if (field == 5) pageIndex = value.value;
+        } else if (wireType == 2) {
+          final length = _decodeVarint(data, position);
+          position = length.next;
+          final end = position + length.value;
+          if (end > data.length) return;
+          if (field == 6) flashPageData = data.sublist(position, end);
+          position = end;
+        } else {
+          return;
+        }
+      }
+    } on FormatException {
+      return;
+    }
+    if (pageIndex != null && pageIndex > _drainMaxIndex) {
+      _drainMaxIndex = pageIndex;
+    }
+    if (flashPageData != null) {
+      for (final frame in _extractFlashPageFrames(flashPageData)) {
+        _drainSink?.addFrame(frame);
+        _drainFrameCount += 1;
+      }
+    }
+    _resetDrainQuiet();
+  }
+
+  List<int> _encodeDownloadFlashPages({
+    required bool batchMode,
+    required bool realTime,
+  }) {
+    final message = <int>[
+      ..._encodeField(1, 0, <int>[batchMode ? 1 : 0]),
+      ..._encodeField(2, 0, <int>[realTime ? 1 : 0]),
+    ];
+    return _encodeBleWrapper(<int>[
+      ..._encodeMessage(8, message),
+      ..._encodeRequestData(),
+    ]);
+  }
+
+  List<int> _encodeAcknowledgeProcessedData(int upToIndex) {
+    return _encodeBleWrapper(<int>[
+      ..._encodeMessage(7, _encodeField(1, 0, _encodeVarint(upToIndex))),
+      ..._encodeRequestData(),
+    ]);
   }
 
   _LimitlessBlePacket? _parseBlePacket(List<int> data) {

@@ -20,20 +20,6 @@ void main() {
     );
     expect(
       DiscoveredWearable.classify(
-        name: 'Bee One',
-        serviceUuids: const <String>[],
-      ),
-      WearableDeviceType.bee,
-    );
-    expect(
-      DiscoveredWearable.classify(
-        name: 'friend_123',
-        serviceUuids: const <String>[],
-      ),
-      WearableDeviceType.friendPendant,
-    );
-    expect(
-      DiscoveredWearable.classify(
         name: 'Limitless Pendant',
         serviceUuids: <String>[WearableDeviceUuids.limitlessService],
       ),
@@ -45,6 +31,27 @@ void main() {
         serviceUuids: const <String>[],
       ),
       WearableDeviceType.omiGlass,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'Unknown',
+        serviceUuids: <String>[WearableDeviceUuids.heyPocketService],
+      ),
+      WearableDeviceType.heyPocket,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'HeyPocket',
+        serviceUuids: const <String>[],
+      ),
+      WearableDeviceType.heyPocket,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'PKT01-2246',
+        serviceUuids: const <String>[],
+      ),
+      WearableDeviceType.heyPocket,
     );
   });
 
@@ -97,5 +104,15 @@ void main() {
     expect(assembler.accept(<int>[0, 0, 0, 1, 2, 3]), isNull);
     final frame = assembler.accept(<int>[1, 0, 0, 4, 5]);
     expect(frame, <int>[1, 2, 3]);
+  });
+
+  test('MP3 codec is locally decodable without async initialization', () async {
+    final decoder = WearableAudioDecoder(
+      codec: WearableAudioCodec.mp3,
+      stripBleHeader: false,
+    );
+    expect(decoder.isSupported, isTrue);
+    expect(await decoder.ensureSupported(), isTrue);
+    decoder.dispose();
   });
 }

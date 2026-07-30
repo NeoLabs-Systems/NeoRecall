@@ -165,6 +165,10 @@ class _RecordScreenState extends State<RecordScreen> {
             _NeedsAttentionBanner(controller: controller),
             const SizedBox(height: 16),
           ],
+          if (controller.preferredDeviceIsOfflineFirst) ...<Widget>[
+            _OfflineDeviceSyncCard(controller: controller),
+            const SizedBox(height: 16),
+          ],
           GlassSurface(
             child: Column(
               children: <Widget>[
@@ -370,6 +374,26 @@ class _RecordScreenState extends State<RecordScreen> {
                               : 'Scan for wearables',
                         ),
                       ),
+                      if (controller.deviceStorageSyncAvailable)
+                        OutlinedButton.icon(
+                          onPressed: controller.deviceStorageSyncing
+                              ? null
+                              : () => controller.syncDeviceStorage(),
+                          icon: controller.deviceStorageSyncing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.sync_rounded),
+                          label: Text(
+                            controller.deviceStorageSyncing
+                                ? 'Syncing…'
+                                : 'Sync device recordings',
+                          ),
+                        ),
                     ],
                   ),
                   if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
@@ -564,6 +588,98 @@ class _NeedsAttentionBannerState extends State<_NeedsAttentionBanner> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Primary "sync" affordance for offline-first wearables (HeyPocket, Limitless,
+/// Plaud): these record on the device itself, so pulling those recordings — not
+/// live capture — is the main action. Recordings also sync automatically on
+/// connect; this makes the manual path obvious and explains the model.
+class _OfflineDeviceSyncCard extends StatefulWidget {
+  const _OfflineDeviceSyncCard({required this.controller});
+  final NeoRecallController controller;
+  @override
+  State<_OfflineDeviceSyncCard> createState() => _OfflineDeviceSyncCardState();
+}
+
+class _OfflineDeviceSyncCardState extends State<_OfflineDeviceSyncCard> {
+  bool _syncing = false;
+
+  Future<void> _sync() async {
+    setState(() => _syncing = true);
+    try {
+      await widget.controller.syncDeviceStorage();
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final controller = widget.controller;
+    final available = controller.deviceStorageSyncAvailable;
+    final busy = _syncing || controller.deviceStorageSyncing;
+    final label = controller.preferredDeviceLabel ?? 'This device';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: palette.accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        border: Border.all(color: palette.accent.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.download_for_offline_outlined, color: palette.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$label records on its own',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Press record and stop on the device itself. When it is connected, '
+            'your recordings sync here automatically — or pull them now.',
+            style: TextStyle(color: palette.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: palette.accent),
+              onPressed: !available || busy ? null : _sync,
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.sync_rounded),
+              label: Text(
+                busy
+                    ? 'Syncing…'
+                    : available
+                    ? 'Sync device recordings'
+                    : 'Connect the device to sync',
+              ),
+            ),
           ),
         ],
       ),

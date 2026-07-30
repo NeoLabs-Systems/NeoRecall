@@ -2,20 +2,23 @@
 enum WearableDeviceType {
   omi,
   omiGlass,
-  bee,
   plaud,
   fieldy,
-  friendPendant,
   limitless,
+  heyPocket,
   custom,
 }
 
-enum WearableAudioCodec { pcm8, pcm16, opus, opusFs320, aac, lc3, unknown }
+enum WearableAudioCodec { pcm8, pcm16, opus, opusFs320, aac, lc3, mp3, unknown }
 
 class WearableDeviceUuids {
   static const omiService = '19b10000-e8f2-537e-4f6c-d104768a1214';
   static const omiAudioData = '19b10001-e8f2-537e-4f6c-d104768a1214';
   static const omiAudioCodec = '19b10002-e8f2-537e-4f6c-d104768a1214';
+  // On-board storage (SD ring buffer / multi-file), fw 3.0.20+.
+  static const omiStorageService = '30295780-4301-eabd-2904-2849adfeae43';
+  static const omiStorageData = '30295781-4301-eabd-2904-2849adfeae43';
+  static const omiStorageControl = '30295782-4301-eabd-2904-2849adfeae43';
   static const buttonService = '23ba7924-0000-1000-7450-346eac492e92';
   static const buttonTrigger = '23ba7925-0000-1000-7450-346eac492e92';
   static const timeSyncService = '19b10030-e8f2-537e-4f6c-d104768a1214';
@@ -25,16 +28,17 @@ class WearableDeviceUuids {
   static const plaudService = '00001910-0000-1000-8000-00805f9b34fb';
   static const plaudWrite = '00002bb1-0000-1000-8000-00805f9b34fb';
   static const plaudNotify = '00002bb0-0000-1000-8000-00805f9b34fb';
-  static const beeService = '03d5d5c4-a86c-11ee-9d89-8f2089a49e7e';
-  static const beeControl = '05e1f93c-d8d0-5ed8-dd88-379e4c1a3e3e';
-  static const beeAudio = 'b189a505-a86c-11ee-a5fb-8f2089a49e7e';
   static const fieldyService = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
   static const fieldyAudio = '82a48422-3ca9-4156-ae67-4170f58666e0';
-  static const friendService = '1a3fd0e7-b1f3-ac9e-2e49-b647b2c4f8da';
-  static const friendAudio = '01000000-1111-1111-1111-111111111111';
   static const limitlessService = '632de001-604c-446b-a80f-7963e950f3fb';
   static const limitlessTx = '632de002-604c-446b-a80f-7963e950f3fb';
   static const limitlessRx = '632de003-604c-446b-a80f-7963e950f3fb';
+  // HeyPocket (also labelled PKT01 / Pocket). Control frames are ASCII text and
+  // audio is an MP3 stream delivered over the audio-notify characteristic.
+  static const heyPocketService = '001120a0-2233-4455-6677-889912345678';
+  static const heyPocketControlNotify = '001120a1-2233-4455-6677-889912345678';
+  static const heyPocketControlWrite = '001120a2-2233-4455-6677-889912345678';
+  static const heyPocketAudioNotify = '001120a3-2233-4455-6677-889912345678';
 }
 
 class DiscoveredWearable {
@@ -61,9 +65,6 @@ class DiscoveredWearable {
     bool has(String uuid) =>
         serviceUuids.any((value) => value.toLowerCase() == uuid.toLowerCase());
 
-    if (lower.startsWith('bee') || has(WearableDeviceUuids.beeService)) {
-      return WearableDeviceType.bee;
-    }
     if (upper.startsWith('PLAUD') || has(WearableDeviceUuids.plaudService)) {
       return WearableDeviceType.plaud;
     }
@@ -72,13 +73,16 @@ class DiscoveredWearable {
         has(WearableDeviceUuids.fieldyService)) {
       return WearableDeviceType.fieldy;
     }
-    if (lower.startsWith('friend_') || has(WearableDeviceUuids.friendService)) {
-      return WearableDeviceType.friendPendant;
-    }
     if (lower.startsWith('limitless') ||
         lower == 'pendant' ||
         has(WearableDeviceUuids.limitlessService)) {
       return WearableDeviceType.limitless;
+    }
+    if (has(WearableDeviceUuids.heyPocketService) ||
+        lower.contains('heypocket') ||
+        lower.startsWith('pkt01') ||
+        lower.startsWith('pocket')) {
+      return WearableDeviceType.heyPocket;
     }
     if (lower.startsWith('openglass') || lower.startsWith('omiglass')) {
       return WearableDeviceType.omiGlass;

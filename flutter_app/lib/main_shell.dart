@@ -498,6 +498,18 @@ class _GlobalStatusBar extends StatelessWidget {
         ),
       );
     }
+    if (controller.deviceStorageSyncing) {
+      final pending = controller.deviceStoragePendingCount;
+      banners.add(
+        _StatusPill(
+          icon: Icons.sync_rounded,
+          color: palette.accent,
+          message: pending > 0
+              ? 'Syncing device recordings… ($pending left)'
+              : 'Syncing device recordings…',
+        ),
+      );
+    }
     if (controller.isRecording && controller.page != RecallPage.record) {
       banners.add(
         _StatusPill(

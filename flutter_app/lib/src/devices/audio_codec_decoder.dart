@@ -5,6 +5,7 @@ import 'package:opus_codec/opus_codec.dart' as opus_codec;
 import 'package:opus_codec_dart/opus_codec_dart.dart';
 
 import '../diagnostics/client_diagnostic_log.dart';
+import 'mp3_stream_decoder.dart';
 import 'omi/device_models.dart';
 
 bool _opusInitialized = false;
@@ -78,6 +79,7 @@ class WearableAudioDecoder {
   final bool stripBleHeader;
 
   SimpleOpusDecoder? _opus;
+  Mp3StreamDecoder? _mp3;
   String? lastWarning;
 
   bool get isSupported {
@@ -88,6 +90,9 @@ class WearableAudioDecoder {
       case WearableAudioCodec.opus:
       case WearableAudioCodec.opusFs320:
         return _opusInitialized;
+      case WearableAudioCodec.mp3:
+        // Pure-Dart decoder; no asynchronous native/wasm load is required.
+        return true;
       case WearableAudioCodec.aac:
       case WearableAudioCodec.lc3:
       case WearableAudioCodec.unknown:
@@ -103,6 +108,8 @@ class WearableAudioDecoder {
       case WearableAudioCodec.opus:
       case WearableAudioCodec.opusFs320:
         return initializeWearableAudioCodecs(retry: true);
+      case WearableAudioCodec.mp3:
+        return true;
       case WearableAudioCodec.aac:
       case WearableAudioCodec.lc3:
       case WearableAudioCodec.unknown:
@@ -143,6 +150,13 @@ class WearableAudioDecoder {
       case WearableAudioCodec.opus:
       case WearableAudioCodec.opusFs320:
         return _decodeOpus(payload);
+      case WearableAudioCodec.mp3:
+        // MP3 frames span BLE packets and may be any rate/channel count, so the
+        // stream decoder buffers, downmixes, and resamples to mono PCM16 @
+        // sampleRate. A null result means bytes were buffered toward the next
+        // frame, not an error, so no warning is set.
+        return (_mp3 ??= Mp3StreamDecoder(targetSampleRate: sampleRate))
+            .addChunk(payload);
       case WearableAudioCodec.aac:
         lastWarning =
             'AAC wearable frames are received but not decoded in this build yet.';
@@ -189,6 +203,8 @@ class WearableAudioDecoder {
       _opus?.destroy();
     } catch (_) {}
     _opus = null;
+    _mp3?.dispose();
+    _mp3 = null;
   }
 }
 

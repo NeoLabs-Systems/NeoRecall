@@ -2,8 +2,14 @@ import 'dart:async';
 
 import 'base_connector.dart';
 import 'device_models.dart';
+import 'offline_audio.dart';
+import 'offline_sync.dart';
 
-class PlaudConnector extends WearableConnector {
+/// PLAUD is a button-record-on-device recorder: audio is captured to on-device
+/// flash and pulled over BLE via the sync-file protocol (stop→start→syncFileStart
+/// → stream chunks until the `0xFFFFFFFF` end marker). The same handshake backs
+/// both live "capture" and offline [drainStoredAudio].
+class PlaudConnector extends WearableConnector with WearableOfflineSync {
   PlaudConnector({required super.device, required super.transport});
 
   static const int _cmdGetBattery = 9;
@@ -15,10 +21,24 @@ class PlaudConnector extends WearableConnector {
   static const Duration _commandTimeout = Duration(seconds: 10);
   static const Duration _recordResetDelay = Duration(milliseconds: 500);
   static const Duration _syncReadyDelay = Duration(seconds: 1);
+  static const Duration _drainTimeout = Duration(minutes: 8);
 
   final Map<int, Completer<List<int>>> _pending = <int, Completer<List<int>>>{};
   StreamSubscription<List<int>>? _notificationSub;
   int? _sessionId;
+  Timer? _batteryTimer;
+
+  // Offline-drain state. While _drainSink is non-null, decoded chunks go to the
+  // drain assembler instead of the live capture stream.
+  bool _draining = false;
+  OfflineWavAssembler? _drainSink;
+  Completer<void>? _drainDone;
+  int _drainFrameCount = 0;
+
+  /// The sync-file session is active for either live capture or an offline drain.
+  bool get _active => recording || _draining;
+
+  static const Duration _batteryPollInterval = Duration(seconds: 60);
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opusFs320;
@@ -31,18 +51,49 @@ class PlaudConnector extends WearableConnector {
       WearableDeviceUuids.plaudNotify,
     )).listen(_handleNotification);
     track(_notificationSub!);
+    // PLAUD has no battery notify characteristic, so poll it like the reference
+    // to keep the battery indicator current. Best-effort; never blocks capture.
+    unawaited(_pollBattery());
+    _batteryTimer = Timer.periodic(
+      _batteryPollInterval,
+      (_) => unawaited(_pollBattery()),
+    );
+  }
+
+  Future<void> _pollBattery() async {
+    try {
+      final level = await readBatteryLevel();
+      if (level >= 0) batteryLevels.add(level);
+    } catch (_) {
+      // Battery telemetry is informational; a failed poll is ignored.
+    }
   }
 
   void _handleNotification(List<int> data) {
     if (data.isEmpty) return;
     if (data[0] == 2) {
+      final payload = data.sublist(1);
+      // The device signals end-of-file with a 0xFFFFFFFF stream position.
+      if (payload.length >= 9 && _toInt32(payload.sublist(4, 8)) == 0xFFFFFFFF) {
+        final done = _drainDone;
+        if (done != null && !done.isCompleted) done.complete();
+        return;
+      }
       // Each parsed chunk is a self-contained Opus FS320 frame whose length the
-      // device declares (byte 8). Emit it directly — the PLAUD path has no frame
-      // assembler downstream, so concatenating chunks into fixed blocks would
-      // hand the packet-based Opus decoder two frames as one. Matches Omi's
+      // device declares (byte 8). During an offline drain it is decoded into the
+      // WAV assembler; live, it is forwarded directly (the PLAUD path has no
+      // downstream frame assembler, so it must not be re-chunked). Matches Omi's
       // reference connector, which forwards each chunk as-is.
-      final chunk = _parseAudioChunk(data.sublist(1));
-      if (chunk != null) audioBytes.add(chunk);
+      final chunk = _parseAudioChunk(payload);
+      if (chunk != null) {
+        final sink = _drainSink;
+        if (sink != null) {
+          sink.addFrame(chunk);
+          _drainFrameCount += 1;
+        } else {
+          audioBytes.add(chunk);
+        }
+      }
       return;
     }
     if (data.length >= 3) {
@@ -93,7 +144,7 @@ class PlaudConnector extends WearableConnector {
 
   @override
   Future<void> startRecording() async {
-    if (recording) return;
+    if (_active) return;
     recording = true;
     // Await the first setup attempt so the caller (and tests) observe the
     // session sync write. If the device does not respond, keep retrying in the
@@ -115,13 +166,13 @@ class PlaudConnector extends WearableConnector {
   /// Runs one stop→start→sync handshake. Returns true once the device confirms
   /// the sync-file-start command, echoing back its session id and start time.
   Future<bool> _attemptSessionSetup() async {
-    if (!recording) return false;
+    if (!_active) return false;
     await _sendCommand(_cmdStopRecord, <int>[
       ..._toBytes32(0),
       ..._toBytes32(0),
     ]);
     await Future<void>.delayed(_recordResetDelay);
-    if (!recording) return false;
+    if (!_active) return false;
     final response = await _sendCommand(_cmdStartRecord, <int>[
       ..._toBytes32(1),
       ..._toBytes32(0),
@@ -131,17 +182,87 @@ class PlaudConnector extends WearableConnector {
     final sessionId = _toInt32(response.sublist(0, 4));
     final startTime = _toInt32(response.sublist(4, 8));
     await Future<void>.delayed(_syncReadyDelay);
-    if (!recording) return false;
+    if (!_active) return false;
     final syncResponse = await _sendCommand(_cmdSyncFileStart, <int>[
       ..._toBytes64(sessionId),
       ..._toBytes64(startTime),
       ..._toBytes64(0x7FFFFFFF),
     ]);
-    if (syncResponse != null && recording) {
+    if (syncResponse != null && _active) {
       _sessionId = sessionId;
       return true;
     }
     return false;
+  }
+
+  // --- Offline drain (WearableOfflineSync) ---
+
+  @override
+  Future<int> drainStoredAudio(
+    Future<void> Function(WearableRecording recording) onRecording, {
+    int minBytes = 0,
+  }) async {
+    if (_active) return 0;
+    final assembler = OfflineWavAssembler(
+      codec: WearableAudioCodec.opusFs320,
+      stripBleHeader: false,
+    );
+    if (!await assembler.ensureSupported()) {
+      assembler.dispose();
+      return 0;
+    }
+    _draining = true;
+    _drainSink = assembler;
+    _drainFrameCount = 0;
+    final done = Completer<void>();
+    _drainDone = done;
+    try {
+      if (await _attemptSessionSetup()) {
+        // Chunks stream into the assembler until the 0xFFFFFFFF end marker.
+        await done.future.timeout(_drainTimeout, onTimeout: () {});
+      }
+      await _stopSync();
+    } finally {
+      _draining = false;
+      _drainSink = null;
+      _drainDone = null;
+      _sessionId = null;
+    }
+    final pcmBytes = assembler.pcmByteLength;
+    final wav = assembler.toWav();
+    assembler.dispose();
+    if (_drainFrameCount == 0 || pcmBytes < minBytes) return 0;
+    await onRecording(
+      WearableRecording(
+        id: 'plaud-offline',
+        bytes: wav,
+        contentType: 'audio/wav',
+        filename: 'plaud-offline.wav',
+      ),
+    );
+    return 1;
+  }
+
+  @override
+  Future<void> cancelStoredSync() async {
+    final done = _drainDone;
+    _drainSink = null;
+    _drainDone = null;
+    _draining = false;
+    if (done != null && !done.isCompleted) done.complete();
+    await _stopSync();
+  }
+
+  Future<void> _stopSync() async {
+    try {
+      await transport.writeCharacteristic(
+        WearableDeviceUuids.plaudService,
+        WearableDeviceUuids.plaudWrite,
+        <int>[1, _cmdStopSync & 0xff, (_cmdStopSync >> 8) & 0xff, 1],
+      );
+    } catch (_) {
+      // Best-effort; the session ends on disconnect regardless.
+    }
   }
 
   @override
@@ -188,12 +309,15 @@ class PlaudConnector extends WearableConnector {
 
   @override
   Future<void> dispose() async {
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
     await super.dispose();
     for (final pending in _pending.values) {
       if (!pending.isCompleted) {
-        pending.completeError(
-          StateError('PLAUD disconnected before the command completed.'),
-        );
+        // Resolve (not error) in-flight commands on teardown: a disconnect or
+        // reconnect mid-handshake should read as "no response" so the setup
+        // simply fails and retries, never as a fatal user-facing exception.
+        pending.complete(const <int>[]);
       }
     }
     _pending.clear();

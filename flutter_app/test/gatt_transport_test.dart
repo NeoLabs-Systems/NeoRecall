@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/devices/ble/gatt_transport.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
-import 'package:neorecall/src/devices/omi/omi_device_adapter.dart';
+import 'package:neorecall/src/devices/omi/device_adapter.dart';
 
 void main() {
   test('GATT scan requires a protocol selector', () {
@@ -22,17 +22,9 @@ void main() {
 
   test('scan chooser only advertises end-to-end decodable protocols', () async {
     final transport = _FakeGattTransport();
-    final adapter = OmiDeviceAdapter(gatt: transport);
+    final adapter = DeviceAdapter(gatt: transport);
     await adapter.startScan();
 
-    expect(
-      transport.lastScanSpec!.serviceUuids,
-      isNot(contains(WearableDeviceUuids.beeService)),
-    );
-    expect(
-      transport.lastScanSpec!.serviceUuids,
-      isNot(contains(WearableDeviceUuids.friendService)),
-    );
     expect(
       transport.lastScanSpec!.serviceUuids,
       contains(WearableDeviceUuids.limitlessService),
@@ -41,19 +33,24 @@ void main() {
   });
 
   test(
-    'Pocket is discoverable and probes services before being saved',
+    'HeyPocket is discovered as a compatible device and connects',
     () async {
-      final transport = _FakeGattTransport()
-        ..discoveredServiceUuids = const <String>['unknown-service'];
-      final adapter = OmiDeviceAdapter(gatt: transport);
+      final transport = _FakeGattTransport();
+      final adapter = DeviceAdapter(gatt: transport);
       final discovery = expectLater(
         adapter.discoveries,
         emits(
           isA<AudioDeviceDescriptor>()
               .having((device) => device.displayName, 'name', 'Pocket')
+              .having((device) => device.metadata['type'], 'type', 'heyPocket')
               .having(
                 (device) => device.metadata['compatibilityUnknown'],
                 'compatibility',
+                isFalse,
+              )
+              .having(
+                (device) => device.supportsMicrophone,
+                'microphone',
                 isTrue,
               ),
         ),
@@ -68,10 +65,62 @@ void main() {
         ),
       );
       await discovery;
+
+      // A validated, locally decodable device connects directly through the
+      // shared adapter without the unknown-device probe path.
+      final connected = expectLater(
+        adapter.transportStates,
+        emitsThrough(DeviceTransportState.connectedStandby),
+      );
       const descriptor = AudioDeviceDescriptor(
         adapterId: 'omi_family',
         deviceKey: 'pocket-device',
         displayName: 'Pocket',
+        transport: 'bluetooth_le',
+        metadata: <String, Object?>{
+          'type': 'heyPocket',
+          'serviceUuids': <String>[],
+        },
+      );
+      await adapter.connect(descriptor);
+      await connected;
+      expect(transport.pairCalls, 0);
+      await adapter.dispose();
+    },
+  );
+
+  test(
+    'an unrecognized in-range device is surfaced and probed before being saved',
+    () async {
+      final transport = _FakeGattTransport()
+        ..discoveredServiceUuids = const <String>['unknown-service'];
+      final adapter = DeviceAdapter(gatt: transport);
+      final discovery = expectLater(
+        adapter.discoveries,
+        emits(
+          isA<AudioDeviceDescriptor>()
+              .having((device) => device.displayName, 'name', 'Gizmo')
+              .having(
+                (device) => device.metadata['compatibilityUnknown'],
+                'compatibility',
+                isTrue,
+              ),
+        ),
+      );
+
+      await adapter.startScan();
+      transport.emitPeripheral(
+        const GattPeripheral(
+          id: 'gizmo-device',
+          name: 'Gizmo',
+          serviceUuids: <String>[],
+        ),
+      );
+      await discovery;
+      const descriptor = AudioDeviceDescriptor(
+        adapterId: 'omi_family',
+        deviceKey: 'gizmo-device',
+        displayName: 'Gizmo',
         transport: 'bluetooth_le',
         supportsMicrophone: false,
         metadata: <String, Object?>{
@@ -92,7 +141,7 @@ void main() {
 
   test('unexpected disconnect resumes an active wearable recording', () async {
     final transport = _FakeGattTransport();
-    final adapter = OmiDeviceAdapter(gatt: transport);
+    final adapter = DeviceAdapter(gatt: transport);
     const device = AudioDeviceDescriptor(
       adapterId: 'omi_family',
       deviceKey: 'omi-device',
@@ -105,7 +154,9 @@ void main() {
     );
 
     await adapter.connect(device);
-    expect(transport.lastAutoReconnect, isFalse);
+    // Always-on wearables use a natively-managed persistent link; the app's
+    // resume logic (verified below) sits on top of that.
+    expect(transport.lastAutoReconnect, isTrue);
     expect(transport.discoverServicesCalls, 1);
     await adapter.requestStartRecording();
     transport.emitConnection(false);
@@ -123,7 +174,7 @@ void main() {
 
   test('an explicit stop is not restarted after reconnect', () async {
     final transport = _FakeGattTransport();
-    final adapter = OmiDeviceAdapter(gatt: transport);
+    final adapter = DeviceAdapter(gatt: transport);
     final states = <DeviceTransportState>[];
     final subscription = adapter.transportStates.listen(states.add);
     const device = AudioDeviceDescriptor(

@@ -9,14 +9,16 @@ import '../../diagnostics/client_diagnostic_log.dart';
 import 'base_connector.dart';
 import 'device_factory.dart';
 import 'device_models.dart';
+import 'offline_sync.dart';
 
-/// Shared GATT adapter for the capture-capable protocols derived from Omi.
+/// Shared GATT adapter for every capture-capable wearable protocol (Omi,
+/// OmiGlass, Fieldy, Plaud, Limitless, HeyPocket, …).
 ///
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
 /// every device's wire protocol in its own connector.
-class OmiDeviceAdapter implements AudioDeviceAdapter {
-  OmiDeviceAdapter({GattTransport? gatt})
+class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
+  DeviceAdapter({GattTransport? gatt})
     : _gatt = gatt ?? createGattTransport();
 
   static const List<String> _serviceUuids = <String>[
@@ -24,6 +26,7 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
     WearableDeviceUuids.plaudService,
     WearableDeviceUuids.fieldyService,
     WearableDeviceUuids.limitlessService,
+    WearableDeviceUuids.heyPocketService,
   ];
 
   final GattTransport _gatt;
@@ -43,6 +46,15 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   StreamSubscription<List<int>>? _buttonSub;
   StreamSubscription<int>? _batterySub;
   WearableConnector? _connector;
+
+  /// The connected device's offline-storage capability, if it exposes one.
+  @override
+  WearableOfflineSync? get offlineSyncConnector {
+    final connector = _connector;
+    return connector is WearableOfflineSync
+        ? connector as WearableOfflineSync
+        : null;
+  }
   WearableAudioDecoder? _decoder;
   WearableAudioDecoder? _frameDecoder;
   OmiFrameAssembler? _assembler;
@@ -76,7 +88,7 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
   @override
   Future<void> initialize() async {
     if (_initialized) return;
-    if (_disposed) throw StateError('OmiDeviceAdapter is already disposed.');
+    if (_disposed) throw StateError('DeviceAdapter is already disposed.');
     final availability = await _gatt.availability();
     if (availability == GattAvailability.unsupported) {
       throw UnsupportedError('Bluetooth LE is unavailable on this platform.');
@@ -115,6 +127,8 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
           'Limitless',
           'Pendant',
           'Pocket',
+          'HeyPocket',
+          'PKT01',
         ],
       ),
       timeout: timeout,
@@ -170,20 +184,21 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       WearableDeviceType.omiGlass =>
         has(WearableDeviceUuids.omiService) &&
             (name.startsWith('omiglass') || name.startsWith('openglass')),
-      WearableDeviceType.bee =>
-        has(WearableDeviceUuids.beeService) || name.startsWith('bee'),
       WearableDeviceType.plaud =>
         has(WearableDeviceUuids.plaudService) || name.startsWith('plaud'),
       WearableDeviceType.fieldy =>
         has(WearableDeviceUuids.fieldyService) ||
             name == 'fieldy' ||
             name == 'compass',
-      WearableDeviceType.friendPendant =>
-        has(WearableDeviceUuids.friendService) || name.startsWith('friend_'),
       WearableDeviceType.limitless =>
         has(WearableDeviceUuids.limitlessService) ||
             name.startsWith('limitless') ||
             name == 'pendant',
+      WearableDeviceType.heyPocket =>
+        has(WearableDeviceUuids.heyPocketService) ||
+            name.contains('heypocket') ||
+            name.startsWith('pkt01') ||
+            name.startsWith('pocket'),
       WearableDeviceType.custom => false,
     };
   }
@@ -194,9 +209,8 @@ class OmiDeviceAdapter implements AudioDeviceAdapter {
       WearableDeviceType.omiGlass ||
       WearableDeviceType.plaud ||
       WearableDeviceType.fieldy ||
-      WearableDeviceType.limitless => true,
-      WearableDeviceType.bee ||
-      WearableDeviceType.friendPendant ||
+      WearableDeviceType.limitless ||
+      WearableDeviceType.heyPocket => true,
       WearableDeviceType.custom => false,
     };
   }

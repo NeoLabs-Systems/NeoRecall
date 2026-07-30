@@ -1,5 +1,5 @@
 import 'audio_device_adapter.dart';
-import 'omi/omi_device_adapter.dart';
+import 'omi/device_adapter.dart';
 
 /// Application-level registry bootstrap.
 ///
@@ -8,5 +8,5 @@ import 'omi/omi_device_adapter.dart';
 /// empty prevents an unknown Bluetooth device from being treated as a
 /// compatible audio source.
 AudioDeviceAdapterRegistry createDefaultDeviceRegistry() {
-  return AudioDeviceAdapterRegistry()..register(OmiDeviceAdapter());
+  return AudioDeviceAdapterRegistry()..register(DeviceAdapter());
 }

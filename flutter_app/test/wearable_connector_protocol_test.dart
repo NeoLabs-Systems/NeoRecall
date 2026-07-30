@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/ble/gatt_connector_transport.dart';
 import 'package:neorecall/src/devices/omi/custom_command_connector.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
+import 'package:neorecall/src/devices/omi/heypocket_connector.dart';
 import 'package:neorecall/src/devices/omi/limitless_connector.dart';
+import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
 import 'package:neorecall/src/devices/omi/plaud_connector.dart';
+import 'package:neorecall/src/devices/omi/ring_protocol.dart';
 
 void main() {
   test('OmiGlass uses its documented Opus fallback codec', () async {
@@ -165,6 +169,296 @@ void main() {
     expect(received.map((frame) => frame.length), <int>[40, 40]);
     expect(received, <List<int>>[first, second]);
     await subscription.cancel();
+    await connector.dispose();
+  });
+
+  test('HeyPocket separates ASCII control frames from binary MP3 audio', () async {
+    final transport = _FakeWearableTransport();
+    final connector = HeyPocketConnector(
+      device: _device(WearableDeviceType.heyPocket),
+      transport: transport,
+    );
+    await connector.connect();
+    expect(connector.codec, WearableAudioCodec.mp3);
+
+    // A battery response on the control-notify path updates the battery stream.
+    final batteryFuture = connector.batteryLevels.stream.first;
+    transport.emit(
+      WearableDeviceUuids.heyPocketService,
+      WearableDeviceUuids.heyPocketControlNotify,
+      ascii.encode('MCU&BAT&87'),
+    );
+    expect(await batteryFuture, 87);
+
+    // Recording enables the audio stream and issues the documented command.
+    await connector.startRecording();
+    expect(
+      transport.writes.map((write) => ascii.decode(write.value)),
+      contains('APP&STA'),
+    );
+
+    final frames = <List<int>>[];
+    final audioSub = connector.audioBytes.stream.listen(frames.add);
+    final mp3Frame = <int>[0xFF, 0xFB, 0x90, 0x00, 0x11, 0x22];
+    transport.emit(
+      WearableDeviceUuids.heyPocketService,
+      WearableDeviceUuids.heyPocketAudioNotify,
+      mp3Frame,
+    );
+    // An ASCII control frame arriving on the audio path is parsed, not captured.
+    transport.emit(
+      WearableDeviceUuids.heyPocketService,
+      WearableDeviceUuids.heyPocketAudioNotify,
+      ascii.encode('MCU&STO'),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(frames, <List<int>>[mp3Frame]);
+
+    await connector.stopRecording();
+    expect(
+      transport.writes.map((write) => ascii.decode(write.value)),
+      contains('APP&STO'),
+    );
+
+    await audioSub.cancel();
+    await connector.dispose();
+  });
+
+  test(
+    'HeyPocket offline drain lists, downloads until MCU&OFF, and deletes',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = HeyPocketConnector(
+        device: _device(WearableDeviceType.heyPocket),
+        transport: transport,
+      );
+      await connector.connect();
+
+      final now = DateTime.now();
+      String pad(int value) => value.toString().padLeft(2, '0');
+      final today =
+          '${now.year.toString().padLeft(4, '0')}-${pad(now.month)}-${pad(now.day)}';
+      final mp3 = <int>[0xFF, 0xFB, 0x00, 0x11, 0x22, 0x33];
+
+      // The device answers the documented offline commands (§8).
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+        final command = ascii.decode(value);
+        void reply(String control) => scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketControlNotify,
+            ascii.encode(control),
+          ),
+        );
+        if (command == 'APP&LIST&$today') {
+          reply('MCU&F&$today&1&6');
+        } else if (command == 'APP&U&$today&1') {
+          scheduleMicrotask(() {
+            transport.emit(
+              WearableDeviceUuids.heyPocketService,
+              WearableDeviceUuids.heyPocketAudioNotify,
+              mp3,
+            );
+            reply('MCU&OFF');
+          });
+        } else if (command == 'APP&D&$today&1') {
+          reply('MCU&D');
+        }
+      };
+
+      // Downloaded bytes must never leak into the live-capture stream.
+      final captured = <List<int>>[];
+      final audioSub = connector.audioBytes.stream.listen(captured.add);
+
+      final recordings = <WearableRecording>[];
+      final count = await connector.drainStoredAudio((recording) async {
+        recordings.add(recording);
+      });
+
+      expect(count, 1);
+      expect(recordings.single.bytes, mp3);
+      expect(recordings.single.contentType, 'audio/mpeg');
+      expect(recordings.single.filename, 'heypocket-$today-1.mp3');
+      expect(captured, isEmpty);
+      // The file is deleted only after the recording was handed off.
+      expect(
+        transport.writes.map((write) => ascii.decode(write.value)),
+        containsAll(<String>['APP&U&$today&1', 'APP&D&$today&1']),
+      );
+
+      await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
+
+  test('HeyPocket readBatteryLevel round-trips APP&BAT/MCU&BAT', () async {
+    final transport = _FakeWearableTransport();
+    final connector = HeyPocketConnector(
+      device: _device(WearableDeviceType.heyPocket),
+      transport: transport,
+    );
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic == WearableDeviceUuids.heyPocketControlWrite &&
+          ascii.decode(value) == 'APP&BAT') {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketControlNotify,
+            ascii.encode('MCU&BAT&64'),
+          ),
+        );
+      }
+    };
+
+    await connector.connect();
+    expect(await connector.readBatteryLevel(), 64);
+    await connector.dispose();
+  });
+
+  test(
+    'Omi ring drain advances the read cursor only after durable ingest',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = OmiConnector(
+        device: _device(WearableDeviceType.omi),
+        transport: transport,
+      );
+      // Default codec is PCM8, so the drain decodes without native Opus (which
+      // is unavailable in the test VM).
+      expect(connector.codec, WearableAudioCodec.pcm8);
+
+      // One 444-byte ring record: [4-byte timestamp][440-byte payload]; the
+      // payload holds a single size-prefixed PCM8 frame then zero padding.
+      final frame = List<int>.filled(8, 0x40);
+      final payload = <int>[
+        frame.length,
+        ...frame,
+        ...List<int>.filled(440 - (frame.length + 1), 0),
+      ];
+      final record = <int>[0, 0, 0, 1, ...payload];
+      expect(record.length, 444);
+
+      // Answer each storage command with the documented notify sequence.
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.omiStorageData ||
+            value.isEmpty) {
+          return;
+        }
+        void emit(List<int> notification) => scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.omiStorageService,
+            WearableDeviceUuids.omiStorageData,
+            notification,
+          ),
+        );
+        switch (value[0]) {
+          case RingProtocol.cmdInfo:
+            emit(<int>[
+              RingProtocol.notifyInfo,
+              ...List<int>.filled(7, 0), 0, // readSeq u64 BE = 0
+              ...List<int>.filled(7, 0), 1, // writeSeq u64 BE = 1
+              0, 0, 0, 0, // capacity
+              ...List<int>.filled(8, 0), // dropped
+              0, 0, // packet size
+            ]);
+          case RingProtocol.cmdRead:
+            emit(<int>[RingProtocol.notifyData, ...record]);
+            emit(<int>[
+              RingProtocol.notifyDone,
+              0, // status ok
+              ...List<int>.filled(7, 0), 1, // nextSeq u64 BE = 1
+            ]);
+        }
+      };
+
+      var advancesAtIngest = -1;
+      final recordings = <WearableRecording>[];
+      final count = await connector.drainStoredAudio((recording) async {
+        recordings.add(recording);
+        // The ring cursor must NOT have advanced yet: ingest happens first.
+        advancesAtIngest = transport.writes
+            .where(
+              (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+            )
+            .length;
+      });
+
+      expect(count, 1);
+      expect(recordings.single.contentType, 'audio/wav');
+      // WAV header (44 bytes) + decoded PCM16 (8 PCM8 samples -> 16 bytes).
+      expect(recordings.single.bytes.length, 44 + 16);
+      // No advance had been written at the moment of ingest...
+      expect(advancesAtIngest, 0);
+      // ...and exactly one advance, targeting nextSeq = 1, was written after.
+      final advances = transport.writes
+          .where(
+            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+          )
+          .toList();
+      expect(advances.length, 1);
+      expect(advances.single.value.sublist(1), <int>[0, 0, 0, 0, 0, 0, 0, 1]);
+
+      await connector.dispose();
+    },
+  );
+
+  test('Omi ring drain does not advance the cursor when ingest fails', () async {
+    final transport = _FakeWearableTransport();
+    final connector = OmiConnector(
+      device: _device(WearableDeviceType.omi),
+      transport: transport,
+    );
+    final frame = List<int>.filled(8, 0x40);
+    final payload = <int>[
+      frame.length,
+      ...frame,
+      ...List<int>.filled(440 - (frame.length + 1), 0),
+    ];
+    final record = <int>[0, 0, 0, 1, ...payload];
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.omiStorageData ||
+          value.isEmpty) {
+        return;
+      }
+      void emit(List<int> notification) => scheduleMicrotask(
+        () => transport.emit(
+          WearableDeviceUuids.omiStorageService,
+          WearableDeviceUuids.omiStorageData,
+          notification,
+        ),
+      );
+      switch (value[0]) {
+        case RingProtocol.cmdInfo:
+          emit(<int>[
+            RingProtocol.notifyInfo,
+            ...List<int>.filled(7, 0), 0,
+            ...List<int>.filled(7, 0), 1,
+            0, 0, 0, 0,
+            ...List<int>.filled(8, 0),
+            0, 0,
+          ]);
+        case RingProtocol.cmdRead:
+          emit(<int>[RingProtocol.notifyData, ...record]);
+          emit(<int>[RingProtocol.notifyDone, 0, ...List<int>.filled(7, 0), 1]);
+      }
+    };
+
+    // An ingest failure must leave the records on the device (no advance), so
+    // the range is re-drained next sync rather than lost.
+    await expectLater(
+      connector.drainStoredAudio((recording) async {
+        throw StateError('ingest failed');
+      }),
+      throwsA(isA<StateError>()),
+    );
+    final advances = transport.writes
+        .where(
+          (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+        )
+        .toList();
+    expect(advances, isEmpty);
+
     await connector.dispose();
   });
 }
