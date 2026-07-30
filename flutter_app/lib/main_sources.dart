@@ -390,14 +390,14 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const SelectableText(
-                    'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; } if (m && m.getToken) { t = m.getToken(); break; } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }',
+                    'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && typeof m.default.getToken === "function") { try { let v = m.default.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } if (m && typeof m.getToken === "function") { try { let v = m.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }',
                     style: TextStyle(fontFamily: 'monospace', fontSize: 11),
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextButton.icon(
                   onPressed: () {
-                    Clipboard.setData(const ClipboardData(text: 'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; } if (m && m.getToken) { t = m.getToken(); break; } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }'));
+                    Clipboard.setData(const ClipboardData(text: 'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && typeof m.default.getToken === "function") { try { let v = m.default.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } if (m && typeof m.getToken === "function") { try { let v = m.getToken(); if (typeof v === "string" && v.length > 20) { t = v; break; } } catch(e) {} } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }'));
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Script copied to clipboard!')));
                   },
                   icon: const Icon(Icons.copy, size: 16),
