@@ -168,83 +168,85 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
     const receiver = connection.receiver;
     
     receiver.speaking.on('start', (userId) => {
-      if (targetUsers.includes(userId)) {
-        console.log(`[DiscordSource] Target user ${userId} started speaking. Capturing...`);
-        
-        let userSource = activeSources.get(userId);
-        if (!userSource) {
-           const sourceId = crypto.randomUUID();
-           ingest.addSource(source.user_id, sessionId, {
-             id: sourceId,
-             clientUuid: sourceId,
-             kind: 'microphone',
-             channelLayout: 'stereo',
-             sampleRate: 48000,
-             sampleFormat: 'f32le',
-             metadata: { discordUserId: userId }
-           });
-           userSource = { id: sourceId, sequence: 0 };
-           activeSources.set(userId, userSource);
-        }
-        
-        const audioStream = receiver.subscribe(userId, {
-          end: {
-            behavior: EndBehaviorType.AfterSilence,
-            duration: 1000,
-          },
-        });
-        
-        const sequence = userSource.sequence++;
-        const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.wav`);
-        const fileStream = fs.createWriteStream(tempPath);
-        
-        try {
-          const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
-          const encoder = new prism.FFmpeg({
-            args: [
-              '-f', 's16le', '-ar', '48000', '-ac', '2',
-              '-i', 'pipe:0',
-              '-f', 'wav', 'pipe:1'
-            ]
+      try {
+        if (targetUsers.includes(userId)) {
+          console.log(`[DiscordSource] Target user ${userId} started speaking. Capturing...`);
+          
+          let userSource = activeSources.get(userId);
+          if (!userSource) {
+             const sourceId = crypto.randomUUID();
+             ingest.addSource(source.user_id, sessionId, {
+               id: sourceId,
+               clientUuid: sourceId,
+               kind: 'microphone',
+               channelLayout: 'stereo',
+               sampleRate: 48000,
+               sampleFormat: 'f32le',
+               metadata: { discordUserId: userId }
+             });
+             userSource = { id: sourceId, sequence: 0 };
+             activeSources.set(userId, userSource);
+          }
+          
+          const audioStream = receiver.subscribe(userId, {
+            end: {
+              behavior: EndBehaviorType.AfterSilence,
+              duration: 1000,
+            },
           });
           
-          const startTime = Date.now();
-          decoder.on('error', err => console.error('[DiscordSource] Decoder error:', err));
-          encoder.on('error', err => console.error('[DiscordSource] Encoder error:', err));
-          fileStream.on('error', err => console.error('[DiscordSource] FileStream error:', err));
-          audioStream.on('error', err => console.error('[DiscordSource] AudioStream error:', err));
-          audioStream.pipe(decoder).pipe(encoder).pipe(fileStream);
+          const sequence = userSource.sequence++;
+          const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.wav`);
+          const fileStream = fs.createWriteStream(tempPath);
           
-          fileStream.on('finish', async () => {
-             const durationMs = Date.now() - startTime;
-             const stat = fs.statSync(tempPath);
-             if (stat.size === 0) return;
-             
-             const hash = crypto.createHash('sha256');
-             const fileBuffer = fs.readFileSync(tempPath);
-             hash.update(fileBuffer);
-             const sha256Hex = hash.digest('hex');
-             
-             try {
-               await ingest.acceptChunk(source.user_id, sessionId, userSource.id, sequence, {
-                 idempotencyKey: `${sessionId}-${userSource.id}-${sequence}`,
-                 container: 'wav',
-                 codec: 'pcm_s16le',
-               channelLayout: 'stereo',
-               deviceStartedAt: new Date(startTime).toISOString(),
-               monotonicOffsetMs: 0,
-               durationMs,
-               overlapMs: 0,
-               sha256: sha256Hex
-             }, { path: tempPath, size: stat.size });
-             console.log(`[DiscordSource] Ingested chunk sequence ${sequence} for user ${userId}`);
-           } catch (e) {
-             console.error(`[DiscordSource] Failed to ingest chunk for ${userId}:`, e.message);
-           }
-         });
-        } catch (err) {
-          console.error(`[DiscordSource] Error creating pipeline:`, err);
+          try {
+            const startTime = Date.now();
+            const { pipeline } = require('stream');
+            
+            // Testing raw pipe without prism-media to see if it prevents crash
+            pipeline(audioStream, fileStream, async (err) => {
+               if (err) {
+                 console.error(`[DiscordSource] Pipeline error for ${userId}:`, err.message);
+                 if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                 return;
+               }
+               
+               const durationMs = Date.now() - startTime;
+               if (!fs.existsSync(tempPath)) return;
+               const stat = fs.statSync(tempPath);
+               if (stat.size === 0) {
+                 fs.unlinkSync(tempPath);
+                 return;
+               }
+               
+               const hash = crypto.createHash('sha256');
+               const fileBuffer = fs.readFileSync(tempPath);
+               hash.update(fileBuffer);
+               const sha256Hex = hash.digest('hex');
+               
+               try {
+                 await ingest.acceptChunk(source.user_id, sessionId, userSource.id, sequence, {
+                   idempotencyKey: `${sessionId}-${userSource.id}-${sequence}`,
+                   container: 'wav',
+                   codec: 'pcm_s16le',
+                   channelLayout: 'stereo',
+                   deviceStartedAt: new Date(startTime).toISOString(),
+                   monotonicOffsetMs: 0,
+                   durationMs,
+                   overlapMs: 0,
+                   sha256: sha256Hex
+                 }, { path: tempPath, size: stat.size });
+                 console.log(`[DiscordSource] Ingested chunk sequence ${sequence} for user ${userId}`);
+               } catch (e) {
+                 console.error(`[DiscordSource] Failed to ingest chunk for ${userId}:`, e.message);
+               }
+            });
+          } catch (err) {
+            console.error(`[DiscordSource] Error creating pipeline:`, err);
+          }
         }
+      } catch (err) {
+        console.error(`[DiscordSource] Uncaught error in speaking listener:`, err);
       }
     });
   } catch (error) {
