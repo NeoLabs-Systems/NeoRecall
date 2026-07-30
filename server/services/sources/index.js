@@ -15,7 +15,11 @@ const sourcesService = {
           config: JSON.parse(row.config_json),
           enabled: row.enabled === 1,
         };
-        require('./discord_source').startSource(source);
+        if (source.type === 'discord') {
+          require('./discord_source').startSource(source);
+        } else if (source.type === 'meeting') {
+          require('./meeting_source').startSource(source);
+        }
       }
     } catch (error) {
       console.error('[Sources] Failed to initialize sources:', error.message);
@@ -67,6 +71,8 @@ const sourcesService = {
     const newSource = this.get(userId, id);
     if (newSource.type === 'discord' && newSource.enabled) {
       require('./discord_source').startSource(newSource);
+    } else if (newSource.type === 'meeting' && newSource.enabled) {
+      require('./meeting_source').startSource(newSource);
     }
     
     return newSource;
@@ -95,6 +101,12 @@ const sourcesService = {
       } else {
         require('./discord_source').stopSource(updatedSource.id);
       }
+    } else if (updatedSource.type === 'meeting') {
+      if (updatedSource.enabled) {
+        require('./meeting_source').startSource(updatedSource);
+      } else {
+        require('./meeting_source').stopSource(updatedSource.id);
+      }
     }
     
     return updatedSource;
@@ -105,6 +117,8 @@ const sourcesService = {
     const existing = this.get(userId, id);
     if (existing.type === 'discord') {
       require('./discord_source').stopSource(id);
+    } else if (existing.type === 'meeting') {
+      require('./meeting_source').stopSource(id);
     }
     const stmt = db.prepare('DELETE FROM sources WHERE user_id = ? AND id = ?');
     stmt.run(userId, id);

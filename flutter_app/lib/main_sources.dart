@@ -28,11 +28,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
       'comingSoon': false,
     },
     {
-      'id': 'zoom',
-      'name': 'Zoom',
-      'icon': Icons.videocam,
-      'description': 'Automatically transcribe and record your Zoom meetings.',
-      'comingSoon': true,
+      'id': 'meeting',
+      'name': 'Meeting Link',
+      'icon': Icons.link,
+      'description': 'Paste a URL to automatically record Google Meet, Zoom, or Teams.',
+      'comingSoon': false,
     },
   ];
 
@@ -59,12 +59,14 @@ class _SourcesScreenState extends State<SourcesScreen> {
   }
 
   Future<void> _setupSource(String typeId) async {
-    if (typeId != 'discord') return;
+    if (typeId != 'discord' && typeId != 'meeting') return;
 
     final result = await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _DiscordSetupDialog(controller: widget.controller),
+      builder: (context) => typeId == 'discord' 
+        ? _DiscordSetupDialog(controller: widget.controller)
+        : _MeetingSetupDialog(controller: widget.controller),
     );
     if (result == true) {
       _loadSources();
@@ -423,6 +425,106 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
           child: _saving
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Connect Account'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MeetingSetupDialog extends StatefulWidget {
+  const _MeetingSetupDialog({required this.controller});
+
+  final NeoRecallController controller;
+
+  @override
+  State<_MeetingSetupDialog> createState() => _MeetingSetupDialogState();
+}
+
+class _MeetingSetupDialogState extends State<_MeetingSetupDialog> {
+  final _urlController = TextEditingController();
+  final _nameController = TextEditingController(text: 'NeoRecall Notetaker');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final url = _urlController.text.trim();
+    final name = _nameController.text.trim();
+
+    if (url.isEmpty) return;
+
+    setState(() => _saving = true);
+    try {
+      await widget.controller.api.request('POST', '/api/v1/sources', body: {
+        'type': 'meeting',
+        'name': name.isNotEmpty ? name : 'NeoRecall Notetaker',
+        'config': {
+          'url': url,
+        },
+        'enabled': true, // Auto-start the bot immediately
+      });
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $error'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Join Meeting'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Paste a Google Meet, Zoom, or Microsoft Teams meeting link below. Our bot will automatically join as a guest and record the audio.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _urlController,
+              decoration: const InputDecoration(
+                labelText: 'Meeting URL',
+                hintText: 'https://meet.google.com/...',
+              ),
+              enabled: !_saving,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Bot Name',
+                hintText: 'e.g. NeoRecall Notetaker',
+                helperText: 'This name will be shown to other participants',
+              ),
+              enabled: !_saving,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Join & Record'),
         ),
       ],
     );
