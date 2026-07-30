@@ -199,12 +199,20 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
           const tempPath = path.join(os.tmpdir(), `discord-${crypto.randomUUID()}.wav`);
           const fileStream = fs.createWriteStream(tempPath);
           
-          try {
+                    try {
+            const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+            const encoder = new prism.FFmpeg({
+              args: [
+                '-f', 's16le', '-ar', '48000', '-ac', '2',
+                '-i', 'pipe:0',
+                '-f', 'wav', 'pipe:1'
+              ]
+            });
+            
             const startTime = Date.now();
             const { pipeline } = require('stream');
             
-            // Testing raw pipe without prism-media to see if it prevents crash
-            pipeline(audioStream, fileStream, async (err) => {
+            pipeline(audioStream, decoder, encoder, fileStream, async (err) => {
                if (err) {
                  console.error(`[DiscordSource] Pipeline error for ${userId}:`, err.message);
                  if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
