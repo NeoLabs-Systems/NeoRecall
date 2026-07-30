@@ -41,9 +41,9 @@ async function login(username, password, context = {}) {
 }
 
 function createSession(admin, context) {
-  const token = \`nra_\${randomToken(32)}\`;
+  const token = `nra_${randomToken(32)}`;
   const expiresAt = new Date(Date.now() + Math.min(getConfig().sessionTtlMs, 12 * 60 * 60_000)).toISOString();
-  getDatabase().prepare(\`INSERT INTO admin_sessions (id,admin_id,token_hash,expires_at,ip_address,user_agent) VALUES (?,?,?,?,?,?)\`)
+  getDatabase().prepare(`INSERT INTO admin_sessions (id,admin_id,token_hash,expires_at,ip_address,user_agent) VALUES (?,?,?,?,?,?)`)
     .run(crypto.randomUUID(), admin.id, sha256(token), expiresAt, context.ipAddress || null, context.userAgent || null);
   getDatabase().prepare("UPDATE admins SET last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(admin.id);
   return { token, expiresAt, admin: { id: admin.id, username: admin.username } };

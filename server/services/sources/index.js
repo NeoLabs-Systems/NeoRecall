@@ -1,11 +1,12 @@
 'use strict';
 
 const crypto = require('crypto');
-const db = require('../../db/database');
+const { getDatabase } = require('../../db/database');
 
 const sourcesService = {
   init() {
     try {
+      const db = getDatabase();
       const stmt = db.prepare('SELECT * FROM sources WHERE enabled = 1 AND type = ?');
       const rows = stmt.all('discord');
       for (const row of rows) {
@@ -22,6 +23,7 @@ const sourcesService = {
   },
 
   list(userId) {
+    const db = getDatabase();
     const stmt = db.prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY created_at DESC');
     const rows = stmt.all(userId);
     return rows.map(row => ({
@@ -32,6 +34,7 @@ const sourcesService = {
   },
 
   get(userId, id) {
+    const db = getDatabase();
     const stmt = db.prepare('SELECT * FROM sources WHERE user_id = ? AND id = ?');
     const row = stmt.get(userId, id);
     if (!row) throw new Error('Source not found');
@@ -43,6 +46,7 @@ const sourcesService = {
   },
 
   create(userId, data) {
+    const db = getDatabase();
     const id = crypto.randomUUID();
     const configJson = JSON.stringify(data.config || {});
     const enabled = data.enabled ? 1 : 0;
@@ -62,6 +66,7 @@ const sourcesService = {
   },
 
   update(userId, id, data) {
+    const db = getDatabase();
     const existing = this.get(userId, id);
     
     const name = data.name ?? existing.name;
@@ -89,6 +94,7 @@ const sourcesService = {
   },
 
   delete(userId, id) {
+    const db = getDatabase();
     const existing = this.get(userId, id);
     if (existing.type === 'discord') {
       require('./discord_source').stopSource(id);

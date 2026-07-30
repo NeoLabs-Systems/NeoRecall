@@ -68,7 +68,7 @@ function activateTwoFactor(adminId, code) {
   
   const codes = Array.from({ length: 10 }, () => {
     let raw = randomToken(8).slice(0, 10).toUpperCase(); // crypto.randomToken gives hex, wait. I should generate alphanumeric.
-    return \`\${raw.slice(0, 5)}-\${raw.slice(5)}\`;
+    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
   });
 
   db.transaction(() => {
@@ -92,7 +92,7 @@ function regenerateRecoveryCodes(adminId, code) {
   verifySecondFactor(adminId, code);
   const codes = Array.from({ length: 10 }, () => {
     let raw = randomToken(8).slice(0, 10).toUpperCase();
-    return \`\${raw.slice(0, 5)}-\${raw.slice(5)}\`;
+    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
   });
   getDatabase().transaction(() => {
     getDatabase().prepare('DELETE FROM admin_recovery_codes WHERE admin_id = ?').run(adminId);

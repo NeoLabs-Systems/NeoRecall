@@ -137,7 +137,7 @@ async function load({ announce = false } = {}) {
   jobBadge.textContent = String(failed);
   renderSettings(settingsData.settings);
   renderSecurity(tfStatus); // 2fa status
-  document.querySelector('#last-refresh').textContent = \`Updated \${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\`;
+  document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (announce) showToast('Admin data refreshed');
 }
 
@@ -163,7 +163,7 @@ function renderSecurity(tfStatus) {
 
 async function handleTwoFactorSetup() {
   const setup = await api('/settings/2fa/setup', { method: 'POST' });
-  const code = prompt(\`Scan the QR code or use manual key: \${setup.manualKey}\\n\\nEnter the 6-digit code:\`);
+  const code = prompt(`Scan the QR code or use manual key: ${setup.manualKey}\n\nEnter the 6-digit code:`);
   if (!code) return;
   const res = await api('/settings/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) });
   alert('2FA enabled! Save these recovery codes:\\n' + res.recoveryCodes.join('\\n'));
@@ -201,7 +201,7 @@ document.addEventListener('click', async (event) => {
       await load();
       showToast('Job queued for retry');
     } else if (button?.dataset.cancel) {
-      await api(\`/jobs/\${button.dataset.cancel}/cancel\`, { method: 'POST' });
+      await api(`/jobs/${button.dataset.cancel}/cancel`, { method: 'POST' });
       await load();
       showToast('Job cancelled');
     } else if (button?.dataset.tfAction === 'setup') {

@@ -166,7 +166,7 @@ async function regenerateRecoveryCodes(userId, password, code) {
   verifySecondFactor(userId, code);
   const codes = Array.from({ length: 10 }, () => {
     let raw = randomToken(8).slice(0, 10).toUpperCase();
-    return \`\${raw.slice(0, 5)}-\${raw.slice(5)}\`;
+    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
   });
   getDatabase().transaction(() => {
     getDatabase().prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
