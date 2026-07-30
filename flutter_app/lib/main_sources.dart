@@ -168,18 +168,32 @@ class _SourcesScreenState extends State<SourcesScreen> {
                             ),
                             if (isConnected) ...[
                               const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
+                              if (activeSource['config'] != null && activeSource['config']['error'] != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.red.withOpacity(0.5)),
+                                  ),
+                                  child: const Text(
+                                    'Error',
+                                    style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                )
+                              else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.green.withOpacity(0.5)),
+                                  ),
+                                  child: const Text(
+                                    'Connected',
+                                    style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
                                 ),
-                                child: const Text(
-                                  'Connected',
-                                  style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
-                                ),
-                              ),
                             ],
                           ],
                         ),
@@ -188,6 +202,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
                           integration['description'],
                           style: TextStyle(color: palette.textSecondary, fontSize: 13),
                         ),
+                        if (isConnected && activeSource['config'] != null && activeSource['config']['error'] != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            activeSource['config']['error'],
+                            style: TextStyle(color: Colors.red.shade400, fontSize: 12),
+                          ),
+                        ]
                       ],
                     ),
                   ),

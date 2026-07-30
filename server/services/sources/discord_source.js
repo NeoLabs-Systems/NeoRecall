@@ -13,7 +13,7 @@ async function startSource(source) {
 
   if (!source.enabled || !source.config.token) return;
 
-  const client = new Client({ checkUpdate: false });
+  const client = new Client({ checkUpdate: false, patchVoice: true });
   const targetUsers = (source.config.targetUsers || '').split(',').map(s => s.trim()).filter(Boolean);
   
   if (targetUsers.length === 0) return;
@@ -26,12 +26,42 @@ async function startSource(source) {
     if (newState.id === client.user.id) return; // Ignore self
     if (!targetUsers.includes(newState.id)) return; // Only target users
 
-    // User joined a voice channel
-    if (!oldState.channelId && newState.channelId) {
+    // User joined or moved to a voice channel
+    if (newState.channelId && oldState.channelId !== newState.channelId) {
       console.log(`[DiscordSource] Target user ${newState.id} joined channel ${newState.channelId}. Joining in 2 seconds...`);
       setTimeout(() => {
         joinAndRecord(client, newState, source, targetUsers);
       }, 2000);
+    }
+  });
+
+  client.on('callCreate', async (call) => {
+    try {
+      const channel = call.channel || await client.channels.fetch(call.channelId);
+      if (!channel) return;
+      
+      let isTarget = false;
+      if (channel.type === 'DM' && channel.recipientId) {
+        isTarget = targetUsers.includes(channel.recipientId);
+      } else if (channel.type === 'GROUP_DM' && channel.recipients) {
+        isTarget = channel.recipients.some(id => targetUsers.includes(id));
+      }
+      
+      if (isTarget) {
+         console.log(`[DiscordSource] Incoming call from target in channel ${channel.id}. Answering...`);
+         setTimeout(() => {
+           const mockVoiceState = {
+             channelId: channel.id,
+             guild: {
+               id: channel.id, // @discordjs/voice expects a guildId, use channel id for DMs
+               voiceAdapterCreator: channel.voiceAdapterCreator
+             }
+           };
+           joinAndRecord(client, mockVoiceState, source, targetUsers);
+         }, 1000);
+      }
+    } catch (error) {
+      console.error(`[DiscordSource] Error handling callCreate:`, error.message);
     }
   });
 
@@ -40,6 +70,11 @@ async function startSource(source) {
     activeClients.set(source.id, { client, connection: null });
   } catch (error) {
     console.error(`[DiscordSource] Failed to login Discord bot for source ${source.id}:`, error.message);
+    const sourcesService = require('./index');
+    sourcesService.update(source.user_id, source.id, {
+      enabled: false,
+      config: { ...source.config, error: 'Login failed: ' + error.message }
+    });
   }
 }
 
