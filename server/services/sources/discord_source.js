@@ -1,7 +1,7 @@
 'use strict';
 
 const { Client } = require('discord.js-selfbot-v13');
-const { joinVoiceChannel, EndBehaviorType } = require('@discordjs/voice');
+const { joinVoiceChannel, EndBehaviorType, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -145,8 +145,20 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
       guildId: voiceState.guild.id,
       adapterCreator: voiceState.guild.voiceAdapterCreator,
       selfDeaf: false,
-      selfMute: true,
+      selfMute: false,
     });
+    // Play silence to satisfy Discord's UDP receive requirements
+    const player = createAudioPlayer();
+    const { Readable } = require('stream');
+    class Silence extends Readable {
+      _read() {
+        this.push(Buffer.alloc(960 * 2 * 2));
+      }
+    }
+    const resource = createAudioResource(new Silence(), { inputType: StreamType.Raw });
+    player.play(resource);
+    connection.subscribe(player);
+  
 
     instance.connection = connection;
     console.log(`[DiscordSource] Joined voice channel ${voiceState.channelId}`);
@@ -165,11 +177,15 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
     });
 
     const activeSources = new Map();
+    const activeStreams = new Map();
     const receiver = connection.receiver;
     
     receiver.speaking.on('start', (userId) => {
       try {
         if (targetUsers.includes(userId)) {
+          if (activeStreams.has(userId)) return; // Already capturing for this user!
+          activeStreams.set(userId, true);
+          
           console.log(`[DiscordSource] Target user ${userId} started speaking. Capturing...`);
           
           let userSource = activeSources.get(userId);
@@ -212,7 +228,9 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
             const startTime = Date.now();
             const { pipeline } = require('stream');
             
+            audioStream.on('data', chunk => console.log(`[DiscordSource] Received opus packet of size ${chunk.length}`));
             pipeline(audioStream, decoder, encoder, fileStream, async (err) => {
+              try {
                if (err) {
                  console.error(`[DiscordSource] Pipeline error for ${userId}:`, err.message);
                  if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
@@ -223,6 +241,7 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
                if (!fs.existsSync(tempPath)) return;
                const stat = fs.statSync(tempPath);
                if (stat.size === 0) {
+                 console.log(`[DiscordSource] Audio file size was 0 for user ${userId}. Discarding.`);
                  fs.unlinkSync(tempPath);
                  return;
                }
@@ -248,6 +267,9 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
                } catch (e) {
                  console.error(`[DiscordSource] Failed to ingest chunk for ${userId}:`, e.message);
                }
+              } finally {
+                activeStreams.delete(userId);
+              }
             });
           } catch (err) {
             console.error(`[DiscordSource] Error creating pipeline:`, err);
