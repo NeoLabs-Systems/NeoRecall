@@ -17,7 +17,24 @@ class SourcesScreen extends StatefulWidget {
 
 class _SourcesScreenState extends State<SourcesScreen> {
   bool loading = true;
-  List<dynamic> sources = [];
+  List<dynamic> activeSources = [];
+
+  final List<Map<String, dynamic>> availableIntegrations = [
+    {
+      'id': 'discord',
+      'name': 'Discord',
+      'icon': Icons.discord,
+      'description': 'Automatically record specific users in voice channels you join.',
+      'comingSoon': false,
+    },
+    {
+      'id': 'zoom',
+      'name': 'Zoom',
+      'icon': Icons.videocam,
+      'description': 'Automatically transcribe and record your Zoom meetings.',
+      'comingSoon': true,
+    },
+  ];
 
   @override
   void initState() {
@@ -30,7 +47,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
     try {
       final response = await widget.controller.api.request('GET', '/sources') as Map;
       setState(() {
-        sources = response['sources'] as List<dynamic>;
+        activeSources = response['sources'] as List<dynamic>;
       });
     } catch (error) {
       if (mounted) {
@@ -41,11 +58,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
   }
 
-  Future<void> _addSource() async {
+  Future<void> _setupSource(String typeId) async {
+    if (typeId != 'discord') return;
+
     final result = await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _AddSourceDialog(controller: widget.controller),
+      builder: (context) => _DiscordSetupDialog(controller: widget.controller),
     );
     if (result == true) {
       _loadSources();
@@ -58,18 +77,33 @@ class _SourcesScreenState extends State<SourcesScreen> {
       _loadSources();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update source: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $error')));
       }
     }
   }
 
   Future<void> _deleteSource(Map<String, dynamic> source) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: neoRecallPaletteOf(context).bgCard,
+        title: Text('Disconnect Account', style: TextStyle(color: neoRecallPaletteOf(context).textPrimary)),
+        content: Text('Are you sure you want to disconnect this source?', style: TextStyle(color: neoRecallPaletteOf(context).textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Cancel', style: TextStyle(color: neoRecallPaletteOf(context).textSecondary))),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text('Disconnect', style: TextStyle(color: neoRecallPaletteOf(context).danger))),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     try {
       await widget.controller.api.request('DELETE', '/sources/${source['id']}');
       _loadSources();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete source: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to disconnect: $error')));
       }
     }
   }
@@ -82,81 +116,117 @@ class _SourcesScreenState extends State<SourcesScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (sources.isEmpty) {
-      return Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.input_rounded, size: 64, color: palette.textMuted),
-              const SizedBox(height: 16),
-              Text(
-                'No Sources Configured',
-                style: TextStyle(
-                  color: palette.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Add external sources like Discord bots here to feed audio into NeoRecall.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: palette.textSecondary),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _addSource,
-                icon: const Icon(Icons.add),
-                label: const Text('Add Source'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: palette.accent,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addSource,
-        backgroundColor: palette.accent,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
+      appBar: AppBar(
+        title: Text('External Sources', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: sources.length,
+        itemCount: availableIntegrations.length,
         itemBuilder: (context, index) {
-          final source = sources[index];
-          final typeName = source['type'] == 'discord' ? 'Discord Selfbot' : source['type'];
+          final integration = availableIntegrations[index];
+          final typeId = integration['id'] as String;
+          final isComingSoon = integration['comingSoon'] as bool;
+          
+          final activeSourceIndex = activeSources.indexWhere((s) => s['type'] == typeId);
+          final activeSource = activeSourceIndex >= 0 ? activeSources[activeSourceIndex] : null;
+          final isConnected = activeSource != null;
+
           return Card(
             color: palette.bgCard,
             margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              leading: Icon(
-                source['type'] == 'discord' ? Icons.discord : Icons.input_rounded,
-                color: palette.accent,
-              ),
-              title: Text(source['name'], style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
-              subtitle: Text(typeName, style: TextStyle(color: palette.textSecondary)),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
                 children: [
-                  Switch(
-                    value: source['enabled'],
-                    onChanged: (val) => _toggleSource(source, val),
-                    activeColor: palette.accent,
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: palette.bgSecondary,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(integration['icon'] as IconData, color: isComingSoon ? palette.textMuted : palette.accent, size: 28),
                   ),
-                  IconButton(
-                    icon: Icon(Icons.delete_outline, color: palette.danger),
-                    onPressed: () => _deleteSource(source),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              integration['name'],
+                              style: TextStyle(
+                                color: palette.textPrimary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (isConnected) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
+                                ),
+                                child: const Text(
+                                  'Connected',
+                                  style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          integration['description'],
+                          style: TextStyle(color: palette.textSecondary, fontSize: 13),
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 16),
+                  if (isComingSoon)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: palette.bgTertiary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text('Coming Soon', style: TextStyle(color: palette.textMuted, fontSize: 12)),
+                    )
+                  else if (isConnected)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Switch(
+                          value: activeSource['enabled'],
+                          onChanged: (val) => _toggleSource(activeSource, val),
+                          activeColor: palette.accent,
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.link_off, color: palette.danger),
+                          tooltip: 'Disconnect Account',
+                          onPressed: () => _deleteSource(activeSource),
+                        ),
+                      ],
+                    )
+                  else
+                    ElevatedButton(
+                      onPressed: () => _setupSource(typeId),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: palette.accent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
+                      child: const Text('Setup'),
+                    ),
                 ],
               ),
             ),
@@ -167,17 +237,17 @@ class _SourcesScreenState extends State<SourcesScreen> {
   }
 }
 
-class _AddSourceDialog extends StatefulWidget {
-  const _AddSourceDialog({required this.controller});
+class _DiscordSetupDialog extends StatefulWidget {
+  const _DiscordSetupDialog({required this.controller});
 
   final NeoRecallController controller;
 
   @override
-  State<_AddSourceDialog> createState() => _AddSourceDialogState();
+  State<_DiscordSetupDialog> createState() => _DiscordSetupDialogState();
 }
 
-class _AddSourceDialogState extends State<_AddSourceDialog> {
-  final _nameController = TextEditingController();
+class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
+  final _nameController = TextEditingController(text: 'My Discord Account');
   final _usersController = TextEditingController();
   
   bool _saving = false;
@@ -314,7 +384,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                 children: [
                   const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                   const SizedBox(width: 12),
-                  Text('Waiting for pairing...', style: TextStyle(color: palette.textSecondary)),
+                  Text('Waiting for you to connect...', style: TextStyle(color: palette.textSecondary)),
                 ],
               ),
             ],
@@ -331,7 +401,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
 
     return AlertDialog(
       backgroundColor: palette.bgCard,
-      title: Text('Add Discord Source', style: TextStyle(color: palette.textPrimary)),
+      title: Text('Connect Discord Account', style: TextStyle(color: palette.textPrimary)),
       content: SizedBox(
         width: 400,
         child: Column(
@@ -351,7 +421,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'WARNING: Using a user token to automate joining and recording voice channels is a violation of Discord Terms of Service. This can lead to your account being permanently banned.',
+                      'WARNING: Automating voice channels violates Discord Terms of Service and could lead to a ban. Use at your own risk.',
                       style: TextStyle(color: palette.danger, fontSize: 13),
                     ),
                   ),
@@ -362,7 +432,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
             TextField(
               controller: _nameController,
               decoration: InputDecoration(
-                labelText: 'Source Name',
+                labelText: 'Account Name',
                 labelStyle: TextStyle(color: palette.textSecondary),
                 enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.border)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.accent)),
@@ -373,7 +443,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
             TextField(
               controller: _usersController,
               decoration: InputDecoration(
-                labelText: 'Target User IDs (comma separated)',
+                labelText: 'Record these users (comma separated IDs)',
                 labelStyle: TextStyle(color: palette.textSecondary),
                 enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.border)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.accent)),
@@ -393,7 +463,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
           style: ElevatedButton.styleFrom(backgroundColor: palette.accent),
           child: _saving
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Generate Setup Script', style: TextStyle(color: Colors.white)),
+              : const Text('Connect Account', style: TextStyle(color: Colors.white)),
         ),
       ],
     );

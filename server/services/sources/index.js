@@ -47,6 +47,13 @@ const sourcesService = {
 
   create(userId, data) {
     const db = getDatabase();
+    
+    // Enforce one source per platform per user
+    const existingCount = db.prepare('SELECT COUNT(*) as count FROM sources WHERE user_id = ? AND type = ?').get(userId, data.type);
+    if (existingCount.count > 0) {
+      throw new Error(`A source of type ${data.type} is already configured. You can only have one per platform.`);
+    }
+
     const id = crypto.randomUUID();
     const configJson = JSON.stringify(data.config || {});
     const enabled = data.enabled ? 1 : 0;
