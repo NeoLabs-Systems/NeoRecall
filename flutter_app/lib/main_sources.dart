@@ -45,7 +45,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Future<void> _loadSources() async {
     setState(() => loading = true);
     try {
-      final response = await widget.controller.api.request('GET', '/sources') as Map;
+      final response = await widget.controller.api.request('GET', '/api/v1/sources') as Map;
       setState(() {
         activeSources = response['sources'] as List<dynamic>;
       });
@@ -73,7 +73,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
 
   Future<void> _toggleSource(Map<String, dynamic> source, bool enabled) async {
     try {
-      await widget.controller.api.request('PATCH', '/sources/${source['id']}', body: {'enabled': enabled});
+      await widget.controller.api.request('PATCH', '/api/v1/sources/${source['id']}', body: {'enabled': enabled});
       _loadSources();
     } catch (error) {
       if (mounted) {
@@ -99,7 +99,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
     if (confirm != true) return;
 
     try {
-      await widget.controller.api.request('DELETE', '/sources/${source['id']}');
+      await widget.controller.api.request('DELETE', '/api/v1/sources/${source['id']}');
       _loadSources();
     } catch (error) {
       if (mounted) {
@@ -270,7 +270,7 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
 
     setState(() => _saving = true);
     try {
-      final response = await widget.controller.api.request('POST', '/sources/discord/pairing', body: {
+      final response = await widget.controller.api.request('POST', '/api/v1/sources/discord/pairing', body: {
         'name': name,
         'targetUsers': users,
       }) as Map;
@@ -296,7 +296,7 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
         return;
       }
       try {
-        final response = await widget.controller.api.request('GET', '/sources/discord/pairing/$_pairingToken/status') as Map;
+        final response = await widget.controller.api.request('GET', '/api/v1/sources/discord/pairing/$_pairingToken/status') as Map;
         if (response['status'] == 'success') {
           timer.cancel();
           if (mounted) Navigator.of(context).pop(true);
