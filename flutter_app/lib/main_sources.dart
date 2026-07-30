@@ -249,188 +249,70 @@ class _DiscordSetupDialog extends StatefulWidget {
 class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
   final _nameController = TextEditingController(text: 'My Discord Account');
   final _usersController = TextEditingController();
-  
+  final _tokenController = TextEditingController();
   bool _saving = false;
-  String? _pairingToken;
-  Timer? _pollingTimer;
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
     _nameController.dispose();
     _usersController.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
 
-  Future<void> _generateSetup() async {
+  Future<void> _save() async {
     final name = _nameController.text.trim();
     final users = _usersController.text.trim();
+    final token = _tokenController.text.trim();
 
-    if (name.isEmpty || users.isEmpty) return;
+    if (name.isEmpty || users.isEmpty || token.isEmpty) return;
 
     setState(() => _saving = true);
     try {
-      final response = await widget.controller.api.request('POST', '/api/v1/sources/discord/pairing', body: {
+      await widget.controller.api.request('POST', '/api/v1/sources', body: {
+        'type': 'discord',
         'name': name,
-        'targetUsers': users,
-      }) as Map;
-      
-      setState(() {
-        _pairingToken = response['pairingToken'] as String;
+        'config': {
+          'token': token,
+          'targetUsers': users,
+        },
       });
-      
-      _startPolling();
+      if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $error')));
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $error'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
       }
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
-  }
-  
-  void _startPolling() {
-    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!mounted || _pairingToken == null) {
-        timer.cancel();
-        return;
-      }
-      try {
-        final response = await widget.controller.api.request('GET', '/api/v1/sources/discord/pairing/$_pairingToken/status') as Map;
-        if (response['status'] == 'success') {
-          timer.cancel();
-          if (mounted) Navigator.of(context).pop(true);
-        } else if (response['status'] == 'expired') {
-          timer.cancel();
-          if (mounted) {
-            setState(() {
-               _pairingToken = null;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Setup session expired.')));
-          }
-        }
-      } catch (_) {}
-    });
-  }
-
-  String get _backendUrl {
-    final url = widget.controller.api.baseUrl;
-    if (url.isNotEmpty) return url;
-    return Uri.base.origin; // Fallback for web
-  }
-
-  String get _jsSnippet {
-    return '''(function() {
-  let t;
-  try {
-    var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]);
-    for (let c in req.c) {
-      let m = req.c[c].exports;
-      if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; }
-      if (m && m.getToken) { t = m.getToken(); break; }
-    }
-  } catch(e) { console.error("Error extracting token", e); }
-  if (!t) return alert("Failed to automatically find Discord token. Discord may have updated their web app.");
-  fetch('$_backendUrl/api/v1/sources/discord/pair', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ pairingToken: '$_pairingToken', discordToken: t })
-  }).then(r => r.ok ? alert('Successfully linked to NeoRecall!') : alert('Pairing failed.'));
-})();''';
   }
 
   @override
   Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-
-    if (_pairingToken != null) {
-      return AlertDialog(
-        backgroundColor: palette.bgCard,
-        title: Text('Complete Setup in Discord', style: TextStyle(color: palette.textPrimary)),
-        content: SizedBox(
-          width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('1. Open the Discord Web App in your browser.', style: TextStyle(color: palette.textSecondary)),
-              const SizedBox(height: 8),
-              Text('2. Open the Developer Tools (Ctrl+Shift+I or Cmd+Option+I) and go to the Console tab.', style: TextStyle(color: palette.textSecondary)),
-              const SizedBox(height: 8),
-              Text('3. Paste the following code and press Enter:', style: TextStyle(color: palette.textSecondary)),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: palette.bgSecondary,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: palette.border),
-                ),
-                child: SelectableText(
-                  _jsSnippet,
-                  style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: palette.textPrimary),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: _jsSnippet));
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy Code'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: palette.bgTertiary,
-                    foregroundColor: palette.textPrimary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                  const SizedBox(width: 12),
-                  Text('Waiting for you to connect...', style: TextStyle(color: palette.textSecondary)),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: TextStyle(color: palette.textSecondary)),
-          ),
-        ],
-      );
-    }
-
     return AlertDialog(
-      backgroundColor: palette.bgCard,
-      title: Text('Connect Discord Account', style: TextStyle(color: palette.textPrimary)),
-      content: SizedBox(
-        width: 400,
+      title: const Text('Connect Discord Account'),
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: palette.danger.withValues(alpha: 0.1),
+                color: Colors.amber.withOpacity(0.1),
+                border: Border.all(color: Colors.amber.withOpacity(0.3)),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: palette.danger),
               ),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: palette.danger),
+                  const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'WARNING: Automating voice channels violates Discord Terms of Service and could lead to a ban. Use at your own risk.',
-                      style: TextStyle(color: palette.danger, fontSize: 13),
+                      'Warning: Automating user accounts is against Discord\'s Terms of Service. This bot will silently monitor all channels and auto-join to record specified users. Use at your own risk.',
+                      style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
                     ),
                   ),
                 ],
@@ -439,24 +321,32 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
             const SizedBox(height: 16),
             TextField(
               controller: _nameController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Account Name',
-                labelStyle: TextStyle(color: palette.textSecondary),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.border)),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.accent)),
+                hintText: 'e.g. Main Discord Account',
               ),
-              style: TextStyle(color: palette.textPrimary),
+              enabled: !_saving,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             TextField(
               controller: _usersController,
-              decoration: InputDecoration(
-                labelText: 'Record these users (comma separated IDs)',
-                labelStyle: TextStyle(color: palette.textSecondary),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.border)),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: palette.accent)),
+              decoration: const InputDecoration(
+                labelText: 'Target User IDs',
+                hintText: 'Comma separated IDs to record',
+                helperText: 'Right-click a user and select "Copy User ID"',
               ),
-              style: TextStyle(color: palette.textPrimary),
+              enabled: !_saving,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(
+                labelText: 'Discord Token',
+                hintText: 'Your Discord User Token',
+                helperText: 'Do not share this token with anyone else',
+              ),
+              enabled: !_saving,
+              obscureText: true,
             ),
           ],
         ),
@@ -464,14 +354,13 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: Text('Cancel', style: TextStyle(color: palette.textSecondary)),
+          child: const Text('Cancel'),
         ),
-        ElevatedButton(
-          onPressed: _saving ? null : _generateSetup,
-          style: ElevatedButton.styleFrom(backgroundColor: palette.accent),
+        FilledButton(
+          onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Connect Account', style: TextStyle(color: Colors.white)),
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Connect Account'),
         ),
       ],
     );
