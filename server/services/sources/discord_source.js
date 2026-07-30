@@ -146,6 +146,12 @@ async function joinAndRecord(client, voiceState, source, targetUsers) {
       adapterCreator: voiceState.guild.voiceAdapterCreator,
       selfDeaf: false,
       selfMute: false,
+      // Selfbots cannot complete Discord's DAVE (E2EE/MLS) key exchange. With DAVE
+      // enabled, incoming voice packets are E2EE-decrypted to null and silently
+      // dropped by @discordjs/voice, so no audio ever reaches the pipeline. Disabling
+      // it advertises max_dave_protocol_version: 0 and falls back to transport-only
+      // decryption, which works with the negotiated secret_key.
+      daveEncryption: false,
     });
     // Play silence to satisfy Discord's UDP receive requirements
     const player = createAudioPlayer();
