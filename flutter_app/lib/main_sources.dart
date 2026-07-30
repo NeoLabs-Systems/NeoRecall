@@ -338,6 +338,7 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
               enabled: !_saving,
             ),
             const SizedBox(height: 16),
+            const SizedBox(height: 16),
             TextField(
               controller: _tokenController,
               decoration: const InputDecoration(
@@ -347,6 +348,46 @@ class _DiscordSetupDialogState extends State<_DiscordSetupDialog> {
               ),
               enabled: !_saving,
               obscureText: true,
+            ),
+            const SizedBox(height: 16),
+            ExpansionTile(
+              title: const Text('How to get your token', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              tilePadding: EdgeInsets.zero,
+              children: [
+                const Text(
+                  '1. Open the Discord Web App in your browser.\n'
+                  '2. Press Ctrl+Shift+I (or Cmd+Option+I) to open Developer Tools.\n'
+                  '3. Go to the "Console" tab.\n'
+                  '4. Paste the following script and hit Enter.',
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const SelectableText(
+                    'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; } if (m && m.getToken) { t = m.getToken(); break; } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(const ClipboardData(text: 'let t; try { var req = webpackChunkdiscord_app.push([[Math.random()], {}, e => e]); for (let c in req.c) { let m = req.c[c].exports; if (m && m.default && m.default.getToken) { t = m.default.getToken(); break; } if (m && m.getToken) { t = m.getToken(); break; } } } catch(e) {} if (t) { copy(t); console.log("%cToken copied to clipboard!", "color: green; font-size: 20px; font-weight: bold;"); } else { console.error("Could not find token."); }'));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Script copied to clipboard!')));
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy Script'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Important: Do not log out of Discord from your browser after copying the token. If you manually log out, Discord will invalidate this token and NeoRecall will stop working. Just close the tab instead.',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary, fontStyle: FontStyle.italic),
+                ),
+              ],
             ),
           ],
         ),
