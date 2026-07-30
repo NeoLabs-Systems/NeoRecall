@@ -7,7 +7,37 @@ const { requireAuth } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 
 const router = express.Router();
+
+const pairingService = require('../services/sources/pairing_service');
+
+// Public endpoint for the JS snippet
+router.post('/discord/pair', express.json(), (req, res, next) => {
+  try {
+    const { pairingToken, discordToken } = req.body;
+    if (!pairingToken || !discordToken) {
+      return res.status(400).json({ error: 'Missing tokens' });
+    }
+    pairingService.consumePairing(pairingToken, discordToken);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 router.use(requireAuth);
+
+router.post('/discord/pairing', (req, res) => {
+  try {
+    const token = pairingService.createPairing(req.auth.userId, req.body);
+    res.json({ pairingToken: token });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/discord/pairing/:token/status', (req, res) => {
+  res.json(pairingService.getPairingStatus(req.params.token));
+});
 
 const createSchema = z.object({
   type: z.string().min(1),
