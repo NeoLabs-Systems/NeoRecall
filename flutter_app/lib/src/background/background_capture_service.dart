@@ -18,7 +18,7 @@ abstract class BackgroundCaptureService {
   Stream<BackgroundCaptureEvent> get events;
 }
 
-enum BackgroundCaptureEventType { message, stopRequested }
+enum BackgroundCaptureEventType { message, stopRequested, batteryOptimizationActive }
 
 class BackgroundCaptureEvent {
   const BackgroundCaptureEvent(this.type, {this.message});
@@ -134,6 +134,11 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
       if (!batteryOptimization.isGranted) {
         _message(
           'Battery optimization is still active; Android or the device vendor may suspend long-running capture.',
+        );
+        _events.add(
+          const BackgroundCaptureEvent(
+            BackgroundCaptureEventType.batteryOptimizationActive,
+          ),
         );
       }
       await _channel.invokeMethod<bool>(

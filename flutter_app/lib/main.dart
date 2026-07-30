@@ -43,7 +43,7 @@ class NeoRecallApp extends StatefulWidget {
 }
 
 class _NeoRecallAppState extends State<NeoRecallApp>
-    with WindowListener, TrayListener {
+    with WindowListener, TrayListener, WidgetsBindingObserver {
   late final NeoRecallController controller = NeoRecallController()
     ..addListener(_changed);
   bool _trayRecording = false;
@@ -54,8 +54,18 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(controller.initialize());
     if (_desktop) _initializeDesktopShell();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Returning to the foreground proactively resumes sync and refresh instead
+    // of waiting for the periodic upload timer or a connectivity event.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(controller.onAppResumed());
+    }
   }
 
   void _changed() {
@@ -112,6 +122,7 @@ class _NeoRecallAppState extends State<NeoRecallApp>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_desktop) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);

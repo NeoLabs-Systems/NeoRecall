@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -188,6 +189,13 @@ class NeoRecallController extends ChangeNotifier {
   String? askAnswer;
   List<Map<String, dynamic>> askCitations = <Map<String, dynamic>>[];
   int pendingAudioBytes = 0;
+  // Chunks parked after repeated server-side permanent failures; surfaced with a
+  // manual retry so a stuck queue is visible instead of silently growing.
+  int needsAttentionCount = 0;
+  // Chunks whose upload is currently failing (transient); still auto-retried.
+  int failedUploadCount = 0;
+  // True when Android/OEM battery optimization may suspend always-on capture.
+  bool backgroundCaptureAtRisk = false;
   double audioLevel = 0;
   DateTime? recordingStartedAt;
   RecorderCapability? capability;
@@ -355,6 +363,10 @@ class NeoRecallController extends ChangeNotifier {
             if (event.type == BackgroundCaptureEventType.stopRequested &&
                 isRecording) {
               unawaited(stopRecording());
+            } else if (event.type ==
+                BackgroundCaptureEventType.batteryOptimizationActive) {
+              backgroundCaptureAtRisk = true;
+              notifyListeners();
             }
           });
         }
@@ -1088,6 +1100,8 @@ class NeoRecallController extends ChangeNotifier {
       _activeSession = null;
       recordingStartedAt = null;
       audioLevel = 0;
+      // The background battery warning is only meaningful during active capture.
+      backgroundCaptureAtRisk = false;
       sync.pump.pump();
       if (recorder is MobileRecallRecorder) {
         await (recorder as MobileRecallRecorder).finishBackgroundHost();
@@ -1244,10 +1258,58 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<void> _refreshPending() async {
     final ownerAccountId = accountId;
-    pendingAudioBytes = ownerAccountId == null
-        ? 0
-        : await store.pendingBytes(ownerAccountId);
+    if (ownerAccountId == null) {
+      pendingAudioBytes = 0;
+      needsAttentionCount = 0;
+      failedUploadCount = 0;
+      notifyListeners();
+      return;
+    }
+    pendingAudioBytes = await store.pendingBytes(ownerAccountId);
+    try {
+      final chunks = await store.pending(ownerAccountId, limit: 500);
+      needsAttentionCount = chunks
+          .where((chunk) => chunk.state == LocalChunkState.needsAttention)
+          .length;
+      failedUploadCount = chunks
+          .where((chunk) => chunk.state == LocalChunkState.failed)
+          .length;
+    } catch (_) {
+      // Counts are best-effort UI hints; never block on them.
+    }
     notifyListeners();
+  }
+
+  /// Re-queues every chunk parked as needsAttention and kicks the pump. Used by
+  /// the "retry failed uploads" action so the user can recover a stuck queue.
+  Future<void> retryFailedUploads() async {
+    final ownerAccountId = accountId;
+    if (ownerAccountId == null) return;
+    final chunks = await store.pending(ownerAccountId, limit: 500);
+    for (final chunk in chunks.where(
+      (chunk) => chunk.state == LocalChunkState.needsAttention,
+    )) {
+      await store.setState(chunk.id, LocalChunkState.ready);
+    }
+    sync.pump.forgetAttempts();
+    await _refreshPending();
+    sync.pump.pump();
+  }
+
+  /// Opens OS settings so the user can lift battery restrictions that would
+  /// otherwise let the system suspend always-on background capture.
+  Future<void> openBatterySettings() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    await openAppSettings();
+  }
+
+  /// Called when the app returns to the foreground. Proactively resumes sync and
+  /// refreshes data instead of waiting for the periodic timer.
+  Future<void> onAppResumed() async {
+    if (!authenticated) return;
+    sync.pump.pump();
+    await _refreshPending();
+    await refreshAll(silent: true);
   }
 
   Future<void> refreshAll({bool silent = false}) async {

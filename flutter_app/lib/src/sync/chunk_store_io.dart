@@ -345,9 +345,11 @@ class IoChunkStore implements ChunkStore {
   @override
   Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async =>
       (await db.rawQuery(
+        // needsAttention is returned so callers can surface/retry it; the upload
+        // pump filters by state itself and never acts on needsAttention chunks.
         '''SELECT c.* FROM chunks c
        JOIN sessions s ON s.id=c.sessionId
-       WHERE s.accountId=? AND c.state IN (?,?,?,?,?)
+       WHERE s.accountId=? AND c.state IN (?,?,?,?,?,?)
        ORDER BY c.createdAt,c.sourceId,c.sequence
        LIMIT ?''',
         <Object?>[
@@ -357,6 +359,7 @@ class IoChunkStore implements ChunkStore {
           LocalChunkState.uploaded.name,
           LocalChunkState.failed.name,
           LocalChunkState.capturing.name,
+          LocalChunkState.needsAttention.name,
           limit,
         ],
       )).map((row) => AudioChunk.fromMap(_map(row))).toList();

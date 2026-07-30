@@ -54,7 +54,7 @@ const meetingSourceService = {
       });
 
     } catch (error) {
-      console.error(`[MeetingSource] Failed to start bot for ${source.id}:`, error.message);
+      console.error(`[MeetingSource] Failed to start bot for ${source.id}:`, error && error.stack ? error.stack : error);
       activeBots.delete(source.id);
       const sourcesService = require('./index');
       sourcesService.update(source.user_id, source.id, {

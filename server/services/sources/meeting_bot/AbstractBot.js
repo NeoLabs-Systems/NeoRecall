@@ -26,38 +26,51 @@ class AbstractBot extends EventEmitter {
 
   async start() {
     console.log(`[MeetingBot] Starting bot for ${this.url}`);
-    
-    // In Docker, we rely on Xvfb being running globally, or we can use xvfb-maybe if needed.
-    // For now we assume the container has Xvfb running or we are on macOS locally.
-    this.browser = await chromium.launch({
-      headless: true, // Use headless=new or true. In playwright true is fine.
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--use-fake-ui-for-media-stream', // Auto-grant permissions
-        '--use-fake-device-for-media-stream',
-      ]
-    });
-    
-    this.context = await this.browser.newContext({
-      permissions: ['microphone', 'camera']
-    });
-    this.page = await this.context.newPage();
 
-    this.page.on('close', () => {
-      this.emit('ended');
-    });
+    try {
+      // In Docker, we rely on Xvfb being running globally, or we can use xvfb-maybe if needed.
+      // For now we assume the container has Xvfb running or we are on macOS locally.
+      console.log('[MeetingBot] Launching Chromium...');
+      this.browser = await chromium.launch({
+        headless: true, // Use headless=new or true. In playwright true is fine.
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+          '--use-fake-ui-for-media-stream', // Auto-grant permissions
+          '--use-fake-device-for-media-stream',
+        ]
+      });
+      console.log('[MeetingBot] Chromium launched. Creating browser context...');
 
-    await this.setupAudioCapture();
-    await this.joinMeeting();
-    
-    // Start silence detection / participant monitoring
-    this.monitorTask = setInterval(() => this.checkMeetingStatus(), 10000);
+      this.context = await this.browser.newContext({
+        permissions: ['microphone', 'camera']
+      });
+      console.log('[MeetingBot] Context created. Opening page...');
+      this.page = await this.context.newPage();
+      console.log('[MeetingBot] Page opened.');
+
+      this.page.on('close', () => {
+        this.emit('ended');
+      });
+
+      console.log('[MeetingBot] Setting up audio capture...');
+      await this.setupAudioCapture();
+      console.log('[MeetingBot] Audio capture ready. Joining meeting...');
+      await this.joinMeeting();
+      console.log('[MeetingBot] joinMeeting() returned; bot is in the meeting.');
+
+      // Start silence detection / participant monitoring
+      this.monitorTask = setInterval(() => this.checkMeetingStatus(), 10000);
+    } catch (err) {
+      console.error('[MeetingBot] start() failed:', err && err.stack ? err.stack : err);
+      throw err;
+    }
   }
 
   async setupAudioCapture() {
+    console.log('[MeetingBot] setupAudioCapture: registering device + session...');
     const db = getDatabase();
     const deviceId = 'meeting-' + this.sourceId;
     const existing = db.prepare('SELECT id FROM devices WHERE id=?').get(deviceId);
@@ -86,6 +99,7 @@ class AbstractBot extends EventEmitter {
       metadata: { botName: this.botName, url: this.url }
     });
 
+    console.log('[MeetingBot] setupAudioCapture: exposing sendAudioChunk...');
     // We expose a function that the page can call to send float32 PCM data
     await this.page.exposeFunction('sendAudioChunk', (float32ArrayObj) => {
       if (!this.isRecording) return;

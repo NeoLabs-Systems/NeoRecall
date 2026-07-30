@@ -13,6 +13,17 @@ class UploadPump {
   Timer? _timer;
   String? accountId;
 
+  // How many times the client re-uploads a chunk the server keeps permanently
+  // failing (state reupload_required) before parking it as needsAttention.
+  // Re-uploading identical bytes fails deterministically, so this bound stops an
+  // otherwise-infinite upload/transcribe/fail loop that would never release the
+  // local audio. Counts are per-chunk and cleared on success or manual retry.
+  static const int _maxReuploadAttempts = 3;
+  final Map<String, int> _reuploadAttempts = <String, int>{};
+
+  /// Clears the per-chunk reupload counters so a manual retry starts fresh.
+  void forgetAttempts() => _reuploadAttempts.clear();
+
   void start() {
     _timer ??= Timer.periodic(const Duration(seconds: 30), (_) => pump());
     pump();
@@ -135,13 +146,29 @@ class UploadPump {
         receipt['persistedAt'] != null &&
         receipt['serverAudioDeletedAt'] != null &&
         receipt['transcriptSha256'] != null) {
+      _reuploadAttempts.remove(id);
       await store.setState(id, LocalChunkState.terminal, receipt: receipt);
       await store.release(id);
       try {
         await api.releaseChunks(<String>[receipt['chunkId'] as String]);
       } catch (_) {}
     } else if (state == 'reupload_required') {
-      await store.setState(id, LocalChunkState.ready, receipt: receipt);
+      final attempts = (_reuploadAttempts[id] ?? 0) + 1;
+      if (attempts >= _maxReuploadAttempts) {
+        _reuploadAttempts.remove(id);
+        final code = receipt['errorCode'];
+        await store.setState(
+          id,
+          LocalChunkState.needsAttention,
+          receipt: receipt,
+          error:
+              'The server could not transcribe this recording after repeated attempts'
+              '${code == null ? '' : ' ($code)'}. Retry when ready.',
+        );
+      } else {
+        _reuploadAttempts[id] = attempts;
+        await store.setState(id, LocalChunkState.ready, receipt: receipt);
+      }
     } else {
       await store.setState(id, LocalChunkState.uploaded, receipt: receipt);
     }

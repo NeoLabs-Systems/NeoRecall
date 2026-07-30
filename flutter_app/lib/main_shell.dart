@@ -71,7 +71,14 @@ class NeoRecallShell extends StatelessWidget {
               body: Row(
                 children: <Widget>[
                   _Sidebar(controller: controller),
-                  Expanded(child: ClipRect(child: content)),
+                  Expanded(
+                    child: Column(
+                      children: <Widget>[
+                        _GlobalStatusBar(controller: controller),
+                        Expanded(child: ClipRect(child: content)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             );
@@ -96,12 +103,19 @@ class NeoRecallShell extends StatelessWidget {
             ),
             body: SafeArea(
               top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(22),
-                  child: content,
-                ),
+              child: Column(
+                children: <Widget>[
+                  _GlobalStatusBar(controller: controller),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(22),
+                        child: content,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           );
@@ -436,6 +450,137 @@ class _SidebarIconButton extends StatelessWidget {
             child: Icon(icon, size: 17, color: palette.textSecondary),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Persistent, cross-screen status strip: offline, background-capture risk,
+/// transient notices, and an off-Record recording indicator. Renders nothing
+/// (zero height) when there is nothing to report.
+class _GlobalStatusBar extends StatelessWidget {
+  const _GlobalStatusBar({required this.controller});
+
+  final NeoRecallController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final banners = <Widget>[];
+
+    if (controller.backgroundCaptureAtRisk) {
+      banners.add(
+        _StatusPill(
+          icon: Icons.battery_alert_rounded,
+          color: palette.danger,
+          message:
+              'Battery optimization may suspend always-on capture on this device.',
+          actionLabel: 'Fix',
+          onAction: () => controller.openBatterySettings(),
+        ),
+      );
+    }
+    if (!controller.online) {
+      banners.add(
+        _StatusPill(
+          icon: Icons.cloud_off_rounded,
+          color: palette.textMuted,
+          message: 'Offline — capture continues; uploads resume when reconnected.',
+        ),
+      );
+    }
+    if (controller.notice != null) {
+      banners.add(
+        _StatusPill(
+          icon: Icons.info_outline_rounded,
+          color: palette.accent,
+          message: controller.notice!,
+        ),
+      );
+    }
+    if (controller.isRecording && controller.page != RecallPage.record) {
+      banners.add(
+        _StatusPill(
+          icon: Icons.fiber_manual_record_rounded,
+          color: palette.secondary,
+          message: 'Recording is active.',
+          actionLabel: 'Open',
+          onAction: () => controller.selectPage(RecallPage.record),
+        ),
+      );
+    }
+
+    if (banners.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (var i = 0; i < banners.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(height: 6),
+            banners[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({
+    required this.icon,
+    required this.color,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: palette.textSecondary,
+                fontSize: 12.5,
+                height: 1.3,
+              ),
+            ),
+          ),
+          if (actionLabel != null && onAction != null) ...<Widget>[
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: color,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(actionLabel!),
+            ),
+          ],
+        ],
       ),
     );
   }

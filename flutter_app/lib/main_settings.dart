@@ -166,10 +166,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   List<Widget> _statusMessages() => <Widget>[
-    if (widget.controller.notice != null) ...<Widget>[
-      InlineMessage(message: widget.controller.notice!),
-      const SizedBox(height: 14),
-    ],
+    // Transient notices now render in the app-wide status bar (see main_shell),
+    // so they are not duplicated here; errors stay inline with the settings form.
     if (widget.controller.error != null) ...<Widget>[
       InlineMessage(message: widget.controller.error!, error: true),
       const SizedBox(height: 14),

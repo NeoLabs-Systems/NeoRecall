@@ -136,11 +136,18 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
       if (existing.state !== 'reupload_required') return { ...receipts.receipt(existing), duplicate: true };
       const destination = tempAudio.chunkPath(existing.id, input.container);
       fs.renameSync(uploadedFile.path, destination);
-      db.transaction(() => {
-        db.prepare(`UPDATE audio_chunks SET temporary_path=?,state='uploaded',error_code=NULL,error_message=NULL,
-          uploaded_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(destination, existing.id);
-        jobs.enqueue({ userId, resourceType: 'audio_chunk', resourceId: existing.id, type: 'transcribe_chunk', priority: 100 }, db);
-      })();
+      try {
+        db.transaction(() => {
+          db.prepare(`UPDATE audio_chunks SET temporary_path=?,state='uploaded',error_code=NULL,error_message=NULL,
+            uploaded_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(destination, existing.id);
+          jobs.enqueue({ userId, resourceType: 'audio_chunk', resourceId: existing.id, type: 'transcribe_chunk', priority: 100 }, db);
+        })();
+      } catch (error) {
+        // Mirror the new-chunk path: never leave the renamed audio orphaned if
+        // the durable state transition fails.
+        tempAudio.unlinkStrict(destination);
+        throw error;
+      }
       return receipts.findForUser(userId, existing.id);
     }
     const id = crypto.randomUUID();

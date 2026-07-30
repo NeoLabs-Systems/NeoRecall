@@ -9,6 +9,10 @@ enum LocalChunkState {
   terminal,
   released,
   failed,
+  // Parked after repeated server-side permanent failures. The upload pump does
+  // NOT auto-retry this state, so a chunk whose audio the server keeps rejecting
+  // stops looping forever; the user resolves it with an explicit retry.
+  needsAttention,
 }
 
 class AudioChunk {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_shared.dart';
+import 'main_spacing.dart';
 import 'main_theme.dart';
 
 bool shouldRequestSystemAudio({
@@ -150,6 +151,18 @@ class _RecordScreenState extends State<RecordScreen> {
           ],
           if (controller.error != null) ...<Widget>[
             InlineMessage(message: controller.error!, error: true),
+            const SizedBox(height: 16),
+          ],
+          if (!controller.online) ...<Widget>[
+            const InlineMessage(
+              message:
+                  'You are offline. Capture continues locally and queued audio uploads automatically when the connection returns.',
+              icon: Icons.cloud_off_rounded,
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (controller.needsAttentionCount > 0) ...<Widget>[
+            _NeedsAttentionBanner(controller: controller),
             const SizedBox(height: 16),
           ],
           GlassSurface(
@@ -488,6 +501,69 @@ class _RecordScreenState extends State<RecordScreen> {
           const InlineMessage(
             message:
                 'Recording privately spoken words may require everyone’s consent. NeoRecall never hides its recording state and does not determine whether a recording is lawful.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Surfaces chunks the server could not transcribe after repeated attempts, with
+/// an explicit retry so a stuck queue is visible and recoverable rather than
+/// silently retaining local audio forever.
+class _NeedsAttentionBanner extends StatefulWidget {
+  const _NeedsAttentionBanner({required this.controller});
+  final NeoRecallController controller;
+  @override
+  State<_NeedsAttentionBanner> createState() => _NeedsAttentionBannerState();
+}
+
+class _NeedsAttentionBannerState extends State<_NeedsAttentionBanner> {
+  bool _retrying = false;
+
+  Future<void> _retry() async {
+    setState(() => _retrying = true);
+    try {
+      await widget.controller.retryFailedUploads();
+    } finally {
+      if (mounted) setState(() => _retrying = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final count = widget.controller.needsAttentionCount;
+    final color = palette.danger;
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.sync_problem_rounded, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              count == 1
+                  ? '1 recording could not be transcribed after repeated attempts. Its audio is kept locally until you retry.'
+                  : '$count recordings could not be transcribed after repeated attempts. Their audio is kept locally until you retry.',
+              style: TextStyle(color: palette.textSecondary, height: 1.4),
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            onPressed: _retrying ? null : _retry,
+            child: _retrying
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Retry'),
           ),
         ],
       ),
