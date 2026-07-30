@@ -4,7 +4,9 @@ const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { hashPassword, verifyPassword, randomToken, sha256 } = require('../../utils/crypto');
+const qrcode = require('qrcode');
 const { HttpError } = require('../../middleware/error_handler');
+const adminTwoFactor = require('./admin_two_factor_service');
 
 async function bootstrap() {
   const username = process.env.ADMIN_USERNAME;
@@ -25,12 +27,45 @@ async function login(username, password, context = {}) {
   const db = getDatabase();
   const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
   if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
-  const token = `nra_${randomToken(32)}`;
+  
+  const tfStatus = adminTwoFactor.getStatus(admin.id);
+  if (tfStatus.enabled) {
+    return { requiresTwoFactor: true, adminId: admin.id };
+  } else if (!tfStatus.enabled && tfStatus.pending) {
+    const setup = adminTwoFactor.beginSetup(admin.id, admin.username);
+    const qrDataUrl = await qrcode.toDataURL(setup.otpauthUrl, { width: 200, margin: 2 });
+    return { requiresTwoFactorSetup: true, adminId: admin.id, setup: { ...setup, qrDataUrl } };
+  }
+  
+  return createSession(admin, context);
+}
+
+function createSession(admin, context) {
+  const token = \`nra_\${randomToken(32)}\`;
   const expiresAt = new Date(Date.now() + Math.min(getConfig().sessionTtlMs, 12 * 60 * 60_000)).toISOString();
-  db.prepare(`INSERT INTO admin_sessions (id,admin_id,token_hash,expires_at,ip_address,user_agent) VALUES (?,?,?,?,?,?)`)
+  getDatabase().prepare(\`INSERT INTO admin_sessions (id,admin_id,token_hash,expires_at,ip_address,user_agent) VALUES (?,?,?,?,?,?)\`)
     .run(crypto.randomUUID(), admin.id, sha256(token), expiresAt, context.ipAddress || null, context.userAgent || null);
-  db.prepare("UPDATE admins SET last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(admin.id);
+  getDatabase().prepare("UPDATE admins SET last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(admin.id);
   return { token, expiresAt, admin: { id: admin.id, username: admin.username } };
+}
+
+async function verifyTwoFactorLogin(username, password, code, context = {}) {
+  const db = getDatabase();
+  const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
+  if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  
+  adminTwoFactor.verifySecondFactor(admin.id, code);
+  return createSession(admin, context);
+}
+
+async function setupTwoFactorLogin(username, password, code, context = {}) {
+  const db = getDatabase();
+  const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
+  if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  
+  const recoveryCodes = adminTwoFactor.activateTwoFactor(admin.id, code);
+  const session = createSession(admin, context);
+  return { ...session, recoveryCodes };
 }
 
 function authenticate(token) {
@@ -43,4 +78,4 @@ function logout(sessionId) {
   getDatabase().prepare("UPDATE admin_sessions SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(sessionId);
 }
 
-module.exports = { bootstrap, login, authenticate, logout };
+module.exports = { bootstrap, login, verifyTwoFactorLogin, setupTwoFactorLogin, authenticate, logout };

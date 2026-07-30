@@ -92,8 +92,11 @@ function shell(title, eyebrow, content) {
   </style></head><body><main class="card"><div class="brand"><div class="mark">R</div><div><div class="eyebrow">${escapeHtml(eyebrow)}</div><strong>NeoRecall</strong></div></div>${content}</main></body></html>`;
 }
 
-function renderSignIn(continuePath, error = '') {
-  return shell('Sign in', 'NEOAGENT CONNECTION', `<h1>Sign in to approve access</h1><p>Use your NeoRecall account. Your password is verified by this NeoRecall server and is never sent to NeoAgent.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><div class="field"><label for="account">Username or email</label><input id="account" name="account" autocomplete="username" required autofocus></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><div class="actions"><button class="primary" type="submit">Sign in securely</button></div></form>`);
+function renderSignIn(continuePath, error = '', account = '', password = '', requiresTwoFactor = false) {
+  if (requiresTwoFactor) {
+    return shell('Two-factor authentication', 'NEOAGENT CONNECTION', `<h1>Two-factor authentication</h1><p>Enter the 6-digit code from your authenticator app, or a recovery code.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><input type="hidden" name="account" value="${escapeHtml(account)}"><input type="hidden" name="password" value="${escapeHtml(password)}"><div class="field"><label for="two_factor_code">Authenticator code</label><input id="two_factor_code" name="two_factor_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="11" placeholder="123 456" spellcheck="false" autocorrect="off" autocapitalize="none" required autofocus></div><div class="actions"><button class="primary" type="submit">Verify</button></div><div style="margin-top:14px;text-align:center;"><a href="/oauth/sign-in?continue=${encodeURIComponent(continuePath)}" style="color:var(--ink-2);font-size:12px;text-decoration:none;">← Back</a></div></form>`);
+  }
+  return shell('Sign in', 'NEOAGENT CONNECTION', `<h1>Sign in to approve access</h1><p>Use your NeoRecall account. Your password is verified by this NeoRecall server and is never sent to NeoAgent.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><div class="field"><label for="account">Username or email</label><input id="account" name="account" autocomplete="username" value="${escapeHtml(account)}" required ${!account ? 'autofocus' : ''}></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required ${account ? 'autofocus' : ''}></div><div class="actions"><button class="primary" type="submit">Sign in securely</button></div></form>`);
 }
 
 function renderConsent(authorize) {
@@ -153,7 +156,10 @@ router.post('/oauth/sign-in', slidingWindow({ windowMs: 60_000, limit: 10 }), as
     setOauthSessionCookie(req, res, createBrowserGrant(user.id));
     return res.redirect(continuePath);
   } catch (error) {
-    return page(res.status(error.status || error.statusCode || 400), renderSignIn(continuePath, error.message));
+    if (error.code === 'TWO_FACTOR_REQUIRED') {
+      return page(res, renderSignIn(continuePath, '', req.body?.account, req.body?.password, true));
+    }
+    return page(res.status(error.status || error.statusCode || 400), renderSignIn(continuePath, error.message, req.body?.account, req.body?.password, !!req.body?.two_factor_code));
   }
 });
 

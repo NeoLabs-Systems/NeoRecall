@@ -117,6 +117,17 @@ async function changePassword(userId, currentPassword, newPassword) {
   logoutAll(userId);
 }
 
+function getTwoFactorStatus(userId) {
+  const row = getDatabase().prepare('SELECT * FROM user_two_factor WHERE user_id = ?').get(userId);
+  const codesLeft = getDatabase().prepare('SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL').get(userId).n;
+  return {
+    enabled: row?.pending === 0,
+    pending: row?.pending === 1,
+    enabledAt: row?.enabled_at || null,
+    recoveryCodesRemaining: codesLeft,
+  };
+}
+
 function beginTwoFactor(userId, username) {
   const secret = authenticator.generateSecret();
   getDatabase().prepare(`INSERT INTO user_two_factor (user_id, secret_encrypted, pending)
@@ -149,6 +160,22 @@ async function disableTwoFactor(userId, password, code) {
   })();
 }
 
+async function regenerateRecoveryCodes(userId, password, code) {
+  const user = getDatabase().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user || !(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'INVALID_PASSWORD', 'The password is incorrect.');
+  verifySecondFactor(userId, code);
+  const codes = Array.from({ length: 10 }, () => {
+    let raw = randomToken(8).slice(0, 10).toUpperCase();
+    return \`\${raw.slice(0, 5)}-\${raw.slice(5)}\`;
+  });
+  getDatabase().transaction(() => {
+    getDatabase().prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
+    const insert = getDatabase().prepare('INSERT INTO user_recovery_codes (id, user_id, code_hash) VALUES (?, ?, ?)');
+    for (const recoveryCode of codes) insert.run(crypto.randomUUID(), userId, sha256(recoveryCode.replace(/-/g, '')));
+  })();
+  return codes;
+}
+
 async function deleteAccount(userId, password, code) {
   const db = getDatabase();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
@@ -168,5 +195,5 @@ async function deleteAccount(userId, password, code) {
 
 module.exports = {
   publicUser, register, login, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
-  beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, verifySecondFactor,
+  beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, verifySecondFactor, getTwoFactorStatus, regenerateRecoveryCodes,
 };

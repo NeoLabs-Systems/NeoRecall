@@ -172,6 +172,8 @@ class NeoRecallController extends ChangeNotifier {
   String? accountId;
   String? username;
   String? warning;
+  bool isConfiguringTwoFactor = false;
+  Map<String, dynamic> accountTwoFactor = const <String, dynamic>{};
   RecallPage page = RecallPage.record;
   List<RecordingSession> recordings = <RecordingSession>[];
   List<TranscriptSegment> transcript = <TranscriptSegment>[];
@@ -567,7 +569,90 @@ class NeoRecallController extends ChangeNotifier {
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
+    accountTwoFactor = const <String, dynamic>{};
     notifyListeners();
+  }
+
+  Future<void> fetchTwoFactorStatus() async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      final response = await api.request('GET', '/api/v1/settings/2fa');
+      accountTwoFactor = Map<String, dynamic>.from(response as Map);
+    } catch (_) {
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>?> beginTwoFactorSetup() async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      final response = await api.request('POST', '/api/v1/settings/2fa/setup');
+      return Map<String, dynamic>.from(response as Map);
+    } catch (e) {
+      error = e.toString();
+      return null;
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<String>> enableTwoFactor(String code) async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      final response = await api.request('POST', '/api/v1/settings/2fa/enable', body: {'code': code});
+      await fetchTwoFactorStatus();
+      final map = response as Map;
+      if (map['recoveryCodes'] is List) {
+        return (map['recoveryCodes'] as List).cast<String>();
+      }
+      return [];
+    } catch (e) {
+      error = e.toString();
+      return [];
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> disableTwoFactor({required String password, String? code}) async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      await api.request('DELETE', '/api/v1/settings/2fa', body: {'password': password, if (code != null) 'code': code});
+      await fetchTwoFactorStatus();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<String>> regenerateTwoFactorCodes({required String password, required String code}) async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      final response = await api.request('POST', '/api/v1/settings/2fa/recovery-codes', body: {'password': password, 'code': code});
+      await fetchTwoFactorStatus();
+      final map = response as Map;
+      if (map['recoveryCodes'] is List) {
+        return (map['recoveryCodes'] as List).cast<String>();
+      }
+      return [];
+    } catch (e) {
+      error = e.toString();
+      return [];
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
   }
 
   Future<String> buildDiagnosticExport() async {

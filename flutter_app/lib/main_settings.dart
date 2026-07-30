@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,7 +8,7 @@ import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 
-enum SettingsSection { general, recording, memory, speakers, devices }
+enum SettingsSection { general, security, recording, memory, speakers, devices }
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -37,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       timezone.text = value['timezone'] as String? ?? 'UTC';
       setState(() => settings = value);
     });
+    widget.controller.fetchTwoFactorStatus();
   }
 
   @override
@@ -148,6 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     return switch (selectedSection) {
       SettingsSection.general => _generalSettings(),
+      SettingsSection.security => _securitySettings(),
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
@@ -245,6 +248,187 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ]);
+  }
+
+  Widget _securitySettings() {
+    final palette = neoRecallPaletteOf(context);
+    final ctrl = widget.controller;
+    final tfStatus = ctrl.accountTwoFactor;
+    final isEnabled = tfStatus['enabled'] == true;
+    final recoveryCodesRemaining = tfStatus['recoveryCodesRemaining'] as int? ?? 0;
+
+    return _sectionList(<Widget>[
+      SectionCard(
+        eyebrow: 'SECURITY',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Two-factor authentication', style: TextStyle(color: palette.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Protect your account with an authenticator app.', style: TextStyle(color: palette.textSecondary, height: 1.45)),
+            const SizedBox(height: 16),
+            if (ctrl.isConfiguringTwoFactor)
+              const Center(child: CircularProgressIndicator())
+            else if (isEnabled) ...<Widget>[
+              Row(
+                children: [
+                  Icon(Icons.check_circle, color: palette.accent, size: 20),
+                  const SizedBox(width: 8),
+                  Text('2FA is enabled ($recoveryCodesRemaining recovery codes remaining)', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _disableTwoFactor(ctrl),
+                    child: const Text('Disable 2FA'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: () => _regenerateRecoveryCodes(ctrl),
+                    child: const Text('Regenerate codes'),
+                  ),
+                ],
+              ),
+            ] else ...<Widget>[
+              Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
+                  const SizedBox(width: 8),
+                  Text('2FA is not enabled', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () => _setupTwoFactor(ctrl),
+                child: const Text('Enable 2FA'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ]);
+  }
+
+  Future<void> _disableTwoFactor(NeoRecallController ctrl) async {
+    final password = await _promptDialog('Enter password', 'Your current password is required to disable 2FA', obscure: true);
+    if (password == null || password.isEmpty) return;
+    await ctrl.disableTwoFactor(password: password);
+    if (ctrl.error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+    }
+  }
+
+  Future<void> _regenerateRecoveryCodes(NeoRecallController ctrl) async {
+    final password = await _promptDialog('Enter password', 'Your current password is required.', obscure: true);
+    if (password == null || password.isEmpty) return;
+    final code = await _promptDialog('Enter 2FA code', 'Enter your current authenticator code.');
+    if (code == null || code.isEmpty) return;
+    final codes = await ctrl.regenerateTwoFactorCodes(password: password, code: code);
+    if (ctrl.error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      return;
+    }
+    if (codes.isNotEmpty && mounted) {
+      _showRecoveryCodesDialog(codes);
+    }
+  }
+
+  Future<void> _setupTwoFactor(NeoRecallController ctrl) async {
+    final setup = await ctrl.beginTwoFactorSetup();
+    if (setup == null || !mounted) return;
+    final code = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final codeController = TextEditingController();
+        return AlertDialog(
+          title: const Text('Enable 2FA'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Scan this QR code in your authenticator app.'),
+              const SizedBox(height: 16),
+              if (setup['qrDataUrl'] != null)
+                Image.memory(base64Decode((setup['qrDataUrl'] as String).split(',').last), width: 200, height: 200),
+              const SizedBox(height: 8),
+              SelectableText(setup['manualKey'] as String? ?? ''),
+              const SizedBox(height: 16),
+              TextField(
+                controller: codeController,
+                decoration: const InputDecoration(labelText: 'Authenticator code'),
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, codeController.text), child: const Text('Verify')),
+          ],
+        );
+      },
+    );
+    if (code == null || code.isEmpty) return;
+    final codes = await ctrl.enableTwoFactor(code);
+    if (ctrl.error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      return;
+    }
+    if (codes.isNotEmpty && mounted) {
+      _showRecoveryCodesDialog(codes);
+    }
+  }
+
+  void _showRecoveryCodesDialog(List<String> codes) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recovery Codes'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Save these codes in a secure place. They are shown only once.'),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: codes.map((c) => Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.grey.withAlpha(25)),
+                child: Text(c, style: const TextStyle(fontFamily: 'monospace')),
+              )).toList(),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _promptDialog(String title, String message, {bool obscure = false}) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message),
+            const SizedBox(height: 16),
+            TextField(controller: controller, obscureText: obscure, autofocus: true),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('OK')),
+        ],
+      ),
+    );
   }
 
   Widget _recordingSettings() {
@@ -389,6 +573,12 @@ class _SettingsNavigation extends StatelessWidget {
       icon: Icons.tune,
       label: 'General',
       description: 'Time and locale',
+    ),
+    _SettingsNavigationItem(
+      section: SettingsSection.security,
+      icon: Icons.security,
+      label: 'Security',
+      description: 'Passwords and 2FA',
     ),
     _SettingsNavigationItem(
       section: SettingsSection.recording,

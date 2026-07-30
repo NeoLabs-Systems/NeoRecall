@@ -44,6 +44,10 @@
         Audit log
       </button>
       <div class="nav-section-label">Configure</div>
+      <button class="nav-item" data-page="security" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+        Security
+      </button>
       <button class="nav-item" data-page="processing" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.1 13 .1-1-.1-1 2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.5h-4L10.3 6a8 8 0 0 0-1.7 1.1l-2.4-1-2 3.4 2 1.5-.1 1 .1 1-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.7 1.1l.4 2.5h4L15 18a8 8 0 0 0 1.7-1.1l2.4 1 2-3.4-2-1.5ZM12.7 15.3A3.5 3.5 0 1 1 11.3 8a3.5 3.5 0 0 1 1.4 7.3Z"/></svg>
         Processing
@@ -111,6 +115,19 @@
             <button id="save-settings" class="btn btn-primary" type="button">Save changes</button>
           </div>
           <div id="processing-settings" class="settings-grid"></div>
+        </div>
+      </section>
+
+      <section class="page" data-page-content="security">
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Two-factor authentication</div><p>Protect the admin account with an authenticator app.</p></div>
+            <div>
+              <button id="twofactor-recovery" class="btn btn-ghost" type="button" data-tf-action="recovery" style="display:none;margin-right:8px;">Regenerate codes</button>
+              <button id="twofactor-action" class="btn btn-primary" type="button" data-tf-action="setup">Enable 2FA</button>
+            </div>
+          </div>
+          <div style="padding:16px;" id="twofactor-status">Loading…</div>
         </div>
       </section>
     </div>

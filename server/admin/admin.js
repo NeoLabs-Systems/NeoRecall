@@ -15,6 +15,7 @@ const pages = {
   ai: ['AI requests', 'Remote analysis usage and cost.'],
   audit: ['Audit log', 'Security-sensitive administrative changes.'],
   processing: ['Processing', 'Live diarization, deduplication and consolidation thresholds.'],
+  security: ['Security', 'Admin authentication and access control.'],
 };
 let toastTimer;
 
@@ -98,13 +99,14 @@ function renderEmpty(columns, message) {
 
 async function load({ announce = false } = {}) {
   document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData] = await Promise.all([
+  const [stats, userData, jobData, aiData, auditData, settingsData, tfStatus] = await Promise.all([
     api('/stats'),
     api('/users'),
     api('/jobs?limit=50'),
     api('/ai-requests?limit=50'),
     api('/audit?limit=50'),
     api('/processing-settings'),
+    api('/settings/2fa'),
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
   const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
@@ -134,8 +136,55 @@ async function load({ announce = false } = {}) {
   jobBadge.hidden = failed === 0;
   jobBadge.textContent = String(failed);
   renderSettings(settingsData.settings);
-  document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  renderSecurity(tfStatus); // 2fa status
+  document.querySelector('#last-refresh').textContent = \`Updated \${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\`;
   if (announce) showToast('Admin data refreshed');
+}
+
+function renderSecurity(tfStatus) {
+  if (!tfStatus) return;
+  const statusEl = document.querySelector('#twofactor-status');
+  const actionBtn = document.querySelector('#twofactor-action');
+  const recoveryBtn = document.querySelector('#twofactor-recovery');
+  if (tfStatus.enabled) {
+    statusEl.innerHTML = '<span class="status-dot ok"></span> 2FA is enabled (' + tfStatus.recoveryCodesRemaining + ' recovery codes remaining)';
+    actionBtn.textContent = 'Disable 2FA';
+    actionBtn.dataset.tfAction = 'disable';
+    actionBtn.classList.replace('btn-primary', 'btn-danger');
+    recoveryBtn.style.display = 'inline-block';
+  } else {
+    statusEl.innerHTML = '<span class="status-dot warn"></span> 2FA is not enabled';
+    actionBtn.textContent = 'Enable 2FA';
+    actionBtn.dataset.tfAction = 'setup';
+    actionBtn.classList.replace('btn-danger', 'btn-primary');
+    recoveryBtn.style.display = 'none';
+  }
+}
+
+async function handleTwoFactorSetup() {
+  const setup = await api('/settings/2fa/setup', { method: 'POST' });
+  const code = prompt(\`Scan the QR code or use manual key: \${setup.manualKey}\\n\\nEnter the 6-digit code:\`);
+  if (!code) return;
+  const res = await api('/settings/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) });
+  alert('2FA enabled! Save these recovery codes:\\n' + res.recoveryCodes.join('\\n'));
+  await load();
+  showToast('2FA enabled');
+}
+
+async function handleTwoFactorDisable() {
+  const code = prompt('Enter your 2FA code or a recovery code to disable 2FA:');
+  if (!code) return;
+  await api('/settings/2fa', { method: 'DELETE', body: JSON.stringify({ code }) });
+  await load();
+  showToast('2FA disabled');
+}
+
+async function handleTwoFactorRecovery() {
+  const code = prompt('Enter your current 2FA code to regenerate recovery codes:');
+  if (!code) return;
+  const res = await api('/settings/2fa/recovery-codes', { method: 'POST', body: JSON.stringify({ code }) });
+  alert('New recovery codes generated! Save these:\\n' + res.recoveryCodes.join('\\n'));
+  await load();
 }
 
 document.addEventListener('click', async (event) => {
@@ -152,9 +201,15 @@ document.addEventListener('click', async (event) => {
       await load();
       showToast('Job queued for retry');
     } else if (button?.dataset.cancel) {
-      await api(`/jobs/${button.dataset.cancel}/cancel`, { method: 'POST' });
+      await api(\`/jobs/\${button.dataset.cancel}/cancel\`, { method: 'POST' });
       await load();
       showToast('Job cancelled');
+    } else if (button?.dataset.tfAction === 'setup') {
+      await handleTwoFactorSetup();
+    } else if (button?.dataset.tfAction === 'disable') {
+      await handleTwoFactorDisable();
+    } else if (button?.dataset.tfAction === 'recovery') {
+      await handleTwoFactorRecovery();
     }
   } catch (error) {
     showError(error);
