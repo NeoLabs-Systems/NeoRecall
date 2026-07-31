@@ -54,6 +54,9 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   // the wait if the device never answers a given day.
   static const Duration _listTimeout = Duration(seconds: 4);
   static const Duration _downloadTimeout = Duration(seconds: 90);
+  // How many times to re-request a file whose transfer arrived short (dropped
+  // notifications) before giving up and leaving it on the device for next sweep.
+  static const int _downloadAttempts = 4;
   static const Duration _deleteTimeout = Duration(seconds: 3);
   static const Duration _commandGap = Duration(milliseconds: 120);
   static const List<String> _controlPrefixes = <String>[
@@ -329,7 +332,12 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
               'accepts no commands. Check the device is on and in range.',
         },
       );
-      return 0;
+      // Surface this instead of returning a silent empty sync: a failed
+      // handshake is a real error the user needs to see (reconnect / retry).
+      throw StateError(
+        'The device did not answer the connection handshake. Reconnect it and '
+        'try syncing again.',
+      );
     }
     var count = 0;
     final files = await _listAllStoredFiles();
@@ -412,38 +420,48 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   }
 
   Future<Uint8List> _downloadStoredFile(HeyPocketStoredFile file) async {
-    final buffer = <int>[];
-    final done = Completer<void>();
-    _downloadBuffer = buffer;
-    _downloadDone = done;
-    _expectedDownloadBytes = null;
-    try {
-      await _writeControl('APP&U&${file.date}&${file.fileId}');
-      // Binary MP3 notifications accumulate into the buffer until MCU&OFF.
-      await done.future.timeout(_downloadTimeout);
-      // MCU&OFF (control channel) can arrive just before the final MP3 chunks
-      // (data channel) are delivered. When the device announced a size, wait
-      // briefly for the buffer to catch up so the MP3 tail is never truncated.
-      final expected = _expectedDownloadBytes;
-      if (expected != null) {
-        for (var i = 0; i < 100 && buffer.length < expected; i += 1) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
-        // Never ingest a truncated recording: if fewer than the announced bytes
-        // arrived (a dropped notification), fail so the file is left on the
-        // device and re-downloaded on the next sweep rather than stored corrupt.
-        if (buffer.length < expected) {
-          throw StateError(
-            'HeyPocket download incomplete: ${buffer.length}/$expected bytes',
-          );
-        }
-      }
-      return Uint8List.fromList(buffer);
-    } finally {
-      _downloadBuffer = null;
-      _downloadDone = null;
+    // A single BLE transfer can arrive short when notifications are dropped
+    // (common on Web Bluetooth). The device re-sends the whole file on each
+    // APP&U, so retry until the full announced byte count (MCU&U&<size>) has
+    // arrived — verified against real hardware, where one file needed a retry.
+    List<int> best = const <int>[];
+    int? announced;
+    for (var attempt = 0; attempt < _downloadAttempts; attempt += 1) {
+      final buffer = <int>[];
+      final done = Completer<void>();
+      _downloadBuffer = buffer;
+      _downloadDone = done;
       _expectedDownloadBytes = null;
+      try {
+        await _writeControl('APP&U&${file.date}&${file.fileId}');
+        await done.future.timeout(_downloadTimeout);
+        // MCU&OFF (control channel) can land just before the last MP3 chunks
+        // (data channel); when a size was announced, wait briefly for the tail.
+        announced = _expectedDownloadBytes;
+        if (announced != null) {
+          for (var i = 0; i < 100 && buffer.length < announced; i += 1) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        }
+      } finally {
+        _downloadBuffer = null;
+        _downloadDone = null;
+        _expectedDownloadBytes = null;
+      }
+      if (buffer.length > best.length) best = buffer;
+      // Done when the device announced no size (can't verify) or we have it all.
+      if (announced == null || best.length >= announced) break;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
+    // Never ingest a truncated recording: if it never reached the announced size
+    // it stays on the device for a later sweep rather than being stored corrupt.
+    if (announced != null && best.length < announced) {
+      throw StateError(
+        'HeyPocket download incomplete after $_downloadAttempts attempts: '
+        '${best.length}/$announced bytes',
+      );
+    }
+    return Uint8List.fromList(best);
   }
 
   Future<bool> _deleteStoredFile(HeyPocketStoredFile file) async {

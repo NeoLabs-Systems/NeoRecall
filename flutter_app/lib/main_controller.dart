@@ -237,6 +237,13 @@ class NeoRecallController extends ChangeNotifier {
     return type is String && _offlineFirstDeviceTypes.contains(type);
   }
 
+  /// True when the preferred wearable is actually connected right now — not
+  /// merely saved as the preference. The device list must use this (rather than a
+  /// name match) so its "connected" indicator never contradicts the sync card.
+  bool get deviceConnected =>
+      audioDeviceSessions.state == DeviceTransportState.connectedStandby ||
+      audioDeviceSessions.state == DeviceTransportState.recording;
+
   /// True when a connected wearable exposes on-board storage that can be synced,
   /// so the UI can offer a manual "sync device recordings" action.
   bool get deviceStorageSyncAvailable {
@@ -726,13 +733,41 @@ class NeoRecallController extends ChangeNotifier {
       details: <String, Object?>{'backendAvailable': backendAvailable},
     );
     return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
-      'schemaVersion': 1,
+      'schemaVersion': 2,
       'client': <String, Object?>{
         ...ClientDiagnosticLog.instance.clientSummary(),
         'wearableAudioCodec': wearableAudioCodecStatus,
+        'preferredDevice': audioDeviceSessions.preferredDevice?.displayName,
+        'preferredDeviceType':
+            audioDeviceSessions.preferredDevice?.metadata['type'],
+        'deviceState': audioDeviceSessions.state.name,
+        'deviceConnected': deviceConnected,
+        'pendingAudioBytes': pendingAudioBytes,
+        'needsAttentionCount': needsAttentionCount,
       },
       'backend': backend,
     });
+  }
+
+  /// Recent diagnostic events (newest last) for the in-app viewer.
+  List<Map<String, Object?>> get diagnosticEvents =>
+      ClientDiagnosticLog.instance.recent(80);
+
+  int get diagnosticEventCount => ClientDiagnosticLog.instance.length;
+
+  /// One readable line for a diagnostic event (used by the viewer).
+  String formatDiagnosticEvent(Map<String, Object?> event) =>
+      ClientDiagnosticLog.instance.formatLine(event);
+
+  /// Wipes the local diagnostic log (the "delete" action in Settings).
+  Future<void> clearDiagnostics() async {
+    await ClientDiagnosticLog.instance.clear();
+    ClientDiagnosticLog.instance.record(
+      'diagnostics',
+      'log_cleared',
+      details: <String, Object?>{'by': 'user'},
+    );
+    notifyListeners();
   }
 
   Future<bool> _run(
@@ -1221,6 +1256,16 @@ class NeoRecallController extends ChangeNotifier {
   }
 
   void _handleDeviceTransportState(DeviceTransportState state) {
+    ClientDiagnosticLog.instance.record(
+      'device_transport',
+      'state_changed',
+      level: state == DeviceTransportState.faulted ? 'warning' : 'info',
+      details: <String, Object?>{
+        'state': state.name,
+        'device': audioDeviceSessions.preferredDevice?.displayName,
+        'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+      },
+    );
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
       _deviceStorageAutoSyncArmed = true;
@@ -1482,14 +1527,36 @@ class NeoRecallController extends ChangeNotifier {
         Namespace.url.value,
         '$backendUrl:${username ?? ''}:$contentHash:${bytes.length}',
       );
+      ClientDiagnosticLog.instance.record(
+        'file_import',
+        'import_started',
+        details: <String, Object?>{
+          'importId': importId,
+          'bytes': bytes.length,
+          'mime': contentType,
+          'filename': filename,
+          'source': 'file',
+        },
+      );
       await api.importAudio(
         importId: importId,
         bytes: Uint8List.fromList(bytes),
         filename: filename,
         contentType: contentType,
       );
+      ClientDiagnosticLog.instance.record(
+        'file_import',
+        'import_accepted',
+        details: <String, Object?>{'importId': importId, 'bytes': bytes.length},
+      );
       notice = 'Import uploaded. Local transcription has been queued.';
     } catch (exception) {
+      ClientDiagnosticLog.instance.record(
+        'file_import',
+        'import_failed',
+        level: 'error',
+        details: <String, Object?>{'error': exception.toString()},
+      );
       error = exception.toString();
     } finally {
       loading = false;
@@ -1519,7 +1586,7 @@ class NeoRecallController extends ChangeNotifier {
   /// ingests them through the durable import pipeline, deleting each file from
   /// the device only once its import is accepted. Idempotent and interruption
   /// safe: re-running re-imports the same content under the same import id.
-  Future<void> syncDeviceStorage() async {
+  Future<void> syncDeviceStorage({bool userInitiated = false}) async {
     // Never drain on-device storage during a live recording: the two share the
     // wearable's BLE channel/buffer and would corrupt each other.
     if (deviceStorageSyncing || !authenticated || isRecording) return;
@@ -1527,12 +1594,23 @@ class NeoRecallController extends ChangeNotifier {
     if (adapter is! StorageSyncCapableAdapter) return;
     final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
     if (storage == null) return;
+    final deviceName = audioDeviceSessions.preferredDevice?.displayName ??
+        'the device';
 
     deviceStorageSyncing = true;
     deviceStorageSyncError = null;
     deviceStorageSyncedCount = 0;
     deviceStoragePendingCount = 0;
     notifyListeners();
+    ClientDiagnosticLog.instance.record(
+      'device_sync',
+      'sync_started',
+      details: <String, Object?>{
+        'device': deviceName,
+        'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+        'trigger': userInitiated ? 'manual' : 'auto',
+      },
+    );
     try {
       // The connector owns its device protocol (file list/download/delete,
       // ring-buffer drain, or flash-page batch) and hands back complete
@@ -1550,10 +1628,30 @@ class NeoRecallController extends ChangeNotifier {
         notice =
             '$deviceStorageSyncedCount device recording(s) synced and queued for transcription.';
         await refreshAll(silent: true);
+      } else if (userInitiated) {
+        // Only tell the user "nothing to sync" when they asked; the automatic
+        // sync on every connect stays quiet on an empty device.
+        notice = 'No new recordings on $deviceName to sync.';
       }
     } catch (error) {
-      deviceStorageSyncError = error.toString();
+      // Surface the failure so a silent no-op never masquerades as success.
+      // Strip Dart's "Bad state:"/"Exception:" prefixes for a cleaner message.
+      final message = error.toString().replaceFirst(
+        RegExp(r'^(Bad state|StateError|Exception):\s*'),
+        '',
+      );
+      deviceStorageSyncError = 'Sync of $deviceName failed: $message';
     } finally {
+      ClientDiagnosticLog.instance.record(
+        'device_sync',
+        'sync_finished',
+        level: deviceStorageSyncError == null ? 'info' : 'warning',
+        details: <String, Object?>{
+          'device': deviceName,
+          'synced': deviceStorageSyncedCount,
+          'error': deviceStorageSyncError,
+        },
+      );
       deviceStorageSyncing = false;
       notifyListeners();
     }
@@ -1565,13 +1663,46 @@ class NeoRecallController extends ChangeNotifier {
       Namespace.url.value,
       '$backendUrl:${username ?? ''}:device:$contentHash:${recording.bytes.length}',
     );
-    await api.importAudio(
-      importId: importId,
-      bytes: recording.bytes,
-      filename: recording.filename,
-      contentType: recording.contentType,
-      captureTime: recording.capturedAt,
+    ClientDiagnosticLog.instance.record(
+      'device_import',
+      'import_started',
+      details: <String, Object?>{
+        'importId': importId,
+        'bytes': recording.bytes.length,
+        'mime': recording.contentType,
+        'filename': recording.filename,
+        'capturedAt': recording.capturedAt?.toIso8601String(),
+        'source': 'device',
+      },
     );
+    try {
+      await api.importAudio(
+        importId: importId,
+        bytes: recording.bytes,
+        filename: recording.filename,
+        contentType: recording.contentType,
+        captureTime: recording.capturedAt,
+      );
+      ClientDiagnosticLog.instance.record(
+        'device_import',
+        'import_accepted',
+        details: <String, Object?>{
+          'importId': importId,
+          'bytes': recording.bytes.length,
+        },
+      );
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'device_import',
+        'import_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'importId': importId,
+          'error': error.toString(),
+        },
+      );
+      rethrow;
+    }
   }
 
   Future<void> renameSpeaker(String id, String name) async {

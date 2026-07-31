@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final timezone = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
   bool exportingDiagnostics = false;
+  bool clearingDiagnostics = false;
 
   @override
   void initState() {
@@ -85,6 +86,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => exportingDiagnostics = false);
+    }
+  }
+
+  Future<void> clearDiagnostics() async {
+    setState(() => clearingDiagnostics = true);
+    try {
+      await widget.controller.clearDiagnostics();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Diagnostic log cleared.')),
+      );
+    } finally {
+      if (mounted) setState(() => clearingDiagnostics = false);
     }
   }
 
@@ -218,34 +232,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              'Diagnostic report',
-              style: TextStyle(
-                color: palette.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Device & sync diagnostics',
+                    style: TextStyle(
+                      color: palette.textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh',
+                  onPressed: () => setState(() {}),
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 2),
             Text(
-              'Copies recent connection and synchronization details for this account. Passwords, access tokens, recordings, transcripts, and data from other accounts are excluded.',
+              'Live log of Bluetooth scan/connect, device sync, and '
+              'import/transcription events for this account — everything needed '
+              'to diagnose a device or sync problem. Passwords, tokens, audio, '
+              'transcripts, and other accounts are never included.',
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: exportingDiagnostics ? null : exportDiagnostics,
-              icon: exportingDiagnostics
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.content_copy_outlined),
-              label: Text(
-                exportingDiagnostics
-                    ? 'Preparing report…'
-                    : 'Copy diagnostic report',
-              ),
+            const SizedBox(height: 12),
+            _DiagnosticsLogView(controller: widget.controller),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: exportingDiagnostics ? null : exportDiagnostics,
+                  icon: exportingDiagnostics
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.content_copy_outlined),
+                  label: Text(
+                    exportingDiagnostics ? 'Preparing…' : 'Copy full report',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: clearingDiagnostics ? null : clearDiagnostics,
+                  icon: clearingDiagnostics
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.delete_outline_rounded),
+                  label: const Text('Clear log'),
+                ),
+              ],
             ),
           ],
         ),
@@ -749,4 +794,60 @@ class _SettingsNavigationItem {
   final IconData icon;
   final String label;
   final String description;
+}
+
+/// Scrollable, monospaced view of the recent diagnostic events, colour-coded by
+/// level. Reads a fresh snapshot on each build; the surrounding card's Refresh
+/// button re-reads it, and it is captured in full by "Copy full report".
+class _DiagnosticsLogView extends StatelessWidget {
+  const _DiagnosticsLogView({required this.controller});
+
+  final NeoRecallController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final events = controller.diagnosticEvents;
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 240),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: palette.surfaceMuted.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        border: Border.all(color: palette.border),
+      ),
+      child: events.isEmpty
+          ? Text(
+              'No diagnostic events yet. Connect a device and sync to populate '
+              'this log, then reopen or refresh.',
+              style: TextStyle(color: palette.textMuted, fontSize: 12.5),
+            )
+          : SingleChildScrollView(
+              reverse: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  for (final event in events)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: SelectableText(
+                        controller.formatDiagnosticEvent(event),
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          height: 1.3,
+                          color: event['level'] == 'error'
+                              ? palette.danger
+                              : event['level'] == 'warning'
+                              ? const Color(0xFFC98A00)
+                              : palette.textSecondary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
 }

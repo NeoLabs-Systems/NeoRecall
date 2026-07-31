@@ -8,7 +8,9 @@ class ClientDiagnosticLog {
   ClientDiagnosticLog._();
 
   static final ClientDiagnosticLog instance = ClientDiagnosticLog._();
-  static const int _maximumEntries = 300;
+  // Deep enough to hold a full connect → sync → import → transcription session
+  // across several devices, so a report captures the whole failing flow.
+  static const int _maximumEntries = 800;
   static const int _maximumTextLength = 500;
 
   final List<Map<String, Object?>> _entries = <Map<String, Object?>>[];
@@ -70,6 +72,32 @@ class ClientDiagnosticLog {
   List<Map<String, Object?>> snapshot() => _entries
       .map((entry) => Map<String, Object?>.from(entry))
       .toList(growable: false);
+
+  /// The most recent [count] entries, newest last — for an in-app viewer.
+  List<Map<String, Object?>> recent([int count = 60]) {
+    final start = _entries.length <= count ? 0 : _entries.length - count;
+    return _entries
+        .sublist(start)
+        .map((entry) => Map<String, Object?>.from(entry))
+        .toList(growable: false);
+  }
+
+  int get length => _entries.length;
+
+  /// One readable line per event (`HH:mm:ss LEVEL component/event {details}`),
+  /// for both the in-app viewer and the copied report.
+  String formatLine(Map<String, Object?> entry) {
+    final ts = (entry['timestamp'] as String?) ?? '';
+    final time = ts.length >= 19 ? ts.substring(11, 19) : ts;
+    final level = (entry['level'] as String? ?? 'info').toUpperCase();
+    final component = entry['component'] ?? '?';
+    final event = entry['event'] ?? '?';
+    final details = entry['details'];
+    final tail = details == null ? '' : ' ${jsonEncode(details)}';
+    return '$time $level $component/$event$tail';
+  }
+
+  String asText() => _entries.map(formatLine).join('\n');
 
   Future<void> clear() async {
     await _writeChain;

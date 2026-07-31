@@ -378,7 +378,10 @@ class _RecordScreenState extends State<RecordScreen> {
                         OutlinedButton.icon(
                           onPressed: controller.deviceStorageSyncing
                               ? null
-                              : () => controller.syncDeviceStorage(),
+                              : () =>
+                                    controller.syncDeviceStorage(
+                                      userInitiated: true,
+                                    ),
                           icon: controller.deviceStorageSyncing
                               ? const SizedBox(
                                   width: 16,
@@ -401,15 +404,21 @@ class _RecordScreenState extends State<RecordScreen> {
                     ...controller.discoveredWearables.map((device) {
                       final compatibilityUnknown =
                           device.metadata['compatibilityUnknown'] == true;
-                      final selected =
+                      // "Preferred" = this is the saved device; "connected" =
+                      // it is actually linked right now. Only the latter shows a
+                      // connected indicator, so this never contradicts the sync
+                      // card (which also keys off the live connection state).
+                      final preferred =
                           controller.preferredDeviceLabel == device.displayName;
+                      final connected = preferred && controller.deviceConnected;
+                      final type = device.metadata['type'] ?? 'wearable';
                       return ListTile(
                         dense: true,
                         leading: Icon(
-                          selected
+                          connected
                               ? Icons.bluetooth_connected
                               : Icons.bluetooth,
-                          color: selected
+                          color: connected
                               ? palette.accentHover
                               : palette.textSecondary,
                         ),
@@ -417,9 +426,13 @@ class _RecordScreenState extends State<RecordScreen> {
                         subtitle: Text(
                           compatibilityUnknown
                               ? 'Compatibility will be checked securely'
-                              : '${device.metadata['type'] ?? 'wearable'} · Ready for audio',
+                              : connected
+                              ? '$type · Connected'
+                              : preferred
+                              ? '$type · Preferred — not connected'
+                              : '$type · Ready for audio',
                         ),
-                        trailing: selected
+                        trailing: connected
                             ? const Icon(Icons.check_circle, size: 18)
                             : TextButton(
                                 onPressed: controller.isRecording
@@ -446,7 +459,11 @@ class _RecordScreenState extends State<RecordScreen> {
                                         }
                                       },
                                 child: Text(
-                                  compatibilityUnknown ? 'Check' : 'Connect',
+                                  compatibilityUnknown
+                                      ? 'Check'
+                                      : preferred
+                                      ? 'Reconnect'
+                                      : 'Connect',
                                 ),
                               ),
                       );
@@ -629,7 +646,7 @@ class _OfflineDeviceSyncCardState extends State<_OfflineDeviceSyncCard> {
   Future<void> _sync() async {
     setState(() => _syncing = true);
     try {
-      await widget.controller.syncDeviceStorage();
+      await widget.controller.syncDeviceStorage(userInitiated: true);
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
@@ -698,6 +715,30 @@ class _OfflineDeviceSyncCardState extends State<_OfflineDeviceSyncCard> {
               ),
             ),
           ),
+          if (controller.deviceStorageSyncError != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(
+                  Icons.error_outline_rounded,
+                  size: 16,
+                  color: palette.danger,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    controller.deviceStorageSyncError!,
+                    style: TextStyle(
+                      color: palette.danger,
+                      fontSize: 12.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
