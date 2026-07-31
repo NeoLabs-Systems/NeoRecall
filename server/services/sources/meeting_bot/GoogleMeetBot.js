@@ -1,7 +1,17 @@
 'use strict';
 
 const AbstractBot = require('./AbstractBot');
-const { clickButtonByTexts, bodyIncludesAny, turnOffToggles, waitForAdmission, sanitizeDisplayName, humanPause, humanFill } = require('./meet_helpers');
+const {
+  JoinError,
+  clickButtonByTexts,
+  clickButtonByTextsWithin,
+  fillDisplayNameIfPresent,
+  bodyIncludesAny,
+  turnOffToggles,
+  waitForAdmission,
+  sanitizeDisplayName,
+  humanPause,
+} = require('./meet_helpers');
 
 // Google Meet renders in the account/browser locale, so list every text we act
 // on in the locales we support (English + German). Add locales here.
@@ -15,6 +25,8 @@ const MUTE_TOGGLES = [
 const ADMITTED_SELECTOR = 'button[aria-label*="Leave call" i], button[aria-label*="Anruf verlassen" i]';
 
 class GoogleMeetBot extends AbstractBot {
+  admittedSelector() { return ADMITTED_SELECTOR; }
+
   async joinMeeting() {
     console.log(`[GoogleMeetBot] Joining ${this.url}`);
     await this.page.goto(this.url, { waitUntil: 'domcontentloaded' });
@@ -22,32 +34,42 @@ class GoogleMeetBot extends AbstractBot {
     await clickButtonByTexts(this.page, CONTINUE_WITHOUT_DEVICES);
     await this._failIfRefused();
 
-    // The name field is the only free-text input on the pre-join screen, so match
-    // by type rather than a locale-specific placeholder.
-    const nameInput = this.page.locator('input[type="text"]').first();
-    try {
-      await nameInput.waitFor({ state: 'visible', timeout: 20000 });
-    } catch (e) {
-      await this._failIfRefused();
-      throw new Error('[GoogleMeetBot] Pre-join name field never appeared (unsupported page or Meet UI change).');
-    }
-    await humanFill(nameInput, sanitizeDisplayName(this.botName));
+    // Guests are asked for a display name; a signed-in browser is not, because
+    // Meet uses the account's name. Both are valid pre-join states — a signed-in
+    // join only glances for the field rather than waiting the full guest budget.
+    const named = await fillDisplayNameIfPresent(this.page, sanitizeDisplayName(this.botName), {
+      timeoutMs: this.connection.connected.google ? 3000 : 12000,
+    });
+    console.log(named
+      ? '[GoogleMeetBot] Filled the guest display name.'
+      : `[GoogleMeetBot] No name prompt — joining as the signed-in account${this.connection.identity ? ` (${this.connection.identity})` : ''}.`);
 
     // Passive recorder: force mic + camera off before joining.
     const off = await turnOffToggles(this.page, MUTE_TOGGLES);
     if (off.length) console.log(`[GoogleMeetBot] Turned off: ${off.join(', ')}`);
 
     await humanPause(this.page);
-    const clicked = await clickButtonByTexts(this.page, JOIN_BUTTONS);
-    if (!clicked) throw new Error('[GoogleMeetBot] Could not find a join button (e.g. "Ask to join" / "Teilnahme erbitten").');
+    // Meet often mounts the join button a moment after the rest of the lobby, so
+    // keep looking while watching for a refusal that makes waiting pointless.
+    const clicked = await clickButtonByTextsWithin(this.page, JOIN_BUTTONS, {
+      onPoll: () => this._failIfRefused(),
+    });
+    if (!clicked) {
+      await this._failIfRefused();
+      throw new JoinError('ui_changed', 'Google Meet showed no join button ("Ask to join" / "Teilnahme erbitten") on the pre-join screen. The link may not be a joinable meeting, or Meet changed its lobby.');
+    }
     console.log(`[GoogleMeetBot] Clicked "${clicked}", waiting for admission...`);
     await clickButtonByTexts(this.page, CONTINUE_WITHOUT_DEVICES);
 
-    await waitForAdmission(this.page, {
-      admittedSelector: ADMITTED_SELECTOR,
-      meetingHost: 'meet.google.com',
-      cannotJoinTexts: CANNOT_JOIN,
-    });
+    try {
+      await waitForAdmission(this.page, {
+        admittedSelector: ADMITTED_SELECTOR,
+        meetingHost: 'meet.google.com',
+        cannotJoinTexts: CANNOT_JOIN,
+      });
+    } catch (error) {
+      throw this._explainRefusal(error);
+    }
 
     console.log('[GoogleMeetBot] Admitted to meeting!');
     this.isRecording = true;
@@ -55,14 +77,27 @@ class GoogleMeetBot extends AbstractBot {
 
   async _failIfRefused() {
     const hit = await bodyIncludesAny(this.page, CANNOT_JOIN);
-    if (hit) {
-      throw new Error(`[GoogleMeetBot] Google refused the join ("${hit}"). The meeting does not allow anonymous ` +
-        `participants, or the host has not started it. This bot joins without a Google account, so meetings ` +
-        `restricted to signed-in/invited users cannot be joined.`);
-    }
+    if (hit) throw this._refusalError(`Google Meet refused the join ("${hit}").`);
     if (this.page.url().startsWith('https://accounts.google.com/')) {
-      throw new Error('[GoogleMeetBot] Meeting requires Google sign-in; the anonymous bot cannot join it.');
+      throw this._refusalError('Google Meet sent the bot to the sign-in page, so this meeting is not open to guests.');
     }
+  }
+
+  // The same refusal means two different things depending on who the bot is,
+  // and the two need opposite fixes — so name the one that applies.
+  _refusalError(what) {
+    if (this.connection.connected.google) {
+      const who = this.connection.identity || 'the connected Google account';
+      return new JoinError('not_invited', `${what} ${who} is signed in but not allowed into this meeting — the host restricted it to invited people. Invite ${who} to the meeting, or ask the host to admit it.`);
+    }
+    return new JoinError('anonymous_blocked', `${what} The bot is joining as an anonymous guest, and this meeting does not accept guests. Connect a Google account under Sources → Meeting account, then start the meeting source again.`);
+  }
+
+  _explainRefusal(error) {
+    if (error instanceof JoinError && (error.code === 'refused' || error.code === 'redirected')) {
+      return this._refusalError(error.message);
+    }
+    return error;
   }
 }
 

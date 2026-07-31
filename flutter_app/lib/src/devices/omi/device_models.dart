@@ -2,7 +2,6 @@
 enum WearableDeviceType {
   omi,
   omiGlass,
-  plaud,
   heyPocket,
   custom,
 }
@@ -23,9 +22,6 @@ class WearableDeviceUuids {
   static const timeSyncWrite = '19b10031-e8f2-537e-4f6c-d104768a1214';
   static const batteryService = '0000180f-0000-1000-8000-00805f9b34fb';
   static const batteryLevel = '00002a19-0000-1000-8000-00805f9b34fb';
-  static const plaudService = '00001910-0000-1000-8000-00805f9b34fb';
-  static const plaudWrite = '00002bb1-0000-1000-8000-00805f9b34fb';
-  static const plaudNotify = '00002bb0-0000-1000-8000-00805f9b34fb';
   // HeyPocket (also labelled PKT01 / Pocket). Control frames are ASCII text and
   // audio is an MP3 stream delivered over the audio-notify characteristic.
   static const heyPocketService = '001120a0-2233-4455-6677-889912345678';
@@ -54,13 +50,9 @@ class DiscoveredWearable {
     required List<String> serviceUuids,
   }) {
     final lower = name.toLowerCase();
-    final upper = name.toUpperCase();
     bool has(String uuid) =>
         serviceUuids.any((value) => value.toLowerCase() == uuid.toLowerCase());
 
-    if (upper.startsWith('PLAUD') || has(WearableDeviceUuids.plaudService)) {
-      return WearableDeviceType.plaud;
-    }
     if (has(WearableDeviceUuids.heyPocketService) ||
         lower.contains('heypocket') ||
         lower.startsWith('pkt01') ||

@@ -68,6 +68,14 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   static const String _batteryResponsePrefix = 'MCU&BAT&';
 
   bool _authenticated = false;
+  /// Set by cancelStoredSync so the sweep stops between files. Aborting only
+  /// the in-flight download let the loop continue with the next file, so a
+  /// cancel issued to free the channel for live capture never actually ended
+  /// the sweep.
+  bool _drainCancelled = false;
+  int _lastFilesListed = 0;
+  int _lastSynced = 0;
+  int _lastFailed = 0;
   Completer<bool>? _authRequest;
   Completer<int>? _batteryRequest;
   // True once the device has answered ANY MCU&… frame this sweep — lets a sync
@@ -266,7 +274,15 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    await _authenticate();
+    // The firmware answers nothing until the session key is accepted, so a
+    // failed handshake means APP&STA cannot start anything. Reporting
+    // "recording" then would show a live capture that can never produce audio.
+    if (!await _authenticate()) {
+      throw StateError(
+        'The device did not answer the connection handshake, so recording could '
+        'not be started. Reconnect it and try again.',
+      );
+    }
     recording = true;
     try {
       // Binary MP3 then flows on a notify channel and is routed to audioBytes
@@ -322,6 +338,10 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     // routing buffer, so they must never run at the same time.
     if (recording) return 0;
     _sawControlResponse = false;
+    _drainCancelled = false;
+    _lastFilesListed = 0;
+    _lastSynced = 0;
+    _lastFailed = 0;
     if (!await _authenticate()) {
       ClientDiagnosticLog.instance.record(
         'bluetooth_audio',
@@ -340,7 +360,9 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       );
     }
     var count = 0;
+    var failed = 0;
     final files = await _listAllStoredFiles();
+    _lastFilesListed = files.length;
     ClientDiagnosticLog.instance.record(
       'bluetooth_audio',
       'heypocket_sync_listed',
@@ -350,6 +372,8 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       },
     );
     for (final file in files) {
+      // A cancel must end the whole sweep, not just the file in flight.
+      if (_drainCancelled) break;
       try {
         final bytes = await _downloadStoredFile(file);
         if (bytes.length < minBytes) continue;
@@ -374,14 +398,30 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
           level: 'warning',
           details: <String, Object?>{'id': file.id, 'error': error.toString()},
         );
+        failed += 1;
         continue;
       }
     }
     ClientDiagnosticLog.instance.record(
       'bluetooth_audio',
       'heypocket_sync_done',
-      details: <String, Object?>{'synced': count, 'available': files.length},
+      details: <String, Object?>{
+        'synced': count,
+        'available': files.length,
+        'failed': failed,
+        'cancelled': _drainCancelled,
+      },
     );
+    _lastSynced = count;
+    _lastFailed = failed;
+    // Every file failing is not an empty device. Surfacing it keeps the sweep
+    // from reporting "no new recordings" when nothing could be pulled at all.
+    if (count == 0 && failed > 0) {
+      throw StateError(
+        'Found $failed recording(s) on the device but none could be '
+        'transferred. Keep the device close and try again.',
+      );
+    }
     return count;
   }
 
@@ -425,6 +465,10 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     // APP&U, so retry until the full announced byte count (MCU&U&<size>) has
     // arrived — verified against real hardware, where one file needed a retry.
     List<int> best = const <int>[];
+    // Sticky across attempts. A retry whose MCU&U announcement is dropped must
+    // NOT read as "size unknown": that switched the completeness check off, so a
+    // short transfer was accepted as final, ingested, and then deleted from the
+    // device — a corrupt import plus permanent loss of the original.
     int? announced;
     for (var attempt = 0; attempt < _downloadAttempts; attempt += 1) {
       final buffer = <int>[];
@@ -435,11 +479,13 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       try {
         await _writeControl('APP&U&${file.date}&${file.fileId}');
         await done.future.timeout(_downloadTimeout);
+        // Keep the first size the device ever reported for this file.
+        announced ??= _expectedDownloadBytes;
         // MCU&OFF (control channel) can land just before the last MP3 chunks
-        // (data channel); when a size was announced, wait briefly for the tail.
-        announced = _expectedDownloadBytes;
-        if (announced != null) {
-          for (var i = 0; i < 100 && buffer.length < announced; i += 1) {
+        // (data channel); when a size is known, wait briefly for the tail.
+        final expected = announced;
+        if (expected != null) {
+          for (var i = 0; i < 100 && buffer.length < expected; i += 1) {
             await Future<void>.delayed(const Duration(milliseconds: 20));
           }
         }
@@ -449,8 +495,13 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
         _expectedDownloadBytes = null;
       }
       if (buffer.length > best.length) best = buffer;
-      // Done when the device announced no size (can't verify) or we have it all.
-      if (announced == null || best.length >= announced) break;
+      if (announced != null) {
+        if (best.length >= announced) break;
+      } else if (best.isNotEmpty) {
+        // Firmware that never announces a size: nothing to verify against, so
+        // accept the first non-empty transfer as before.
+        break;
+      }
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     // Never ingest a truncated recording: if it never reached the announced size
@@ -489,7 +540,21 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   }
 
   @override
+  Map<String, Object?> get syncDiagnostics => <String, Object?>{
+    // Separates "device is empty" from "device never answered" and from
+    // "files were found but none could be transferred".
+    'deviceResponded': _sawControlResponse,
+    'authenticated': _authenticated,
+    'filesListed': _lastFilesListed,
+    'filesSynced': _lastSynced,
+    'filesFailed': _lastFailed,
+  };
+
+  @override
   Future<void> cancelStoredSync() async {
+    // Stop the sweep itself, not just the transfer in flight: without this the
+    // loop simply moved on to the next file and kept the channel busy.
+    _drainCancelled = true;
     try {
       await _writeControl('APP&SHUT');
     } catch (_) {

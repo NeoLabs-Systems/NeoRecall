@@ -16,6 +16,7 @@ import 'src/devices/audio_device_adapter.dart';
 import 'src/devices/audio_codec_decoder.dart';
 import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
+import 'src/devices/device_storage_sync_scheduler.dart';
 import 'src/devices/omi/offline_sync.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
@@ -202,14 +203,16 @@ class NeoRecallController extends ChangeNotifier {
   int deviceStorageSyncedCount = 0;
   int deviceStoragePendingCount = 0;
   String? deviceStorageSyncError;
-  bool _deviceStorageAutoSyncArmed = true;
   static const int _deviceStorageMinBytes = 2048;
-  // While a device stays connected, re-drain periodically so recordings made
-  // after the initial connect are pulled without any user action — background
-  // sync that keeps running as long as the app process is alive (including
-  // during a foreground-service recording on Android).
-  Timer? _deviceStorageSyncTimer;
-  static const Duration _deviceStorageSyncInterval = Duration(minutes: 5);
+  // Automatic on-device recording sync. It runs on every platform (web
+  // included), needs no user action, and keeps sweeping for as long as the
+  // process lives — which on Android is for as long as the wearable link hold
+  // keeps the foreground host alive, i.e. also while the app is swiped away.
+  late final DeviceStorageSyncScheduler deviceStorageSync =
+      DeviceStorageSyncScheduler(
+        isEligible: _canSyncDeviceStorage,
+        runSync: _runDeviceStorageSync,
+      );
   double audioLevel = 0;
   DateTime? recordingStartedAt;
   RecorderCapability? capability;
@@ -230,10 +233,7 @@ class NeoRecallController extends ChangeNotifier {
 
   // Devices that record on-device (button-triggered) rather than streaming live;
   // for these, pulling stored recordings is the primary action, not live capture.
-  static const Set<String> _offlineFirstDeviceTypes = <String>{
-    'heyPocket',
-    'plaud',
-  };
+  static const Set<String> _offlineFirstDeviceTypes = <String>{'heyPocket'};
 
   /// True when the connected wearable is an offline-first (button-record-on-
   /// device) type, so the UI can present "sync recordings" as the primary flow.
@@ -409,21 +409,35 @@ class NeoRecallController extends ChangeNotifier {
         if (recorder is MobileRecallRecorder) {
           final mobile = recorder as MobileRecallRecorder;
           _backgroundSubscription = mobile.background.events.listen((event) {
-            if (event.type == BackgroundCaptureEventType.stopRequested &&
-                isRecording) {
-              unawaited(stopRecording());
-            } else if (event.type ==
-                BackgroundCaptureEventType.batteryOptimizationActive) {
-              backgroundCaptureAtRisk = true;
-              notifyListeners();
+            switch (event.type) {
+              case BackgroundCaptureEventType.stopRequested:
+                // The notification's Stop releases everything the background
+                // host was holding — capture and the wearable link — until the
+                // app is opened again.
+                unawaited(_releaseBackgroundRuntime(mobile));
+              case BackgroundCaptureEventType.batteryOptimizationActive:
+                backgroundCaptureAtRisk = true;
+                notifyListeners();
+              case BackgroundCaptureEventType.microphoneUnavailable:
+                warning = event.message;
+                notifyListeners();
+              case BackgroundCaptureEventType.message:
+                break;
             }
           });
+          // A host restored after a reboot reports a dropped microphone hold
+          // before anything can listen; read it once subscriptions are live.
+          if (mobile.background.state.microphoneUnavailable) {
+            warning = backgroundMicrophoneUnavailableMessage;
+          }
         }
       }
       if (!_runtimeSubscriptionsReady) {
         _attachRuntimeSubscriptions();
         _runtimeSubscriptionsReady = true;
       }
+      // Automatic device-storage sync needs no user action and no open UI.
+      deviceStorageSync.start();
       // Recover interrupted offline sessions/chunks before new capture starts.
       sync.pump.pump();
       await _refreshPending();
@@ -1071,6 +1085,9 @@ class NeoRecallController extends ChangeNotifier {
       sync.pump.pump();
     } catch (exception) {
       error = exception.toString();
+      // Capture never took the device, so release the claim — otherwise a failed
+      // start would silently disable automatic sync for the rest of the session.
+      _deviceClaimedForCapture = false;
       if (recorder.isRecording) await recorder.stop();
       await _partialWrite;
       await Future<void>.delayed(Duration.zero);
@@ -1160,6 +1177,8 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> stopRecording() async {
     if (_stoppingRecording) return;
     _stoppingRecording = true;
+    // The wearable is free again; automatic sweeps may resume.
+    _deviceClaimedForCapture = false;
     try {
       await recorder.stop();
       await _partialWrite;
@@ -1214,6 +1233,19 @@ class NeoRecallController extends ChangeNotifier {
       if (mode == 'bluetooth' && !hasPreferredBluetoothDevice) {
         warning =
             'Background capture could not resume because its Bluetooth device is not configured.';
+        notifyListeners();
+        return;
+      }
+      if (mode == 'microphone' &&
+          recorder is MobileRecallRecorder &&
+          !await (recorder as MobileRecallRecorder).hasAttachedUi()) {
+        // The system started this process on its own (reboot or a sticky
+        // restart) and denies microphone access to a process with no UI.
+        // Keep the durable intent and resume when the app is opened, rather
+        // than starting a capture that would record silence.
+        warning =
+            'Phone-microphone recording is waiting for NeoRecall to be opened. '
+            'Bluetooth capture and device sync continue in the background.';
         notifyListeners();
         return;
       }
@@ -1273,25 +1305,12 @@ class NeoRecallController extends ChangeNotifier {
     );
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
-      _deviceStorageAutoSyncArmed = true;
-      _deviceStorageSyncTimer?.cancel();
-      _deviceStorageSyncTimer = null;
-    } else if (state == DeviceTransportState.connectedStandby &&
-        _deviceStorageAutoSyncArmed) {
-      // §9: after each (re)connect, pull anything the device recorded offline.
-      _deviceStorageAutoSyncArmed = false;
-      unawaited(syncDeviceStorage());
-    }
-    // Keep pulling newly-recorded files for as long as the device is linked.
-    if (state == DeviceTransportState.connectedStandby) {
-      _deviceStorageSyncTimer ??= Timer.periodic(
-        _deviceStorageSyncInterval,
-        (_) {
-          if (deviceConnected && !isRecording && !deviceStorageSyncing) {
-            unawaited(syncDeviceStorage());
-          }
-        },
-      );
+      deviceStorageSync.onDeviceUnlinked();
+    } else if (state == DeviceTransportState.connectedStandby) {
+      // §9: after each (re)connect, pull anything the device recorded offline,
+      // then keep sweeping while it stays linked so later recordings arrive on
+      // their own — with or without the app open.
+      deviceStorageSync.onDeviceLinked();
     }
     final connected =
         state == DeviceTransportState.connectedStandby ||
@@ -1419,12 +1438,31 @@ class NeoRecallController extends ChangeNotifier {
   /// Called when the app returns to the foreground. Proactively resumes sync and
   /// refreshes data instead of waiting for the periodic timer.
   Future<void> onAppResumed() async {
+    if (recorder is MobileRecallRecorder) {
+      final mobile = recorder as MobileRecallRecorder;
+      // Re-arm a runtime the user released from the notification, and retry a
+      // microphone capture that could not resume while no UI was attached.
+      await mobile.resumeBackgroundRuntime();
+      if (_supportsDurableMobileResume) {
+        unawaited(_resumeMobileCaptureIfRequested());
+      }
+    }
     if (!authenticated) return;
     sync.pump.pump();
     await _refreshPending();
     await refreshAll(silent: true);
     // Pull anything the wearable recorded while the app was backgrounded.
     unawaited(syncDeviceStorage());
+  }
+
+  /// Releases every background hold after the user tapped Stop on the
+  /// notification: capture ends, the wearable is unlinked, and the host stops.
+  Future<void> _releaseBackgroundRuntime(MobileRecallRecorder mobile) async {
+    if (isRecording) await stopRecording();
+    await mobile.pauseBackgroundRuntime();
+    notice =
+        'Background recording and device sync are paused. Open NeoRecall to resume them.';
+    notifyListeners();
   }
 
   Future<void> refreshAll({bool silent = false}) async {
@@ -1591,7 +1629,11 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> _stopDeviceStorageSyncForCapture(
     AudioDeviceAdapter adapter,
   ) async {
-    if (!deviceStorageSyncing) return;
+    // Claim the device first and unconditionally: with no sweep in flight this
+    // method used to return immediately, leaving the periodic poll free to start
+    // one during the rest of capture setup.
+    _deviceClaimedForCapture = true;
+    if (!deviceStorageSync.isRunning) return;
     if (adapter is! StorageSyncCapableAdapter) return;
     final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
     if (storage == null) return;
@@ -1600,37 +1642,67 @@ class NeoRecallController extends ChangeNotifier {
     } catch (_) {
       // Best-effort: the drain also unwinds on its own timeout/disconnect.
     }
+    // Automatic sweeps run unattended, so the cancel above may land mid-drain.
+    // Wait for the sweep to actually unwind before the live stream subscribes,
+    // otherwise stored audio could still be routed into the live capture.
+    await deviceStorageSync.activeSweep;
   }
+
+  /// Set while a live capture is claiming the wearable's BLE channel.
+  ///
+  /// `isRecording` only becomes true once capture is running, so between
+  /// cancelling the drain and that point an automatic sweep could still start
+  /// and take the channel back. The claim closes that window.
+  bool _deviceClaimedForCapture = false;
+
+  /// Whether an automatic sweep may run right now.
+  bool _canSyncDeviceStorage() =>
+      authenticated &&
+      !isRecording &&
+      !_deviceClaimedForCapture &&
+      deviceStorageSyncAvailable;
 
   /// Pulls recordings held on the connected wearable's on-board storage and
   /// ingests them through the durable import pipeline, deleting each file from
   /// the device only once its import is accepted. Idempotent and interruption
   /// safe: re-running re-imports the same content under the same import id.
-  Future<void> syncDeviceStorage({bool userInitiated = false}) async {
+  Future<void> syncDeviceStorage({bool userInitiated = false}) =>
+      deviceStorageSync.requestSync(userInitiated: userInitiated);
+
+  /// One sweep. Returns false only when the device was reachable and failed to
+  /// answer — the scheduler turns that into a backoff instead of hammering a
+  /// device that is out of range or busy. A sweep that had nothing to do (state
+  /// changed between the eligibility check and the run) is not a failure.
+  Future<bool> _runDeviceStorageSync({required bool userInitiated}) async {
     // Never drain on-device storage during a live recording: the two share the
     // wearable's BLE channel/buffer and would corrupt each other.
-    if (deviceStorageSyncing || !authenticated || isRecording) return;
+    if (!authenticated || isRecording) return true;
     final adapter = audioDeviceSessions.activeAdapter;
-    if (adapter is! StorageSyncCapableAdapter) return;
+    if (adapter is! StorageSyncCapableAdapter) return true;
     final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
-    if (storage == null) return;
+    if (storage == null) return true;
     final deviceName = audioDeviceSessions.preferredDevice?.displayName ??
         'the device';
 
-    deviceStorageSyncing = true;
-    deviceStorageSyncError = null;
+    // An automatic sweep stays invisible until it actually transfers something.
+    // Showing a spinner on every poll would report activity, not progress.
+    deviceStorageSyncing = userInitiated;
     deviceStorageSyncedCount = 0;
     deviceStoragePendingCount = 0;
-    notifyListeners();
-    ClientDiagnosticLog.instance.record(
-      'device_sync',
-      'sync_started',
-      details: <String, Object?>{
-        'device': deviceName,
-        'type': audioDeviceSessions.preferredDevice?.metadata['type'],
-        'trigger': userInitiated ? 'manual' : 'auto',
-      },
-    );
+    if (userInitiated) {
+      deviceStorageSyncError = null;
+      notifyListeners();
+      ClientDiagnosticLog.instance.record(
+        'device_sync',
+        'sync_started',
+        details: <String, Object?>{
+          'device': deviceName,
+          'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+          'trigger': 'manual',
+        },
+      );
+    }
+    var succeeded = false;
     try {
       // The connector owns its device protocol (file list/download/delete,
       // ring-buffer drain, or flash-page batch) and hands back complete
@@ -1638,21 +1710,35 @@ class NeoRecallController extends ChangeNotifier {
       // the connector removes it from the device.
       await storage.drainStoredAudio(
         (recording) async {
+          // The first transferred recording makes an automatic sweep visible:
+          // now there is real progress to report. It also tells the background
+          // host to keep the CPU awake until the transfer finishes.
+          deviceStorageSyncing = true;
+          await _setBackgroundSyncActive(true);
+          notifyListeners();
           await _ingestDeviceRecording(recording);
           deviceStorageSyncedCount += 1;
           notifyListeners();
         },
         minBytes: _deviceStorageMinBytes,
       );
+      succeeded = true;
       if (deviceStorageSyncedCount > 0) {
         notice =
             '$deviceStorageSyncedCount device recording(s) synced and queued for transcription.';
         await refreshAll(silent: true);
-      } else if (userInitiated) {
-        // Only tell the user "nothing to sync" when they asked; the automatic
-        // sync on every connect stays quiet on an empty device.
-        notice = 'No new recordings on $deviceName to sync.';
+      } else {
+        // Reaching here with zero recordings means the device really was empty:
+        // a connector that could not talk to its device throws instead (HeyPocket
+        // raises on a failed handshake and on a sweep where every file failed),
+        // so those surface through the catch below rather than as "nothing new".
+        if (userInitiated) {
+          // Only tell the user "nothing to sync" when they asked; the automatic
+          // sweep stays quiet on an empty device.
+          notice = 'No new recordings on $deviceName to sync.';
+        }
       }
+      if (succeeded) deviceStorageSyncError = null;
     } catch (error) {
       // Surface the failure so a silent no-op never masquerades as success.
       // Strip Dart's "Bad state:"/"Exception:" prefixes for a cleaner message.
@@ -1660,25 +1746,47 @@ class NeoRecallController extends ChangeNotifier {
         RegExp(r'^(Bad state|StateError|Exception):\s*'),
         '',
       );
-      deviceStorageSyncError = 'Sync of $deviceName failed: $message';
+      // A single transient miss (device busy, a momentary link drop) between
+      // unattended sweeps is not worth alarming anyone; a repeat is.
+      if (userInitiated || _deviceSyncFailureIsPersistent) {
+        deviceStorageSyncError = 'Sync of $deviceName failed: $message';
+      }
     } finally {
-      ClientDiagnosticLog.instance.record(
-        'device_sync',
-        'sync_finished',
-        level: deviceStorageSyncError == null ? 'info' : 'warning',
-        details: <String, Object?>{
-          'device': deviceName,
-          'synced': deviceStorageSyncedCount,
-          'error': deviceStorageSyncError,
-          // Protocol-level facts from the connector, so a zero-recording sweep
-          // can be told apart from a device that never answered.
-          ...storage.syncDiagnostics,
-        },
-      );
+      // Unattended polling must not flood the diagnostic ring: record a sweep
+      // that did something, failed, or was asked for — not every quiet check.
+      if (userInitiated || deviceStorageSyncedCount > 0 || !succeeded) {
+        ClientDiagnosticLog.instance.record(
+          'device_sync',
+          'sync_finished',
+          level: succeeded ? 'info' : 'warning',
+          details: <String, Object?>{
+            'device': deviceName,
+            'synced': deviceStorageSyncedCount,
+            'trigger': userInitiated ? 'manual' : 'auto',
+            'error': deviceStorageSyncError,
+            // Protocol-level facts from the connector, so a zero-recording sweep
+            // can be told apart from a device that never answered.
+            ...storage.syncDiagnostics,
+          },
+        );
+      }
       deviceStorageSyncing = false;
+      await _setBackgroundSyncActive(false);
       notifyListeners();
     }
+    return succeeded;
   }
+
+  Future<void> _setBackgroundSyncActive(bool active) async {
+    if (recorder is! MobileRecallRecorder) return;
+    await (recorder as MobileRecallRecorder).setDeviceSyncActive(active);
+  }
+
+  /// True when the sweep that is failing right now is not the first one to fail.
+  /// The scheduler counts a sweep only after it returns, so a non-zero count
+  /// here means an earlier sweep already failed.
+  bool get _deviceSyncFailureIsPersistent =>
+      deviceStorageSync.consecutiveFailures >= 1;
 
   Future<void> _ingestDeviceRecording(WearableRecording recording) async {
     final contentHash = sha256.convert(recording.bytes).toString();
@@ -1810,7 +1918,7 @@ class NeoRecallController extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _deviceControlSubscription?.cancel();
     _backgroundSubscription?.cancel();
-    _deviceStorageSyncTimer?.cancel();
+    deviceStorageSync.dispose();
     sync.close();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {

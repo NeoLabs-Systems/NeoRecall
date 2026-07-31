@@ -107,6 +107,22 @@ class GattConnectorTransport implements WearableTransport {
         'negotiated': negotiatedMtu,
       },
     );
+    // Bond BEFORE discovering. A peripheral that requires bonding may hide or
+    // refuse its encrypted services until the link is encrypted, so a table
+    // discovered on an unbonded link is incomplete — every hasCharacteristic()
+    // gate then false-negatives and the device looks half-broken. Because the
+    // bond survives, a second connect attempt would discover the full table,
+    // which is exactly the "press pair twice before it works" symptom. Pairing
+    // first makes the first attempt behave like the second.
+    if (requiresPairing) {
+      try {
+        await _gatt.pair(deviceId);
+      } catch (_) {
+        // Not supported on this platform (web/macOS) or already bonded. Apple
+        // and Web bond implicitly when an encrypted characteristic is accessed,
+        // so keep going and let that path trigger the native prompt.
+      }
+    }
     // Discover the full characteristic table once, up front, and cache it so
     // hasCharacteristic()/discoveredCharacteristics work for the whole session.
     // This is what lets each connector adapt to the concrete firmware instead of
@@ -116,14 +132,14 @@ class GattConnectorTransport implements WearableTransport {
         .map((characteristic) =>
             _key(characteristic.serviceUuid, characteristic.uuid))
         .toSet();
-    if (requiresPairing) {
-      try {
-        await _gatt.pair(deviceId);
-      } catch (_) {
-        // Apple and Web trigger pairing when an encrypted characteristic is
-        // accessed. Keeping that path alive lets the native prompt appear.
-      }
-    }
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'characteristics_discovered',
+      details: <String, Object?>{
+        'count': _discovered.length,
+        'bondRequested': requiresPairing,
+      },
+    );
   }
 
   @override

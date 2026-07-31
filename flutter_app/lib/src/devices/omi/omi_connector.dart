@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../../diagnostics/client_diagnostic_log.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
 import 'offline_audio.dart';
@@ -10,18 +11,31 @@ import 'ring_protocol.dart';
 class OmiConnector extends WearableConnector with WearableOfflineSync {
   OmiConnector({required super.device, required super.transport});
 
-  WearableAudioCodec _codec = WearableAudioCodec.pcm8;
+  // Null until the device reports its codec on connect; reads fall back to
+  // the hardware-accurate default rather than a stale PCM8 guess.
+  WearableAudioCodec? _codec;
 
   // Last observed ring-buffer facts, reported through [syncDiagnostics] so a
   // drain that yields nothing can be told apart from one that never ran.
   bool _storageReadable = false;
   int _lastUnreadPackets = -1;
   int _lastFrameCount = 0;
+  int _lastDoneStatus = -1;
+  bool _decoderAvailable = true;
 
-  WearableAudioCodec get fallbackCodec => WearableAudioCodec.pcm8;
+  /// Completer of the drain currently awaiting NOTIFY_DONE, so an abort or a
+  /// teardown can end the wait locally instead of hanging on its timeout.
+  Completer<DoneNotification?>? _activeDrain;
+
+  /// Codec assumed when the device's codec characteristic cannot be read.
+  ///
+  /// Opus FS320, not PCM8: Omi ships Opus by default since fw 1.0.3 and every
+  /// real unit measured against this code reported id 21. Assuming PCM8 would
+  /// decode an Opus stream as raw samples — audible noise instead of speech.
+  WearableAudioCodec get fallbackCodec => WearableAudioCodec.opusFs320;
 
   @override
-  WearableAudioCodec get codec => _codec;
+  WearableAudioCodec get codec => _codec ?? fallbackCodec;
 
   @override
   Future<void> onConnected() async {
@@ -77,27 +91,46 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     } catch (_) {}
   }
 
+  /// Reads the device's audio codec.
+  ///
+  /// Guessing wrong here does not fail loudly — it decodes the stream with the
+  /// wrong codec and yields noise — so an unreadable or unrecognised value is
+  /// logged rather than silently swallowed, and [fallbackCodec] deliberately
+  /// matches what real hardware reports (Omi has shipped Opus by default since
+  /// fw 1.0.3; every unit measured here reported id 21 / opusFS320).
   Future<WearableAudioCodec> _readCodec() async {
+    Object? failure;
+    int? codecId;
     try {
       final value = await transport.readCharacteristic(
         WearableDeviceUuids.omiService,
         WearableDeviceUuids.omiAudioCodec,
       );
-      if (value.isEmpty) return fallbackCodec;
-      final codecId = value.first;
-      switch (codecId) {
-        case 1:
-          return WearableAudioCodec.pcm8;
-        case 20:
-          return WearableAudioCodec.opus;
-        case 21:
-          return WearableAudioCodec.opusFs320;
-        default:
-          return fallbackCodec;
+      if (value.isNotEmpty) {
+        codecId = value.first;
+        switch (codecId) {
+          case 1:
+            return WearableAudioCodec.pcm8;
+          case 20:
+            return WearableAudioCodec.opus;
+          case 21:
+            return WearableAudioCodec.opusFs320;
+        }
       }
-    } catch (_) {
-      return fallbackCodec;
+    } catch (error) {
+      failure = error;
     }
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      'omi_codec_unresolved',
+      level: 'warning',
+      details: <String, Object?>{
+        'codecId': codecId,
+        'error': failure?.toString(),
+        'assumed': fallbackCodec.name,
+      },
+    );
+    return fallbackCodec;
   }
 
   @override
@@ -169,12 +202,21 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     if (status == null || status.unreadPackets == 0) return 0;
     final assembler = OfflineWavAssembler(codec: codec, stripBleHeader: false);
     if (!await assembler.ensureSupported()) {
+      // The ring holds audio we cannot decode on this platform. Record it so the
+      // sweep is not reported as "nothing to sync", and leave the cursor alone so
+      // the data survives until a build that can decode it.
+      _decoderAvailable = false;
       assembler.dispose();
       return 0;
     }
+    _decoderAvailable = true;
     final reassembler = RingRecordReassembler();
     final infoCompleter = Completer<RingInfo?>();
-    final doneCompleter = Completer<int?>();
+    final doneCompleter = Completer<DoneNotification?>();
+    // Published so cancelStoredSync() can unwind the wait locally. Without it an
+    // abort only tells the device to stop; no DONE ever arrives and the drain
+    // sits on its 8-minute timeout, blocking the capture it was cancelled for.
+    _activeDrain = doneCompleter;
     var frameCount = 0;
 
     final subscription =
@@ -201,13 +243,13 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
             case RingProtocol.notifyDone:
               final done = RingProtocol.parseDoneNotification(value);
               if (done != null && !doneCompleter.isCompleted) {
-                doneCompleter.complete(done.nextSeq);
+                doneCompleter.complete(done);
               }
           }
         });
 
     RingInfo? info;
-    int? nextSeq;
+    DoneNotification? done;
     try {
       await _writeStorage(<int>[RingProtocol.cmdInfo]);
       info = await infoCompleter.future.timeout(
@@ -216,19 +258,30 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
       );
       if (info == null || info.writeSeq <= info.readSeq) return 0;
       await _writeStorage(RingProtocol.encodeReadCommand(info.readSeq));
-      nextSeq = await doneCompleter.future.timeout(
+      done = await doneCompleter.future.timeout(
         const Duration(minutes: 8),
         onTimeout: () => null,
       );
     } finally {
       await subscription.cancel();
+      if (identical(_activeDrain, doneCompleter)) _activeDrain = null;
     }
 
     _lastFrameCount = frameCount;
+    // The range counts as transferred only when the device said so AND reported
+    // success. A timeout, an abort, or a non-zero status means we hold an
+    // incomplete prefix of the range.
+    final transferComplete = done != null && done.isOk;
+    _lastDoneStatus = done?.status ?? -1;
     final pcmBytes = assembler.pcmByteLength;
     final wav = assembler.toWav();
     assembler.dispose();
-    final hasRecording = frameCount > 0 && pcmBytes >= minBytes;
+    // Never ingest a partial range. The cursor is not advanced without DONE, so
+    // the same range is re-read next sync — ingesting the prefix now would
+    // import audio that the fuller re-read then imports again under a different
+    // content hash (the hash covers the whole file), i.e. a duplicate.
+    final hasRecording =
+        transferComplete && frameCount > 0 && pcmBytes >= minBytes;
     if (hasRecording) {
       // Durability invariant: ingest the recording BEFORE advancing the ring
       // cursor. If the ingest throws (or the app dies) the records stay on the
@@ -243,13 +296,17 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
         ),
       );
     }
-    // Advance only once the device signalled DONE (the range was fully
-    // transferred) and only after any recording above was durably ingested. On
-    // a DONE timeout we leave the cursor put so the whole range is retried next
-    // sync rather than being skipped and lost.
-    if (nextSeq != null) {
+    // Advance only after a successful, complete transfer and after any recording
+    // above was durably ingested. On a timeout, an abort, or an error status the
+    // cursor stays put so the whole range is retried rather than skipped.
+    //
+    // A complete range that decoded no usable audio is still advanced: the bytes
+    // were delivered and are unusable, so re-reading them forever would wedge
+    // every future sync behind the same dead range. syncDiagnostics records the
+    // frame count so that case is visible rather than silent.
+    if (transferComplete) {
       try {
-        await _writeStorage(RingProtocol.encodeAdvanceCommand(nextSeq));
+        await _writeStorage(RingProtocol.encodeAdvanceCommand(done.nextSeq));
       } catch (_) {
         // A failed advance only costs a harmless re-drain next sync.
       }
@@ -262,15 +319,34 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     'storageCharacteristicReadable': _storageReadable,
     'unreadPackets': _lastUnreadPackets,
     'opusFramesDecoded': _lastFrameCount,
+    // -1 = no DONE received (timeout or abort); 0 = success; >0 = device error.
+    'transferStatus': _lastDoneStatus,
+    'decoderAvailable': _decoderAvailable,
   };
 
   @override
   Future<void> cancelStoredSync() async {
+    // Unwind the local wait first: the device is told to stop, but it sends no
+    // DONE for an aborted transfer, so without this the drain would sit on its
+    // 8-minute timeout and hold up the capture that cancelled it.
+    final pending = _activeDrain;
+    _activeDrain = null;
+    if (pending != null && !pending.isCompleted) pending.complete(null);
     try {
       await _writeStorage(<int>[RingProtocol.cmdStop]);
     } catch (_) {
       // Best-effort abort.
     }
+  }
+
+  @override
+  Future<void> dispose() async {
+    // A teardown mid-drain must not leave the drain awaiting a DONE that can no
+    // longer arrive.
+    final pending = _activeDrain;
+    _activeDrain = null;
+    if (pending != null && !pending.isCompleted) pending.complete(null);
+    await super.dispose();
   }
 
   Future<void> _writeStorage(List<int> bytes) => transport.writeCharacteristic(

@@ -27,20 +27,47 @@ class DeviceSessionController {
       StreamController<String>.broadcast();
   final StreamController<DeviceControlEvent> _controlEvents =
       StreamController<DeviceControlEvent>.broadcast();
+  final StreamController<bool> _linkIntents = StreamController<bool>.broadcast();
   StreamSubscription<DeviceTransportState>? _stateSub;
   StreamSubscription<DeviceControlEvent>? _controlSub;
   Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
-  bool _connecting = false;
+  /// The connect attempt currently in flight, if any.
+  ///
+  /// Attempts are serialised rather than dropped: a tap that arrived while a
+  /// background reconnect was running used to return false immediately, which
+  /// [selectPreferred] surfaced as "could not be connected" even though nothing
+  /// was wrong — the user tapped again and it worked. That was the "press pair
+  /// twice" symptom. Waiting for the in-flight attempt makes one tap enough.
+  Future<bool>? _connectOperation;
   bool _disconnecting = false;
   String? _accountId;
 
   Stream<DeviceTransportState> get states => _states.stream;
   Stream<String> get messages => _messages.stream;
   Stream<DeviceControlEvent> get controlEvents => _controlEvents.stream;
+
+  /// Emits whenever [linkDesired] may have changed (device chosen or cleared,
+  /// Bluetooth preference toggled, account rebound).
+  ///
+  /// The always-on host subscribes to this instead of polling: keeping a paired
+  /// wearable linked is what lets its recordings sync with no app open, so the
+  /// decision to hold the process alive follows the same signal that decides
+  /// whether a device should be connected at all.
+  Stream<bool> get linkIntents => _linkIntents.stream;
+
+  /// True when a paired wearable should stay connected even while nothing is
+  /// being recorded, so reconnect, device-storage sync, and upload keep running.
+  bool get linkDesired => preferBluetooth && hasPreferredDevice;
+
   bool get hasPreferredDevice {
     final device = preferredDevice;
     return device != null && registry[device.adapterId] != null;
+  }
+
+  void _notifyLinkIntent() {
+    if (_linkIntents.isClosed) return;
+    _linkIntents.add(linkDesired);
   }
 
   String? get accountId => _accountId;
@@ -55,6 +82,7 @@ class DeviceSessionController {
     preferBluetooth = true;
     _accountId = value;
     if (value != null) await restore();
+    _notifyLinkIntent();
   }
 
   Future<void> restore() async {
@@ -113,6 +141,7 @@ class DeviceSessionController {
   Future<void> setPreferBluetooth(bool value) async {
     preferBluetooth = value;
     await _persist();
+    _notifyLinkIntent();
   }
 
   Future<void> prefer(AudioDeviceDescriptor device) async {
@@ -129,15 +158,40 @@ class DeviceSessionController {
       );
     }
     await _persist();
+    _notifyLinkIntent();
   }
 
   Future<void> clearPreferred() async {
     preferredDevice = null;
     await disconnect();
     await _persist();
+    _notifyLinkIntent();
   }
 
   Future<bool> connectPreferred({bool scheduleReconnect = true}) async {
+    // Let any in-flight attempt finish first so this one is queued, not dropped.
+    while (_connectOperation != null) {
+      await _connectOperation;
+    }
+    // Claim the slot synchronously (before the first await below) so two callers
+    // in the same microtask cannot both start connecting.
+    final completer = Completer<bool>();
+    _connectOperation = completer.future;
+    try {
+      final connected = await _connect(scheduleReconnect: scheduleReconnect);
+      completer.complete(connected);
+      return connected;
+    } catch (_) {
+      completer.complete(false);
+      rethrow;
+    } finally {
+      if (identical(_connectOperation, completer.future)) {
+        _connectOperation = null;
+      }
+    }
+  }
+
+  Future<bool> _connect({required bool scheduleReconnect}) async {
     final device = preferredDevice;
     final adapter =
         activeAdapter ?? (device == null ? null : registry[device.adapterId]);
@@ -145,8 +199,12 @@ class DeviceSessionController {
       _messages.add('No preferred Bluetooth device is configured yet.');
       return false;
     }
-    if (_connecting) return false;
-    _connecting = true;
+    // Already linked (e.g. the attempt we just waited on connected this very
+    // device): report success instead of tearing a good link down.
+    if (state == DeviceTransportState.connectedStandby ||
+        state == DeviceTransportState.recording) {
+      return true;
+    }
     activeAdapter = adapter;
     await _stateSub?.cancel();
     await _controlSub?.cancel();
@@ -191,8 +249,6 @@ class DeviceSessionController {
       _messages.add('Connect failed: $error');
       if (autoReconnect && scheduleReconnect) _scheduleReconnect();
       return false;
-    } finally {
-      _connecting = false;
     }
   }
 
@@ -228,6 +284,7 @@ class DeviceSessionController {
     await _states.close();
     await _messages.close();
     await _controlEvents.close();
+    await _linkIntents.close();
   }
 }
 

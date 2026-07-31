@@ -4,7 +4,10 @@ const EventEmitter = require('events');
 const crypto = require('crypto');
 const ingest = require('../../ingest/ingest_service');
 const { getDatabase } = require('../../../db/database');
+const { getConfig } = require('../../../config');
 const { createMeetingBrowser } = require('./browser_launcher');
+const profileStore = require('./browser_profile');
+const meetingAccounts = require('./meeting_account_service');
 
 class AbstractBot extends EventEmitter {
   constructor(userId, sourceId, botName, url) {
@@ -17,15 +20,35 @@ class AbstractBot extends EventEmitter {
     this.page = null;
     this.context = null;
     this._disposeBrowser = null;
+    this._profile = null;
     this.sessionId = null;
     this.audioSourceId = null;
     this.isRecording = false;
+    // True once the bot was actually admitted — the difference between "the
+    // meeting is over" and "the join never happened", which the source uses to
+    // decide whether to retire the link or keep the failure visible.
+    this.hasJoined = false;
+    this._stopping = false;
+    this.monitorTask = null;
+    // What account (if any) the bot is joining as — the platform bots use this
+    // to explain a refusal precisely instead of guessing at the cause.
+    this.connection = { signedIn: false, connected: {}, identity: null };
+    this._absentSince = null;
   }
 
   async start() {
     console.log(`[MeetingBot] Starting bot for ${this.url}`);
 
     try {
+      // Join as the account the user connected, if they connected one. The
+      // profile is cloned per session, so a crash or a killed browser can never
+      // damage the signed-in original.
+      this._profile = await profileStore.checkoutForSession(this.userId);
+      this.connection = meetingAccounts.describeConnection(this.userId);
+      console.log(this._profile.dir
+        ? `[MeetingBot] Using the connected browser profile${this.connection.identity ? ` (${this.connection.identity})` : ''}.`
+        : '[MeetingBot] No connected account; joining anonymously.');
+
       // The launcher picks the least-detectable browser strategy available
       // (external CDP → spawn real Chrome + attach over CDP → direct launch),
       // headful and off-screen. See browser_launcher.js for the rationale.
@@ -33,6 +56,7 @@ class AbstractBot extends EventEmitter {
       const launched = await createMeetingBrowser({
         extraArgs: this.extraChromiumArgs(),
         headlessFallback,
+        userDataDir: this._profile.dir,
       });
       this.browser = launched.browser;
       this.context = launched.context;
@@ -40,8 +64,11 @@ class AbstractBot extends EventEmitter {
       this._disposeBrowser = launched.dispose;
       console.log(`[MeetingBot] Browser ready (${launched.mode}).`);
 
+      // A closed tab ends the meeting for us. Route it through stop() so the
+      // session is closed and the browser/profile are released — emitting
+      // 'ended' on its own used to leave both behind.
       this.page.on('close', () => {
-        this.emit('ended');
+        this.stop().catch((error) => console.error('[MeetingBot] Teardown after tab close failed:', error.message));
       });
 
       console.log('[MeetingBot] Registering session (no page injection yet)...');
@@ -52,10 +79,17 @@ class AbstractBot extends EventEmitter {
       await this.beginAudioCapture();
       console.log('[MeetingBot] Bot admitted and capturing.');
 
-      // Start silence detection / participant monitoring
-      this.monitorTask = setInterval(() => this.checkMeetingStatus(), 10000);
+      // Watch for the call ending. The timer must swallow its own failures — an
+      // unhandled rejection from a background tick would take the process down.
+      this.monitorTask = setInterval(() => {
+        this.checkMeetingStatus().catch((error) => console.error('[MeetingBot] Status check failed:', error.message));
+      }, 10000);
     } catch (err) {
       console.error('[MeetingBot] start() failed:', err && err.stack ? err.stack : err);
+      // A failed join used to leave the browser process, the profile clone and
+      // an open DB session behind — one refused meeting then leaked a Chrome
+      // instance for the lifetime of the server.
+      await this.releaseResources();
       throw err;
     }
   }
@@ -110,6 +144,7 @@ class AbstractBot extends EventEmitter {
   // streams attach after admission and change over the call, so we rescan.
   async beginAudioCapture() {
     console.log('[MeetingBot] beginAudioCapture: injecting capture (post-admission)...');
+    this.hasJoined = true;
     await this.page.exposeFunction('sendAudioChunk', (float32ArrayObj) => {
       if (!this.isRecording) return;
       const floatArray = Float32Array.from(Object.values(float32ArrayObj));
@@ -187,17 +222,55 @@ class AbstractBot extends EventEmitter {
   // devices to drive its pre-join toggles). Default: none.
   extraChromiumArgs() { return []; }
 
+  // Selector that is present exactly while the bot is in the call (the "leave
+  // call" control). Platform bots override it so the monitor below can tell that
+  // the meeting ended or the bot was removed.
+  admittedSelector() { return null; }
+
+  // Ends the recording when the call is over. Previously the bot only noticed a
+  // closed tab, so a meeting that simply ended left it recording silence — and
+  // holding the session open — until the server restarted.
   async checkMeetingStatus() {
-    // Basic implementation: if page is closed, stop
-    if (this.page.isClosed()) {
-      this.stop();
+    if (!this.page || this.page.isClosed()) {
+      await this.stop();
+      return;
+    }
+    const selector = this.admittedSelector();
+    if (!selector || !this.isRecording) return;
+
+    const inCall = await this.page.locator(selector).first().isVisible().catch(() => null);
+    if (inCall === null) return; // page busy/navigating — no verdict this tick
+    if (inCall) {
+      this._absentSince = null;
+      return;
+    }
+    if (this._absentSince === null) {
+      this._absentSince = Date.now();
+      return;
+    }
+    if (Date.now() - this._absentSince >= getConfig().meetingLeaveGraceMs) {
+      console.log('[MeetingBot] No longer in the call (meeting ended or bot removed); stopping.');
+      await this.stop();
     }
   }
 
   async stop() {
-    if (this.monitorTask) clearInterval(this.monitorTask);
+    // Teardown re-enters itself: closing the browser fires the page 'close'
+    // handler, which stops the bot again. Let the first call win.
+    if (this._stopping) return;
+    this._stopping = true;
+    if (this.monitorTask) {
+      clearInterval(this.monitorTask);
+      this.monitorTask = null;
+    }
     this.isRecording = false;
+    await this.releaseResources();
+    this.emit('ended');
+  }
 
+  // Idempotent teardown shared by stop() and the failed-start path: flush audio,
+  // close the session, kill the browser, delete the profile clone.
+  async releaseResources() {
     // Flush any buffered tail audio into a final chunk before closing the session.
     if (this.audioSourceId) {
       ingest.finalizeAudio(this.audioSourceId);
@@ -212,14 +285,21 @@ class AbstractBot extends EventEmitter {
     // dispose() closes the browser and, for the CDP-spawn strategy, also kills
     // the Chrome process and removes its temp profile.
     if (this._disposeBrowser) {
-      await this._disposeBrowser();
+      const dispose = this._disposeBrowser;
       this._disposeBrowser = null;
+      await dispose().catch((error) => console.error('[MeetingBot] Browser teardown failed:', error.message));
       this.browser = null;
     } else if (this.browser) {
-      await this.browser.close();
+      const browser = this.browser;
       this.browser = null;
+      await browser.close().catch(() => {});
     }
-    this.emit('ended');
+
+    if (this._profile) {
+      const profile = this._profile;
+      this._profile = null;
+      await profile.dispose();
+    }
   }
 }
 

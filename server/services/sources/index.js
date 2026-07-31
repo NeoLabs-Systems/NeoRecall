@@ -3,39 +3,91 @@
 const crypto = require('crypto');
 const { getDatabase } = require('../../db/database');
 
+/// Registry of source types.
+///
+/// Every type is a module exposing `startSource(source)` / `stopSource(id)`.
+/// Adding a source means adding one entry here — the lifecycle below (restore on
+/// boot, create, update, delete) is type-agnostic, so no new branch is needed in
+/// four different places. Loaded lazily so one connector's dependencies cannot
+/// break the whole service at require time.
+const SOURCE_TYPES = {
+  discord: () => require('./discord_source'),
+  meeting: () => require('./meeting_source'),
+  plaud: () => require('./plaud_source'),
+};
+
+/// Config keys that hold credentials and must never be echoed back to a client.
+const SECRET_CONFIG_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'password', 'apiKey']);
+
+function driverFor(type) {
+  const load = SOURCE_TYPES[type];
+  if (!load) return null;
+  try {
+    return load();
+  } catch (error) {
+    console.error(`[Sources] Source type ${type} could not be loaded:`, error.message);
+    return null;
+  }
+}
+
+/// Starts or stops a source according to its enabled flag, never throwing: one
+/// misbehaving connector must not take down the request or the boot sequence.
+function applyLifecycle(source) {
+  const driver = driverFor(source.type);
+  if (!driver) return;
+  const onError = (error) =>
+    console.error(`[Sources] ${source.enabled ? 'Start' : 'Stop'} failed for ${source.id} (${source.type}):`, error.message);
+  try {
+    const result = source.enabled ? driver.startSource(source) : driver.stopSource(source.id);
+    Promise.resolve(result).catch(onError);
+  } catch (error) {
+    onError(error);
+  }
+}
+
+function hydrate(row) {
+  return { ...row, config: JSON.parse(row.config_json), enabled: row.enabled === 1 };
+}
+
+/// Strips credentials from a source before it leaves the API. The owner already
+/// supplied them; echoing them back only widens where they can leak.
+function redact(source) {
+  const config = {};
+  for (const [key, value] of Object.entries(source.config)) {
+    config[key] = SECRET_CONFIG_KEYS.has(key) ? '••••••••' : value;
+  }
+  const { config_json: _configJson, ...rest } = source;
+  return { ...rest, config, configuredSecrets: Object.keys(source.config).filter((key) => SECRET_CONFIG_KEYS.has(key)) };
+}
+
 const sourcesService = {
+  /// Source types this build can run, for the client to offer.
+  availableTypes() {
+    return Object.keys(SOURCE_TYPES);
+  },
+
+  /// Validates a type's credentials before the source is stored. Types whose
+  /// driver exposes no `verifyAccess` are accepted as-is.
+  async verifyConfig(type, config) {
+    const driver = driverFor(type);
+    if (!driver) throw new Error(`Unknown source type: ${type}`);
+    if (typeof driver.verifyAccess !== 'function') return {};
+    const details = await driver.verifyAccess(config);
+    return details && typeof details === 'object' ? { account: details } : {};
+  },
+
   init() {
     try {
       const db = getDatabase();
-      const rows = db.prepare('SELECT * FROM sources WHERE enabled = 1').all();
-      for (const row of rows) {
+      for (const row of db.prepare('SELECT * FROM sources WHERE enabled = 1').all()) {
         let source;
         try {
-          source = {
-            ...row,
-            config: JSON.parse(row.config_json),
-            enabled: row.enabled === 1,
-          };
+          source = hydrate(row);
         } catch (parseError) {
           console.error(`[Sources] Skipping source ${row.id} with invalid config:`, parseError.message);
           continue;
         }
-        // Start each source in isolation so one failing connector cannot
-        // prevent the others from resuming after a server restart. startSource
-        // is async, so guard against both synchronous throws and rejections.
-        const onStartError = (startError) =>
-          console.error(`[Sources] Failed to start source ${source.id} (${source.type}):`, startError.message);
-        try {
-          let started;
-          if (source.type === 'discord') {
-            started = require('./discord_source').startSource(source);
-          } else if (source.type === 'meeting') {
-            started = require('./meeting_source').startSource(source);
-          }
-          Promise.resolve(started).catch(onStartError);
-        } catch (startError) {
-          onStartError(startError);
-        }
+        applyLifecycle(source);
       }
     } catch (error) {
       console.error('[Sources] Failed to initialize sources:', error.message);
@@ -44,30 +96,29 @@ const sourcesService = {
 
   list(userId) {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY created_at DESC');
-    const rows = stmt.all(userId);
-    return rows.map(row => ({
-      ...row,
-      config: JSON.parse(row.config_json),
-      enabled: row.enabled === 1,
-    }));
+    const rows = db.prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    return rows.map((row) => redact(hydrate(row)));
   },
 
+  /// Full record including secrets — for server-side use only, never a response.
   get(userId, id) {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM sources WHERE user_id = ? AND id = ?');
-    const row = stmt.get(userId, id);
+    const row = db.prepare('SELECT * FROM sources WHERE user_id = ? AND id = ?').get(userId, id);
     if (!row) throw new Error('Source not found');
-    return {
-      ...row,
-      config: JSON.parse(row.config_json),
-      enabled: row.enabled === 1,
-    };
+    return hydrate(row);
+  },
+
+  /// Safe projection for API responses.
+  getPublic(userId, id) {
+    return redact(this.get(userId, id));
   },
 
   create(userId, data) {
     const db = getDatabase();
-    
+    if (!SOURCE_TYPES[data.type]) {
+      throw new Error(`Unknown source type: ${data.type}`);
+    }
+
     // Enforce one source per platform per user
     const existingCount = db.prepare('SELECT COUNT(*) as count FROM sources WHERE user_id = ? AND type = ?').get(userId, data.type);
     if (existingCount.count > 0) {
@@ -75,70 +126,49 @@ const sourcesService = {
     }
 
     const id = crypto.randomUUID();
-    const configJson = JSON.stringify(data.config || {});
-    const enabled = data.enabled ? 1 : 0;
-    
-    const stmt = db.prepare(`
+    db.prepare(`
       INSERT INTO sources (id, user_id, type, name, config_json, enabled)
       VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(id, userId, data.type, data.name, configJson, enabled);
-    
-    const newSource = this.get(userId, id);
-    if (newSource.type === 'discord' && newSource.enabled) {
-      require('./discord_source').startSource(newSource);
-    } else if (newSource.type === 'meeting' && newSource.enabled) {
-      require('./meeting_source').startSource(newSource);
-    }
-    
-    return newSource;
+    `).run(id, userId, data.type, data.name, JSON.stringify(data.config || {}), data.enabled ? 1 : 0);
+
+    const created = this.get(userId, id);
+    applyLifecycle(created);
+    return redact(created);
   },
 
   update(userId, id, data) {
     const db = getDatabase();
     const existing = this.get(userId, id);
-    
-    const name = data.name ?? existing.name;
-    const configJson = data.config ? JSON.stringify(data.config) : existing.config_json;
-    const enabled = data.enabled !== undefined ? (data.enabled ? 1 : 0) : (existing.enabled ? 1 : 0);
-    const updatedAt = new Date().toISOString();
 
-    const stmt = db.prepare(`
+    // A config update replaces the stored object, so merge it onto the existing
+    // one: the client never receives secrets back and would otherwise blank them
+    // out by round-tripping a redacted config.
+    const config = data.config ? { ...existing.config, ...data.config } : existing.config;
+    const name = data.name ?? existing.name;
+    const enabled = data.enabled !== undefined ? (data.enabled ? 1 : 0) : (existing.enabled ? 1 : 0);
+
+    db.prepare(`
       UPDATE sources
       SET name = ?, config_json = ?, enabled = ?, updated_at = ?
       WHERE user_id = ? AND id = ?
-    `);
-    stmt.run(name, configJson, enabled, updatedAt, userId, id);
-    
-    const updatedSource = this.get(userId, id);
-    if (updatedSource.type === 'discord') {
-      if (updatedSource.enabled) {
-        require('./discord_source').startSource(updatedSource);
-      } else {
-        require('./discord_source').stopSource(updatedSource.id);
-      }
-    } else if (updatedSource.type === 'meeting') {
-      if (updatedSource.enabled) {
-        require('./meeting_source').startSource(updatedSource);
-      } else {
-        require('./meeting_source').stopSource(updatedSource.id);
-      }
-    }
-    
-    return updatedSource;
+    `).run(name, JSON.stringify(config), enabled, new Date().toISOString(), userId, id);
+
+    const updated = this.get(userId, id);
+    applyLifecycle(updated);
+    return redact(updated);
   },
 
   delete(userId, id) {
     const db = getDatabase();
     const existing = this.get(userId, id);
-    if (existing.type === 'discord') {
-      require('./discord_source').stopSource(id);
-    } else if (existing.type === 'meeting') {
-      require('./meeting_source').stopSource(id);
+    const driver = driverFor(existing.type);
+    if (driver) {
+      try {
+        Promise.resolve(driver.stopSource(id)).catch(() => { /* teardown is best-effort */ });
+      } catch (_) { /* teardown is best-effort */ }
     }
-    const stmt = db.prepare('DELETE FROM sources WHERE user_id = ? AND id = ?');
-    stmt.run(userId, id);
-  }
+    db.prepare('DELETE FROM sources WHERE user_id = ? AND id = ?').run(userId, id);
+  },
 };
 
 module.exports = sourcesService;

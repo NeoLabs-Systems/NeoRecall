@@ -37,6 +37,12 @@ The admin dashboard can safely tune boundary, deduplication, speaker matching, a
 
 Conversation boundaries expose separate controls for hard and soft silence gaps, contextual embedding similarity and valley prominence, the number of neighboring segments used as semantic context, and maximum duration/character safety ceilings. `NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS` must not exceed `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS`, ensuring one provisional conversation always fits in a bounded consolidation request.
 
+`NEORECALL_MEETING_JOIN_TIMEOUT_MS` is how long a meeting bot waits in the
+lobby before giving up — a host has to notice the knock and admit it, so the
+default is generous. `NEORECALL_MEETING_LEAVE_GRACE_MS` is how long the bot may
+be absent from a call before the recording is ended, which is what stops it
+recording silence after a meeting is over.
+
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.
 Both are validated within the product's 5–10 second preview contract.

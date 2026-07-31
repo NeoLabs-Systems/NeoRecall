@@ -99,6 +99,55 @@ async function complete(userId, id) {
   return get(userId, id);
 }
 
+/// Imports a complete audio file that already lives on this server's disk.
+///
+/// Server-side sources (cloud integrations) receive whole recordings rather than
+/// the live chunk stream the capture pipeline expects, so they reuse the very
+/// same durable import path a user's manual upload takes: declare -> parts ->
+/// complete -> process_import job. Passing a stable [importId] makes the call
+/// idempotent — re-polling a source that already imported a recording resolves
+/// to the existing import instead of creating a duplicate.
+async function importLocalFile(userId, filename, input) {
+  const stats = fs.statSync(filename);
+  const digest = await shaFile(filename);
+  const partSize = getConfig().importPartBytes;
+  const record = declare(userId, {
+    id: input.importId,
+    originalName: input.originalName,
+    contentType: input.contentType,
+    totalSize: stats.size,
+    sha256: digest,
+    partSize,
+    captureTime: input.captureTime,
+    timezone: input.timezone,
+  });
+  // A prior run already finished this recording; nothing left to do.
+  if (['assembled', 'processing', 'completed'].includes(record.state)) return record;
+
+  const handle = fs.openSync(filename, 'r');
+  try {
+    for (const partNumber of record.missingParts) {
+      const rangeStart = partNumber * partSize;
+      const rangeEnd = Math.min(stats.size - 1, rangeStart + partSize - 1);
+      const length = rangeEnd - rangeStart + 1;
+      const buffer = Buffer.alloc(length);
+      fs.readSync(handle, buffer, 0, length, rangeStart);
+      // acceptPart consumes (renames) the file it is given, so hand it a copy.
+      const staged = path.join(ensureRuntimeDirs().importTmp, `${record.id}.${partNumber}.staged`);
+      fs.writeFileSync(staged, buffer, { mode: 0o600 });
+      await acceptPart(userId, record.id, partNumber, {
+        rangeStart,
+        rangeEnd,
+        total: stats.size,
+        sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      }, { path: staged, size: length });
+    }
+  } finally {
+    fs.closeSync(handle);
+  }
+  return complete(userId, record.id);
+}
+
 function cancel(userId, id) {
   const record = get(userId, id);
   const db = getDatabase();
@@ -143,4 +192,4 @@ function sweepOrphans() {
   return removed;
 }
 
-module.exports = { declare, get, acceptPart, complete, cancel, shaFile, reconcileProcessing, sweepOrphans };
+module.exports = { declare, get, acceptPart, complete, cancel, shaFile, importLocalFile, reconcileProcessing, sweepOrphans };

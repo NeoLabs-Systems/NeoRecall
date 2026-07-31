@@ -12,7 +12,7 @@ import 'device_models.dart';
 import 'offline_sync.dart';
 
 /// Shared GATT adapter for every capture-capable wearable protocol (Omi,
-/// OmiGlass, Plaud, HeyPocket, …).
+/// OmiGlass, HeyPocket, …).
 ///
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
@@ -21,10 +21,21 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   DeviceAdapter({GattTransport? gatt})
     : _gatt = gatt ?? createGattTransport();
 
+  /// Primary services used to select supported wearables during the scan.
   static const List<String> _serviceUuids = <String>[
     WearableDeviceUuids.omiService,
-    WearableDeviceUuids.plaudService,
     WearableDeviceUuids.heyPocketService,
+  ];
+
+  /// Secondary services the connectors access once connected. They never select
+  /// a device, but on web they must still be granted at chooser time — without
+  /// them Omi's offline sync (storage) and the battery/button/time-sync reads
+  /// fail with a SecurityError in the browser and nowhere else.
+  static const List<String> _secondaryServiceUuids = <String>[
+    WearableDeviceUuids.omiStorageService,
+    WearableDeviceUuids.batteryService,
+    WearableDeviceUuids.buttonService,
+    WearableDeviceUuids.timeSyncService,
   ];
 
   final GattTransport _gatt;
@@ -116,10 +127,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     await _gatt.startScan(
       const GattScanSpec(
         serviceUuids: _serviceUuids,
-        // PLAUD firmware versions do not consistently advertise their primary
-        // service, so the documented product prefix is included.
+        optionalServiceUuids: _secondaryServiceUuids,
         namePrefixes: <String>[
-          'PLAUD',
           'Pocket',
           'HeyPocket',
           'PKT01',
@@ -181,11 +190,15 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     return switch (device.type) {
       WearableDeviceType.omi =>
         has(WearableDeviceUuids.omiService) || name.startsWith('omi'),
+      // Same OR shape as every other device: the scan deliberately carries the
+      // 'OmiGlass'/'OpenGlass' name prefixes for firmware that does not put the
+      // service UUID in its advertisement, so requiring BOTH would reject the
+      // very devices those prefixes exist to find. Only those two prefixes
+      // classify as omiGlass, so the name alone is already specific.
       WearableDeviceType.omiGlass =>
-        has(WearableDeviceUuids.omiService) &&
-            (name.startsWith('omiglass') || name.startsWith('openglass')),
-      WearableDeviceType.plaud =>
-        has(WearableDeviceUuids.plaudService) || name.startsWith('plaud'),
+        has(WearableDeviceUuids.omiService) ||
+            name.startsWith('omiglass') ||
+            name.startsWith('openglass'),
       WearableDeviceType.heyPocket =>
         has(WearableDeviceUuids.heyPocketService) ||
             name.contains('heypocket') ||
@@ -199,7 +212,6 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     return switch (type) {
       WearableDeviceType.omi ||
       WearableDeviceType.omiGlass ||
-      WearableDeviceType.plaud ||
       WearableDeviceType.heyPocket => true,
       WearableDeviceType.custom => false,
     };
@@ -278,15 +290,11 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     });
 
     try {
-      // Omi/OmiGlass/HeyPocket stream and sync over a plain link — this
-      // is verified against the real devices. The PLAUD NotePin is the one
-      // exception: Android's own Bluetooth stack reports it BONDED, and on an
-      // unbonded link its command channel never accepts the session preamble.
-      // pair() is best-effort (a no-op on platforms that don't implement it),
-      // so requesting it here cannot break the other devices.
-      await connector.connect(
-        requiresPairing: wearable.type == WearableDeviceType.plaud,
-      );
+      // Every supported wearable streams and syncs over a plain link; this is
+      // verified against the real devices. Bonding is only requested on the
+      // unknown-device probe path, where an encrypted characteristic may be the
+      // thing being probed.
+      await connector.connect(requiresPairing: false);
       _connector = connector;
       final omiFraming =
           wearable.type == WearableDeviceType.omi ||

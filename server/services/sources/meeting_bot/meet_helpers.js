@@ -5,6 +5,19 @@
 // Frame, both of which expose evaluate/locator/getByRole — so the platform bots
 // share one implementation instead of duplicating selector logic.
 
+const { getConfig } = require('../../../config');
+
+// A join failure with a stable reason code. The code is what the source stores
+// and the UI branches on; the message is what the user reads. Without this the
+// caller can only guess from message text why a join did not happen.
+class JoinError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'JoinError';
+    this.code = code;
+  }
+}
+
 // Click the first visible, enabled <button> whose visible text or aria-label
 // includes any of `texts` (case-insensitive, so it works across locales and
 // markup changes). Returns the matched text, or null if nothing was clicked.
@@ -24,6 +37,30 @@ async function clickButtonByTexts(scope, texts) {
     if (clicked) return text;
   }
   return null;
+}
+
+// Lobby UIs render progressively, so the button we need is often not in the DOM
+// on the first look. Retry until it is, or until the budget runs out.
+async function clickButtonByTextsWithin(scope, texts, { timeoutMs = 30000, pollMs = 1000, onPoll } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const clicked = await clickButtonByTexts(scope, texts);
+    if (clicked) return clicked;
+    if (onPoll) await onPoll();
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+// Fill a pre-join display-name field if the platform is asking for one. A
+// signed-in browser is not asked (the account name is used), so a missing field
+// is a normal outcome, not a failure.
+async function fillDisplayNameIfPresent(scope, name, { timeoutMs = 12000, selector = 'input[type="text"]' } = {}) {
+  const input = scope.locator(selector).first();
+  const visible = await input.isVisible({ timeout: timeoutMs }).catch(() => false);
+  if (!visible) return false;
+  await humanFill(input, name);
+  return true;
 }
 
 // First entry of `texts` present in the scope's body text, else null.
@@ -54,19 +91,28 @@ async function turnOffToggles(scope, toggles) {
 // Poll until admitted or fail with a clear reason. Admission = `admittedSelector`
 // visible. Failure = the tab is redirected off `meetingHost` (kicked/denied), or
 // a terminal `cannotJoinTexts` string appears. `page` drives timing; `scope`
-// (defaults to page) is where elements/text are checked.
-async function waitForAdmission(page, { admittedSelector, meetingHost, cannotJoinTexts = [], scope = page, timeoutMs = 120000, pollMs = 2000 }) {
-  const deadline = Date.now() + timeoutMs;
+// (defaults to page) is where elements/text are checked. The default timeout is
+// the configured join budget — a host who has to notice the knock and admit the
+// bot needs real minutes, not a hardcoded two.
+async function waitForAdmission(page, { admittedSelector, meetingHost, cannotJoinTexts = [], scope = page, timeoutMs, pollMs = 2000 }) {
+  const budgetMs = timeoutMs || getConfig().meetingJoinTimeoutMs;
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     if (admittedSelector && await scope.locator(admittedSelector).first().isVisible().catch(() => false)) return;
     if (meetingHost && !page.url().includes(meetingHost)) {
-      throw new Error(`Redirected off ${meetingHost} while waiting for admission (join denied or timed out).`);
+      throw new JoinError('redirected', `Redirected off ${meetingHost} while waiting for admission (join denied or the meeting ended).`);
     }
     const refused = await bodyIncludesAny(scope, cannotJoinTexts);
-    if (refused) throw new Error(`Join refused by the meeting ("${refused}").`);
+    if (refused) throw new JoinError('refused', `Join refused by the meeting ("${refused}").`);
     await page.waitForTimeout(pollMs);
   }
-  throw new Error('Timed out waiting to be admitted from the lobby.');
+  throw new JoinError('not_admitted', `Nobody admitted the bot within ${Math.round(budgetMs / 1000)}s. The host has to let it in from the waiting room.`);
+}
+
+// Is the bot still in the call? Used to end the recording when the meeting is
+// over or the bot was removed, instead of holding a session open forever.
+async function isStillInCall(scope, admittedSelector) {
+  return scope.locator(admittedSelector).first().isVisible().catch(() => false);
 }
 
 // Meeting hosts and Google's heuristics flag obvious "…bot"/"notetaker" guest
@@ -97,4 +143,16 @@ async function humanFill(locator, text) {
   await locator.pressSequentially(text, { delay: 60 + Math.floor(Math.random() * 90) });
 }
 
-module.exports = { clickButtonByTexts, bodyIncludesAny, turnOffToggles, waitForAdmission, sanitizeDisplayName, humanPause, humanFill };
+module.exports = {
+  JoinError,
+  clickButtonByTexts,
+  clickButtonByTextsWithin,
+  fillDisplayNameIfPresent,
+  bodyIncludesAny,
+  turnOffToggles,
+  waitForAdmission,
+  isStillInCall,
+  sanitizeDisplayName,
+  humanPause,
+  humanFill,
+};

@@ -2,15 +2,33 @@
   <img src="landing/assets/logo.svg" width="112" height="112" alt="NeoRecall">
 </p>
 
-# NeoRecall
+<h1 align="center">NeoRecall</h1>
 
-**Private, self-hosted audio memory — recorded anywhere, transcribed locally, and recalled naturally.**
+<p align="center"><strong>Private, self-hosted audio memory — recorded anywhere, transcribed locally, and recalled naturally.</strong></p>
 
-![Node 20+](https://img.shields.io/badge/Node-20%2B-5fa04e?style=flat-square) ![AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square)
+<p align="center">
+  NeoRecall runs as a service on your own machine. It transcribes and diarizes
+  audio from web, desktop, and wearable clients entirely on-device, builds
+  searchable local memory, and only calls an LLM for rare, budgeted
+  consolidation and Ask queries.
+</p>
 
-[![Join the NeoLabs Discord](https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/f59rg2RwUT)
+<p align="center">
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-20%2B-5fa04e?style=flat-square" alt="Node.js 20 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square" alt="AGPL-3.0 license"></a>
+</p>
 
-## Install
+<p align="center">
+  <a href="https://discord.gg/f59rg2RwUT"><img src="https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Join the NeoLabs Discord"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest"><img alt="Web" src="https://img.shields.io/badge/Web-client-000000?style=flat-square"></a>
+  <a href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-000000?style=flat-square&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-10%2F11_x64-0078d4?style=flat-square&logo=windows&logoColor=white"></a>
+</p>
+
+## 🚀 Install
 
 ```bash
 npm i -g neorecall
@@ -21,26 +39,31 @@ neorecall start
 
 Open `http://localhost:4500` and `/app/`. Use `neorecall update` to install newer GitHub releases for the setup-selected `beta` or `stable` channel.
 
-## What makes it different
+Read the [installation guide](docs/docs/installation.md) before exposing the service to a network.
 
-**Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
+## ✨ What makes it different
 
-**Transcription and search are local.** CPU inference, multilingual embeddings, FTS5, and sqlite-vec keep the continuous path free of paid tokens.
+- **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
+- **Transcription and search are local.** CPU inference, multilingual embeddings, FTS5, and sqlite-vec keep the continuous path free of paid tokens.
+- **LLMs are rare and budgeted.** OpenRouter is called only for eligible memory consolidations and explicit Ask searches, with durable rate gates.
+- **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
+- **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) with PKCE OAuth to search memories and transcript evidence through read-only, token-free retrieval tools.
 
-**LLMs are rare and budgeted.** OpenRouter is called only for eligible memory consolidations and explicit Ask searches, with durable rate gates.
+## 🧪 Project status
 
-**Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
+NeoRecall is beta software maintained primarily by one person. Web, macOS 13+, and Windows 10/11 x64 are the v1 clients. Desktop is the reference client for uninterrupted recording; browser capture remains subject to browser permission and lifecycle limits. Review [Privacy and consent](docs/docs/privacy-and-consent.md) before recording anyone else.
 
-**Native NeoAgent recall.** Connect from NeoAgent with PKCE OAuth to search memories and transcript evidence through read-only, token-free retrieval tools.
+## 📚 Documentation
 
-## Project status
-
-NeoRecall is in beta. Web, macOS 13+, and Windows 10/11 x64 are the v1 clients. Desktop is the reference client for uninterrupted recording; browser capture remains subject to browser permission and lifecycle limits.
-
-## Documentation
-
-See `docs/docs/installation.md`, `docs/docs/privacy-and-consent.md`, and `docs/docs/architecture.md`.
+Start with the [documentation](https://neolabs-systems.github.io/NeoRecall/docs/).
+Use [GitHub Discussions](https://github.com/NeoLabs-Systems/NeoRecall/discussions)
+for questions and [GitHub Issues](https://github.com/NeoLabs-Systems/NeoRecall/issues)
+for reproducible bugs. Security reports belong in the process described by
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-NeoRecall is licensed under the GNU Affero General Public License v3.0 only.
+NeoRecall is licensed under the
+[GNU Affero General Public License v3.0 only](LICENSE).
+
+*Made with ❤️ by [Neo](https://github.com/neooriginal) · [NeoLabs Systems](https://github.com/NeoLabs-Systems)*

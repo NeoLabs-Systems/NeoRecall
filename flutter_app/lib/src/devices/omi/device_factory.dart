@@ -3,7 +3,6 @@ import 'base_connector.dart';
 import 'device_models.dart';
 import 'heypocket_connector.dart';
 import 'omi_connector.dart';
-import 'plaud_connector.dart';
 
 WearableConnector createWearableConnector(
   DiscoveredWearable device,
@@ -14,8 +13,6 @@ WearableConnector createWearableConnector(
       return OmiConnector(device: device, transport: transport);
     case WearableDeviceType.omiGlass:
       return OmiGlassConnector(device: device, transport: transport);
-    case WearableDeviceType.plaud:
-      return PlaudConnector(device: device, transport: transport);
     case WearableDeviceType.heyPocket:
       return HeyPocketConnector(device: device, transport: transport);
     case WearableDeviceType.custom:

@@ -10,11 +10,29 @@ class GattScanSpec {
     this.serviceUuids = const <String>[],
     this.namePrefixes = const <String>[],
     this.manufacturerIds = const <int>[],
+    this.optionalServiceUuids = const <String>[],
   });
 
+  /// Services used to *select* devices in the scan.
   final List<String> serviceUuids;
   final List<String> namePrefixes;
   final List<int> manufacturerIds;
+
+  /// Every service a connector may access after connecting.
+  ///
+  /// Web Bluetooth grants access per service: `getPrimaryService` throws a
+  /// SecurityError for any UUID that was not listed in the chooser's filters or
+  /// `optionalServices`. Selecting a device by its primary service therefore does
+  /// NOT grant its battery/storage/button/time-sync services — those must be
+  /// declared up front or the feature silently fails on web only. Defaults to
+  /// [serviceUuids] so a caller that needs nothing extra stays unchanged.
+  final List<String> optionalServiceUuids;
+
+  /// The full set of services the browser chooser must grant access to.
+  List<String> get webAccessibleServices => <String>{
+    ...serviceUuids,
+    ...optionalServiceUuids,
+  }.toList(growable: false);
 
   bool get hasProtocolSelector =>
       serviceUuids.isNotEmpty ||
@@ -200,7 +218,10 @@ class UniversalGattTransport implements GattTransport {
         platformConfig: kIsWeb
             ? PlatformConfig(
                 web: WebOptions(
-                  optionalServices: spec.serviceUuids,
+                  // Not just the scan selectors: every service any connector may
+                  // touch (storage, battery, button, time sync) has to be granted
+                  // here or the browser blocks it after connecting.
+                  optionalServices: spec.webAccessibleServices,
                   optionalManufacturerData: spec.manufacturerIds,
                 ),
               )

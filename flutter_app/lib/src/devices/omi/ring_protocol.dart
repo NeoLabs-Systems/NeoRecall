@@ -21,6 +21,24 @@ class RingProtocol {
   static const int cmdClear = 0x13;
   static const int cmdStop = 0x03;
 
+  /// Reads a big-endian unsigned 64-bit sequence number as two 32-bit halves.
+  ///
+  /// `ByteData.getUint64` is **unimplemented on dart2js** — JavaScript has no
+  /// 64-bit integer type, so it throws UnsupportedError in a browser build and
+  /// would take the entire ring protocol down on web while working natively.
+  /// Ring cursors are packet counters, far below 2^53, so composing them from
+  /// two 32-bit reads is exact on every platform.
+  static int _readUint64BE(ByteData data, int offset) =>
+      data.getUint32(offset, Endian.big) * 0x100000000 +
+      data.getUint32(offset + 4, Endian.big);
+
+  /// Writes a big-endian unsigned 64-bit sequence number as two 32-bit halves,
+  /// for the same reason as [_readUint64BE] (`setUint64` throws on dart2js).
+  static void _writeUint64BE(ByteData data, int offset, int value) {
+    data.setUint32(offset, value ~/ 0x100000000, Endian.big);
+    data.setUint32(offset + 4, value % 0x100000000, Endian.big);
+  }
+
   static RingStatus? parseStatus(List<int> value) {
     if (value.length < 16) return null;
     final bd = ByteData.sublistView(Uint8List.fromList(value));
@@ -37,10 +55,10 @@ class RingProtocol {
     if (value.isEmpty || value[0] != notifyInfo || value.length < 31) return null;
     final bd = ByteData.sublistView(Uint8List.fromList(value));
     return RingInfo(
-      readSeq: bd.getUint64(1, Endian.big),
-      writeSeq: bd.getUint64(9, Endian.big),
+      readSeq: _readUint64BE(bd, 1),
+      writeSeq: _readUint64BE(bd, 9),
       capacityPackets: bd.getUint32(17, Endian.big),
-      droppedPackets: bd.getUint64(21, Endian.big),
+      droppedPackets: _readUint64BE(bd, 21),
       packetSize: bd.getUint16(29, Endian.big),
     );
   }
@@ -50,7 +68,7 @@ class RingProtocol {
     final bd = ByteData.sublistView(Uint8List.fromList(value));
     return DoneNotification(
       status: bd.getUint8(1),
-      nextSeq: bd.getUint64(2, Endian.big),
+      nextSeq: _readUint64BE(bd, 2),
     );
   }
 
@@ -60,7 +78,7 @@ class RingProtocol {
     }
     final bd = ByteData.sublistView(Uint8List.fromList(value));
     return ReadBeginNotification(
-      transferStartSeq: bd.getUint64(1, Endian.big),
+      transferStartSeq: _readUint64BE(bd, 1),
       packetCount: bd.getUint32(9, Endian.big),
     );
   }
@@ -70,7 +88,7 @@ class RingProtocol {
     final hasCount = packetCount != null && packetCount > 0;
     final cmd = ByteData(hasCount ? 13 : 9);
     cmd.setUint8(0, cmdRead);
-    cmd.setUint64(1, startSeq, Endian.big);
+    _writeUint64BE(cmd, 1, startSeq);
     if (hasCount) cmd.setUint32(9, packetCount, Endian.big);
     return cmd.buffer.asUint8List();
   }
@@ -79,7 +97,7 @@ class RingProtocol {
   static Uint8List encodeAdvanceCommand(int newReadSeq) {
     final cmd = ByteData(9);
     cmd.setUint8(0, cmdAdvance);
-    cmd.setUint64(1, newReadSeq, Endian.big);
+    _writeUint64BE(cmd, 1, newReadSeq);
     return cmd.buffer.asUint8List();
   }
 

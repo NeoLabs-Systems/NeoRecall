@@ -41,16 +41,68 @@ uploads; other devices continue synchronizing.
 ## Client process lifetime
 
 Android uses a process-owned Flutter engine plus a visible foreground service.
-The engine owns capture, durable chunk writes, Bluetooth reconnect, and upload,
-so dismissing the Activity does not detach those components. A durable capture
-intent creates a new interrupted/recovered session after process recreation.
-The notification Stop action waits for final chunk and session persistence
-before releasing the service.
+The engine owns capture, durable chunk writes, Bluetooth reconnect, device
+storage sync, and upload, so dismissing the Activity does not detach those
+components. A durable capture intent creates a new interrupted/recovered session
+after process recreation.
+
+The host is claimed through *background holds* rather than a single capture
+mode. `microphoneCapture` and `wearableCapture` cover live audio,
+`wearableLink` keeps a paired wearable connected while nothing is recording, and
+`wearableSync` is taken only for the duration of a transfer off a device. The
+service derives its foreground service types from the union of active holds
+(microphone, connectedDevice) and holds a wake lock only for holds whose work
+the CPU sleeping would stretch — never for an idle link. Any combination is
+therefore one service and one notification, and a paired wearable keeps
+reconnect, on-device sync, and upload running with the app swiped away.
+
+The notification Stop action releases every hold — capture ends, the wearable is
+unlinked, the host stops — after final chunk and session persistence. Opening
+the app re-arms it.
+
+`BOOT_COMPLETED` restores only holds that may legally start from the
+background. Android denies microphone access to a process with no UI, so a
+microphone capture intent is preserved and reported instead of resumed; wearable
+holds are restored, so device recordings still sync after a restart.
 
 iOS background audio and Bluetooth modes can keep an authorized active session
 alive while the app is backgrounded, but iOS does not permit an app to continue
 or relaunch after the user force-quits it. NeoRecall does not represent that OS
 restriction as a recoverable guarantee.
+
+## Device storage sync
+
+Wearables that record on their own give no signal when a new file appears, so
+every client polls on a short interval and drains through the same durable
+import pipeline; nothing is deleted from a device before its import is accepted.
+One scheduler owns that timing on all platforms, web included, so the periodic
+poll, the reconnect trigger, the app-resumed trigger, and the manual button
+share a single policy. Repeated failures back off instead of hammering a device
+that is out of range or busy, and an unattended poll stays silent — it reports
+only when it transfers something or keeps failing.
+
+## Meeting sources
+
+A meeting link is recorded by a bot that joins the call in a real browser and
+taps the WebRTC audio streams, feeding the same ingest pipeline as any other
+source. Nothing is injected into the page before the bot is admitted, so the
+join is fingerprinted on a clean page.
+
+Joining as an anonymous guest is the exception, not the rule: Google Meet, Zoom
+and Teams all refuse guests whenever the host restricts a meeting, and no amount
+of browser tuning changes that. The bot therefore joins as a signed-in
+participant. The user signs in once, by hand, in an ordinary Chrome window that
+the server opens on its own machine — deliberately *not* an automated browser,
+because providers block sign-in in one they can see is driven. NeoRecall never
+receives the password; it keeps only the browser profile Chrome writes, under
+`meeting_profiles/` in the runtime home, and reads it for cookie names and hosts
+only. No per-service API key or OAuth application is involved.
+
+Every join gets a throwaway clone of that profile, so concurrent meetings cannot
+fight over Chrome's single-instance lock and a crashed bot cannot damage the
+signed-in original. A refused join reports which of the two situations it was —
+an anonymous bot the meeting will not accept, or a signed-in account that was
+not invited — because the fixes are different.
 
 ## Processing pipeline
 

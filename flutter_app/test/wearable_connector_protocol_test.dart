@@ -8,7 +8,6 @@ import 'package:neorecall/src/devices/omi/device_models.dart';
 import 'package:neorecall/src/devices/omi/heypocket_connector.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
-import 'package:neorecall/src/devices/omi/plaud_connector.dart';
 import 'package:neorecall/src/devices/omi/ring_protocol.dart';
 
 void main() {
@@ -19,153 +18,6 @@ void main() {
     );
     await connector.connect();
     expect(connector.codec, WearableAudioCodec.opus);
-    await connector.dispose();
-  });
-
-  test('PLAUD uses FS320 frames and syncs from returned start time', () async {
-    final transport = _FakeWearableTransport();
-    final connector = PlaudConnector(
-      device: _device(WearableDeviceType.plaud),
-      transport: transport,
-    );
-    transport.onWrite = (service, characteristic, value) {
-      if (characteristic != WearableDeviceUuids.plaudWrite ||
-          value.length < 3) {
-        return;
-      }
-      // Mirror the real device: acknowledge each session-preamble chunk with
-      // `[0x12][0xfe][total][index]` before any command is answered.
-      if (value[0] == 0x10 && value[1] == 0xfe) {
-        scheduleMicrotask(
-          () => transport.emit(
-            WearableDeviceUuids.plaudService,
-            WearableDeviceUuids.plaudNotify,
-            <int>[0x12, 0xfe, value[2], value[3]],
-          ),
-        );
-        return;
-      }
-      final command = value[1] | (value[2] << 8);
-      final response = switch (command) {
-        20 => <int>[0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55, 0, 0],
-        _ => <int>[0],
-      };
-      scheduleMicrotask(
-        () => transport.emit(
-          WearableDeviceUuids.plaudService,
-          WearableDeviceUuids.plaudNotify,
-          <int>[1, command & 0xff, command >> 8, ...response],
-        ),
-      );
-    };
-
-    await connector.connect();
-    await connector.startRecording();
-
-    expect(connector.codec, WearableAudioCodec.opusFs320);
-    final syncWrite = transport.writes.firstWhere(
-      (write) => write.value[1] == 28,
-    );
-    expect(syncWrite.value.sublist(3, 11), <int>[
-      0x44,
-      0x33,
-      0x22,
-      0x11,
-      0,
-      0,
-      0,
-      0,
-    ]);
-    expect(syncWrite.value.sublist(11, 19), <int>[
-      0x88,
-      0x77,
-      0x66,
-      0x55,
-      0,
-      0,
-      0,
-      0,
-    ]);
-
-    // Each device-declared chunk is a self-contained Opus frame and must be
-    // forwarded as its own packet (matching Omi's reference), not concatenated.
-    final frames = <List<int>>[];
-    final audioSub = connector.audioBytes.stream.listen(frames.add);
-    transport.emit(
-      WearableDeviceUuids.plaudService,
-      WearableDeviceUuids.plaudNotify,
-      <int>[2, 0, 0, 0, 0, 0, 0, 0, 0, 40, ...List<int>.filled(40, 0xb8)],
-    );
-    transport.emit(
-      WearableDeviceUuids.plaudService,
-      WearableDeviceUuids.plaudNotify,
-      <int>[2, 0, 0, 0, 0, 40, 0, 0, 0, 40, ...List<int>.filled(40, 0x78)],
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(frames.map((frame) => frame.length), <int>[40, 40]);
-    expect(frames[0].every((byte) => byte == 0xb8), isTrue);
-    expect(frames[1].every((byte) => byte == 0x78), isTrue);
-    await audioSub.cancel();
-    await connector.dispose();
-  });
-
-  test('PLAUD sends the captured session preamble before any command', () async {
-    final transport = _FakeWearableTransport();
-    final connector = PlaudConnector(
-      device: _device(WearableDeviceType.plaud),
-      transport: transport,
-    );
-    transport.onWrite = (service, characteristic, value) {
-      if (characteristic != WearableDeviceUuids.plaudWrite) return;
-      if (value.length >= 4 && value[0] == 0x10 && value[1] == 0xfe) {
-        scheduleMicrotask(
-          () => transport.emit(
-            WearableDeviceUuids.plaudService,
-            WearableDeviceUuids.plaudNotify,
-            <int>[0x12, 0xfe, value[2], value[3]],
-          ),
-        );
-      }
-    };
-
-    await connector.connect();
-
-    final preamble = transport.writes
-        .where(
-          (write) =>
-              write.characteristic == WearableDeviceUuids.plaudWrite &&
-              write.value.length >= 4 &&
-              write.value[0] == 0x10 &&
-              write.value[1] == 0xfe,
-        )
-        .toList();
-    // Three chunks, framed [0x10][0xfe][total=3][index], carrying 256 bytes —
-    // exactly what the official app sends (verified byte-for-byte against the
-    // HCI capture; see _handshakeChunksHex).
-    expect(preamble.length, 3);
-    expect(preamble.map((write) => write.value[2]), everyElement(3));
-    expect(preamble.map((write) => write.value[3]), <int>[0, 1, 2]);
-    expect(
-      preamble.fold<int>(0, (sum, write) => sum + write.value.length - 4),
-      256,
-    );
-    expect(preamble.first.value.sublist(4, 8), <int>[0x55, 0x18, 0xb7, 0xd8]);
-    expect(connector.handshakeCompleted, isTrue);
-
-    // The preamble must precede every command write on the same channel.
-    final firstCommand = transport.writes.indexWhere(
-      (write) =>
-          write.characteristic == WearableDeviceUuids.plaudWrite &&
-          write.value.isNotEmpty &&
-          write.value[0] == 0x01,
-    );
-    final lastPreamble = transport.writes.lastIndexWhere(
-      (write) =>
-          write.value.length >= 2 &&
-          write.value[0] == 0x10 &&
-          write.value[1] == 0xfe,
-    );
-    if (firstCommand != -1) expect(lastPreamble, lessThan(firstCommand));
     await connector.dispose();
   });
 
@@ -353,11 +205,14 @@ void main() {
       );
       // RingStatus (usedBytes, unreadPackets=1, freeBytes, rtcValid) so the
       // drain's status probe on 30295782 finds data to pull.
+      // The device reports PCM8 (codec id 1) so the drain decodes without a
+      // native Opus codec, which the test VM does not have. Stated explicitly:
+      // the connector's fallback is Opus, matching real hardware.
+      transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
       transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
         0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
       ];
-      // Default codec is PCM8, so the drain decodes without native Opus (which
-      // is unavailable in the test VM).
+      await connector.connect();
       expect(connector.codec, WearableAudioCodec.pcm8);
 
       // One 444-byte ring record: [4-byte timestamp][440-byte payload]; the
@@ -441,9 +296,12 @@ void main() {
       device: _device(WearableDeviceType.omi),
       transport: transport,
     );
+    // PCM8 (codec id 1) so the drain decodes without a native Opus codec.
+    transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
     transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
       0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
     ];
+    await connector.connect();
     final frame = List<int>.filled(8, 0x40);
     final payload = <int>[
       frame.length,

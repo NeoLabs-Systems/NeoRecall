@@ -1,8 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'main_controller.dart';
+import 'main_device_diagnostics.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
@@ -328,14 +330,25 @@ class _RecordScreenState extends State<RecordScreen> {
                 if (bluetoothPreferred ||
                     controller.preferredDeviceLabel != null) ...<Widget>[
                   const SizedBox(height: 10),
-                  Text(
-                    controller.preferredDeviceLabel == null
-                        ? 'Connect a supported Bluetooth device before starting this source.'
-                        : 'Preferred device: ${controller.preferredDeviceLabel}',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: palette.textSecondary,
-                      height: 1.45,
+                  // Long-press opens device & sync diagnostics. Deliberately
+                  // unadvertised: this stays a consumer product, so the
+                  // troubleshooting surface has no visible affordance and is
+                  // only reached when support asks for it.
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onLongPress: () {
+                      HapticFeedback.mediumImpact();
+                      showDeviceDiagnosticsSheet(context, controller);
+                    },
+                    child: Text(
+                      controller.preferredDeviceLabel == null
+                          ? 'Connect a supported Bluetooth device before starting this source.'
+                          : 'Preferred device: ${controller.preferredDeviceLabel}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: palette.textSecondary,
+                        height: 1.45,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -478,7 +491,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     style: TextStyle(color: palette.textMuted, height: 1.4),
                   ),
                 ],
-                // Offline-first wearables (HeyPocket, Plaud) record on
+                // Offline-first wearables (HeyPocket) record on
                 // the device itself and cannot live-stream, so the live record
                 // button is hidden when such a device is the chosen source — sync
                 // (the card above) is the only capture path. The Stop button is
@@ -629,10 +642,10 @@ class _NeedsAttentionBannerState extends State<_NeedsAttentionBanner> {
   }
 }
 
-/// Primary "sync" affordance for offline-first wearables (HeyPocket and
-/// Plaud): these record on the device itself, so pulling those recordings — not
-/// live capture — is the main action. Recordings also sync automatically on
-/// connect; this makes the manual path obvious and explains the model.
+/// Primary "sync" affordance for offline-first wearables (HeyPocket): these
+/// record on the device itself, so pulling those recordings — not live capture
+/// — is the main action. Recordings also sync automatically on connect; this
+/// makes the manual path obvious and explains the model.
 class _OfflineDeviceSyncCard extends StatefulWidget {
   const _OfflineDeviceSyncCard({required this.controller});
   final NeoRecallController controller;

@@ -9,6 +9,9 @@ const { validate } = require('../middleware/validate');
 const router = express.Router();
 
 const pairingService = require('../services/sources/pairing_service');
+const meetingAccounts = require('../services/sources/meeting_bot/meeting_account_service');
+
+const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
 // Public endpoint for the JS snippet
 router.post('/discord/pair', express.json(), (req, res, next) => {
@@ -39,6 +42,51 @@ router.get('/discord/pairing/:token/status', (req, res) => {
   res.json(pairingService.getPairingStatus(req.params.token));
 });
 
+// Which source types this build can run, so the client offers only real ones.
+router.get('/types', (req, res) => res.json({ types: sources.availableTypes() }));
+
+// Meeting account: the bots join as a real signed-in participant instead of an
+// anonymous guest, which is what most meetings require. Sign-in happens in an
+// ordinary Chrome window on the machine running the server — no API keys, and no
+// password ever reaches NeoRecall.
+const signInSchema = z.object({ provider: z.enum(Object.keys(meetingAccounts.PROVIDERS)) });
+
+router.get('/meeting/account', (req, res) => res.json(meetingAccounts.getStatus(req.auth.userId)));
+
+router.post('/meeting/account/sign-in', validate(signInSchema), (req, res) => {
+  try {
+    res.json({ ...meetingAccounts.startSignIn(req.auth.userId, req.body.provider), status: meetingAccounts.getStatus(req.auth.userId) });
+  } catch (error) {
+    res.status(409).json({ error: error.message });
+  }
+});
+
+// Closes the sign-in window and reports which providers the profile now holds.
+router.post('/meeting/account/complete', asyncRoute(async (req, res) => {
+  res.json(await meetingAccounts.completeSignIn(req.auth.userId));
+}));
+
+router.delete('/meeting/account', asyncRoute(async (req, res) => {
+  res.json(await meetingAccounts.signOut(req.auth.userId));
+}));
+
+const verifySchema = z.object({
+  type: z.string().min(1),
+  config: z.record(z.unknown()),
+});
+
+// Checks credentials before a source is stored, so a bad token surfaces in the
+// setup dialog instead of as a silent background failure later. Types that need
+// no verification simply report ok.
+router.post('/verify', validate(verifySchema), async (req, res) => {
+  try {
+    const result = await sources.verifyConfig(req.body.type, req.body.config);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
 const createSchema = z.object({
   type: z.string().min(1),
   name: z.string().min(1).max(100),
@@ -64,7 +112,7 @@ router.post('/', validate(createSchema), (req, res, next) => {
 
 router.get('/:id', (req, res, next) => {
   try {
-    res.json(sources.get(req.auth.userId, req.params.id));
+    res.json(sources.getPublic(req.auth.userId, req.params.id));
   } catch (error) {
     next(error);
   }

@@ -298,7 +298,15 @@ class _FakeGattTransport implements GattTransport {
     String deviceId,
     String serviceUuid,
     String characteristicUuid,
-  ) async => Uint8List(0);
+  ) async {
+    // Report PCM8 so the shared decoder can start without a native Opus codec.
+    // The connector's fallback is Opus (what real hardware reports), so a fake
+    // that answered nothing would make these transport tests need a real codec.
+    if (characteristicUuid == WearableDeviceUuids.omiAudioCodec) {
+      return Uint8List.fromList(<int>[1]);
+    }
+    return Uint8List(0);
+  }
 
   @override
   Future<void> requestAccess() async {}

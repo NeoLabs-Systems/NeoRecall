@@ -7,13 +7,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { chromium } = require('playwright-extra');
+const { chromium } = require('playwright');
+const { chromium: stealthChromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth')();
 // These two evasions interfere with Google Meet's media/iframe handling and, on
 // real Chrome, contradict genuine values — disable them (as screenapp does).
 stealthPlugin.enabledEvasions.delete('iframe.contentWindow');
 stealthPlugin.enabledEvasions.delete('media.codecs');
-chromium.use(stealthPlugin);
+stealthChromium.use(stealthPlugin);
 
 // Well-known real-Chrome install locations per platform. `neorecall setup` runs
 // `playwright install chrome`, which installs branded Google Chrome to these.
@@ -40,6 +41,14 @@ function resolveChromePath() {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+// Whether this host can put a real window on a screen. Needed for the
+// interactive sign-in window: a headless box can run the bots, but nobody can
+// type a password into a browser it cannot display.
+function hasDisplay() {
+  if (process.platform === 'darwin' || process.platform === 'win32') return true;
+  return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 }
 
 function freePort() {
@@ -106,9 +115,14 @@ async function attachContextPage(browser) {
 // Because Playwright never *launches* it, the browser carries none of the
 // launch-time automation fingerprint (no --enable-automation, navigator.webdriver
 // stays false) — the least-detectable configuration and screenapp's prod default.
+// `opts.userDataDir` (a throwaway clone of the signed-in profile) makes the bot
+// join as that account instead of as an anonymous guest.
 async function launchViaCdpSpawn(chromePath, opts) {
   const port = await freePort();
-  const userDataDir = path.join(os.tmpdir(), `neorecall-meet-${crypto.randomUUID()}`);
+  const borrowedProfile = Boolean(opts && opts.userDataDir);
+  const userDataDir = borrowedProfile
+    ? opts.userDataDir
+    : path.join(os.tmpdir(), `neorecall-meet-${crypto.randomUUID()}`);
   const child = spawn(chromePath, [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
@@ -117,13 +131,19 @@ async function launchViaCdpSpawn(chromePath, opts) {
   ], { stdio: 'ignore' });
   child.on('error', () => {});
 
+  // Only the temp profile we created here is ours to delete; a borrowed clone
+  // belongs to the caller (AbstractBot disposes it with the session).
+  const discardProfile = () => {
+    if (!borrowedProfile) fs.rm(userDataDir, { recursive: true, force: true }, () => {});
+  };
+
   let browser;
   try {
     const cdpUrl = await waitForCdp(port);
     browser = await chromium.connectOverCDP(cdpUrl);
   } catch (err) {
     try { child.kill('SIGKILL'); } catch (e) {}
-    fs.rm(userDataDir, { recursive: true, force: true }, () => {});
+    discardProfile();
     throw err;
   }
 
@@ -131,9 +151,12 @@ async function launchViaCdpSpawn(chromePath, opts) {
   const dispose = async () => {
     try { await browser.close(); } catch (e) {}
     try { child.kill('SIGKILL'); } catch (e) {}
-    fs.rm(userDataDir, { recursive: true, force: true }, () => {});
+    discardProfile();
   };
-  return { browser, context, page, dispose, mode: `cdp-spawn (${path.basename(chromePath)})` };
+  return {
+    browser, context, page, dispose,
+    mode: `cdp-spawn (${path.basename(chromePath)}${borrowedProfile ? ', signed-in profile' : ''})`,
+  };
 }
 
 // STRATEGY 2 — connect to an already-running external Chrome (advanced/prod:
@@ -146,8 +169,12 @@ async function launchViaCdpConnect(cdpUrl) {
 }
 
 // STRATEGY 3 — Playwright launches the browser directly. Simplest, but carries
-// the automation fingerprint; we strip what we can. Prefers real Chrome channel,
-// falls back to bundled Chromium.
+// the automation fingerprint; we strip what we can. Prefers real Chrome, falls
+// back to bundled Chromium.
+//
+// The stealth plugin is applied to bundled Chromium only. Its evasions exist to
+// make *Chromium* look like Chrome; running them on genuine Chrome overwrites
+// already-correct values and introduces the inconsistencies detectors look for.
 async function launchDirect(opts) {
   const launchOptions = {
     headless: false,
@@ -159,18 +186,35 @@ async function launchDirect(opts) {
   };
   if (process.env.MEETING_BOT_CHROME_PATH) launchOptions.executablePath = process.env.MEETING_BOT_CHROME_PATH;
   const channel = launchOptions.executablePath ? undefined : (process.env.MEETING_BOT_CHROME_CHANNEL || 'chrome');
+  const userDataDir = opts && opts.userDataDir;
+
+  // Persistent profile: launchPersistentContext is the only launch API that
+  // takes a user-data-dir, so the signed-in session survives this route too.
+  if (userDataDir) {
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      ...launchOptions,
+      ...(channel ? { channel } : {}),
+      viewport: null,
+      ignoreHTTPSErrors: true,
+    });
+    const page = context.pages().find((p) => !p.isClosed()) || (await context.newPage());
+    const dispose = async () => { try { await context.close(); } catch (e) {} };
+    return { browser: context.browser(), context, page, dispose, mode: 'direct (signed-in profile)' };
+  }
 
   let browser;
+  let usedRealChrome = Boolean(channel || launchOptions.executablePath);
   try {
     browser = await chromium.launch(channel ? { ...launchOptions, channel } : launchOptions);
   } catch (err) {
     if (!channel) throw err;
-    browser = await chromium.launch(launchOptions); // bundled Chromium fallback
+    usedRealChrome = false;
+    browser = await stealthChromium.launch(launchOptions); // bundled Chromium fallback
   }
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
   const page = await context.newPage();
   const dispose = async () => { try { await browser.close(); } catch (e) {} };
-  return { browser, context, page, dispose, mode: channel ? `direct (${channel})` : 'direct (bundled)' };
+  return { browser, context, page, dispose, mode: usedRealChrome ? `direct (${channel || 'chrome path'})` : 'direct (bundled + stealth)' };
 }
 
 // Create the meeting browser using the least-detectable strategy available.
@@ -195,4 +239,36 @@ async function createMeetingBrowser(opts = {}) {
   return launchDirect(opts);
 }
 
-module.exports = { createMeetingBrowser, resolveChromePath };
+// A plain, visible Chrome window for the one-time account sign-in.
+//
+// Deliberately *not* automated: no remote-debugging port, no Playwright, no
+// stealth. Google refuses sign-in ("This browser or app may not be secure") in
+// a browser it can see is being driven, so the user signs in in an ordinary
+// window and NeoRecall only reads the resulting profile afterwards. The
+// password is typed into Google's own page and never passes through NeoRecall.
+function spawnSignInWindow({ chromePath, userDataDir, url }) {
+  const child = spawn(chromePath, [
+    `--user-data-dir=${userDataDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--window-size=1100,900',
+    '--new-window',
+    url,
+  ], { stdio: 'ignore', detached: false });
+  child.on('error', () => {});
+  return child;
+}
+
+// Attach to a profile just long enough to inspect its cookies (sign-in check).
+// Off-screen and short-lived; the caller must close it via dispose().
+async function openProfileForInspection(chromePath, userDataDir) {
+  return launchViaCdpSpawn(chromePath, { userDataDir, extraArgs: ['--disable-extensions'] });
+}
+
+module.exports = {
+  createMeetingBrowser,
+  resolveChromePath,
+  hasDisplay,
+  spawnSignInWindow,
+  openProfileForInspection,
+};

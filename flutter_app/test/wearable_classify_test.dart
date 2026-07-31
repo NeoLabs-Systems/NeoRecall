@@ -13,13 +13,6 @@ void main() {
     );
     expect(
       DiscoveredWearable.classify(
-        name: 'PLAUD NOTE',
-        serviceUuids: const <String>[],
-      ),
-      WearableDeviceType.plaud,
-    );
-    expect(
-      DiscoveredWearable.classify(
         name: 'OmiGlass',
         serviceUuids: const <String>[],
       ),

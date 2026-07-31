@@ -16,7 +16,13 @@ import 'recorder.dart';
 /// Defaults:
 /// 1. preferred Bluetooth/external device when connected
 /// 2. phone microphone fallback
-/// 3. Android foreground service host while recording
+/// 3. Android foreground host while any background hold is held
+///
+/// The recorder owns the mobile runtime's background holds because it is the one
+/// object that sees both sides: live capture sources and the wearable link. A
+/// hold is taken per *reason* (see [BackgroundHold]), so phone-microphone
+/// capture, wearable capture, and an idle wearable link share a single host and
+/// a single notification instead of competing for one "capture mode".
 class MobileRecallRecorder implements RecallRecorder {
   MobileRecallRecorder({
     AudioDeviceAdapterRegistry? registry,
@@ -41,6 +47,9 @@ class MobileRecallRecorder implements RecallRecorder {
   final StreamController<String> _warnings =
       StreamController<String>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
+  Set<BackgroundHold> _captureHolds = const <BackgroundHold>{};
+  bool _backgroundPaused = false;
+  bool _syncing = false;
   bool _initialized = false;
 
   @override
@@ -54,22 +63,28 @@ class MobileRecallRecorder implements RecallRecorder {
   @override
   bool get isRecording => _pipeline?.isRunning ?? false;
 
+  /// True when the user released the background host from its notification.
+  /// Nothing stays linked or captures until the app is opened again.
+  bool get backgroundPaused => _backgroundPaused;
+
   Future<void> initialize({String? accountId}) async {
     if (_initialized) return;
     await registry.initializeAll();
     await devices.bindAccount(accountId);
     await background.initialize();
     _subs.add(devices.messages.listen(_warnings.add));
+    _subs.add(devices.linkIntents.listen((_) => unawaited(applyBackgroundHolds())));
     _subs.add(
       background.events.listen((event) {
         final message = event.message;
         if (message != null) _warnings.add(message);
       }),
     );
-    if (devices.preferBluetooth && devices.hasPreferredDevice) {
+    _initialized = true;
+    await applyBackgroundHolds();
+    if (devices.linkDesired) {
       await devices.connectPreferred();
     }
-    _initialized = true;
   }
 
   Future<void> bindAccount(String? accountId) async {
@@ -78,6 +93,80 @@ class MobileRecallRecorder implements RecallRecorder {
       return;
     }
     await devices.bindAccount(accountId);
+    await applyBackgroundHolds();
+  }
+
+  /// Reconciles the native host with everything that currently needs the process
+  /// alive. Safe to call at any time; the service ignores an unchanged request.
+  /// Returns false when the host refused the request (missing permission, or a
+  /// platform that will not host the requested holds).
+  Future<bool> applyBackgroundHolds() async {
+    if (!_initialized) return false;
+    final holds = <BackgroundHold>{..._captureHolds};
+    if (!_backgroundPaused) {
+      if (devices.linkDesired) holds.add(BackgroundHold.wearableLink);
+      // A transfer already in flight keeps the host regardless of the standing
+      // preference: dropping it mid-drain would strand audio on the device.
+      if (_syncing) holds.add(BackgroundHold.wearableSync);
+    }
+    return background.apply(
+      BackgroundRuntimeRequest(
+        holds: holds,
+        deviceLabel: devices.preferredDevice?.displayName,
+      ),
+    );
+  }
+
+  /// Marks a device-storage transfer as running (or finished) so the host keeps
+  /// the CPU awake for its duration. Idle polling must not set this — only an
+  /// actual transfer does.
+  Future<void> setDeviceSyncActive(bool active) async {
+    if (_syncing == active) return;
+    _syncing = active;
+    await applyBackgroundHolds();
+  }
+
+  /// Releases every hold after the user tapped Stop on the notification: capture
+  /// ends, the wearable is unlinked, and the host shuts down. Opening the app
+  /// calls [resumeBackgroundRuntime] to arm it again.
+  Future<void> pauseBackgroundRuntime() async {
+    _backgroundPaused = true;
+    devices.autoReconnect = false;
+    await stop();
+    _captureHolds = const <BackgroundHold>{};
+    _syncing = false;
+    await devices.disconnect();
+    await background.stop();
+  }
+
+  Future<void> resumeBackgroundRuntime() async {
+    if (!_backgroundPaused) return;
+    _backgroundPaused = false;
+    devices.autoReconnect = true;
+    await applyBackgroundHolds();
+    if (devices.linkDesired) {
+      unawaited(devices.connectPreferred());
+    }
+  }
+
+  /// Whether an Activity is attached right now. Phone-microphone capture cannot
+  /// start without one — the platform denies microphone access to a process the
+  /// system started on its own — so automatic recovery must check this instead of
+  /// starting a capture that would record silence.
+  Future<bool> hasAttachedUi() async =>
+      (await background.refreshState()).foreground;
+
+  static Set<BackgroundHold> holdsForSources(Iterable<CaptureSource> sources) {
+    final holds = <BackgroundHold>{};
+    for (final source in sources) {
+      switch (source.kind) {
+        case 'microphone':
+          holds.add(BackgroundHold.microphoneCapture);
+        case 'wearable':
+          holds.add(BackgroundHold.wearableCapture);
+      }
+    }
+    return holds;
   }
 
   @override
@@ -90,6 +179,9 @@ class MobileRecallRecorder implements RecallRecorder {
   }) async {
     if (!_initialized) await initialize();
     if (isRecording) throw StateError('Recorder is already active.');
+    // An explicit capture request supersedes a notification-initiated pause.
+    _backgroundPaused = false;
+    devices.autoReconnect = true;
 
     final sources = <CaptureSource>[];
     final notes = <String>[];
@@ -156,13 +248,13 @@ class MobileRecallRecorder implements RecallRecorder {
       throw StateError('No mobile audio source is available.');
     }
 
-    final actualMode = sources.first.kind == 'wearable'
-        ? 'bluetooth'
-        : 'microphone';
-    final backgroundStarted = await background.start(mode: actualMode);
-    if (!backgroundStarted) {
+    // The host must own the matching foreground types before capture opens the
+    // microphone or the BLE audio stream, not after.
+    final previousCaptureHolds = _captureHolds;
+    _captureHolds = holdsForSources(sources);
+    if (!await applyBackgroundHolds()) {
       notes.add(
-        'Background capture host could not start. Recording continues while the app stays alive.',
+        'Background host could not start. Recording continues while the app stays open.',
       );
     }
 
@@ -182,6 +274,13 @@ class MobileRecallRecorder implements RecallRecorder {
     try {
       final capability = await pipeline.start();
       _pipeline = pipeline;
+      // Sources that failed permission or startup drop out of the pipeline;
+      // hold only what is actually streaming.
+      final activeHolds = holdsForSources(pipeline.activeSources);
+      if (activeHolds.length != _captureHolds.length) {
+        _captureHolds = activeHolds;
+        await applyBackgroundHolds();
+      }
       final warning = [
         if (capability.warning != null) capability.warning!,
         ...notes,
@@ -200,7 +299,8 @@ class MobileRecallRecorder implements RecallRecorder {
         _subs.remove(sub);
       }
       await pipeline.dispose();
-      await background.stop();
+      _captureHolds = previousCaptureHolds;
+      await applyBackgroundHolds();
       rethrow;
     }
   }
@@ -215,14 +315,18 @@ class MobileRecallRecorder implements RecallRecorder {
     }
   }
 
-  /// Release the native host only after the controller has durably finalized
-  /// the last chunk and session declaration.
-  Future<void> finishBackgroundHost() => background.stop();
+  /// Releases the capture holds only after the controller has durably finalized
+  /// the last chunk and session declaration. Any wearable link hold survives, so
+  /// device-storage sync and upload keep running with the app closed.
+  Future<void> finishBackgroundHost() async {
+    _captureHolds = const <BackgroundHold>{};
+    await applyBackgroundHolds();
+  }
 
   @override
   Future<void> dispose() async {
     await stop();
-    await finishBackgroundHost();
+    _captureHolds = const <BackgroundHold>{};
     for (final sub in _subs) {
       await sub.cancel();
     }

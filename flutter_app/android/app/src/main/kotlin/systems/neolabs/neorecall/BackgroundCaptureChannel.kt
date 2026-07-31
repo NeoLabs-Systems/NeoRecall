@@ -2,13 +2,12 @@ package systems.neolabs.neorecall
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
-/** Process-level bridge used by both the Activity and foreground service. */
+/** Process-level bridge used by both the Activity and the foreground host. */
 class BackgroundCaptureChannel(private val context: Context) {
   private lateinit var channel: MethodChannel
 
@@ -16,15 +15,18 @@ class BackgroundCaptureChannel(private val context: Context) {
     channel = MethodChannel(messenger, CHANNEL)
     channel.setMethodCallHandler { call, result ->
       when (call.method) {
-        "startBackgroundCapture" -> {
-          val mode = call.argument<String>("mode") ?: "microphone"
-          val intent = Intent(context, BackgroundCaptureService::class.java)
-            .putExtra(BackgroundCaptureService.EXTRA_MODE, mode)
+        "applyBackgroundHolds" -> {
+          val holds = call.argument<List<String>>("holds").orEmpty()
           try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-              context.startForegroundService(intent)
+            if (holds.isEmpty()) {
+              stopHost()
             } else {
-              context.startService(intent)
+              BackgroundCaptureService.requestHolds(
+                context,
+                holds,
+                call.argument<String>("title"),
+                call.argument<String>("text"),
+              )
             }
             result.success(true)
           } catch (error: Exception) {
@@ -32,21 +34,33 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
         }
         "stopBackgroundCapture" -> {
-          val intent = Intent(context, BackgroundCaptureService::class.java)
-            .setAction(BackgroundCaptureService.ACTION_STOP)
-          try {
-            context.startService(intent)
-            result.success(true)
-          } catch (_: Exception) {
-            context.stopService(Intent(context, BackgroundCaptureService::class.java))
-            result.success(true)
-          }
+          stopHost()
+          result.success(true)
         }
-        "isBackgroundCaptureRunning" -> {
-          result.success(BackgroundCaptureService.isRunning(context))
+        "backgroundRuntimeState" -> {
+          result.success(
+            mapOf(
+              "running" to BackgroundCaptureService.isRunning(context),
+              "holds" to BackgroundCaptureService.activeHolds(context).toList(),
+              "foreground" to
+                ((context.applicationContext as? NeoRecallApplication)?.hasVisibleActivity == true),
+              "microphoneUnavailable" to
+                BackgroundCaptureService.microphoneUnavailable(context),
+            ),
+          )
         }
         else -> result.notImplemented()
       }
+    }
+  }
+
+  private fun stopHost() {
+    val intent = Intent(context, BackgroundCaptureService::class.java)
+      .setAction(BackgroundCaptureService.ACTION_STOP)
+    try {
+      context.startService(intent)
+    } catch (_: Exception) {
+      context.stopService(Intent(context, BackgroundCaptureService::class.java))
     }
   }
 
@@ -54,6 +68,15 @@ class BackgroundCaptureChannel(private val context: Context) {
     Handler(Looper.getMainLooper()).post {
       if (::channel.isInitialized) {
         channel.invokeMethod("backgroundStopRequested", null)
+      }
+    }
+  }
+
+  /** Surfaces a host-side condition (dropped hold, refused start) in the app. */
+  fun notifyHostMessage(message: String) {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod("backgroundHostMessage", mapOf("message" to message))
       }
     }
   }
