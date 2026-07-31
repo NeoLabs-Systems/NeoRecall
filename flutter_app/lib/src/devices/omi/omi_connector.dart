@@ -12,6 +12,12 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
 
   WearableAudioCodec _codec = WearableAudioCodec.pcm8;
 
+  // Last observed ring-buffer facts, reported through [syncDiagnostics] so a
+  // drain that yields nothing can be told apart from one that never ran.
+  bool _storageReadable = false;
+  int _lastUnreadPackets = -1;
+  int _lastFrameCount = 0;
+
   WearableAudioCodec get fallbackCodec => WearableAudioCodec.pcm8;
 
   @override
@@ -138,15 +144,29 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     // buffer only exists to cover phone-away gaps, so it is drained while idle,
     // never mid-recording (which would also contend for the storage channel).
     if (recording) return 0;
-    // Only DevKit-class Omi hardware exposes the on-board storage service; on
-    // models without it there is nothing to drain, so return immediately rather
-    // than waiting out the info-notification timeout.
-    if (!transport.hasCharacteristic(
-      WearableDeviceUuids.omiStorageService,
-      WearableDeviceUuids.omiStorageData,
-    )) {
-      return 0;
+    // Probe on-board storage by READING the ring status characteristic
+    // (30295782), exactly as the official Omi app does. This is more reliable
+    // than hasCharacteristic (some BLE stacks don't enumerate the storage
+    // service until it is accessed — the reason earlier builds silently synced
+    // nothing), detects models without storage (read throws), AND tells us up
+    // front whether there is anything to drain, so we skip the whole transfer
+    // and its notify timeout when the ring is empty.
+    RingStatus? status;
+    try {
+      final rawStatus = await transport.readCharacteristic(
+        WearableDeviceUuids.omiStorageService,
+        WearableDeviceUuids.omiStorageControl,
+      );
+      status = RingProtocol.parseStatus(rawStatus);
+      _storageReadable = true;
+    } catch (_) {
+      _storageReadable = false;
+      _lastUnreadPackets = -1;
+      return 0; // no on-board storage on this device
     }
+    _lastUnreadPackets = status?.unreadPackets ?? -1;
+    _lastFrameCount = 0;
+    if (status == null || status.unreadPackets == 0) return 0;
     final assembler = OfflineWavAssembler(codec: codec, stripBleHeader: false);
     if (!await assembler.ensureSupported()) {
       assembler.dispose();
@@ -204,6 +224,7 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
       await subscription.cancel();
     }
 
+    _lastFrameCount = frameCount;
     final pcmBytes = assembler.pcmByteLength;
     final wav = assembler.toWav();
     assembler.dispose();
@@ -235,6 +256,13 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     }
     return hasRecording ? 1 : 0;
   }
+
+  @override
+  Map<String, Object?> get syncDiagnostics => <String, Object?>{
+    'storageCharacteristicReadable': _storageReadable,
+    'unreadPackets': _lastUnreadPackets,
+    'opusFramesDecoded': _lastFrameCount,
+  };
 
   @override
   Future<void> cancelStoredSync() async {

@@ -1,9 +1,7 @@
 import '../ble/gatt_connector_transport.dart';
 import 'base_connector.dart';
-import 'custom_command_connector.dart';
 import 'device_models.dart';
 import 'heypocket_connector.dart';
-import 'limitless_connector.dart';
 import 'omi_connector.dart';
 import 'plaud_connector.dart';
 
@@ -16,12 +14,8 @@ WearableConnector createWearableConnector(
       return OmiConnector(device: device, transport: transport);
     case WearableDeviceType.omiGlass:
       return OmiGlassConnector(device: device, transport: transport);
-    case WearableDeviceType.fieldy:
-      return FieldyConnector(device: device, transport: transport);
     case WearableDeviceType.plaud:
       return PlaudConnector(device: device, transport: transport);
-    case WearableDeviceType.limitless:
-      return LimitlessConnector(device: device, transport: transport);
     case WearableDeviceType.heyPocket:
       return HeyPocketConnector(device: device, transport: transport);
     case WearableDeviceType.custom:

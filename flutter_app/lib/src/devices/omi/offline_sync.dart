@@ -52,6 +52,17 @@ abstract mixin class WearableOfflineSync {
 
   /// Aborts an in-flight drain so the device can return to idle/live capture.
   Future<void> cancelStoredSync();
+
+  /// Protocol-level facts about the last drain, recorded in the diagnostics log
+  /// alongside the sync outcome.
+  ///
+  /// A drain that returns zero recordings is ambiguous on its own — an empty
+  /// device and a device that never answered look identical to the user. Each
+  /// connector reports what it actually observed (handshake acknowledged, list
+  /// received, packets pending) so a failing sync can be diagnosed from a user's
+  /// exported log instead of requiring the hardware in hand. Values must contain
+  /// no audio, transcripts or secrets.
+  Map<String, Object?> get syncDiagnostics => const <String, Object?>{};
 }
 
 /// Implemented by a device adapter whose currently-connected device may expose

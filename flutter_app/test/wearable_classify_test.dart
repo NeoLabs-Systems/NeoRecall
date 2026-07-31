@@ -20,13 +20,6 @@ void main() {
     );
     expect(
       DiscoveredWearable.classify(
-        name: 'Limitless Pendant',
-        serviceUuids: <String>[WearableDeviceUuids.limitlessService],
-      ),
-      WearableDeviceType.limitless,
-    );
-    expect(
-      DiscoveredWearable.classify(
         name: 'OmiGlass',
         serviceUuids: const <String>[],
       ),

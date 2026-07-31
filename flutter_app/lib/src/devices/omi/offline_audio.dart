@@ -7,7 +7,7 @@ import 'device_models.dart';
 /// them to 16 kHz mono PCM16 via [WearableAudioDecoder], and produces a
 /// self-contained WAV.
 ///
-/// This is what lets frame-based wearables (Omi, Limitless) feed their offline
+/// This is what lets frame-based wearables (Omi) feed their offline
 /// recordings into the exact same server import pipeline as any uploaded file:
 /// the connector drains raw Opus/PCM frames, this assembles a decodable WAV, and
 /// the import path (ffmpeg-backed) handles the rest.

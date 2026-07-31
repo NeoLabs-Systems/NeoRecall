@@ -467,14 +467,25 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   Future<bool> _deleteStoredFile(HeyPocketStoredFile file) async {
     final ack = Completer<bool>();
     _deleteAck = ack;
+    var ok = false;
     try {
       await _writeControl('APP&D&${file.date}&${file.fileId}');
-      return await ack.future.timeout(_deleteTimeout, onTimeout: () => false);
+      ok = await ack.future.timeout(_deleteTimeout, onTimeout: () => false);
     } catch (_) {
-      return false;
+      ok = false;
     } finally {
       if (identical(_deleteAck, ack)) _deleteAck = null;
     }
+    // Surface whether the device actually acknowledged the delete (MCU&D): if it
+    // does not, the file is re-listed next sweep (re-download is idempotent, so
+    // no duplicate transcript — just wasted transfer, visible here).
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      ok ? 'heypocket_deleted' : 'heypocket_delete_unacked',
+      level: ok ? 'info' : 'warning',
+      details: <String, Object?>{'id': file.id},
+    );
+    return ok;
   }
 
   @override

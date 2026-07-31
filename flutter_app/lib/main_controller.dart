@@ -204,6 +204,12 @@ class NeoRecallController extends ChangeNotifier {
   String? deviceStorageSyncError;
   bool _deviceStorageAutoSyncArmed = true;
   static const int _deviceStorageMinBytes = 2048;
+  // While a device stays connected, re-drain periodically so recordings made
+  // after the initial connect are pulled without any user action — background
+  // sync that keeps running as long as the app process is alive (including
+  // during a foreground-service recording on Android).
+  Timer? _deviceStorageSyncTimer;
+  static const Duration _deviceStorageSyncInterval = Duration(minutes: 5);
   double audioLevel = 0;
   DateTime? recordingStartedAt;
   RecorderCapability? capability;
@@ -226,7 +232,6 @@ class NeoRecallController extends ChangeNotifier {
   // for these, pulling stored recordings is the primary action, not live capture.
   static const Set<String> _offlineFirstDeviceTypes = <String>{
     'heyPocket',
-    'limitless',
     'plaud',
   };
 
@@ -1269,11 +1274,24 @@ class NeoRecallController extends ChangeNotifier {
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
       _deviceStorageAutoSyncArmed = true;
+      _deviceStorageSyncTimer?.cancel();
+      _deviceStorageSyncTimer = null;
     } else if (state == DeviceTransportState.connectedStandby &&
         _deviceStorageAutoSyncArmed) {
       // §9: after each (re)connect, pull anything the device recorded offline.
       _deviceStorageAutoSyncArmed = false;
       unawaited(syncDeviceStorage());
+    }
+    // Keep pulling newly-recorded files for as long as the device is linked.
+    if (state == DeviceTransportState.connectedStandby) {
+      _deviceStorageSyncTimer ??= Timer.periodic(
+        _deviceStorageSyncInterval,
+        (_) {
+          if (deviceConnected && !isRecording && !deviceStorageSyncing) {
+            unawaited(syncDeviceStorage());
+          }
+        },
+      );
     }
     final connected =
         state == DeviceTransportState.connectedStandby ||
@@ -1405,6 +1423,8 @@ class NeoRecallController extends ChangeNotifier {
     sync.pump.pump();
     await _refreshPending();
     await refreshAll(silent: true);
+    // Pull anything the wearable recorded while the app was backgrounded.
+    unawaited(syncDeviceStorage());
   }
 
   Future<void> refreshAll({bool silent = false}) async {
@@ -1650,6 +1670,9 @@ class NeoRecallController extends ChangeNotifier {
           'device': deviceName,
           'synced': deviceStorageSyncedCount,
           'error': deviceStorageSyncError,
+          // Protocol-level facts from the connector, so a zero-recording sweep
+          // can be told apart from a device that never answered.
+          ...storage.syncDiagnostics,
         },
       );
       deviceStorageSyncing = false;
@@ -1787,6 +1810,7 @@ class NeoRecallController extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _deviceControlSubscription?.cancel();
     _backgroundSubscription?.cancel();
+    _deviceStorageSyncTimer?.cancel();
     sync.close();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {

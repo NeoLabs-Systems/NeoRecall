@@ -3,8 +3,6 @@ enum WearableDeviceType {
   omi,
   omiGlass,
   plaud,
-  fieldy,
-  limitless,
   heyPocket,
   custom,
 }
@@ -28,11 +26,6 @@ class WearableDeviceUuids {
   static const plaudService = '00001910-0000-1000-8000-00805f9b34fb';
   static const plaudWrite = '00002bb1-0000-1000-8000-00805f9b34fb';
   static const plaudNotify = '00002bb0-0000-1000-8000-00805f9b34fb';
-  static const fieldyService = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
-  static const fieldyAudio = '82a48422-3ca9-4156-ae67-4170f58666e0';
-  static const limitlessService = '632de001-604c-446b-a80f-7963e950f3fb';
-  static const limitlessTx = '632de002-604c-446b-a80f-7963e950f3fb';
-  static const limitlessRx = '632de003-604c-446b-a80f-7963e950f3fb';
   // HeyPocket (also labelled PKT01 / Pocket). Control frames are ASCII text and
   // audio is an MP3 stream delivered over the audio-notify characteristic.
   static const heyPocketService = '001120a0-2233-4455-6677-889912345678';
@@ -67,16 +60,6 @@ class DiscoveredWearable {
 
     if (upper.startsWith('PLAUD') || has(WearableDeviceUuids.plaudService)) {
       return WearableDeviceType.plaud;
-    }
-    if (lower == 'compass' ||
-        lower == 'fieldy' ||
-        has(WearableDeviceUuids.fieldyService)) {
-      return WearableDeviceType.fieldy;
-    }
-    if (lower.startsWith('limitless') ||
-        lower == 'pendant' ||
-        has(WearableDeviceUuids.limitlessService)) {
-      return WearableDeviceType.limitless;
     }
     if (has(WearableDeviceUuids.heyPocketService) ||
         lower.contains('heypocket') ||

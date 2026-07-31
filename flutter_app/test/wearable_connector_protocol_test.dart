@@ -4,10 +4,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/ble/gatt_connector_transport.dart';
 import 'package:neorecall/src/devices/ble/gatt_transport.dart';
-import 'package:neorecall/src/devices/omi/custom_command_connector.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
 import 'package:neorecall/src/devices/omi/heypocket_connector.dart';
-import 'package:neorecall/src/devices/omi/limitless_connector.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
 import 'package:neorecall/src/devices/omi/plaud_connector.dart';
@@ -33,6 +31,18 @@ void main() {
     transport.onWrite = (service, characteristic, value) {
       if (characteristic != WearableDeviceUuids.plaudWrite ||
           value.length < 3) {
+        return;
+      }
+      // Mirror the real device: acknowledge each session-preamble chunk with
+      // `[0x12][0xfe][total][index]` before any command is answered.
+      if (value[0] == 0x10 && value[1] == 0xfe) {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.plaudService,
+            WearableDeviceUuids.plaudNotify,
+            <int>[0x12, 0xfe, value[2], value[3]],
+          ),
+        );
         return;
       }
       final command = value[1] | (value[2] << 8);
@@ -99,77 +109,63 @@ void main() {
     await connector.dispose();
   });
 
-  test(
-    'Limitless uses protobuf commands and reassembles Opus payloads',
-    () async {
-      final transport = _FakeWearableTransport();
-      final connector = LimitlessConnector(
-        device: _device(WearableDeviceType.limitless),
-        transport: transport,
-      );
-      await connector.connect(requiresPairing: true);
-      expect(transport.requiredPairing, isTrue);
-      expect(transport.writes.single.value.first, 0x08);
-
-      await connector.startRecording();
-      final startCommand = transport.writes.last.value;
-      expect(startCommand, contains(0x42));
-
-      final frame = <int>[0xb8, ...List<int>.generate(11, (index) => index)];
-      final innerPayload = <int>[0x22, frame.length, ...frame];
-      final wrapper = <int>[
-        0x08,
-        7,
-        0x10,
-        0,
-        0x18,
-        1,
-        0x22,
-        innerPayload.length,
-        ...innerPayload,
-      ];
-      final frameFuture = connector.audioBytes.stream.first;
-      transport.emit(
-        WearableDeviceUuids.limitlessService,
-        WearableDeviceUuids.limitlessRx,
-        wrapper,
-      );
-      expect(await frameFuture, frame);
-      await connector.dispose();
-    },
-  );
-
-  test('Fieldy reassembles fragmented FS320 Opus frames', () async {
+  test('PLAUD sends the captured session preamble before any command', () async {
     final transport = _FakeWearableTransport();
-    final connector = FieldyConnector(
-      device: _device(WearableDeviceType.fieldy),
+    final connector = PlaudConnector(
+      device: _device(WearableDeviceType.plaud),
       transport: transport,
     );
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.plaudWrite) return;
+      if (value.length >= 4 && value[0] == 0x10 && value[1] == 0xfe) {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.plaudService,
+            WearableDeviceUuids.plaudNotify,
+            <int>[0x12, 0xfe, value[2], value[3]],
+          ),
+        );
+      }
+    };
+
     await connector.connect();
-    await connector.startRecording();
-    final received = <List<int>>[];
-    final subscription = connector.audioBytes.stream.listen(received.add);
-    final first = <int>[0xb8, ...List<int>.filled(39, 0x11)];
-    final second = <int>[0xb8, ...List<int>.filled(39, 0x22)];
-    transport.emit(
-      WearableDeviceUuids.fieldyService,
-      WearableDeviceUuids.fieldyAudio,
-      first.sublist(0, 19),
+
+    final preamble = transport.writes
+        .where(
+          (write) =>
+              write.characteristic == WearableDeviceUuids.plaudWrite &&
+              write.value.length >= 4 &&
+              write.value[0] == 0x10 &&
+              write.value[1] == 0xfe,
+        )
+        .toList();
+    // Three chunks, framed [0x10][0xfe][total=3][index], carrying 256 bytes —
+    // exactly what the official app sends (verified byte-for-byte against the
+    // HCI capture; see _handshakeChunksHex).
+    expect(preamble.length, 3);
+    expect(preamble.map((write) => write.value[2]), everyElement(3));
+    expect(preamble.map((write) => write.value[3]), <int>[0, 1, 2]);
+    expect(
+      preamble.fold<int>(0, (sum, write) => sum + write.value.length - 4),
+      256,
     );
-    transport.emit(
-      WearableDeviceUuids.fieldyService,
-      WearableDeviceUuids.fieldyAudio,
-      <int>[...first.sublist(19), ...second.sublist(0, 7)],
+    expect(preamble.first.value.sublist(4, 8), <int>[0x55, 0x18, 0xb7, 0xd8]);
+    expect(connector.handshakeCompleted, isTrue);
+
+    // The preamble must precede every command write on the same channel.
+    final firstCommand = transport.writes.indexWhere(
+      (write) =>
+          write.characteristic == WearableDeviceUuids.plaudWrite &&
+          write.value.isNotEmpty &&
+          write.value[0] == 0x01,
     );
-    transport.emit(
-      WearableDeviceUuids.fieldyService,
-      WearableDeviceUuids.fieldyAudio,
-      second.sublist(7),
+    final lastPreamble = transport.writes.lastIndexWhere(
+      (write) =>
+          write.value.length >= 2 &&
+          write.value[0] == 0x10 &&
+          write.value[1] == 0xfe,
     );
-    await Future<void>.delayed(Duration.zero);
-    expect(received.map((frame) => frame.length), <int>[40, 40]);
-    expect(received, <List<int>>[first, second]);
-    await subscription.cancel();
+    if (firstCommand != -1) expect(lastPreamble, lessThan(firstCommand));
     await connector.dispose();
   });
 
@@ -355,6 +351,11 @@ void main() {
         device: _device(WearableDeviceType.omi),
         transport: transport,
       );
+      // RingStatus (usedBytes, unreadPackets=1, freeBytes, rtcValid) so the
+      // drain's status probe on 30295782 finds data to pull.
+      transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
+        0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      ];
       // Default codec is PCM8, so the drain decodes without native Opus (which
       // is unavailable in the test VM).
       expect(connector.codec, WearableAudioCodec.pcm8);
@@ -440,6 +441,9 @@ void main() {
       device: _device(WearableDeviceType.omi),
       transport: transport,
     );
+    transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
+      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+    ];
     final frame = List<int>.filled(8, 0x40);
     final payload = <int>[
       frame.length,
@@ -567,11 +571,13 @@ class _FakeWearableTransport implements WearableTransport {
         .add(value);
   }
 
+  final Map<String, List<int>> readValues = <String, List<int>>{};
+
   @override
   Future<List<int>> readCharacteristic(
     String serviceUuid,
     String characteristicUuid,
-  ) async => <int>[];
+  ) async => readValues[characteristicUuid] ?? <int>[];
 
   @override
   Future<void> writeCharacteristic(

@@ -27,7 +27,7 @@ void main() {
 
     expect(
       transport.lastScanSpec!.serviceUuids,
-      contains(WearableDeviceUuids.limitlessService),
+      contains(WearableDeviceUuids.heyPocketService),
     );
     await adapter.dispose();
   });

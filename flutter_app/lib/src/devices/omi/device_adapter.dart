@@ -12,7 +12,7 @@ import 'device_models.dart';
 import 'offline_sync.dart';
 
 /// Shared GATT adapter for every capture-capable wearable protocol (Omi,
-/// OmiGlass, Fieldy, Plaud, Limitless, HeyPocket, …).
+/// OmiGlass, Plaud, HeyPocket, …).
 ///
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
@@ -24,8 +24,6 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   static const List<String> _serviceUuids = <String>[
     WearableDeviceUuids.omiService,
     WearableDeviceUuids.plaudService,
-    WearableDeviceUuids.fieldyService,
-    WearableDeviceUuids.limitlessService,
     WearableDeviceUuids.heyPocketService,
   ];
 
@@ -122,10 +120,6 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         // service, so the documented product prefix is included.
         namePrefixes: <String>[
           'PLAUD',
-          'Compass',
-          'Fieldy',
-          'Limitless',
-          'Pendant',
           'Pocket',
           'HeyPocket',
           'PKT01',
@@ -192,14 +186,6 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
             (name.startsWith('omiglass') || name.startsWith('openglass')),
       WearableDeviceType.plaud =>
         has(WearableDeviceUuids.plaudService) || name.startsWith('plaud'),
-      WearableDeviceType.fieldy =>
-        has(WearableDeviceUuids.fieldyService) ||
-            name == 'fieldy' ||
-            name == 'compass',
-      WearableDeviceType.limitless =>
-        has(WearableDeviceUuids.limitlessService) ||
-            name.startsWith('limitless') ||
-            name == 'pendant',
       WearableDeviceType.heyPocket =>
         has(WearableDeviceUuids.heyPocketService) ||
             name.contains('heypocket') ||
@@ -214,8 +200,6 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       WearableDeviceType.omi ||
       WearableDeviceType.omiGlass ||
       WearableDeviceType.plaud ||
-      WearableDeviceType.fieldy ||
-      WearableDeviceType.limitless ||
       WearableDeviceType.heyPocket => true,
       WearableDeviceType.custom => false,
     };
@@ -229,8 +213,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       transport: transport,
       supportsHardwareButtons:
           device.type == WearableDeviceType.omi ||
-          device.type == WearableDeviceType.omiGlass ||
-          device.type == WearableDeviceType.limitless,
+          device.type == WearableDeviceType.omiGlass,
       supportsMicrophone: device.type != WearableDeviceType.custom,
       metadata: <String, Object?>{
         'type': device.type.name,
@@ -295,8 +278,14 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     });
 
     try {
+      // Omi/OmiGlass/HeyPocket stream and sync over a plain link — this
+      // is verified against the real devices. The PLAUD NotePin is the one
+      // exception: Android's own Bluetooth stack reports it BONDED, and on an
+      // unbonded link its command channel never accepts the session preamble.
+      // pair() is best-effort (a no-op on platforms that don't implement it),
+      // so requesting it here cannot break the other devices.
       await connector.connect(
-        requiresPairing: wearable.type == WearableDeviceType.limitless,
+        requiresPairing: wearable.type == WearableDeviceType.plaud,
       );
       _connector = connector;
       final omiFraming =

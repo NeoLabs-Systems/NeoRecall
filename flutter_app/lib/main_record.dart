@@ -478,7 +478,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     style: TextStyle(color: palette.textMuted, height: 1.4),
                   ),
                 ],
-                // Offline-first wearables (HeyPocket, Limitless, Plaud) record on
+                // Offline-first wearables (HeyPocket, Plaud) record on
                 // the device itself and cannot live-stream, so the live record
                 // button is hidden when such a device is the chosen source — sync
                 // (the card above) is the only capture path. The Stop button is
@@ -629,7 +629,7 @@ class _NeedsAttentionBannerState extends State<_NeedsAttentionBanner> {
   }
 }
 
-/// Primary "sync" affordance for offline-first wearables (HeyPocket, Limitless,
+/// Primary "sync" affordance for offline-first wearables (HeyPocket and
 /// Plaud): these record on the device itself, so pulling those recordings — not
 /// live capture — is the main action. Recordings also sync automatically on
 /// connect; this makes the manual path obvious and explains the model.
