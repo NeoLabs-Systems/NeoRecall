@@ -461,28 +461,45 @@ class _RecordScreenState extends State<RecordScreen> {
                     style: TextStyle(color: palette.textMuted, height: 1.4),
                   ),
                 ],
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: 280,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: controller.isRecording
-                          ? palette.secondary
-                          : palette.accent,
-                    ),
-                    onPressed: _toggle,
-                    icon: Icon(
-                      controller.isRecording
-                          ? Icons.stop_rounded
-                          : Icons.fiber_manual_record_rounded,
-                    ),
-                    label: Text(
-                      controller.isRecording
-                          ? 'Stop and finalize'
-                          : 'Start recording',
+                // Offline-first wearables (HeyPocket, Limitless, Plaud) record on
+                // the device itself and cannot live-stream, so the live record
+                // button is hidden when such a device is the chosen source — sync
+                // (the card above) is the only capture path. The Stop button is
+                // always kept while a recording is somehow active.
+                if (controller.isRecording ||
+                    !(bluetoothPreferred &&
+                        controller.preferredDeviceIsOfflineFirst)) ...<Widget>[
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: 280,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: controller.isRecording
+                            ? palette.secondary
+                            : palette.accent,
+                      ),
+                      onPressed: _toggle,
+                      icon: Icon(
+                        controller.isRecording
+                            ? Icons.stop_rounded
+                            : Icons.fiber_manual_record_rounded,
+                      ),
+                      label: Text(
+                        controller.isRecording
+                            ? 'Stop and finalize'
+                            : 'Start recording',
+                      ),
                     ),
                   ),
-                ),
+                ] else ...<Widget>[
+                  const SizedBox(height: 18),
+                  Text(
+                    'This device records by itself — there is no live capture. '
+                    'Use “Sync device recordings” above to pull and transcribe them.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: palette.textMuted, height: 1.4),
+                  ),
+                ],
                 if (_isDesktop) ...<Widget>[
                   const SizedBox(height: 12),
                   Text(

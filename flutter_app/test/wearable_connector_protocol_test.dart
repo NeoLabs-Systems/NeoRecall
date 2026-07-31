@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/ble/gatt_connector_transport.dart';
+import 'package:neorecall/src/devices/ble/gatt_transport.dart';
 import 'package:neorecall/src/devices/omi/custom_command_connector.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
 import 'package:neorecall/src/devices/omi/heypocket_connector.dart';
@@ -178,10 +179,24 @@ void main() {
       device: _device(WearableDeviceType.heyPocket),
       transport: transport,
     );
+    // The device ignores commands until the APP&SK session-key handshake is
+    // acknowledged; replies are routed by content, not by which channel.
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic == WearableDeviceUuids.heyPocketControlWrite &&
+          ascii.decode(value).startsWith('APP&SK&')) {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode('MCU&SK&OK'),
+          ),
+        );
+      }
+    };
     await connector.connect();
     expect(connector.codec, WearableAudioCodec.mp3);
 
-    // A battery response on the control-notify path updates the battery stream.
+    // A battery response updates the battery stream (routed by content).
     final batteryFuture = connector.batteryLevels.stream.first;
     transport.emit(
       WearableDeviceUuids.heyPocketService,
@@ -232,40 +247,52 @@ void main() {
         device: _device(WearableDeviceType.heyPocket),
         transport: transport,
       );
-      await connector.connect();
-
       final now = DateTime.now();
       String pad(int value) => value.toString().padLeft(2, '0');
+      final ymd =
+          '${now.year.toString().padLeft(4, '0')}${pad(now.month)}${pad(now.day)}';
       final today =
           '${now.year.toString().padLeft(4, '0')}-${pad(now.month)}-${pad(now.day)}';
+      final fileId = '${ymd}120000';
       final mp3 = <int>[0xFF, 0xFB, 0x00, 0x11, 0x22, 0x33];
 
-      // The device answers the documented offline commands (§8).
+      // Real protocol: APP&SK auth first, per-day listing terminated by
+      // MCU&LIST&<count>, download ending in MCU&OFF, then delete ack. Captured
+      // firmware sends control on the a3 channel and MP3 data on a1; the
+      // connector routes both by content, so this exercises that mapping.
       transport.onWrite = (service, characteristic, value) {
         if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
         final command = ascii.decode(value);
-        void reply(String control) => scheduleMicrotask(
+        void ctrl(String s) => scheduleMicrotask(
           () => transport.emit(
             WearableDeviceUuids.heyPocketService,
-            WearableDeviceUuids.heyPocketControlNotify,
-            ascii.encode(control),
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode(s),
           ),
         );
-        if (command == 'APP&LIST&$today') {
-          reply('MCU&F&$today&1&6');
-        } else if (command == 'APP&U&$today&1') {
+        if (command.startsWith('APP&SK&')) {
+          ctrl('MCU&SK&OK');
+        } else if (command == 'APP&LIST&$today') {
+          ctrl('MCU&F&$today&$fileId&1');
+          ctrl('MCU&LIST&001');
+        } else if (command.startsWith('APP&LIST&')) {
+          ctrl('MCU&LIST&0');
+        } else if (command == 'APP&U&$today&$fileId') {
           scheduleMicrotask(() {
+            ctrl('MCU&U&6');
             transport.emit(
               WearableDeviceUuids.heyPocketService,
-              WearableDeviceUuids.heyPocketAudioNotify,
+              WearableDeviceUuids.heyPocketControlNotify,
               mp3,
             );
-            reply('MCU&OFF');
+            ctrl('MCU&OFF');
           });
-        } else if (command == 'APP&D&$today&1') {
-          reply('MCU&D');
+        } else if (command == 'APP&D&$today&$fileId') {
+          ctrl('MCU&D');
         }
       };
+
+      await connector.connect();
 
       // Downloaded bytes must never leak into the live-capture stream.
       final captured = <List<int>>[];
@@ -279,12 +306,12 @@ void main() {
       expect(count, 1);
       expect(recordings.single.bytes, mp3);
       expect(recordings.single.contentType, 'audio/mpeg');
-      expect(recordings.single.filename, 'heypocket-$today-1.mp3');
+      expect(recordings.single.filename, 'heypocket-$today-$fileId.mp3');
       expect(captured, isEmpty);
       // The file is deleted only after the recording was handed off.
       expect(
         transport.writes.map((write) => ascii.decode(write.value)),
-        containsAll(<String>['APP&U&$today&1', 'APP&D&$today&1']),
+        containsAll(<String>['APP&U&$today&$fileId', 'APP&D&$today&$fileId']),
       );
 
       await audioSub.cancel();
@@ -299,15 +326,19 @@ void main() {
       transport: transport,
     );
     transport.onWrite = (service, characteristic, value) {
-      if (characteristic == WearableDeviceUuids.heyPocketControlWrite &&
-          ascii.decode(value) == 'APP&BAT') {
-        scheduleMicrotask(
-          () => transport.emit(
-            WearableDeviceUuids.heyPocketService,
-            WearableDeviceUuids.heyPocketControlNotify,
-            ascii.encode('MCU&BAT&64'),
-          ),
-        );
+      if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+      final cmd = ascii.decode(value);
+      void ctrl(String s) => scheduleMicrotask(
+        () => transport.emit(
+          WearableDeviceUuids.heyPocketService,
+          WearableDeviceUuids.heyPocketAudioNotify,
+          ascii.encode(s),
+        ),
+      );
+      if (cmd.startsWith('APP&SK&')) {
+        ctrl('MCU&SK&OK');
+      } else if (cmd == 'APP&BAT') {
+        ctrl('MCU&BAT&64');
       }
     };
 
@@ -489,6 +520,15 @@ class _FakeWearableTransport implements WearableTransport {
 
   @override
   Stream<bool> get connectionStateStream => _connections.stream;
+
+  // The fake exposes every characteristic as present so gated connector paths
+  // (e.g. the Omi storage drain) run exactly as before this capability existed.
+  @override
+  bool hasCharacteristic(String serviceUuid, String characteristicUuid) => true;
+
+  @override
+  List<GattDiscoveredCharacteristic> get discoveredCharacteristics =>
+      const <GattDiscoveredCharacteristic>[];
 
   String _key(String service, String characteristic) =>
       '$service:$characteristic';

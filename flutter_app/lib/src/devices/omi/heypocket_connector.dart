@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../diagnostics/client_diagnostic_log.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
 import 'offline_sync.dart';
@@ -9,16 +10,14 @@ import 'offline_sync.dart';
 /// A recording held in HeyPocket on-board flash, addressed by its capture date
 /// and per-day file id (both echoed verbatim to the download/delete commands).
 class HeyPocketStoredFile {
-  const HeyPocketStoredFile({
-    required this.date,
-    required this.fileId,
-    required this.sizeBytes,
-  });
+  const HeyPocketStoredFile({required this.date, required this.fileId});
 
   /// `YYYY-MM-DD` as reported by the device.
   final String date;
+
+  /// Device-assigned file id (a `YYYYMMDDHHMMSS`-style stamp), echoed verbatim
+  /// to the upload/delete commands.
   final String fileId;
-  final int sizeBytes;
 
   String get id => '$date/$fileId';
   String get contentType => 'audio/mpeg';
@@ -26,31 +25,37 @@ class HeyPocketStoredFile {
   DateTime? get capturedAt => DateTime.tryParse(date)?.toUtc();
 }
 
-/// HeyPocket (also labelled PKT01 / Pocket) BLE recorder.
+/// HeyPocket (also labelled PKT01 / "Pocket AI") BLE recorder.
 ///
-/// Control traffic is ASCII text framed with the documented prefixes
-/// (`MCU&`, `APP&`, `BLE&`, `SYS&`); audio is an MP3 byte stream. Some firmware
-/// variants emit binary audio on the control-notify endpoint as well, so every
-/// payload is classified as control-or-audio by its *content* rather than by
-/// which characteristic delivered it.
-///
-/// To avoid streaming (and draining the battery) while merely paired, the audio
-/// notify subscription and the `APP&STA` start command are issued on
-/// [startRecording] and torn down on [stopRecording], mirroring the other
-/// wearable connectors.
+/// Protocol confirmed against a real PKT01 firmware capture:
+/// - The device ignores every command until an **`APP&SK&<key>` session-key
+///   handshake** succeeds (`MCU&SK&OK`). This was the single reason earlier
+///   builds saw the device stay silent.
+/// - Control replies (`MCU&…` ASCII) and binary MP3 file data arrive on the two
+///   notify characteristics, but firmware variants disagree on which is which
+///   (the captured unit puts control on `…a3` and data on `…a1`, the reverse of
+///   the profile's names). So BOTH notify endpoints are subscribed and every
+///   payload is routed by **content**: an ASCII `MCU&/APP&/BLE&/SYS&` frame is
+///   control, anything else is audio/file data.
+/// - Offline files: `APP&LIST&<date>` → zero or more `MCU&F&<date>&<id>&<idx>`
+///   terminated by `MCU&LIST&<count>`; download `APP&U&<date>&<id>` →
+///   `MCU&U&<size>` then MP3 chunks then `MCU&OFF`.
 class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   HeyPocketConnector({required super.device, required super.transport});
 
+  // Fixed session key used by the official "Pocket" app; the firmware validates
+  // it before accepting any other command. Required for the device to respond.
+  static const String _sessionKey = '3TMd6HawHvRl2nhg';
+
+  static const Duration _authTimeout = Duration(seconds: 5);
   static const Duration _batteryTimeout = Duration(seconds: 5);
-  // Offline sync: how far back to enumerate stored files, and per-step timeouts.
   static const int _syncLookbackDays = 7;
-  // A day with no files ends after this short wait; between file entries the
-  // (slightly longer) quiet gap detects the end of a populated day's list.
-  static const Duration _listInitialTimeout = Duration(milliseconds: 350);
-  static const Duration _listQuietGap = Duration(milliseconds: 700);
-  static const Duration _listOverallTimeout = Duration(seconds: 12);
+  // Each day's listing is terminated explicitly by MCU&LIST&<count>; this bounds
+  // the wait if the device never answers a given day.
+  static const Duration _listTimeout = Duration(seconds: 4);
   static const Duration _downloadTimeout = Duration(seconds: 90);
-  static const Duration _deleteTimeout = Duration(seconds: 8);
+  static const Duration _deleteTimeout = Duration(seconds: 3);
+  static const Duration _commandGap = Duration(milliseconds: 120);
   static const List<String> _controlPrefixes = <String>[
     'MCU&',
     'APP&',
@@ -59,28 +64,54 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   ];
   static const String _batteryResponsePrefix = 'MCU&BAT&';
 
+  bool _authenticated = false;
+  Completer<bool>? _authRequest;
   Completer<int>? _batteryRequest;
+  // True once the device has answered ANY MCU&… frame this sweep — lets a sync
+  // distinguish "no files" from "device never replied".
+  bool _sawControlResponse = false;
   // Offline-sync state. A non-null _downloadBuffer routes binary payloads to the
   // active download instead of the live-capture stream.
   List<int>? _downloadBuffer;
+  // Byte count the device announces for the current download (MCU&U&<size>);
+  // used to wait out trailing MP3 chunks that can arrive just after MCU&OFF.
+  int? _expectedDownloadBytes;
   Completer<void>? _downloadDone;
+  Completer<void>? _listDone;
   Completer<bool>? _deleteAck;
   void Function(HeyPocketStoredFile file)? _onFileEntry;
-  StreamSubscription<List<int>>? _syncAudioSub;
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.mp3;
 
   @override
   Future<void> onConnected() async {
+    // Subscribe BOTH notify characteristics and route by content (see class
+    // doc): the firmware's control/data channel assignment is not fixed.
     track(
       (await transport.characteristicStream(
         WearableDeviceUuids.heyPocketService,
         WearableDeviceUuids.heyPocketControlNotify,
-      )).listen(_handleControlNotification),
+      )).listen(_handleNotification),
     );
-    // Best-effort clock sync and an initial battery read. Neither may block or
-    // fail capture, so both are guarded.
+    track(
+      (await transport.characteristicStream(
+        WearableDeviceUuids.heyPocketService,
+        WearableDeviceUuids.heyPocketAudioNotify,
+      )).listen(_handleNotification),
+    );
+    // The device ignores everything until the session key is accepted.
+    final authed = await _authenticate();
+    if (!authed) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'heypocket_auth_failed',
+        level: 'warning',
+        details: <String, Object?>{
+          'hint': 'No MCU&SK&OK for APP&SK; the device will ignore commands.',
+        },
+      );
+    }
     await _syncTime();
     try {
       await _writeControl('APP&BAT');
@@ -89,17 +120,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     }
   }
 
-  void _handleControlNotification(List<int> data) {
-    if (data.isEmpty) return;
-    final text = _asControlFrame(data);
-    if (text != null) {
-      _handleControlFrame(text);
-    } else {
-      _handleBinary(data);
-    }
-  }
-
-  void _handleAudioNotification(List<int> data) {
+  void _handleNotification(List<int> data) {
     if (data.isEmpty) return;
     final text = _asControlFrame(data);
     if (text != null) {
@@ -136,6 +157,13 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   }
 
   void _handleControlFrame(String text) {
+    if (text.startsWith('MCU&')) _sawControlResponse = true;
+    if (text.startsWith('MCU&SK&OK')) {
+      _authenticated = true;
+      final request = _authRequest;
+      if (request != null && !request.isCompleted) request.complete(true);
+      return;
+    }
     if (text.startsWith(_batteryResponsePrefix)) {
       final level = int.tryParse(
         text.substring(_batteryResponsePrefix.length).trim(),
@@ -147,10 +175,22 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       }
       return;
     }
-    // Offline-sync responses (§8): file-list entry, end-of-download, delete ack.
+    // Offline-sync responses: file entry, end-of-list, end-of-download, del ack.
     if (text.startsWith('MCU&F&')) {
       final file = _parseFileEntry(text);
       if (file != null) _onFileEntry?.call(file);
+      return;
+    }
+    if (text.startsWith('MCU&LIST&')) {
+      final done = _listDone;
+      if (done != null && !done.isCompleted) done.complete();
+      return;
+    }
+    if (text.startsWith('MCU&U&')) {
+      // Download size announcement (distinct from MCU&USB&…).
+      _expectedDownloadBytes = int.tryParse(
+        text.substring('MCU&U&'.length).trim(),
+      );
       return;
     }
     if (text.startsWith('MCU&OFF')) {
@@ -163,25 +203,45 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       if (ack != null && !ack.isCompleted) ack.complete(true);
       return;
     }
-    // Other acknowledgements (MCU&STE / MCU&STA / MCU&STO) are status only and
-    // require no action for the streaming capture path.
+    // Other acknowledgements (MCU&STE / MCU&STA / MCU&STO / MCU&REC …) are
+    // status only and need no action here.
   }
 
-  /// Parses `MCU&F&<date>&<fileId>&<size>` into a stored-file descriptor.
+  /// Parses `MCU&F&<date>&<fileId>&<index>`. The list does not report a byte
+  /// size (that arrives as `MCU&U&<size>` at download time), so none is stored.
   HeyPocketStoredFile? _parseFileEntry(String text) {
     final parts = text.split('&');
-    if (parts.length < 5) return null;
-    final size = int.tryParse(parts[4].trim());
-    if (size == null) return null;
-    return HeyPocketStoredFile(
-      date: parts[2].trim(),
-      fileId: parts[3].trim(),
-      sizeBytes: size,
-    );
+    if (parts.length < 4) return null;
+    final date = parts[2].trim();
+    final fileId = parts[3].trim();
+    if (date.isEmpty || fileId.isEmpty) return null;
+    return HeyPocketStoredFile(date: date, fileId: fileId);
+  }
+
+  /// Sends the session key and waits for `MCU&SK&OK`. Idempotent per connection.
+  Future<bool> _authenticate() async {
+    if (_authenticated) return true;
+    final existing = _authRequest;
+    if (existing != null) {
+      return existing.future.timeout(_authTimeout, onTimeout: () => false);
+    }
+    final request = Completer<bool>();
+    _authRequest = request;
+    try {
+      await _writeControl('APP&SK&$_sessionKey');
+      return await request.future.timeout(_authTimeout);
+    } on TimeoutException {
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      if (identical(_authRequest, request)) _authRequest = null;
+    }
   }
 
   @override
   Future<int> readBatteryLevel() async {
+    if (!await _authenticate()) return -1;
     final existing = _batteryRequest;
     if (existing != null) {
       return existing.future.timeout(_batteryTimeout, onTimeout: () => -1);
@@ -203,19 +263,16 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   @override
   Future<void> startRecording() async {
     if (recording) return;
-    trackRecording(
-      (await transport.characteristicStream(
-        WearableDeviceUuids.heyPocketService,
-        WearableDeviceUuids.heyPocketAudioNotify,
-      )).listen(_handleAudioNotification),
-    );
+    await _authenticate();
+    recording = true;
     try {
+      // Binary MP3 then flows on a notify channel and is routed to audioBytes
+      // (both channels are already subscribed from onConnected).
       await _writeControl('APP&STA');
     } catch (_) {
-      await cancelRecordingSubscriptions();
+      recording = false;
       rethrow;
     }
-    recording = true;
   }
 
   @override
@@ -227,22 +284,26 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     } catch (_) {
       // Best-effort; the device stops streaming once notifications are dropped.
     }
-    await cancelRecordingSubscriptions();
   }
 
-  // --- Offline sync (WearableOfflineSync, §8) ---
+  // --- Offline sync (WearableOfflineSync) ---
 
-  /// Sends the documented preamble so the device reports battery/firmware and
-  /// aligns its clock and mode before a sync sweep. Best-effort throughout.
-  Future<void> sendSyncPreamble() async {
+  /// Sends the documented pre-list sequence the official app uses; best-effort.
+  /// `APP&REC&SECEN` in particular precedes listing in the reference capture.
+  Future<void> _sendSyncPreamble() async {
     for (final command in <String>[
+      'APP&GET&USB',
       'APP&BAT',
       'APP&FW',
+      'APP&MAC',
+      'APP&SPACE',
       'APP&T&${_formatTimestamp(DateTime.now())}',
+      'APP&REC&SECEN',
       'APP&STE',
     ]) {
       try {
         await _writeControl(command);
+        await Future<void>.delayed(_commandGap);
       } catch (_) {
         // Preamble is informational; listing still works without it.
       }
@@ -254,12 +315,33 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     Future<void> Function(WearableRecording recording) onRecording, {
     int minBytes = 0,
   }) async {
-    // Live capture and offline sync both use the audio-notify channel and the
-    // binary-routing buffer, so they must never run at the same time.
+    // Live capture and offline sync share the notify channels and the binary
+    // routing buffer, so they must never run at the same time.
     if (recording) return 0;
+    _sawControlResponse = false;
+    if (!await _authenticate()) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'heypocket_no_response',
+        level: 'warning',
+        details: <String, Object?>{
+          'hint': 'Session-key handshake (APP&SK) not acknowledged; the device '
+              'accepts no commands. Check the device is on and in range.',
+        },
+      );
+      return 0;
+    }
     var count = 0;
-    for (final file in await _listAllStoredFiles()) {
-      if (file.sizeBytes < minBytes) continue;
+    final files = await _listAllStoredFiles();
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      'heypocket_sync_listed',
+      details: <String, Object?>{
+        'files': files.length,
+        'deviceResponded': _sawControlResponse,
+      },
+    );
+    for (final file in files) {
       try {
         final bytes = await _downloadStoredFile(file);
         if (bytes.length < minBytes) continue;
@@ -275,24 +357,35 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
         // Delete from the device only after the recording is durably ingested.
         await _deleteStoredFile(file);
         count += 1;
-      } catch (_) {
-        // A single failed file (download or ingest) is left on the device for a
-        // later sweep to retry, and must not abort draining the rest.
+      } catch (error) {
+        // A single failed file is left on the device for a later sweep to retry
+        // and must not abort draining the rest.
+        ClientDiagnosticLog.instance.record(
+          'bluetooth_audio',
+          'heypocket_file_failed',
+          level: 'warning',
+          details: <String, Object?>{'id': file.id, 'error': error.toString()},
+        );
         continue;
       }
     }
+    ClientDiagnosticLog.instance.record(
+      'bluetooth_audio',
+      'heypocket_sync_done',
+      details: <String, Object?>{'synced': count, 'available': files.length},
+    );
     return count;
   }
 
   Future<List<HeyPocketStoredFile>> _listAllStoredFiles() async {
-    await sendSyncPreamble();
-    // Enumerate the recent days and de-duplicate by id (a day can be re-listed).
+    await _sendSyncPreamble();
+    // Enumerate recent days, de-duplicating by id (a day can be re-listed).
     final byId = <String, HeyPocketStoredFile>{};
     final today = DateTime.now();
     for (var back = 0; back < _syncLookbackDays; back += 1) {
       final day = today.subtract(Duration(days: back));
       for (final file in await _listStoredFilesForDate(day)) {
-        if (file.sizeBytes > 0) byId[file.id] = file;
+        byId[file.id] = file;
       }
     }
     return byId.values.toList()..sort((a, b) => a.id.compareTo(b.id));
@@ -303,26 +396,17 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   ) async {
     final collector = <HeyPocketStoredFile>[];
     final done = Completer<void>();
-    Timer? quiet;
-    void finish() {
-      if (!done.isCompleted) done.complete();
-    }
-
-    // Entries stream in with no explicit terminator, so a quiet gap ends the day.
-    _onFileEntry = (file) {
-      collector.add(file);
-      quiet?.cancel();
-      quiet = Timer(_listQuietGap, finish);
-    };
+    _listDone = done;
+    _onFileEntry = collector.add;
     try {
       await _writeControl('APP&LIST&${_formatDate(date)}');
-      quiet = Timer(_listInitialTimeout, finish);
-      await done.future.timeout(_listOverallTimeout, onTimeout: finish);
+      // The device ends each day's listing with MCU&LIST&<count>.
+      await done.future.timeout(_listTimeout, onTimeout: () {});
     } catch (_) {
       // A failed day query contributes no files rather than aborting the sweep.
     } finally {
-      quiet?.cancel();
       _onFileEntry = null;
+      _listDone = null;
     }
     return collector;
   }
@@ -332,16 +416,33 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     final done = Completer<void>();
     _downloadBuffer = buffer;
     _downloadDone = done;
-    await _beginSyncAudio();
+    _expectedDownloadBytes = null;
     try {
       await _writeControl('APP&U&${file.date}&${file.fileId}');
       // Binary MP3 notifications accumulate into the buffer until MCU&OFF.
       await done.future.timeout(_downloadTimeout);
+      // MCU&OFF (control channel) can arrive just before the final MP3 chunks
+      // (data channel) are delivered. When the device announced a size, wait
+      // briefly for the buffer to catch up so the MP3 tail is never truncated.
+      final expected = _expectedDownloadBytes;
+      if (expected != null) {
+        for (var i = 0; i < 100 && buffer.length < expected; i += 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        // Never ingest a truncated recording: if fewer than the announced bytes
+        // arrived (a dropped notification), fail so the file is left on the
+        // device and re-downloaded on the next sweep rather than stored corrupt.
+        if (buffer.length < expected) {
+          throw StateError(
+            'HeyPocket download incomplete: ${buffer.length}/$expected bytes',
+          );
+        }
+      }
       return Uint8List.fromList(buffer);
     } finally {
       _downloadBuffer = null;
       _downloadDone = null;
-      await _endSyncAudio();
+      _expectedDownloadBytes = null;
     }
   }
 
@@ -371,21 +472,6 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     if (done != null && !done.isCompleted) {
       done.completeError(StateError('HeyPocket sync cancelled.'));
     }
-    await _endSyncAudio();
-  }
-
-  Future<void> _beginSyncAudio() async {
-    if (_syncAudioSub != null || recording) return;
-    _syncAudioSub =
-        (await transport.characteristicStream(
-          WearableDeviceUuids.heyPocketService,
-          WearableDeviceUuids.heyPocketAudioNotify,
-        )).listen(_handleAudioNotification);
-  }
-
-  Future<void> _endSyncAudio() async {
-    await _syncAudioSub?.cancel();
-    _syncAudioSub = null;
   }
 
   static String _formatDate(DateTime time) {
@@ -419,20 +505,24 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   @override
   Future<void> dispose() async {
     await super.dispose();
-    final request = _batteryRequest;
-    if (request != null && !request.isCompleted) request.complete(-1);
+    final auth = _authRequest;
+    if (auth != null && !auth.isCompleted) auth.complete(false);
+    _authRequest = null;
+    final battery = _batteryRequest;
+    if (battery != null && !battery.isCompleted) battery.complete(-1);
     _batteryRequest = null;
-    // Resolve any in-flight sync so a teardown never leaves a hung future or a
-    // dangling audio subscription.
+    // Resolve any in-flight sync so a teardown never leaves a hung future.
     _downloadBuffer = null;
     final download = _downloadDone;
     _downloadDone = null;
     if (download != null && !download.isCompleted) {
       download.completeError(StateError('HeyPocket disconnected during sync.'));
     }
+    final list = _listDone;
+    _listDone = null;
+    if (list != null && !list.isCompleted) list.complete();
     final delete = _deleteAck;
     _deleteAck = null;
     if (delete != null && !delete.isCompleted) delete.complete(false);
-    await _endSyncAudio();
   }
 }

@@ -129,6 +129,12 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
           'Pocket',
           'HeyPocket',
           'PKT01',
+          // Omi/OmiGlass advertise their 128-bit service, but include the name
+          // prefixes too so discovery still works on platforms/firmware that do
+          // not put the service UUID in the advertisement (scan filters are OR).
+          'Omi',
+          'OmiGlass',
+          'OpenGlass',
         ],
       ),
       timeout: timeout,

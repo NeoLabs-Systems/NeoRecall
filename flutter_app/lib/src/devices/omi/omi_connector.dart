@@ -51,6 +51,14 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
   }
 
   Future<void> _syncTime() async {
+    // Only some Omi models/firmware expose the time-sync service; skip the write
+    // entirely when it is absent instead of issuing a doomed request.
+    if (!transport.hasCharacteristic(
+      WearableDeviceUuids.timeSyncService,
+      WearableDeviceUuids.timeSyncWrite,
+    )) {
+      return;
+    }
     try {
       final epochSeconds =
           DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -130,6 +138,15 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     // buffer only exists to cover phone-away gaps, so it is drained while idle,
     // never mid-recording (which would also contend for the storage channel).
     if (recording) return 0;
+    // Only DevKit-class Omi hardware exposes the on-board storage service; on
+    // models without it there is nothing to drain, so return immediately rather
+    // than waiting out the info-notification timeout.
+    if (!transport.hasCharacteristic(
+      WearableDeviceUuids.omiStorageService,
+      WearableDeviceUuids.omiStorageData,
+    )) {
+      return 0;
+    }
     final assembler = OfflineWavAssembler(codec: codec, stripBleHeader: false);
     if (!await assembler.ensureSupported()) {
       assembler.dispose();

@@ -264,6 +264,29 @@ class _FakeGattTransport implements GattTransport {
   }
 
   @override
+  Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(
+    String deviceId,
+  ) async {
+    // Discovery-on-connect now enumerates characteristics; count it as a
+    // discovery so reconnect assertions still hold.
+    discoverServicesCalls += 1;
+    return discoveredServiceUuids
+        .map(
+          (service) => GattDiscoveredCharacteristic(
+            serviceUuid: service,
+            uuid: service,
+            properties: const <String>{
+              'read',
+              'write',
+              'writeWithoutResponse',
+              'notify',
+            },
+          ),
+        )
+        .toList();
+  }
+
+  @override
   Future<void> dispose() async {
     await _discoveries.close();
     await _connections.close();

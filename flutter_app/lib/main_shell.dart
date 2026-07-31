@@ -499,16 +499,7 @@ class _GlobalStatusBar extends StatelessWidget {
       );
     }
     if (controller.deviceStorageSyncing) {
-      final pending = controller.deviceStoragePendingCount;
-      banners.add(
-        _StatusPill(
-          icon: Icons.sync_rounded,
-          color: palette.accent,
-          message: pending > 0
-              ? 'Syncing device recordings… ($pending left)'
-              : 'Syncing device recordings…',
-        ),
-      );
+      banners.add(_SyncStatusPill(controller: controller));
     }
     if (controller.isRecording && controller.page != RecallPage.record) {
       banners.add(
@@ -532,6 +523,88 @@ class _GlobalStatusBar extends StatelessWidget {
             if (i > 0) const SizedBox(height: 6),
             banners[i],
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Live device-storage sync indicator: a spinning icon plus a synced/left count,
+/// so an in-progress sync reads as active work rather than a flat notice.
+class _SyncStatusPill extends StatefulWidget {
+  const _SyncStatusPill({required this.controller});
+
+  final NeoRecallController controller;
+
+  @override
+  State<_SyncStatusPill> createState() => _SyncStatusPillState();
+}
+
+class _SyncStatusPillState extends State<_SyncStatusPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final controller = widget.controller;
+    final synced = controller.deviceStorageSyncedCount;
+    final pending = controller.deviceStoragePendingCount;
+    final label = controller.preferredDeviceLabel ?? 'device';
+    final detail = <String>[
+      if (synced > 0) '$synced synced',
+      if (pending > 0) '$pending left',
+    ].join(' · ');
+    final color = palette.accent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: <Widget>[
+          RotationTransition(
+            turns: _spin,
+            child: Icon(Icons.sync_rounded, size: 16, color: color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Syncing $label',
+                  style: TextStyle(
+                    color: palette.textSecondary,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                if (detail.isNotEmpty)
+                  Text(
+                    detail,
+                    style: TextStyle(
+                      color: palette.textMuted,
+                      fontSize: 11.5,
+                      height: 1.2,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

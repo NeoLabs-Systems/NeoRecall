@@ -38,6 +38,30 @@ class GattPeripheral {
   final Map<int, Uint8List> manufacturerData;
 }
 
+/// One discovered GATT characteristic: which service it belongs to, its UUID,
+/// and the (lower-cased) property names it exposes (`read`, `write`,
+/// `writeWithoutResponse`, `notify`, `indicate`, …). Lets connectors gate every
+/// operation on what the connected firmware actually offers instead of blindly
+/// reading/writing/subscribing characteristics that may not exist on a given
+/// device model or firmware revision.
+class GattDiscoveredCharacteristic {
+  const GattDiscoveredCharacteristic({
+    required this.serviceUuid,
+    required this.uuid,
+    required this.properties,
+  });
+
+  final String serviceUuid;
+  final String uuid;
+  final Set<String> properties;
+
+  bool get canNotify =>
+      properties.contains('notify') || properties.contains('indicate');
+  bool get canWrite =>
+      properties.contains('write') ||
+      properties.contains('writeWithoutResponse');
+}
+
 /// Vendor-neutral BLE GATT transport for protocol adapters.
 ///
 /// Device integrations own packet formats, codecs, commands, and hardware
@@ -63,6 +87,9 @@ abstract class GattTransport {
   Future<void> pair(String deviceId);
   Future<void> disconnect(String deviceId);
   Future<List<String>> discoverServices(String deviceId);
+  Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(
+    String deviceId,
+  );
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
@@ -235,6 +262,29 @@ class UniversalGattTransport implements GattTransport {
       (await UniversalBle.discoverServices(deviceId))
           .map((service) => service.uuid.toLowerCase())
           .toList(growable: false);
+
+  @override
+  Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(
+    String deviceId,
+  ) async {
+    final services = await UniversalBle.discoverServices(deviceId);
+    final out = <GattDiscoveredCharacteristic>[];
+    for (final service in services) {
+      final serviceUuid = service.uuid.toLowerCase();
+      for (final characteristic in service.characteristics) {
+        out.add(
+          GattDiscoveredCharacteristic(
+            serviceUuid: serviceUuid,
+            uuid: characteristic.uuid.toLowerCase(),
+            properties: characteristic.properties
+                .map((property) => property.name)
+                .toSet(),
+          ),
+        );
+      }
+    }
+    return out;
+  }
 
   @override
   Future<Uint8List> read(

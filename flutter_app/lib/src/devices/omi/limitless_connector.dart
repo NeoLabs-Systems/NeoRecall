@@ -532,8 +532,13 @@ class LimitlessConnector extends WearableConnector with WearableOfflineSync {
   }
 
   List<int> _encodeEnableDataStream({required bool enable}) {
+    // Message 8 with field 1 = batch-mode flag (0 for the live stream) and
+    // field 2 = enable. This matches the reference `_encodeEnableDataStream`
+    // VERBATIM: field 1 is 0x00, not 1 — sending 1 here makes the pendant treat
+    // it as a batch request and it never starts the live stream (the real cause
+    // of "connected, LED off, no audio"). Verified against the pinned source.
     final message = <int>[
-      ..._encodeField(1, 0, const <int>[1]),
+      ..._encodeField(1, 0, const <int>[0x00]),
       ..._encodeField(2, 0, <int>[enable ? 1 : 0]),
     ];
     return _encodeBleWrapper(<int>[
