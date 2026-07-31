@@ -134,29 +134,47 @@ are ported 1:1 from the Flutter client so processing behaves identically.
 
 ---
 
-## Board bring-up notes (verify on first hardware)
+## Over-the-air updates
 
-This firmware was assembled from the official schematic **and** a compile-tested
-ESPHome reference for this exact board, but a few things are worth a glance on
-real hardware:
+The panel updates itself from GitHub:
 
-- **Colours look swapped (red/blue).** Flip `rgb_ele_order` to
-  `LCD_RGB_ELEMENT_ORDER_BGR` in [`nr_board.c`](main/board/nr_board.c), or adjust
-  the data-pin grouping in `board_config.h`. This is the one common RGB tweak.
-- **Panel stays black / garbled.** The panel-specific ST7701 init array is in
-  `nr_board.c`; set `NR_ST7701_USE_VENDOR_INIT` to `0` to fall back to the
-  driver's built-in ST7701 init.
-- **Backlight inverted** (fully bright at 0 %). Flip `NR_BL_ACTIVE_LOW`.
-- **Touch address.** GT911 is assumed at `0x5D`; if unresponsive, try `0x14`
-  (`BRD_ADDR_GT911`).
-- **Mic too quiet/loud.** Adjust `ES7210_MIC_GAIN` in
-  [`nr_mic.c`](main/board/nr_mic.c).
-- The **AXP2101 PMU is intentionally left at power-on defaults** (the tested
-  ESPHome reference does the same); no rail configuration is needed.
+1. [`.github/workflows/build-firmware.yml`](../../.github/workflows/build-firmware.yml)
+   builds this firmware with ESP-IDF on every change to its folder and, on
+   `beta`, publishes a rolling **`firmware-latest`** pre-release with the `.bin`
+   plus a `manifest.json` (version, download URL, sha256).
+2. On the device, **Settings → Software-Update (OTA)**: enable "Automatische
+   Updates" and paste the manifest URL
+   `https://github.com/<owner>/<repo>/releases/download/firmware-latest/manifest.json`.
+3. The panel checks every 6 h (and once shortly after boot); if the manifest
+   version differs from the running one it downloads via `esp_https_ota`,
+   verifies the image and reboots. A bad image is rolled back automatically by
+   the bootloader (rollback enabled), and a healthy boot is confirmed after a
+   60 s grace period. The repo/release must be public so the device can fetch it
+   without credentials.
 
-For a pixel-perfect match to the app you can replace the built-in Montserrat
-fonts with **Geist / Geist Mono** generated via `lv_font_conv` and swap the
-`&lv_font_montserrat_*` references in the UI.
+## Board bring-up (verified working)
+
+Built with **ESP-IDF v5.4.2** and confirmed running on real hardware. The
+display config matches Waveshare's official `esp32_s3_touch_lcd_4b` BSP. The
+non-obvious essentials (all in [`nr_board.c`](main/board/nr_board.c)):
+
+- **I2C uses the new `i2c_master` driver** — the legacy `driver/i2c.h` cannot
+  coexist with the managed touch/expander components (`driver_ng` conflict).
+- **ST7701 COLMOD = RGB666** (`panel_dev_config.bits_per_pixel = 18`, init array
+  `0x3A = 0x66`) even though the framebuffer is 16-bit RGB565 on a 16-wire bus —
+  this is the fix for washed-out/red colours. Inversion is done by **INVON
+  (`0x21`)** inside the init array, not `esp_lcd_panel_invert_color()`.
+- **No drift/shimmer:** `num_fbs = 1` + a 20-line bounce buffer, and the LVGL
+  port runs with `avoid_tearing = false` (partial draw buffers), `swap_bytes =
+  false`, blue-first `data_gpio_nums`.
+- **GT911 touch** is reset through the TCA9554 (INT low at reset → address
+  `0x5D`); **AXP2101 PMU is left at power-on defaults**; mic gain is
+  `ES7210_MIC_GAIN` in [`nr_mic.c`](main/board/nr_mic.c).
+
+German UI text renders via custom LVGL fonts (Montserrat + FontAwesome symbols +
+Latin-1) generated with `lv_font_conv` into [`main/ui/fonts/`](main/ui/fonts/) —
+the built-in Montserrat fonts are ASCII-only. Regenerate them (or swap in
+Geist/Geist Mono for a pixel-match to the app) with the same tool.
 
 ---
 
@@ -169,6 +187,7 @@ main/
   net/nr_time.*           SNTP + ISO-8601 + local time
   net/nr_http.*           TLS HTTP helper + streaming multipart WAV PUT
   net/nr_wifi.*           station reconnect + on-device network scan
+  net/nr_ota.*            esp_https_ota client (manifest poll + rollback confirm)
   ingest/nr_spool.*       durable memory-first chunk/session/gap store
   ingest/nr_ingest.*      the upload pump (protocol state machine)
   ingest/nr_recorder.*    24/7 capture → WAV chunker → spool

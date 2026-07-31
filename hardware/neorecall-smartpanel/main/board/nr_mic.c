@@ -8,11 +8,12 @@
 
 #include <string.h>
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
 
 #include "board/board_config.h"
+#include "board/nr_board.h"
 
 static const char *TAG = "nr_mic";
 
@@ -20,20 +21,34 @@ static const char *TAG = "nr_mic";
 #define STEREO_SCRATCH  512    // frames per I2S read
 
 static i2s_chan_handle_t s_rx;
+static i2c_master_dev_handle_t s_es_dev;
 static bool s_running;
 static int16_t s_scratch[STEREO_SCRATCH * 2];
 
-// ---- ES7210 over I2C -------------------------------------------------------
+// ---- ES7210 over I2C (new i2c_master driver, shared board bus) -------------
+
+static esp_err_t es_dev_init(void)
+{
+    if (s_es_dev) return ESP_OK;
+    i2c_master_bus_handle_t bus = nr_board_i2c_bus();
+    if (!bus) return ESP_ERR_INVALID_STATE;
+    i2c_device_config_t dc = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = BRD_ADDR_ES7210,
+        .scl_speed_hz = BRD_I2C_HZ,
+    };
+    return i2c_master_bus_add_device(bus, &dc, &s_es_dev);
+}
 
 static esp_err_t es_w(uint8_t reg, uint8_t val)
 {
     uint8_t b[2] = { reg, val };
-    return i2c_master_write_to_device(BRD_I2C_PORT, BRD_ADDR_ES7210, b, 2, pdMS_TO_TICKS(100));
+    return i2c_master_transmit(s_es_dev, b, 2, 100);
 }
 
 static esp_err_t es_r(uint8_t reg, uint8_t *val)
 {
-    return i2c_master_write_read_device(BRD_I2C_PORT, BRD_ADDR_ES7210, &reg, 1, val, 1, pdMS_TO_TICKS(100));
+    return i2c_master_transmit_receive(s_es_dev, &reg, 1, val, 1, 100);
 }
 
 static esp_err_t es7210_configure(void)
@@ -117,6 +132,11 @@ esp_err_t nr_mic_start(uint32_t sample_rate)
     esp_err_t err = i2s_channel_enable(s_rx);   // MCLK starts running here
     if (err != ESP_OK) { ESP_LOGE(TAG, "i2s enable: %s", esp_err_to_name(err)); return err; }
 
+    if (es_dev_init() != ESP_OK) {
+        ESP_LOGE(TAG, "ES7210 I2C device add failed");
+        i2s_channel_disable(s_rx);
+        return ESP_FAIL;
+    }
     if (es7210_configure() != ESP_OK) {
         i2s_channel_disable(s_rx);
         return ESP_FAIL;

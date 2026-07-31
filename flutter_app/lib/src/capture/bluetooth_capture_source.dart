@@ -12,11 +12,25 @@ class BluetoothCaptureSource implements CaptureSource {
     required this.adapter,
     required this.device,
     this.connectOnStart = true,
+    this.firstAudioTimeout = const Duration(seconds: 90),
   });
 
   final AudioDeviceAdapter adapter;
   final AudioDeviceDescriptor device;
   final bool connectOnStart;
+
+  /// How long a started capture may receive nothing before saying so.
+  ///
+  /// A connected wearable that streams no audio looks exactly like a working
+  /// recording: the timer runs, the pipeline is live, and the file is empty.
+  /// Some devices legitimately stay quiet (Omi only sends on acoustic activity),
+  /// so this window is generous and only *warns* — it never stops the capture,
+  /// because a wrongly-stopped recording loses audio while a wrong warning
+  /// costs nothing.
+  final Duration firstAudioTimeout;
+
+  Timer? _firstAudioTimer;
+  bool _sawAudio = false;
   final List<StreamSubscription<dynamic>> _subs =
       <StreamSubscription<dynamic>>[];
   final StreamController<Uint8List> _pcm =
@@ -49,6 +63,10 @@ class BluetoothCaptureSource implements CaptureSource {
     _subs.add(
       adapter.pcm16Stream.listen(
         (pcm) {
+          if (!_sawAudio) {
+            _sawAudio = true;
+            _firstAudioTimer?.cancel();
+          }
           _pcm.add(pcm);
           _emitLevel(pcm);
         },
@@ -77,6 +95,13 @@ class BluetoothCaptureSource implements CaptureSource {
       }),
     );
     await adapter.requestStartRecording();
+    _firstAudioTimer = Timer(firstAudioTimeout, () {
+      if (_sawAudio || !_active) return;
+      _warnings.add(
+        '${device.displayName} is connected but has not sent any audio yet. '
+        'If it records on its own, sync its storage instead.',
+      );
+    });
     _active = true;
   }
 
@@ -97,6 +122,9 @@ class BluetoothCaptureSource implements CaptureSource {
 
   @override
   Future<void> stop() async {
+    _firstAudioTimer?.cancel();
+    _firstAudioTimer = null;
+    _sawAudio = false;
     for (final sub in _subs) {
       await sub.cancel();
     }

@@ -11,6 +11,9 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# --- OTA: roll back automatically if a new image fails to confirm itself -----
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # --- CPU --------------------------------------------------------------------
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 

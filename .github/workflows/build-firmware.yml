@@ -1,0 +1,89 @@
+name: Build Firmware
+
+# Builds the NeoRecall Smart Panel ESP32-S3 firmware on every change to its
+# folder, and (on beta) publishes a rolling `firmware-latest` pre-release with
+# the binary + an OTA manifest the device pulls to update itself over the air.
+
+on:
+  push:
+    branches: [beta, main]
+    paths:
+      - hardware/neorecall-smartpanel/**
+      - .github/workflows/build-firmware.yml
+  pull_request:
+    branches: [beta, main]
+    paths:
+      - hardware/neorecall-smartpanel/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ESP-IDF firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build with ESP-IDF v5.4
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          target: esp32s3
+          path: hardware/neorecall-smartpanel
+
+      - name: Assemble OTA manifest
+        id: manifest
+        working-directory: hardware/neorecall-smartpanel/build
+        run: |
+          set -euo pipefail
+          BIN=neorecall_smartpanel.bin
+          SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+          # Firmware version comes from the app project version (idf app-desc),
+          # falling back to the short commit SHA.
+          VER=$(python -c "import json;print(json.load(open('project_description.json')).get('project_version',''))" 2>/dev/null || true)
+          [ -n "$VER" ] || VER="g${GITHUB_SHA::7}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/firmware-latest/${BIN}"
+          cat > manifest.json <<EOF
+          {
+            "version": "${VER}",
+            "sha256": "${SHA}",
+            "url": "${URL}",
+            "commit": "${GITHUB_SHA}",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          cat manifest.json
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: neorecall-smartpanel-firmware
+          path: |
+            hardware/neorecall-smartpanel/build/neorecall_smartpanel.bin
+            hardware/neorecall-smartpanel/build/manifest.json
+          if-no-files-found: error
+
+      # Publish a rolling pre-release the device polls for OTA. Beta only.
+      - name: Publish rolling firmware release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/beta'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: hardware/neorecall-smartpanel/build
+        run: |
+          set -euo pipefail
+          gh release delete firmware-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create firmware-latest \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Smart Panel firmware ${{ steps.manifest.outputs.version }}" \
+            --notes "Automated NeoRecall Smart Panel firmware build from ${GITHUB_SHA}." \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            neorecall_smartpanel.bin manifest.json

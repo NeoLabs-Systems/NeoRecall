@@ -250,6 +250,13 @@ void main() {
               0, 0, // packet size
             ]);
           case RingProtocol.cmdRead:
+            // Real firmware always announces the transfer size first; the drain
+            // uses it to prove nothing was dropped in transit.
+            emit(<int>[
+              RingProtocol.notifyReadBegin,
+              ...List<int>.filled(8, 0), // transferStartSeq u64 BE = 0
+              0, 0, 0, 1, // packetCount u32 BE = 1
+            ]);
             emit(<int>[RingProtocol.notifyData, ...record]);
             emit(<int>[
               RingProtocol.notifyDone,
@@ -332,6 +339,12 @@ void main() {
             0, 0,
           ]);
         case RingProtocol.cmdRead:
+          // Real firmware announces the transfer size first.
+          emit(<int>[
+            RingProtocol.notifyReadBegin,
+            ...List<int>.filled(8, 0),
+            0, 0, 0, 1, // packetCount = 1
+          ]);
           emit(<int>[RingProtocol.notifyData, ...record]);
           emit(<int>[RingProtocol.notifyDone, 0, ...List<int>.filled(7, 0), 1]);
       }
@@ -353,6 +366,163 @@ void main() {
     expect(advances, isEmpty);
 
     await connector.dispose();
+  });
+
+  test('a drain that loses a notification is retried, never ingested', () async {
+    // The ring arrives as one unframed byte stream, so a single notification
+    // dropped by the host stack (documented on Web Bluetooth) shifts every
+    // following 444-byte boundary — the audio decodes into garbage instead of
+    // failing. The device still reports DONE status=0, because it sent
+    // everything. Only READ_BEGIN's announced packet count catches this.
+    final transport = _FakeWearableTransport();
+    final connector = OmiConnector(
+      device: _device(WearableDeviceType.omi),
+      transport: transport,
+    );
+    transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
+    transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
+      0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+    ];
+    await connector.connect();
+    final frame = List<int>.filled(8, 0x40);
+    final record = <int>[
+      0, 0, 0, 1,
+      frame.length,
+      ...frame,
+      ...List<int>.filled(440 - (frame.length + 1), 0),
+    ];
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.omiStorageData ||
+          value.isEmpty) {
+        return;
+      }
+      void emit(List<int> n) => scheduleMicrotask(
+        () => transport.emit(
+          WearableDeviceUuids.omiStorageService,
+          WearableDeviceUuids.omiStorageData,
+          n,
+        ),
+      );
+      switch (value[0]) {
+        case RingProtocol.cmdInfo:
+          emit(<int>[
+            RingProtocol.notifyInfo,
+            ...List<int>.filled(7, 0), 0,
+            ...List<int>.filled(7, 0), 2,
+            0, 0, 0, 0,
+            ...List<int>.filled(8, 0),
+            0, 0,
+          ]);
+        case RingProtocol.cmdRead:
+          // Two packets announced...
+          emit(<int>[
+            RingProtocol.notifyReadBegin,
+            ...List<int>.filled(8, 0),
+            0, 0, 0, 2,
+          ]);
+          // ...but only one arrives: the second is dropped in transit.
+          emit(<int>[RingProtocol.notifyData, ...record]);
+          emit(<int>[RingProtocol.notifyDone, 0, ...List<int>.filled(7, 0), 2]);
+      }
+    };
+
+    var ingested = 0;
+    // Reported as a failure, not as "no new recordings" — the device is holding
+    // audio, and a silent zero would read as an empty device.
+    await expectLater(
+      connector.drainStoredAudio((_) async => ingested += 1),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('received 1 of 2 packets'),
+        ),
+      ),
+    );
+
+    expect(ingested, 0, reason: 'a short transfer must never reach the import');
+    expect(
+      transport.writes.where(
+        (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+      ),
+      isEmpty,
+      reason: 'the cursor stays put so the range is re-read intact next sweep',
+    );
+    expect(connector.syncDiagnostics['packetsExpected'], 2);
+    expect(connector.syncDiagnostics['packetsTransferred'], 1);
+
+    await connector.dispose();
+  });
+
+  group('draining while live capture runs', () {
+    // A wearable that keeps recording while the phone is away only helps if the
+    // app can pull that backlog *and* stream live at once — otherwise every
+    // reconnect forces a choice between the past and the present. Whether that
+    // is safe is a property of the device, so it is a capability, and claiming
+    // it wrongly corrupts both streams instead of failing loudly.
+
+    test('Omi allows it: the ring and live audio are separate services', () {
+      final transport = _FakeWearableTransport();
+      final connector = OmiConnector(
+        device: _device(WearableDeviceType.omi),
+        transport: transport,
+      );
+      expect(connector.supportsConcurrentCapture, isTrue);
+      // The claim rests entirely on these being different characteristics on
+      // different services; if a UUID edit ever collapsed them, a concurrent
+      // drain would start eating live audio.
+      expect(
+        WearableDeviceUuids.omiAudioData,
+        isNot(WearableDeviceUuids.omiStorageData),
+      );
+      expect(
+        WearableDeviceUuids.omiService,
+        isNot(WearableDeviceUuids.omiStorageService),
+      );
+    });
+
+    test('Omi still drains while it is recording', () async {
+      final transport = _FakeWearableTransport();
+      final connector = OmiConnector(
+        device: _device(WearableDeviceType.omi),
+        transport: transport,
+      );
+      transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
+      transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
+        0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      ];
+      await connector.connect();
+      await connector.startRecording();
+      expect(connector.recording, isTrue);
+
+      await connector.drainStoredAudio((_) async {});
+
+      // Previously this returned 0 without touching the device. The drain must
+      // now reach the ring: it asks for INFO on the storage characteristic.
+      final storageWrites = transport.writes
+          .where((w) => w.characteristic == WearableDeviceUuids.omiStorageData)
+          .toList();
+      expect(
+        storageWrites.any((w) => w.value.first == RingProtocol.cmdInfo),
+        isTrue,
+        reason: 'a recording Omi must still be asked for its backlog',
+      );
+      await connector.dispose();
+    });
+
+    test('HeyPocket refuses it: one notify channel carries both', () async {
+      // HeyPocket routes binary notifications to the download buffer while a
+      // transfer is active and to live audio otherwise — the two are told apart
+      // by context, not by channel. Draining mid-capture would splice live
+      // frames into the downloaded file and lose them from the recording.
+      final transport = _FakeWearableTransport();
+      final connector = HeyPocketConnector(
+        device: _device(WearableDeviceType.heyPocket),
+        transport: transport,
+      );
+      expect(connector.supportsConcurrentCapture, isFalse);
+      await connector.dispose();
+    });
   });
 }
 

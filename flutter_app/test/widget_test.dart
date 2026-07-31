@@ -61,6 +61,7 @@ void main() {
     );
 
     expect(find.text('Bluetooth device'), findsOneWidget);
+    await tester.ensureVisible(find.text('Bluetooth device'));
     await tester.tap(find.text('Bluetooth device'));
     await tester.pump();
     expect(find.text('Scan for wearables'), findsOneWidget);

@@ -18,6 +18,7 @@
 #include "util/nr_util.h"
 #include "net/nr_time.h"
 #include "net/nr_wifi.h"
+#include "net/nr_ota.h"
 #include "ingest/nr_spool.h"
 #include "ingest/nr_ingest.h"
 #include "ingest/nr_recorder.h"
@@ -89,6 +90,7 @@ void app_main(void)
     // --- Keyless services + backend sync + capture -------------------------
     nr_weather_init();
     nr_ingest_init();
+    nr_ota_init();               // confirms this image + polls for OTA updates
 
     // The recorder is the reason this device exists: start it last so every
     // dependency (spool, config, board mic/I2C) is ready, then never stop.

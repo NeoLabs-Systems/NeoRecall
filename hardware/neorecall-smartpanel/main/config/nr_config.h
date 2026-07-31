@@ -30,7 +30,9 @@ typedef struct {
     char wifi_ssid[NR_CFG_STR_MAX];
     char wifi_pass[NR_CFG_SECRET_MAX];
     char backend_url[NR_CFG_URL_MAX]; // e.g. https://recall.example.com  (no trailing slash)
-    char api_key[NR_CFG_SECRET_MAX];  // nrk_...  (ingest:write scope)
+    char api_key[NR_CFG_SECRET_MAX];  // nrk_...  (ingest:write scope) — used if set
+    char auth_user[NR_CFG_STR_MAX];   // NeoRecall username (login mode alternative)
+    char auth_pass[NR_CFG_SECRET_MAX];// NeoRecall password (login mode alternative)
     bool tls_insecure;                // skip cert verification (self-hosted/local only)
     char device_id[NR_UUID_LEN];      // stable NeoRecall device UUID
     char device_client_uuid[NR_UUID_LEN];
@@ -57,6 +59,10 @@ typedef struct {
 
     // --- Recording ----------------------------------------------------------
     bool recording_enabled;           // false => user paused (persists across reboot)
+
+    // --- OTA ----------------------------------------------------------------
+    bool ota_enabled;                 // check for + apply firmware updates
+    char ota_url[NR_CFG_URL_MAX];     // manifest.json URL (empty => OTA off)
 
     // --- Cached server limits (from GET /api/v1/meta) -----------------------
     uint32_t chunk_target_ms;         // default 30000

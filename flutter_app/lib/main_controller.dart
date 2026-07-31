@@ -202,6 +202,31 @@ class NeoRecallController extends ChangeNotifier {
   bool deviceStorageSyncing = false;
   int deviceStorageSyncedCount = 0;
   int deviceStoragePendingCount = 0;
+
+  /// Live transfer progress of the running sweep, so a multi-minute drain shows
+  /// how far it has got instead of an indeterminate spinner.
+  WearableSyncProgress? deviceStorageSyncProgress;
+
+  /// Audio still waiting on the device, refreshed when the device links and
+  /// after each sweep. Lets the UI say what is outstanding before syncing.
+  int deviceStoragePendingSeconds = 0;
+  StreamSubscription<WearableSyncProgress>? _syncProgressSub;
+
+  /// Asks the connected wearable how much it is holding, without transferring.
+  Future<void> refreshDeviceStoragePending() async {
+    final adapter = audioDeviceSessions.activeAdapter;
+    if (adapter is! StorageSyncCapableAdapter) return;
+    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+    if (storage == null) return;
+    try {
+      final pending = await storage.peekPending();
+      if (pending == null) return;
+      deviceStoragePendingSeconds = pending.pendingSeconds;
+      notifyListeners();
+    } catch (_) {
+      // Advisory only; never surface a probe failure as a sync error.
+    }
+  }
   String? deviceStorageSyncError;
   static const int _deviceStorageMinBytes = 2048;
   // Automatic on-device recording sync. It runs on every platform (web
@@ -257,10 +282,16 @@ class NeoRecallController extends ChangeNotifier {
     if ((adapter as StorageSyncCapableAdapter).offlineSyncConnector == null) {
       return false;
     }
-    // Only offer a sync while idle: an offline drain and a live capture must not
-    // run at once (they share the wearable's BLE channel), so the action is
-    // unavailable during recording.
-    return audioDeviceSessions.state == DeviceTransportState.connectedStandby;
+    // A drain may run during live capture only where the device keeps the two on
+    // independent channels (Omi does; HeyPocket does not). Everywhere else the
+    // action stays idle-only, because a concurrent drain there would corrupt
+    // both streams.
+    final state = audioDeviceSessions.state;
+    if (state == DeviceTransportState.connectedStandby) return true;
+    return state == DeviceTransportState.recording &&
+        (adapter as StorageSyncCapableAdapter)
+            .offlineSyncConnector!
+            .supportsConcurrentCapture;
   }
   String get backendUrl {
     if (api.baseUrl.isNotEmpty) return api.baseUrl;
@@ -894,6 +925,9 @@ class NeoRecallController extends ChangeNotifier {
     }
     scanningWearables = true;
     discoveredWearables = <AudioDeviceDescriptor>[];
+    // Each scan reports its own outcome; a leftover notice from the previous one
+    // would otherwise stay on screen and contradict this run.
+    notice = null;
     notifyListeners();
     final subs = <StreamSubscription<dynamic>>[];
     final firstWebDiscovery = Completer<void>();
@@ -940,6 +974,15 @@ class NeoRecallController extends ChangeNotifier {
         await sub.cancel();
       }
       scanningWearables = false;
+      // A scan that finds nothing looks identical to a broken scan, so say which
+      // it was instead of leaving an empty list on screen. Every cause here is
+      // actionable by the user.
+      if (discoveredWearables.isEmpty) {
+        notice = kIsWeb
+            ? 'No device was selected in the browser chooser.'
+            : 'No supported device found. Check that the wearable is switched '
+                  'on, close by, and not already connected to another app or phone.';
+      }
       notifyListeners();
     }
   }
@@ -1215,6 +1258,60 @@ class NeoRecallController extends ChangeNotifier {
   String _mobileCaptureIntentKey(String ownerAccountId) =>
       'mobileCaptureIntent:$ownerAccountId';
 
+  /// Whether linking a known wearable should start live capture by itself, so
+  /// the user does not have to open the app and press record on every reconnect.
+  ///
+  /// Deliberately narrow, because starting a recording unprompted is not a
+  /// neutral act: only on mobile (the always-on host), only when the user
+  /// already chose Bluetooth as their capture source, only once consent has been
+  /// given, and only for devices that actually stream live — an offline-first
+  /// recorder has nothing to stream, and its sync is the whole point. Recording
+  /// stays visibly indicated exactly as a manual start does. The offline drain
+  /// is unaffected and keeps running alongside on devices that support it, so a
+  /// reconnect resumes the present and recovers the gap at the same time.
+  bool get shouldAutoStartLiveCapture {
+    if (!isMobileCapturePlatform) return false;
+    if (!authenticated || !consentAccepted) return false;
+    if (!preferBluetoothCapture) return false;
+    if (isRecording || _resumingMobileCapture || _switchingMobileSource) {
+      return false;
+    }
+    // Offline-first wearables record on the device itself; there is no live
+    // stream to start, and claiming the channel would only stall their sync.
+    if (preferredDeviceIsOfflineFirst) return false;
+    return hasPreferredBluetoothDevice;
+  }
+
+  /// Guards the window between deciding to auto-start and the recorder actually
+  /// reporting isRecording: a flapping link can deliver two connectedStandby
+  /// events inside it, and two concurrent starts would fight over the device.
+  bool _autoStartingLiveCapture = false;
+
+  Future<void> _startLiveCaptureOnLink() async {
+    if (_autoStartingLiveCapture) return;
+    if (!shouldAutoStartLiveCapture) return;
+    _autoStartingLiveCapture = true;
+    try {
+      await startRecording(microphone: false, systemAudio: false, bluetooth: true);
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'live_autostarted_on_link',
+        details: <String, Object?>{
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+        },
+      );
+    } catch (error) {
+      // A failed auto-start must never look like a crash: the user can still
+      // press record, and the device keeps syncing regardless.
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'live_autostart_failed',
+        level: 'warning',
+        details: <String, Object?>{'error': error.toString()},
+      );
+    }
+  }
+
   Future<void> _resumeMobileCaptureIfRequested() async {
     if (_resumingMobileCapture) return;
     final ownerAccountId = accountId;
@@ -1311,6 +1408,10 @@ class NeoRecallController extends ChangeNotifier {
       // then keep sweeping while it stays linked so later recordings arrive on
       // their own — with or without the app open.
       deviceStorageSync.onDeviceLinked();
+      // Show what the device is holding as soon as it links, so the amount is
+      // known before the user decides to sync.
+      unawaited(refreshDeviceStoragePending());
+      unawaited(_startLiveCaptureOnLink());
     }
     final connected =
         state == DeviceTransportState.connectedStandby ||
@@ -1629,14 +1730,17 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> _stopDeviceStorageSyncForCapture(
     AudioDeviceAdapter adapter,
   ) async {
+    if (adapter is! StorageSyncCapableAdapter) return;
+    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+    if (storage == null) return;
+    // Devices that keep live audio and their storage on separate channels can
+    // keep draining right through the capture — stopping it would be pure loss.
+    if (storage.supportsConcurrentCapture) return;
     // Claim the device first and unconditionally: with no sweep in flight this
     // method used to return immediately, leaving the periodic poll free to start
     // one during the rest of capture setup.
     _deviceClaimedForCapture = true;
     if (!deviceStorageSync.isRunning) return;
-    if (adapter is! StorageSyncCapableAdapter) return;
-    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
-    if (storage == null) return;
     try {
       await storage.cancelStoredSync();
     } catch (_) {
@@ -1656,11 +1760,11 @@ class NeoRecallController extends ChangeNotifier {
   bool _deviceClaimedForCapture = false;
 
   /// Whether an automatic sweep may run right now.
+  /// deviceStorageSyncAvailable already encodes whether this device may drain
+  /// while recording, so recording alone no longer blocks a sweep — only a
+  /// capture that is still claiming the transport does.
   bool _canSyncDeviceStorage() =>
-      authenticated &&
-      !isRecording &&
-      !_deviceClaimedForCapture &&
-      deviceStorageSyncAvailable;
+      authenticated && !_deviceClaimedForCapture && deviceStorageSyncAvailable;
 
   /// Pulls recordings held on the connected wearable's on-board storage and
   /// ingests them through the durable import pipeline, deleting each file from
@@ -1703,6 +1807,15 @@ class NeoRecallController extends ChangeNotifier {
       );
     }
     var succeeded = false;
+    // Follow the connector's own progress for as long as this sweep runs.
+    await _syncProgressSub?.cancel();
+    _syncProgressSub = storage.syncProgress.listen((progress) {
+      deviceStorageSyncProgress = progress;
+      deviceStoragePendingSeconds = progress.pendingSeconds;
+      // Real transfer means the sweep is worth showing, even automatic ones.
+      if (progress.transferred > 0) deviceStorageSyncing = true;
+      notifyListeners();
+    });
     try {
       // The connector owns its device protocol (file list/download/delete,
       // ring-buffer drain, or flash-page batch) and hands back complete
@@ -1770,9 +1883,15 @@ class NeoRecallController extends ChangeNotifier {
           },
         );
       }
+      await _syncProgressSub?.cancel();
+      _syncProgressSub = null;
+      deviceStorageSyncProgress = null;
       deviceStorageSyncing = false;
       await _setBackgroundSyncActive(false);
       notifyListeners();
+      // The ring keeps filling while the sweep ran, so re-read what is left
+      // instead of leaving the pre-sweep figure on screen.
+      unawaited(refreshDeviceStoragePending());
     }
     return succeeded;
   }
@@ -1918,6 +2037,7 @@ class NeoRecallController extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _deviceControlSubscription?.cancel();
     _backgroundSubscription?.cancel();
+    _syncProgressSub?.cancel();
     deviceStorageSync.dispose();
     sync.close();
     recorder.dispose();

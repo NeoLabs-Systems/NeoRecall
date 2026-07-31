@@ -28,14 +28,12 @@ esp_err_t nr_time_init(void)
 {
     nr_config_apply_timezone();
 
-    // Two servers for resilience; smooth sync would delay first fix, so the
-    // default (immediate step) is used to get a usable clock fast at boot.
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
-        2, ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.cloudflare.com"));
+    // One server keeps us within lwip's default CONFIG_LWIP_SNTP_MAX_SERVERS=1;
+    // pool.ntp.org is itself a load-balanced pool. Immediate (step) sync gives a
+    // usable clock fast at boot.
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     cfg.sync_cb = on_sync;
     cfg.start = true;
-    cfg.server_from_dhcp = true;              // honour a router-advertised NTP server
-    cfg.renew_servers_after_new_IP = true;
 
     esp_err_t err = esp_netif_sntp_init(&cfg);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {

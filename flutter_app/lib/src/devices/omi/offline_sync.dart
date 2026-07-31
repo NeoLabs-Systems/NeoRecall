@@ -29,6 +29,35 @@ class WearableRecording {
   final DateTime? capturedAt;
 }
 
+/// How far a drain has got, so the UI can show real progress instead of an
+/// indeterminate spinner.
+///
+/// A large ring can take minutes to transfer; without this the user cannot tell
+/// a working sync from a stuck one. [pendingSeconds] is what is still waiting on
+/// the device, which is also meaningful *before* a sync starts.
+class WearableSyncProgress {
+  const WearableSyncProgress({
+    this.transferred = 0,
+    this.total = 0,
+    this.pendingSeconds = 0,
+  });
+
+  /// Units already pulled this sweep (packets for a ring, files for a file list).
+  final int transferred;
+
+  /// Units the device announced for this sweep; 0 when it is not yet known.
+  final int total;
+
+  /// Approximate seconds of audio still held on the device.
+  final int pendingSeconds;
+
+  /// 0..1 once [total] is known, otherwise null (indeterminate).
+  double? get fraction =>
+      total > 0 ? (transferred / total).clamp(0.0, 1.0) : null;
+
+  bool get isEmpty => transferred == 0 && total == 0 && pendingSeconds == 0;
+}
+
 /// Optional capability a wearable connector implements when the device keeps an
 /// on-board store of recordings that can be pulled over BLE and ingested after
 /// the fact — the offline/durable counterpart to the live audio stream.
@@ -50,8 +79,30 @@ abstract mixin class WearableOfflineSync {
     int minBytes = 0,
   });
 
+  /// Whether this device can drain stored audio *while* live capture is running.
+  ///
+  /// Defaults to false because the safe assumption is a shared channel. It is
+  /// true only where the two genuinely do not touch: Omi streams live audio on
+  /// its audio characteristic and drains the ring on a separate storage
+  /// characteristic, so both can run at once. HeyPocket cannot — its live audio
+  /// and its file download arrive on the same notify channels and are told apart
+  /// by content, so a concurrent drain would swallow live audio into the file
+  /// (corrupting both).
+  bool get supportsConcurrentCapture => false;
+
   /// Aborts an in-flight drain so the device can return to idle/live capture.
   Future<void> cancelStoredSync();
+
+  /// Live progress of the current (or most recent) drain.
+  ///
+  /// Connectors that can report it override this; the default keeps the
+  /// capability optional so no connector is forced to fake numbers.
+  Stream<WearableSyncProgress> get syncProgress =>
+      const Stream<WearableSyncProgress>.empty();
+
+  /// How much audio is waiting on the device right now, without transferring it.
+  /// Returns null when the device cannot be asked cheaply.
+  Future<WearableSyncProgress?> peekPending() async => null;
 
   /// Protocol-level facts about the last drain, recorded in the diagnostics log
   /// alongside the sync outcome.

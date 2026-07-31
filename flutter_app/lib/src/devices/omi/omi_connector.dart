@@ -27,6 +27,57 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
   /// teardown can end the wait locally instead of hanging on its timeout.
   Completer<DoneNotification?>? _activeDrain;
 
+  // A full ring can take minutes to transfer, so progress is published rather
+  // than left to an indeterminate spinner.
+  final StreamController<WearableSyncProgress> _progress =
+      StreamController<WearableSyncProgress>.broadcast();
+  int _packetsTransferred = 0;
+  int _packetsExpected = 0;
+  int _lastPendingBytes = 0;
+
+  /// Seconds of audio a single 444-byte ring packet represents.
+  ///
+  /// Measured on real hardware rather than derived: a full drain of a live Omi
+  /// delivered 30 249 packets that decoded to 131 012 opus frames, i.e. 2 620 s
+  /// of audio at 20 ms per frame -> 0.0866 s per packet. (Computing it from the
+  /// 440-byte payload and the ~90-byte mean frame would give 0.097 and overstate
+  /// the estimate, because it ignores the zero padding at the end of a record.)
+  static const double _secondsPerPacket = 0.0866;
+
+  @override
+  Stream<WearableSyncProgress> get syncProgress => _progress.stream;
+
+  @override
+  Future<WearableSyncProgress?> peekPending() async {
+    try {
+      final raw = await transport.readCharacteristic(
+        WearableDeviceUuids.omiStorageService,
+        WearableDeviceUuids.omiStorageControl,
+      );
+      final status = RingProtocol.parseStatus(raw);
+      if (status == null) return null;
+      return WearableSyncProgress(
+        pendingSeconds: (status.unreadPackets * _secondsPerPacket).round(),
+      );
+    } catch (_) {
+      return null; // no on-board storage on this model
+    }
+  }
+
+  void _publishProgress() {
+    if (_progress.isClosed) return;
+    _progress.add(
+      WearableSyncProgress(
+        transferred: _packetsTransferred,
+        total: _packetsExpected,
+        pendingSeconds:
+            ((_packetsExpected - _packetsTransferred).clamp(0, 1 << 31) *
+                    _secondsPerPacket)
+                .round(),
+      ),
+    );
+  }
+
   /// Codec assumed when the device's codec characteristic cannot be read.
   ///
   /// Opus FS320, not PCM8: Omi ships Opus by default since fw 1.0.3 and every
@@ -173,10 +224,11 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     Future<void> Function(WearableRecording recording) onRecording, {
     int minBytes = 0,
   }) async {
-    // Live capture and the offline ring drain are mutually exclusive: the ring
-    // buffer only exists to cover phone-away gaps, so it is drained while idle,
-    // never mid-recording (which would also contend for the storage channel).
-    if (recording) return 0;
+    // Omi keeps live audio on its audio characteristic and the ring on a
+    // separate storage characteristic, so a drain may run *during* live capture:
+    // an always-on pendant should not have to choose between streaming now and
+    // recovering what it recorded while the phone was away. The two paths never
+    // share a buffer, so there is nothing to cross-feed.
     // Probe on-board storage by READING the ring status characteristic
     // (30295782), exactly as the official Omi app does. This is more reliable
     // than hasCharacteristic (some BLE stacks don't enumerate the storage
@@ -199,6 +251,8 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     }
     _lastUnreadPackets = status?.unreadPackets ?? -1;
     _lastFrameCount = 0;
+    _packetsTransferred = 0;
+    _packetsExpected = 0;
     if (status == null || status.unreadPackets == 0) return 0;
     final assembler = OfflineWavAssembler(codec: codec, stripBleHeader: false);
     if (!await assembler.ensureSupported()) {
@@ -226,6 +280,14 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
         )).listen((value) {
           if (value.isEmpty) return;
           switch (value[0]) {
+            case RingProtocol.notifyReadBegin:
+              // The device announces how many packets this transfer covers;
+              // that is what makes real progress (not a spinner) possible.
+              final begin = RingProtocol.parseReadBeginNotification(value);
+              if (begin != null) {
+                _packetsExpected = begin.packetCount;
+                _publishProgress();
+              }
             case RingProtocol.notifyInfo:
               final info = RingProtocol.parseInfoNotification(value);
               if (info != null && !infoCompleter.isCompleted) {
@@ -234,6 +296,10 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
             case RingProtocol.notifyData:
               reassembler.append(value.sublist(1));
               for (final record in reassembler.drainRecords()) {
+                _packetsTransferred += 1;
+                // ~30k packets per sweep: publishing each one would flood the
+                // UI, so report every 25.
+                if (_packetsTransferred % 25 == 0) _publishProgress();
                 final audio = record.sublist(RingProtocol.timestampBytes);
                 for (final frame in RingProtocol.parseAudioPayload(audio)) {
                   assembler.addFrame(frame);
@@ -271,7 +337,32 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     // The range counts as transferred only when the device said so AND reported
     // success. A timeout, an abort, or a non-zero status means we hold an
     // incomplete prefix of the range.
-    final transferComplete = done != null && done.isOk;
+    //
+    // DONE alone is not enough: it reports what the *device* sent, and a host
+    // stack that drops a notification under the burst (documented on Web
+    // Bluetooth) leaves us short without the device ever knowing. Because the
+    // ring is one unframed byte stream, a single lost notification shifts every
+    // following 444-byte boundary — the audio decodes into garbage rather than
+    // failing. So the packet count the device announced in READ_BEGIN must
+    // match what we reassembled, with no partial record left over; otherwise
+    // the range is retried instead of being ingested and advanced past.
+    final packetsAccountedFor =
+        _packetsExpected > 0 &&
+        _packetsTransferred == _packetsExpected &&
+        reassembler.pendingBytes == 0;
+    _lastPendingBytes = reassembler.pendingBytes;
+    final transferComplete = done != null && done.isOk && packetsAccountedFor;
+    if (done != null && done.isOk && !packetsAccountedFor) {
+      // The device finished successfully but we hold less than it sent. Saying
+      // "no new recordings" here would be a lie about a device that is holding
+      // 45 minutes of audio, so this surfaces as the failure it is; the cursor
+      // is untouched, so the next sweep re-reads the range intact.
+      throw StateError(
+        'Transfer incomplete: received $_packetsTransferred of '
+        '$_packetsExpected packets. The recording stays on the device and is '
+        'retried.',
+      );
+    }
     _lastDoneStatus = done?.status ?? -1;
     final pcmBytes = assembler.pcmByteLength;
     final wav = assembler.toWav();
@@ -314,8 +405,16 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     return hasRecording ? 1 : 0;
   }
 
+  /// Safe here: live audio (19b10001) and the ring (30295781) are different
+  /// characteristics on different services, with independent buffers.
+  @override
+  bool get supportsConcurrentCapture => true;
+
   @override
   Map<String, Object?> get syncDiagnostics => <String, Object?>{
+    'packetsExpected': _packetsExpected,
+    'packetsTransferred': _packetsTransferred,
+    'unreassembledBytes': _lastPendingBytes,
     'storageCharacteristicReadable': _storageReadable,
     'unreadPackets': _lastUnreadPackets,
     'opusFramesDecoded': _lastFrameCount,
@@ -346,6 +445,7 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     final pending = _activeDrain;
     _activeDrain = null;
     if (pending != null && !pending.isCompleted) pending.complete(null);
+    await _progress.close();
     await super.dispose();
   }
 

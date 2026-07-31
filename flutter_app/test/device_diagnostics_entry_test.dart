@@ -20,6 +20,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
 
+    await tester.ensureVisible(find.text('Bluetooth device'));
     await tester.tap(find.text('Bluetooth device'));
     await tester.pump();
 
@@ -30,6 +31,8 @@ void main() {
     // Nothing on screen advertises diagnostics before the gesture.
     expect(find.text('Device & sync diagnostics'), findsNothing);
 
+    await tester.ensureVisible(statusLine);
+    await tester.pumpAndSettle();
     await tester.longPress(statusLine);
     await tester.pumpAndSettle();
 
@@ -46,13 +49,15 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
 
+    await tester.ensureVisible(find.text('Bluetooth device'));
     await tester.tap(find.text('Bluetooth device'));
     await tester.pump();
-    await tester.tap(
-      find.text(
-        'Connect a supported Bluetooth device before starting this source.',
-      ),
+    final statusLine = find.text(
+      'Connect a supported Bluetooth device before starting this source.',
     );
+    await tester.ensureVisible(statusLine);
+    await tester.pumpAndSettle();
+    await tester.tap(statusLine);
     await tester.pumpAndSettle();
 
     expect(find.text('Device & sync diagnostics'), findsNothing);

@@ -10,6 +10,7 @@
 #include "esp_log.h"
 
 #include "ui/ui_theme.h"
+#include "ui/nr_fonts.h"
 #include "ui/ui_settings.h"
 #include "board/nr_board.h"
 #include "config/nr_config.h"
@@ -191,7 +192,7 @@ static void build_dashboard(void)
 
     // Header: logo + wordmark, gear button
     mk_logo(s_dash, 20, 18);
-    lv_obj_t *word = mk_label(s_dash, &lv_font_montserrat_20, NRC_TX);
+    lv_obj_t *word = mk_label(s_dash, &nr_font_20, NRC_TX);
     lv_label_set_text(word, "NeoRecall");
     lv_obj_set_pos(word, 54, 20);
 
@@ -204,16 +205,16 @@ static void build_dashboard(void)
     lv_obj_set_style_radius(gear, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_shadow_width(gear, 0, 0);
     lv_obj_add_event_cb(gear, gear_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *gl = mk_label(gear, &lv_font_montserrat_20, NRC_TX2);
+    lv_obj_t *gl = mk_label(gear, &nr_font_20, NRC_TX2);
     lv_label_set_text(gl, LV_SYMBOL_SETTINGS);
     lv_obj_center(gl);
 
     // Clock + date
-    s_clock = mk_label(s_dash, &lv_font_montserrat_48, NRC_TX);
+    s_clock = mk_label(s_dash, &nr_font_48, NRC_TX);
     lv_label_set_text(s_clock, "--:--");
     lv_obj_align(s_clock, LV_ALIGN_TOP_MID, 0, 72);
 
-    s_date = mk_label(s_dash, &lv_font_montserrat_20, NRC_TX2);
+    s_date = mk_label(s_dash, &nr_font_20, NRC_TX2);
     lv_label_set_text(s_date, "");
     lv_obj_align(s_date, LV_ALIGN_TOP_MID, 0, 138);
 
@@ -229,26 +230,26 @@ static void build_dashboard(void)
     lv_obj_set_style_pad_all(s_wx_icon, 0, 0);
     lv_obj_remove_flag(s_wx_icon, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_wx_temp = mk_label(wx, &lv_font_montserrat_36, NRC_TX);
+    s_wx_temp = mk_label(wx, &nr_font_36, NRC_TX);
     lv_label_set_text(s_wx_temp, "--°");
     lv_obj_align(s_wx_temp, LV_ALIGN_LEFT_MID, 78, -12);
 
-    s_wx_desc = mk_label(wx, &lv_font_montserrat_16, NRC_TX2);
+    s_wx_desc = mk_label(wx, &nr_font_16, NRC_TX2);
     lv_label_set_text(s_wx_desc, "Wetter wird geladen …");
     lv_obj_align(s_wx_desc, LV_ALIGN_LEFT_MID, 80, 22);
 
-    s_wx_hilo = mk_label(wx, &lv_font_montserrat_14, NRC_TX3);
+    s_wx_hilo = mk_label(wx, &nr_font_14, NRC_TX3);
     lv_label_set_text(s_wx_hilo, "");
     lv_obj_align(s_wx_hilo, LV_ALIGN_TOP_RIGHT, -4, 4);
 
-    s_city = mk_label(wx, &lv_font_montserrat_14, NRC_TX3);
+    s_city = mk_label(wx, &nr_font_14, NRC_TX3);
     lv_label_set_text(s_city, "");
     lv_obj_align(s_city, LV_ALIGN_BOTTOM_RIGHT, -4, 2);
 
     // Recording row (dot + text + equalizer)
     s_rec_dot = circle(s_dash, 12, NRC_TX3, 0, 0);
     lv_obj_align(s_rec_dot, LV_ALIGN_TOP_MID, -120, 340);
-    s_rec_text = mk_label(s_dash, &lv_font_montserrat_16, NRC_TX2);
+    s_rec_text = mk_label(s_dash, &nr_font_16, NRC_TX2);
     lv_label_set_text(s_rec_text, "…");
     lv_obj_align(s_rec_text, LV_ALIGN_TOP_MID, -40, 336);
 
@@ -272,12 +273,12 @@ static void build_dashboard(void)
     lv_obj_set_style_border_width(s_pause_btn, 2, 0);
     lv_obj_set_style_shadow_width(s_pause_btn, 0, 0);
     lv_obj_add_event_cb(s_pause_btn, pause_cb, LV_EVENT_CLICKED, NULL);
-    s_pause_icon = mk_label(s_pause_btn, &lv_font_montserrat_24, NRC_GOLD);
+    s_pause_icon = mk_label(s_pause_btn, &nr_font_24, NRC_GOLD);
     lv_label_set_text(s_pause_icon, LV_SYMBOL_PAUSE);
     lv_obj_center(s_pause_icon);
 
     // Status bar
-    s_status = mk_label(s_dash, &lv_font_montserrat_14, NRC_TX3);
+    s_status = mk_label(s_dash, &nr_font_14, NRC_TX3);
     lv_label_set_text(s_status, "");
     lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 24, -30);
 }

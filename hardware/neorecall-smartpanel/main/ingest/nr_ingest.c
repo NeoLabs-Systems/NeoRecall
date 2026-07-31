@@ -37,11 +37,19 @@ static int64_t s_last_heartbeat_ms;
 typedef struct {
     char base[NR_CFG_URL_MAX];
     char api_key[NR_CFG_SECRET_MAX];
+    char username[NR_CFG_STR_MAX];
+    char password[NR_CFG_SECRET_MAX];
     char device_id[NR_UUID_LEN];
     char device_client[NR_UUID_LEN];
     char device_name[NR_CFG_STR_MAX];
     bool tls_insecure;
 } cyc_cfg_t;
+
+// Bearer used for every request this cycle: either the API key, or a session
+// token obtained by logging in with username+password. Cleared on a 401 so the
+// next cycle re-authenticates.
+static char s_login_token[160];
+static char s_bearer[176];
 
 // ---- status helpers --------------------------------------------------------
 
@@ -94,11 +102,12 @@ static cJSON *api_send(const cyc_cfg_t *cfg, const char *method, const char *pat
     nr_http_result_t res;
     esp_err_t err = nr_http_request(method, url, body ? "application/json" : NULL,
                                     body, body ? strlen(body) : 0,
-                                    cfg->api_key[0] ? cfg->api_key : NULL,
+                                    s_bearer[0] ? s_bearer : NULL,
                                     NULL, 0, cfg->tls_insecure, 20000, &res);
     free(body);
     if (status) *status = res.status;
     if (err != ESP_OK) { status_set_error("network error", 0); return NULL; }
+    if (res.status == 401) s_login_token[0] = '\0';   // token died: re-login next cycle
 
     xSemaphoreTake(s_status_lock, portMAX_DELAY);
     s_status.server_reachable = true;
@@ -117,6 +126,53 @@ static cJSON *api_send(const cyc_cfg_t *cfg, const char *method, const char *pat
     }
     nr_http_result_free(&res);
     return parsed;
+}
+
+// ---- authentication --------------------------------------------------------
+
+// Log in with username+password (unauthenticated) and cache the session token.
+static bool do_login(const cyc_cfg_t *cfg)
+{
+    char url[256]; api_url(cfg, url, sizeof(url), "/auth/login");
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "account", cfg->username);
+    cJSON_AddStringToObject(body, "password", cfg->password);
+    char *bs = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+
+    nr_http_result_t res;
+    esp_err_t err = nr_http_request("POST", url, "application/json", bs, strlen(bs),
+                                    NULL, NULL, 0, cfg->tls_insecure, 15000, &res);
+    free(bs);
+
+    bool ok = false;
+    if (err == ESP_OK && res.status == 200 && res.body) {
+        cJSON *j = cJSON_Parse(res.body);
+        cJSON *sess = j ? cJSON_GetObjectItem(j, "session") : NULL;
+        cJSON *tok = sess ? cJSON_GetObjectItem(sess, "token") : NULL;
+        if (cJSON_IsString(tok) && tok->valuestring[0]) {
+            nr_strlcpy(s_login_token, tok->valuestring, sizeof(s_login_token));
+            ok = true;
+            ESP_LOGI(TAG, "logged in as %s", cfg->username);
+        }
+        if (j) cJSON_Delete(j);
+    } else {
+        status_set_error(res.status == 401 ? "Login: falsche Zugangsdaten" : "Login fehlgeschlagen", res.status);
+    }
+    nr_http_result_free(&res);
+    return ok;
+}
+
+// Set s_bearer for this cycle. Returns false if no usable credential exists.
+static bool resolve_bearer(const cyc_cfg_t *cfg)
+{
+    if (cfg->username[0] && cfg->password[0]) {
+        if (!s_login_token[0] && !do_login(cfg)) { s_bearer[0] = '\0'; return false; }
+        nr_strlcpy(s_bearer, s_login_token, sizeof(s_bearer));
+    } else {
+        nr_strlcpy(s_bearer, cfg->api_key, sizeof(s_bearer));
+    }
+    return s_bearer[0] != '\0';
 }
 
 // ---- infrastructure: meta, device, heartbeat ------------------------------
@@ -436,7 +492,7 @@ static void upload_chunk(const cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
     nr_spool_update_chunk(&m);
 
     nr_http_result_t res;
-    esp_err_t err = nr_http_put_wav_multipart(url, cfg->api_key[0] ? cfg->api_key : NULL,
+    esp_err_t err = nr_http_put_wav_multipart(url, s_bearer[0] ? s_bearer : NULL,
                                               hdrs, sizeof(hdrs) / sizeof(hdrs[0]),
                                               mem, mem ? NULL : path, len, filename,
                                               cfg->tls_insecure, 30000, &res);
@@ -451,8 +507,9 @@ static void upload_chunk(const cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
     xSemaphoreGive(s_status_lock);
 
     if (res.status == 401) {
+        s_login_token[0] = '\0';   // token expired: re-login next cycle, then retry
         if (nr_spool_get_chunk(cm->local_id, &m)) { m.state = NR_CHUNK_READY; nr_spool_update_chunk(&m); }
-        status_set_error("auth rejected (check API key)", 401);
+        status_set_error("Auth abgelehnt (Zugangsdaten prüfen)", 401);
     } else if (res.status >= 200 && res.status < 300 && res.body) {
         cJSON *j = cJSON_Parse(res.body);
         cJSON *receipt = j ? cJSON_GetObjectItem(j, "receipt") : NULL;
@@ -509,15 +566,20 @@ static void pump_once(void)
     if (!nr_net_is_online()) return;
 
     nr_config_t c; nr_config_get(&c);
-    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && c.api_key[0])) return;
+    bool has_auth = c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]);
+    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && has_auth)) return;
 
     cyc_cfg_t cfg = {0};
     nr_strlcpy(cfg.base, c.backend_url, sizeof(cfg.base));
     nr_strlcpy(cfg.api_key, c.api_key, sizeof(cfg.api_key));
+    nr_strlcpy(cfg.username, c.auth_user, sizeof(cfg.username));
+    nr_strlcpy(cfg.password, c.auth_pass, sizeof(cfg.password));
     nr_strlcpy(cfg.device_id, c.device_id, sizeof(cfg.device_id));
     nr_strlcpy(cfg.device_client, c.device_client_uuid, sizeof(cfg.device_client));
     nr_strlcpy(cfg.device_name, c.device_name, sizeof(cfg.device_name));
     cfg.tls_insecure = c.tls_insecure;
+
+    if (!resolve_bearer(&cfg)) return;  // logged out / login failed: retry next cycle
 
     ensure_meta(&cfg);
     if (!ensure_device(&cfg)) return;   // no point declaring sessions without a device

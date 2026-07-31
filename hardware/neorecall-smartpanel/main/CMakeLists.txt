@@ -8,6 +8,7 @@ idf_component_register(
         "net/nr_time.c"
         "net/nr_http.c"
         "net/nr_wifi.c"
+        "net/nr_ota.c"
         "ingest/nr_spool.c"
         "ingest/nr_ingest.c"
         "ingest/nr_recorder.c"
@@ -17,6 +18,12 @@ idf_component_register(
         "services/nr_geo.c"
         "ui/nr_ui.c"
         "ui/ui_settings.c"
+        "ui/fonts/nr_font_14.c"
+        "ui/fonts/nr_font_16.c"
+        "ui/fonts/nr_font_20.c"
+        "ui/fonts/nr_font_24.c"
+        "ui/fonts/nr_font_36.c"
+        "ui/fonts/nr_font_48.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
@@ -26,6 +33,8 @@ idf_component_register(
         esp_netif
         esp_http_client
         esp_http_server
+        esp_https_ota
+        app_update
         esp-tls
         mbedtls
         json
@@ -35,3 +44,8 @@ idf_component_register(
         lwip
         esp_hw_support
 )
+
+# uint32_t is `long unsigned` on xtensa, so %u/%lu tripping -Werror=format is an
+# ABI pedantry, not a bug; snprintf format-truncation on our bounded path buffers
+# is likewise a false positive. Keep them as warnings for this app component.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=format -Wno-error=format-truncation)

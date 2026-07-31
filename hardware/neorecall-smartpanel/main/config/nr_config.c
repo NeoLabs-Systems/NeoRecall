@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -73,6 +74,8 @@ static void apply_defaults(nr_config_t *c)
     c->night_end_min = 7 * 60;      // 07:00
     c->wake_seconds = 8;
     c->recording_enabled = true;    // 24/7 by default
+    c->ota_enabled = true;
+    c->ota_url[0] = '\0';
     c->chunk_target_ms = 30000;
     c->chunk_overlap_ms = 2000;
     c->chunk_min_ms = 15000;
@@ -101,6 +104,8 @@ esp_err_t nr_config_init(void)
     load_str(h, "wifi_pass", s_cfg.wifi_pass, sizeof(s_cfg.wifi_pass), "");
     load_str(h, "backend_url", s_cfg.backend_url, sizeof(s_cfg.backend_url), "");
     load_str(h, "api_key", s_cfg.api_key, sizeof(s_cfg.api_key), "");
+    load_str(h, "auth_user", s_cfg.auth_user, sizeof(s_cfg.auth_user), "");
+    load_str(h, "auth_pass", s_cfg.auth_pass, sizeof(s_cfg.auth_pass), "");
     s_cfg.tls_insecure = load_u8(h, "tls_insecure", 0);
     load_str(h, "device_id", s_cfg.device_id, sizeof(s_cfg.device_id), "");
     load_str(h, "dev_client", s_cfg.device_client_uuid, sizeof(s_cfg.device_client_uuid), "");
@@ -124,6 +129,8 @@ esp_err_t nr_config_init(void)
     s_cfg.wake_seconds = (uint16_t) load_u32(h, "wake_secs", s_cfg.wake_seconds);
 
     s_cfg.recording_enabled = load_u8(h, "rec_en", 1);
+    s_cfg.ota_enabled = load_u8(h, "ota_en", 1);
+    load_str(h, "ota_url", s_cfg.ota_url, sizeof(s_cfg.ota_url), "");
 
     s_cfg.chunk_target_ms = load_u32(h, "chunk_tgt", s_cfg.chunk_target_ms);
     s_cfg.chunk_overlap_ms = load_u32(h, "chunk_ovl", s_cfg.chunk_overlap_ms);
@@ -163,7 +170,8 @@ void nr_config_get(nr_config_t *out)
 bool nr_config_is_provisioned(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] && s_cfg.api_key[0];
+    bool has_auth = s_cfg.api_key[0] || (s_cfg.auth_user[0] && s_cfg.auth_pass[0]);
+    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] && has_auth;
     xSemaphoreGive(s_lock);
     return ok;
 }
@@ -191,6 +199,8 @@ static esp_err_t persist_all_locked(void)
     nvs_set_str(h, "wifi_pass", s_cfg.wifi_pass);
     nvs_set_str(h, "backend_url", s_cfg.backend_url);
     nvs_set_str(h, "api_key", s_cfg.api_key);
+    nvs_set_str(h, "auth_user", s_cfg.auth_user);
+    nvs_set_str(h, "auth_pass", s_cfg.auth_pass);
     nvs_set_u8(h, "tls_insecure", s_cfg.tls_insecure);
     nvs_set_str(h, "device_id", s_cfg.device_id);
     nvs_set_str(h, "dev_client", s_cfg.device_client_uuid);
@@ -214,6 +224,8 @@ static esp_err_t persist_all_locked(void)
     nvs_set_u32(h, "wake_secs", s_cfg.wake_seconds);
 
     nvs_set_u8(h, "rec_en", s_cfg.recording_enabled);
+    nvs_set_u8(h, "ota_en", s_cfg.ota_enabled);
+    nvs_set_str(h, "ota_url", s_cfg.ota_url);
 
     nvs_set_u32(h, "chunk_tgt", s_cfg.chunk_target_ms);
     nvs_set_u32(h, "chunk_ovl", s_cfg.chunk_overlap_ms);

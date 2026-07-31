@@ -558,11 +558,16 @@ class _SyncStatusPillState extends State<_SyncStatusPill>
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
     final synced = controller.deviceStorageSyncedCount;
-    final pending = controller.deviceStoragePendingCount;
+    final progress = controller.deviceStorageSyncProgress;
     final label = controller.preferredDeviceLabel ?? 'device';
+    // Percent and remaining audio come from the device's own announced transfer
+    // size, so a long drain reads as progress instead of an endless spinner.
+    final percent = progress?.fraction;
     final detail = <String>[
+      if (percent != null) '${(percent * 100).round()}%',
       if (synced > 0) '$synced synced',
-      if (pending > 0) '$pending left',
+      if (progress != null && progress.pendingSeconds > 0)
+        '${DeviceSyncStatusView.formatDuration(progress.pendingSeconds)} left',
     ].join(' · ');
     final color = palette.accent;
     return Container(

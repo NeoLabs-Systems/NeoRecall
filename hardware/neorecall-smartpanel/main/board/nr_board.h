@@ -8,6 +8,7 @@
 #pragma once
 
 #include "nr_common.h"
+#include "driver/i2c_master.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,9 @@ extern "C" {
 // Initialise I2C, the display + touch stack, and LVGL. On success the LVGL
 // task is running and a display + input device are registered.
 esp_err_t nr_board_init(void);
+
+// The shared I2C master bus (used by the microphone codec in nr_mic.c).
+i2c_master_bus_handle_t nr_board_i2c_bus(void);
 
 // LVGL is not thread-safe: hold this lock around any lv_* call made outside the
 // LVGL task's own callbacks. timeout_ms < 0 waits forever.

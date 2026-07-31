@@ -10,18 +10,21 @@
 #include "freertos/task.h"
 
 #include "ui/ui_theme.h"
+#include "ui/nr_fonts.h"
 #include "ui/nr_ui.h"
 #include "board/nr_board.h"
 #include "config/nr_config.h"
 #include "net/nr_wifi.h"
 #include "services/nr_geo.h"
 #include "services/nr_weather.h"
+#include "util/nr_util.h"
 
 static lv_obj_t *s_scr, *s_kb;
-static lv_obj_t *dd_ssid, *ta_pass, *ta_url, *ta_key, *ta_city;
-static lv_obj_t *sw_tls, *sw_loc_auto, *sw_24h, *sw_units, *sw_night, *sw_night_off;
+static lv_obj_t *dd_ssid, *ta_pass, *ta_url, *ta_key, *ta_city, *ta_user, *ta_authpass;
+static lv_obj_t *sw_tls, *sw_loc_auto, *sw_24h, *sw_units, *sw_night, *sw_night_off, *sw_ota;
 static lv_obj_t *sl_bri_day, *sl_bri_night;
 static lv_obj_t *rol_sh, *rol_sm, *rol_eh, *rol_em;
+static lv_obj_t *ta_ota_url;
 
 // Wi-Fi scan results, filled by a background task and applied on the LVGL task.
 static char s_scan[20][33];
@@ -36,7 +39,7 @@ static const char *MINS5 = "00\n05\n10\n15\n20\n25\n30\n35\n40\n45\n50\n55";
 static lv_obj_t *section(lv_obj_t *parent, const char *title)
 {
     lv_obj_t *hdr = lv_label_create(parent);
-    lv_obj_set_style_text_font(hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(hdr, &nr_font_14, 0);
     lv_obj_set_style_text_color(hdr, NRC_GOLD_HI, 0);
     lv_obj_set_style_pad_left(hdr, 6, 0);
     lv_obj_set_style_pad_top(hdr, 10, 0);
@@ -69,7 +72,7 @@ static lv_obj_t *row(lv_obj_t *parent, const char *label)
     lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     if (label && label[0]) {
         lv_obj_t *l = lv_label_create(r);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(l, &nr_font_16, 0);
         lv_obj_set_style_text_color(l, NRC_TX, 0);
         lv_label_set_text(l, label);
     }
@@ -137,7 +140,7 @@ static lv_obj_t *field(lv_obj_t *parent, const char *label, const char *placehol
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_t *l = lv_label_create(box);
     lv_obj_set_style_text_color(l, NRC_TX2, 0);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(l, &nr_font_14, 0);
     lv_label_set_text(l, label);
     lv_obj_t *ta = lv_textarea_create(box);
     lv_textarea_set_one_line(ta, true);
@@ -197,6 +200,8 @@ static void load_values(void)
     nr_config_t c; nr_config_get(&c);
     lv_textarea_set_text(ta_url, c.backend_url);
     lv_textarea_set_text(ta_key, c.api_key);
+    lv_textarea_set_text(ta_user, c.auth_user);
+    lv_textarea_set_text(ta_authpass, "");   // never echo the stored password
     lv_textarea_set_text(ta_pass, "");
     lv_textarea_set_text(ta_city, c.city);
     if (c.tls_insecure) lv_obj_add_state(sw_tls, LV_STATE_CHECKED); else lv_obj_remove_state(sw_tls, LV_STATE_CHECKED);
@@ -211,6 +216,8 @@ static void load_values(void)
     lv_roller_set_selected(rol_sm, (c.night_start_min % 60) / 5, LV_ANIM_OFF);
     lv_roller_set_selected(rol_eh, c.night_end_min / 60, LV_ANIM_OFF);
     lv_roller_set_selected(rol_em, (c.night_end_min % 60) / 5, LV_ANIM_OFF);
+    lv_textarea_set_text(ta_ota_url, c.ota_url);
+    if (c.ota_enabled) lv_obj_add_state(sw_ota, LV_STATE_CHECKED); else lv_obj_remove_state(sw_ota, LV_STATE_CHECKED);
     // Show whatever we last found, then refresh in the background.
     apply_scan(NULL);
     start_scan();
@@ -235,6 +242,9 @@ static void save_cb(lv_event_t *e)
 
     nr_strlcpy(c.backend_url, lv_textarea_get_text(ta_url), sizeof(c.backend_url));
     nr_strlcpy(c.api_key, lv_textarea_get_text(ta_key), sizeof(c.api_key));
+    nr_strlcpy(c.auth_user, lv_textarea_get_text(ta_user), sizeof(c.auth_user));
+    const char *authpass = lv_textarea_get_text(ta_authpass);
+    if (authpass[0]) nr_strlcpy(c.auth_pass, authpass, sizeof(c.auth_pass));  // empty keeps the stored one
     nr_strlcpy(c.city, lv_textarea_get_text(ta_city), sizeof(c.city));
     c.tls_insecure = lv_obj_has_state(sw_tls, LV_STATE_CHECKED);
     c.location_auto = lv_obj_has_state(sw_loc_auto, LV_STATE_CHECKED);
@@ -246,7 +256,10 @@ static void save_cb(lv_event_t *e)
     c.brightness_night = lv_slider_get_value(sl_bri_night);
     c.night_start_min = lv_roller_get_selected(rol_sh) * 60 + lv_roller_get_selected(rol_sm) * 5;
     c.night_end_min = lv_roller_get_selected(rol_eh) * 60 + lv_roller_get_selected(rol_em) * 5;
-    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] && c.api_key[0];
+    nr_strlcpy(c.ota_url, lv_textarea_get_text(ta_ota_url), sizeof(c.ota_url));
+    c.ota_enabled = lv_obj_has_state(sw_ota, LV_STATE_CHECKED);
+    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] &&
+                    (c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]));
 
     nr_config_set(&c);
     nr_wifi_reconfigure();       // apply Wi-Fi credentials and connect
@@ -276,7 +289,7 @@ static lv_obj_t *action_button(lv_obj_t *parent, const char *text, lv_color_t bg
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_obj_set_style_text_color(l, fg, 0);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(l, &nr_font_16, 0);
     lv_label_set_text(l, text);
     lv_obj_center(l);
     return b;
@@ -307,7 +320,7 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_style_text_color(bi, NRC_TX, 0);
     lv_obj_center(bi);
     lv_obj_t *title = lv_label_create(head);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(title, &nr_font_20, 0);
     lv_obj_set_style_text_color(title, NRC_TX, 0);
     lv_label_set_text(title, "Einstellungen");
 
@@ -318,7 +331,7 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_flex_align(wrow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_t *wl = lv_label_create(wrow);
     lv_obj_set_style_text_color(wl, NRC_TX2, 0);
-    lv_obj_set_style_text_font(wl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(wl, &nr_font_14, 0);
     lv_label_set_text(wl, "Netzwerk");
     dd_ssid = lv_dropdown_create(wrow);
     lv_obj_set_width(dd_ssid, lv_pct(100));
@@ -332,7 +345,9 @@ lv_obj_t *ui_settings_create(void)
     // --- Backend ---
     sec = section(s_scr, "BACKEND");
     ta_url = field(sec, "Backend-URL", "https://recall.example.com", false);
-    ta_key = field(sec, "API-Key (Scope ingest:write)", "nrk_...", false);
+    ta_user = field(sec, "Benutzername (Login)", "dein NeoRecall-Login", false);
+    ta_authpass = field(sec, "Passwort (Login)", "leer lassen = unverändert", true);
+    ta_key = field(sec, "… oder API-Key statt Login", "nrk_...", false);
     sw_tls = add_switch(sec, "TLS-Zertifikat nicht prüfen", false);
 
     // --- Location ---
@@ -358,6 +373,11 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_t *rend = row(sec, "Ende");
     rol_eh = time_roller(rend, HOURS);
     rol_em = time_roller(rend, MINS5);
+
+    // --- Software update (OTA) ---
+    sec = section(s_scr, "SOFTWARE-UPDATE (OTA)");
+    sw_ota = add_switch(sec, "Automatische Updates", true);
+    ta_ota_url = field(sec, "Update-Manifest-URL", "https://github.com/…/firmware-latest/manifest.json", false);
 
     // --- Actions ---
     sec = section(s_scr, "AKTIONEN");
