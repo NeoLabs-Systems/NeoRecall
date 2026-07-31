@@ -55,7 +55,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.2",
     "@huggingface/hub": "2.13.3",
     "@huggingface/transformers": "4.2.0",
