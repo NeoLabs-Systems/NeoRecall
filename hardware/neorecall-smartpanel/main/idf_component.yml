@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Managed component dependencies (pulled by `idf.py reconfigure` / build).
+dependencies:
+  idf: ">=5.1"
+
+  # Display: ST7701 RGB panel with its init driven over the TCA9554 expander's
+  # 3-wire SPI (esp_lcd_panel_io_additions), plus GT911 touch and the LVGL port.
+  espressif/esp_lcd_st7701: "^2.0.0"
+  espressif/esp_lcd_panel_io_additions: "^1.0.0"
+  espressif/esp_io_expander_tca9554: "^2.0.0"
+  espressif/esp_lcd_touch_gt911: "^1.2.0"
+  espressif/esp_lvgl_port: "^2.3.0"
+  lvgl/lvgl: "^9.2.0"
+
+  # Durable spool storage on internal flash (no SD slot on this board).
+  joltwallet/littlefs: "^1.14.0"

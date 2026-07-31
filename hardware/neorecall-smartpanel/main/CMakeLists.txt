@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "nr_common.c"
+        "config/nr_config.c"
+        "util/nr_util.c"
+        "net/nr_time.c"
+        "net/nr_http.c"
+        "net/nr_wifi.c"
+        "ingest/nr_spool.c"
+        "ingest/nr_ingest.c"
+        "ingest/nr_recorder.c"
+        "board/nr_board.c"
+        "board/nr_mic.c"
+        "services/nr_weather.c"
+        "services/nr_geo.c"
+        "ui/nr_ui.c"
+        "ui/ui_settings.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        nvs_flash
+        esp_event
+        esp_timer
+        esp_wifi
+        esp_netif
+        esp_http_client
+        esp_http_server
+        esp-tls
+        mbedtls
+        json
+        driver
+        esp_lcd
+        esp_psram
+        lwip
+        esp_hw_support
+)

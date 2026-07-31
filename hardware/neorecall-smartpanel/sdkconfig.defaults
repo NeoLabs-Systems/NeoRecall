@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: MIT
+# Defaults for the Waveshare ESP32-S3-Touch-LCD-4B (WROOM-1-N16R8).
+# Run `idf.py set-target esp32s3` once; these are applied on first configure.
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Flash & partitions -----------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- CPU --------------------------------------------------------------------
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# --- Octal PSRAM (required for the RGB framebuffer) -------------------------
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# --- FreeRTOS / system ------------------------------------------------------
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# --- TLS: verify public hosts via the bundled Mozilla roots; allow an opt-in
+#     insecure mode for self-hosted/self-signed NeoRecall backends -----------
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+
+# --- RGB LCD: keep the flush path in IRAM to avoid tearing ------------------
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+
+# --- LVGL -------------------------------------------------------------------
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
+# Route LVGL allocations to the system heap (which can spill into PSRAM) so the
+# UI is not limited to a small fixed pool.
+CONFIG_LV_USE_STDLIB_MALLOC_LV_STDLIB_CLIB=y
+CONFIG_LV_USE_STDLIB_STRING_LV_STDLIB_CLIB=y
+CONFIG_LV_USE_STDLIB_SPRINTF_LV_STDLIB_CLIB=y
+# Safety net if the built-in allocator is selected instead of CLIB.
+CONFIG_LV_MEM_SIZE_KILOBYTES=64
