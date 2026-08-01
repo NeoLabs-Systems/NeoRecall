@@ -395,7 +395,7 @@ static void refresh_recording(void)
 
 static void refresh_status(void)
 {
-    char line[128];
+    char line[160];
     nr_net_state_t net = nr_net_state();
     nr_ingest_status_t ing; nr_ingest_get_status(&ing);
 
@@ -418,14 +418,23 @@ static void refresh_status(void)
         case NR_NET_CONNECTING: net_txt = LV_SYMBOL_WIFI " Verbinde …"; break;
         default: net_txt = LV_SYMBOL_WARNING " Offline"; break;
     }
-    if (ing.pending_upload > 0)
-        snprintf(line, sizeof(line), "%s   %s %u wartend", net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload);
+    if (ing.pending_upload > 0) {
+        if (ing.last_error[0] && net == NR_NET_ONLINE)
+            snprintf(line, sizeof(line), "%s   %s %u wartend · %s",
+                     net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload, ing.last_error);
+        else
+            snprintf(line, sizeof(line), "%s   %s %u wartend",
+                     net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload);
+    } else if (ing.needs_attention > 0)
+        snprintf(line, sizeof(line), "%s   %s %u prüfen",
+                 net_txt, LV_SYMBOL_WARNING, (unsigned) ing.needs_attention);
     else if (net == NR_NET_ONLINE && ing.provisioned)
         snprintf(line, sizeof(line), "%s   %s synchron", net_txt, LV_SYMBOL_OK);
     else
         snprintf(line, sizeof(line), "%s", net_txt);
     lv_label_set_text(s_status, line);
-    lv_obj_set_style_text_color(s_status, ing.needs_attention ? NRC_DANGER : NRC_TX3, 0);
+    lv_obj_set_style_text_color(s_status,
+        (ing.needs_attention || (ing.pending_upload && ing.last_error[0])) ? NRC_DANGER : NRC_TX3, 0);
 }
 
 // ---- night schedule --------------------------------------------------------

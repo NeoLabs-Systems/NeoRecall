@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define NR_FIRMWARE_VERSION "1.0.0"
+#define NR_FIRMWARE_VERSION "1.0.1"
 
 // UUID string length including the null terminator ("8-4-4-4-12").
 #define NR_UUID_LEN 37

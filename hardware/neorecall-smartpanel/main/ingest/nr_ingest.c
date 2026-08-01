@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "cJSON.h"
 
 #include "config/nr_config.h"
@@ -20,10 +21,17 @@
 
 static const char *TAG = "nr_ingest";
 
-#define PUMP_INTERVAL_MS   15000
-#define MAX_UPLOADS_CYCLE  6
-#define MAX_POLL_IDS       80
-#define REUPLOAD_LIMIT     3
+// Idle cadence when the backlog is empty or nothing progressed. While a backlog
+// is actively draining we re-arm almost immediately so capture cannot outrun us.
+#define PUMP_IDLE_MS           8000
+#define PUMP_DRAIN_MS          400
+#define MAX_UPLOADS_CYCLE      8
+#define MAX_POLL_IDS           80
+#define REUPLOAD_LIMIT         3
+#define TRANSIENT_FAIL_LIMIT   12   // after this many transient failures → needs_attention
+#define PERMANENT_FAIL_LIMIT   3    // permanent 4xx after this many tries → needs_attention
+#define BACKOFF_BASE_MS        2000
+#define BACKOFF_MAX_MS         120000
 
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_kick;
@@ -32,6 +40,8 @@ static nr_ingest_status_t s_status;
 static bool s_device_registered;
 static bool s_meta_fetched;
 static int64_t s_last_heartbeat_ms;
+static bool s_drain_next;                 // last cycle made progress with remaining work
+static int s_cycle_backoff_ms = PUMP_IDLE_MS;
 
 // Snapshot of config used for a whole cycle so it cannot change mid-request.
 typedef struct {
@@ -49,7 +59,7 @@ typedef struct {
 // token obtained by logging in with username+password. Cleared on a 401 so the
 // next cycle re-authenticates.
 static char s_login_token[160];
-static char s_bearer[176];
+static char s_bearer[200];
 
 // ---- status helpers --------------------------------------------------------
 
@@ -66,6 +76,14 @@ static void status_note_receipt(void)
     xSemaphoreTake(s_status_lock, portMAX_DELAY);
     s_status.last_receipt_epoch_ms = nr_time_epoch_ms();
     s_status.last_error[0] = '\0';
+    xSemaphoreGive(s_status_lock);
+}
+
+static void status_note_http(int status)
+{
+    xSemaphoreTake(s_status_lock, portMAX_DELAY);
+    s_status.server_reachable = true;
+    s_status.last_http_status = status;
     xSemaphoreGive(s_status_lock);
 }
 
@@ -103,16 +121,13 @@ static cJSON *api_send(const cyc_cfg_t *cfg, const char *method, const char *pat
     esp_err_t err = nr_http_request(method, url, body ? "application/json" : NULL,
                                     body, body ? strlen(body) : 0,
                                     s_bearer[0] ? s_bearer : NULL,
-                                    NULL, 0, cfg->tls_insecure, 20000, &res);
+                                    NULL, 0, cfg->tls_insecure, 25000, &res);
     free(body);
     if (status) *status = res.status;
     if (err != ESP_OK) { status_set_error("network error", 0); return NULL; }
     if (res.status == 401) s_login_token[0] = '\0';   // token died: re-login next cycle
 
-    xSemaphoreTake(s_status_lock, portMAX_DELAY);
-    s_status.server_reachable = true;
-    s_status.last_http_status = res.status;
-    xSemaphoreGive(s_status_lock);
+    status_note_http(res.status);
 
     cJSON *parsed = (res.body && res.body_len) ? cJSON_Parse(res.body) : NULL;
     if (res.status >= 400) {
@@ -142,7 +157,7 @@ static bool do_login(const cyc_cfg_t *cfg)
 
     nr_http_result_t res;
     esp_err_t err = nr_http_request("POST", url, "application/json", bs, strlen(bs),
-                                    NULL, NULL, 0, cfg->tls_insecure, 15000, &res);
+                                    NULL, NULL, 0, cfg->tls_insecure, 20000, &res);
     free(bs);
 
     bool ok = false;
@@ -156,17 +171,31 @@ static bool do_login(const cyc_cfg_t *cfg)
             ESP_LOGI(TAG, "logged in as %s", cfg->username);
         }
         if (j) cJSON_Delete(j);
+    } else if (err == ESP_OK) {
+        const char *msg = "Login fehlgeschlagen";
+        if (res.status == 401) {
+            // Distinguish 2FA from bad password when the body says so.
+            if (res.body && strstr(res.body, "TWO_FACTOR"))
+                msg = "Login: 2FA aktiv – bitte API-Key nutzen";
+            else
+                msg = "Login: falsche Zugangsdaten";
+        }
+        status_set_error(msg, res.status);
     } else {
-        status_set_error(res.status == 401 ? "Login: falsche Zugangsdaten" : "Login fehlgeschlagen", res.status);
+        status_set_error("Login: Netzwerkfehler", 0);
     }
     nr_http_result_free(&res);
     return ok;
 }
 
-// Set s_bearer for this cycle by logging in with username+password. Returns
-// false if credentials are missing or the login failed (retried next cycle).
+// Prefer a long-lived API key (device-friendly, works with 2FA accounts). Fall
+// back to username+password session tokens for interactive setup.
 static bool resolve_bearer(const cyc_cfg_t *cfg)
 {
+    if (cfg->api_key[0]) {
+        nr_strlcpy(s_bearer, cfg->api_key, sizeof(s_bearer));
+        return true;
+    }
     if (!(cfg->username[0] && cfg->password[0])) { s_bearer[0] = '\0'; return false; }
     if (!s_login_token[0] && !do_login(cfg)) { s_bearer[0] = '\0'; return false; }
     nr_strlcpy(s_bearer, s_login_token, sizeof(s_bearer));
@@ -198,7 +227,7 @@ static void ensure_meta(const cyc_cfg_t *cfg)
     if (j) cJSON_Delete(j);
 }
 
-static bool ensure_device(const cyc_cfg_t *cfg)
+static bool ensure_device(cyc_cfg_t *cfg)
 {
     if (s_device_registered) return true;
     cJSON *body = cJSON_CreateObject();
@@ -212,8 +241,21 @@ static bool ensure_device(const cyc_cfg_t *cfg)
     cJSON_AddStringToObject(caps, "firmware", NR_FIRMWARE_VERSION);
     int status = 0;
     cJSON *j = api_send(cfg, "POST", "/devices", body, &status);
+    if (status == 200 || status == 201) {
+        // The server may return an existing device id for this clientUuid.
+        // Session creates must use that id or every upload stays blocked.
+        cJSON *id = j ? cJSON_GetObjectItem(j, "id") : NULL;
+        if (cJSON_IsString(id) && id->valuestring[0] &&
+            strcmp(id->valuestring, cfg->device_id) != 0) {
+            nr_strlcpy(cfg->device_id, id->valuestring, sizeof(cfg->device_id));
+            nr_config_set_device_id(id->valuestring);
+            ESP_LOGW(TAG, "reconciled device_id to server value %.8s…", id->valuestring);
+        }
+        s_device_registered = true;
+        if (j) cJSON_Delete(j);
+        return true;
+    }
     if (j) cJSON_Delete(j);
-    if (status == 200 || status == 201) { s_device_registered = true; return true; }
     return false;
 }
 
@@ -229,21 +271,36 @@ static void heartbeat(const cyc_cfg_t *cfg)
     cJSON *j = api_send(cfg, "POST", path, body, &status);
     if (j) cJSON_Delete(j);
     if (status == 200) s_last_heartbeat_ms = now;
+    else if (status == 404) {
+        // Device vanished server-side (revoke / DB rebuild): re-register next cycle.
+        s_device_registered = false;
+        status_set_error("Gerät unbekannt – registriere neu", 404);
+    }
 }
 
 // ---- session sync ----------------------------------------------------------
 
-static void declare_session(const cyc_cfg_t *cfg, nr_session_rec_t *rec)
+static void declare_session(cyc_cfg_t *cfg, nr_session_rec_t *rec)
 {
     char started[NR_ISO8601_LEN];
     nr_time_iso_from_epoch_ms(rec->start_epoch_ms, started);
+
+    // Empty or exotic timezone names fail the server's IANA check and would
+    // pin every chunk of the session as permanently pending. Fall back to UTC.
+    const char *tz = (rec->timezone[0] && strchr(rec->timezone, '/')) ||
+                     (rec->timezone[0] && strcmp(rec->timezone, "UTC") == 0)
+                     ? rec->timezone : "UTC";
+    if (strcmp(tz, rec->timezone) != 0) {
+        nr_strlcpy(rec->timezone, tz, sizeof(rec->timezone));
+        nr_spool_put_session(rec);
+    }
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "id", rec->id);
     cJSON_AddStringToObject(body, "deviceId", cfg->device_id);
     cJSON_AddStringToObject(body, "clientUuid", rec->id);
     cJSON_AddStringToObject(body, "startedAt", started);
-    cJSON_AddStringToObject(body, "timezone", rec->timezone[0] ? rec->timezone : "UTC");
+    cJSON_AddStringToObject(body, "timezone", tz);
     cJSON_AddStringToObject(body, "consentAttestedAt", started);
     cJSON *sources = cJSON_AddArrayToObject(body, "sources");
     cJSON *src = cJSON_CreateObject();
@@ -261,11 +318,60 @@ static void declare_session(const cyc_cfg_t *cfg, nr_session_rec_t *rec)
 
     int status = 0;
     cJSON *j = api_send(cfg, "POST", "/ingest/sessions", body, &status);
-    if (j) cJSON_Delete(j);
     if (status == 200 || status == 201) {
         rec->synced = true;
         nr_spool_put_session(rec);
         ESP_LOGI(TAG, "session %.8s declared", rec->id);
+        if (j) cJSON_Delete(j);
+        return;
+    }
+    // Invalid timezone (or similar validation) must not pin the session forever.
+    bool validation = (status == 400);
+    if (j) {
+        cJSON *e = cJSON_GetObjectItem(j, "error");
+        cJSON *code = e ? cJSON_GetObjectItem(e, "code") : NULL;
+        if (cJSON_IsString(code) && strstr(code->valuestring, "VALID")) validation = true;
+        cJSON_Delete(j);
+    }
+    if (validation && strcmp(tz, "UTC") != 0) {
+        ESP_LOGW(TAG, "session %.8s declare failed (%d); retrying with timezone=UTC", rec->id, status);
+        nr_strlcpy(rec->timezone, "UTC", sizeof(rec->timezone));
+        nr_spool_put_session(rec);
+        // Rebuild and re-POST with UTC once (avoids infinite recursion via a flag).
+        body = cJSON_CreateObject();
+        cJSON_AddStringToObject(body, "id", rec->id);
+        cJSON_AddStringToObject(body, "deviceId", cfg->device_id);
+        cJSON_AddStringToObject(body, "clientUuid", rec->id);
+        cJSON_AddStringToObject(body, "startedAt", started);
+        cJSON_AddStringToObject(body, "timezone", "UTC");
+        cJSON_AddStringToObject(body, "consentAttestedAt", started);
+        sources = cJSON_AddArrayToObject(body, "sources");
+        src = cJSON_CreateObject();
+        cJSON_AddStringToObject(src, "id", rec->source_id);
+        cJSON_AddStringToObject(src, "clientUuid", rec->source_id);
+        cJSON_AddStringToObject(src, "kind", "microphone");
+        cJSON_AddStringToObject(src, "channelLayout", "mono");
+        cJSON_AddNumberToObject(src, "sampleRate", rec->sample_rate ? rec->sample_rate : 16000);
+        cJSON_AddStringToObject(src, "sampleFormat", "pcm_s16le");
+        meta = cJSON_AddObjectToObject(src, "metadata");
+        cJSON_AddNumberToObject(meta, "actualSampleRate", rec->sample_rate ? rec->sample_rate : 16000);
+        cJSON_AddStringToObject(meta, "platform", "esp32-s3");
+        cJSON_AddStringToObject(meta, "firmware", NR_FIRMWARE_VERSION);
+        cJSON_AddItemToArray(sources, src);
+        status = 0;
+        j = api_send(cfg, "POST", "/ingest/sessions", body, &status);
+        if (j) cJSON_Delete(j);
+        if (status == 200 || status == 201) {
+            rec->synced = true;
+            nr_spool_put_session(rec);
+            ESP_LOGI(TAG, "session %.8s declared (UTC fallback)", rec->id);
+            return;
+        }
+    }
+    if (status == 404) {
+        // Device missing: clear registration so ensure_device re-runs.
+        s_device_registered = false;
+        status_set_error("Session: Gerät fehlt – re-register", 404);
     }
 }
 
@@ -298,16 +404,17 @@ static void close_session(const cyc_cfg_t *cfg, nr_session_rec_t *rec)
     }
 }
 
-typedef struct { const cyc_cfg_t *cfg; } sess_ctx_t;
+typedef struct { cyc_cfg_t *cfg; } sess_ctx_t;
 
 static bool sync_session_cb(const nr_session_rec_t *rec_in, void *ctx)
 {
     sess_ctx_t *c = ctx;
     nr_session_rec_t rec = *rec_in;
 
-    // Back-compute the true wall-clock start once NTP has landed.
+    // Back-compute the true wall-clock start once NTP (or HTTP Date) has landed.
     if (rec.start_epoch_ms == 0 && nr_time_is_valid()) {
         rec.start_epoch_ms = nr_time_epoch_ms() - (nr_time_monotonic_ms() - rec.start_monotonic_ms);
+        if (rec.start_epoch_ms < 0) rec.start_epoch_ms = nr_time_epoch_ms();
         nr_spool_put_session(&rec);
     }
     if (rec.start_epoch_ms == 0) return true;  // cannot declare without a real start time yet
@@ -372,7 +479,8 @@ static bool accept_receipt(const cyc_cfg_t *cfg, const char *local_id, const cJS
     const cJSON *st = cJSON_GetObjectItem(receipt, "state");
     const char *state = cJSON_IsString(st) ? st->valuestring : "";
     const cJSON *cid = cJSON_GetObjectItem(receipt, "chunkId");
-    if (cJSON_IsString(cid) && cid->valuestring[0]) nr_strlcpy(m.server_chunk_id, cid->valuestring, sizeof(m.server_chunk_id));
+    if (cJSON_IsString(cid) && cid->valuestring[0])
+        nr_strlcpy(m.server_chunk_id, cid->valuestring, sizeof(m.server_chunk_id));
 
     bool terminal = (!strcmp(state, "transcribed") || !strcmp(state, "silent"));
     bool proven = cJSON_GetObjectItem(receipt, "persistedAt") && !cJSON_IsNull(cJSON_GetObjectItem(receipt, "persistedAt")) &&
@@ -381,20 +489,37 @@ static bool accept_receipt(const cyc_cfg_t *cfg, const char *local_id, const cJS
 
     if (terminal && proven) {
         m.state = NR_CHUNK_TERMINAL;
+        m.fail_count = 0;
+        m.next_attempt_mono_ms = 0;
         nr_spool_update_chunk(&m);
         if (m.server_chunk_id[0]) release_chunk(cfg, m.server_chunk_id);
         nr_spool_delete_chunk(local_id);      // reliability invariant satisfied
         status_note_receipt();
+        ESP_LOGI(TAG, "chunk %.8s terminal (%s) — released", local_id, state);
         return true;
     }
     if (!strcmp(state, "reupload_required")) {
         m.reupload_attempts++;
+        m.fail_count = 0;
+        m.next_attempt_mono_ms = 0;
         m.state = (m.reupload_attempts >= REUPLOAD_LIMIT) ? NR_CHUNK_NEEDS_ATTENTION : NR_CHUNK_READY;
+        // Clear server id so a re-PUT is a clean attempt.
+        if (m.state == NR_CHUNK_READY) m.server_chunk_id[0] = '\0';
         nr_spool_update_chunk(&m);
+        ESP_LOGW(TAG, "chunk %.8s reupload_required (attempt %u)", local_id, m.reupload_attempts);
         return false;
     }
     // uploaded / persisted_cleanup_pending / other non-terminal
+    if (!m.server_chunk_id[0]) {
+        // Receipt without a chunkId cannot be polled — re-upload next cycle.
+        m.state = NR_CHUNK_READY;
+        m.next_attempt_mono_ms = 0;
+        nr_spool_update_chunk(&m);
+        return false;
+    }
     m.state = NR_CHUNK_UPLOADED;
+    m.fail_count = 0;
+    m.next_attempt_mono_ms = 0;
     nr_spool_update_chunk(&m);
     return false;
 }
@@ -418,18 +543,36 @@ static bool collect_uploaded_cb(const nr_chunk_meta_t *m, void *ctx)
     return p->count < MAX_POLL_IDS;
 }
 
-static void poll_uploaded(const cyc_cfg_t *cfg)
+// UPLOADED without a server id is unpollable — push back to READY so the pump
+// re-PUTs (idempotent) and obtains a proper receipt.
+static bool repair_orphan_uploaded_cb(const nr_chunk_meta_t *m, void *ctx)
 {
+    (void) ctx;
+    if (m->state == NR_CHUNK_UPLOADED && !m->server_chunk_id[0]) {
+        nr_chunk_meta_t fixed = *m;
+        fixed.state = NR_CHUNK_READY;
+        fixed.next_attempt_mono_ms = 0;
+        nr_spool_update_chunk(&fixed);
+        ESP_LOGW(TAG, "chunk %.8s was UPLOADED without server id — re-queued", m->local_id);
+    }
+    return true;
+}
+
+static int poll_uploaded(const cyc_cfg_t *cfg)
+{
+    nr_spool_for_each_chunk(repair_orphan_uploaded_cb, NULL);
+
     poll_ctx_t *p = calloc(1, sizeof(*p));
-    if (!p) return;
+    if (!p) return 0;
     nr_spool_for_each_chunk(collect_uploaded_cb, p);
-    if (p->count == 0) { free(p); return; }
+    if (p->count == 0) { free(p); return 0; }
 
     cJSON *body = cJSON_CreateObject();
     cJSON *arr = cJSON_AddArrayToObject(body, "chunkIds");
     for (int i = 0; i < p->count; i++) cJSON_AddItemToArray(arr, cJSON_CreateString(p->server_ids[i]));
 
     int status = 0;
+    int released = 0;
     cJSON *j = api_send(cfg, "POST", "/ingest/chunks/status", body, &status);
     if (j && status == 200) {
         cJSON *receipts = cJSON_GetObjectItem(j, "receipts");
@@ -438,23 +581,61 @@ static void poll_uploaded(const cyc_cfg_t *cfg)
             cJSON *cid = cJSON_GetObjectItem(r, "chunkId");
             if (!cJSON_IsString(cid)) continue;
             for (int i = 0; i < p->count; i++) {
-                if (strcmp(p->server_ids[i], cid->valuestring) == 0) { accept_receipt(cfg, p->local_ids[i], r); break; }
+                if (strcmp(p->server_ids[i], cid->valuestring) == 0) {
+                    if (accept_receipt(cfg, p->local_ids[i], r)) released++;
+                    break;
+                }
             }
         }
     }
     if (j) cJSON_Delete(j);
     free(p);
+    return released;
 }
 
 // ---- upload ready ----------------------------------------------------------
 
-static void upload_chunk(const cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
+static uint32_t backoff_ms_for(uint8_t fail_count)
+{
+    if (fail_count == 0) return 0;
+    // 2s, 4s, 8s, … capped, with a little jitter so multi-chunk bursts don't sync.
+    uint32_t shift = fail_count > 6 ? 6 : fail_count;
+    uint32_t base = BACKOFF_BASE_MS << (shift - 1);
+    if (base > BACKOFF_MAX_MS) base = BACKOFF_MAX_MS;
+    uint32_t jitter = esp_random() % (base / 4 + 1);
+    return base + jitter;
+}
+
+static void schedule_retry(nr_chunk_meta_t *m, bool permanent)
+{
+    m->fail_count = (uint8_t) (m->fail_count < 255 ? m->fail_count + 1 : 255);
+    uint8_t limit = permanent ? PERMANENT_FAIL_LIMIT : TRANSIENT_FAIL_LIMIT;
+    if (m->fail_count >= limit) {
+        m->state = NR_CHUNK_NEEDS_ATTENTION;
+        m->next_attempt_mono_ms = 0;
+        ESP_LOGE(TAG, "chunk %.8s parked as needs_attention after %u failures",
+                 m->local_id, m->fail_count);
+    } else {
+        m->state = NR_CHUNK_FAILED;
+        m->next_attempt_mono_ms = nr_time_monotonic_ms() + backoff_ms_for(m->fail_count);
+    }
+    nr_spool_update_chunk(m);
+}
+
+// Returns true when the server accepted the PUT (receipt path taken).
+static bool upload_chunk(cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
 {
     nr_session_rec_t sess;
-    if (!nr_spool_get_session(cm->session_id, &sess) || !sess.synced || sess.start_epoch_ms == 0) return;
+    if (!nr_spool_get_session(cm->session_id, &sess) || !sess.synced || sess.start_epoch_ms == 0)
+        return false;
 
     const uint8_t *mem = NULL; size_t len = 0; char path[192];
-    if (!nr_spool_borrow_wav(cm->local_id, &mem, &len, path, sizeof(path))) return;
+    if (!nr_spool_borrow_wav(cm->local_id, &mem, &len, path, sizeof(path))) {
+        ESP_LOGW(TAG, "chunk %.8s missing WAV bytes", cm->local_id);
+        nr_chunk_meta_t m = *cm;
+        schedule_retry(&m, true);
+        return false;
+    }
 
     char device_started[NR_ISO8601_LEN];
     nr_time_iso_from_epoch_ms(sess.start_epoch_ms + cm->monotonic_offset_ms, device_started);
@@ -489,40 +670,81 @@ static void upload_chunk(const cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
     m.state = NR_CHUNK_UPLOADING;
     nr_spool_update_chunk(&m);
 
+    // Timeout scales with payload size inside nr_http_put_wav_multipart; pass 0
+    // to take the auto budget (floor 60 s).
     nr_http_result_t res;
     esp_err_t err = nr_http_put_wav_multipart(url, s_bearer[0] ? s_bearer : NULL,
                                               hdrs, sizeof(hdrs) / sizeof(hdrs[0]),
                                               mem, mem ? NULL : path, len, filename,
-                                              cfg->tls_insecure, 30000, &res);
+                                              cfg->tls_insecure, 0, &res);
     if (err != ESP_OK) {
-        if (nr_spool_get_chunk(cm->local_id, &m)) { m.state = NR_CHUNK_FAILED; nr_spool_update_chunk(&m); }
-        status_set_error("upload failed", 0);
-        return;
+        if (nr_spool_get_chunk(cm->local_id, &m)) {
+            schedule_retry(&m, false);
+        }
+        status_set_error("upload network error", 0);
+        ESP_LOGW(TAG, "chunk %.8s seq %u transport fail", cm->local_id, cm->sequence);
+        return false;
     }
-    xSemaphoreTake(s_status_lock, portMAX_DELAY);
-    s_status.server_reachable = true;
-    s_status.last_http_status = res.status;
-    xSemaphoreGive(s_status_lock);
+    status_note_http(res.status);
 
+    bool accepted = false;
     if (res.status == 401) {
         s_login_token[0] = '\0';   // token expired: re-login next cycle, then retry
-        if (nr_spool_get_chunk(cm->local_id, &m)) { m.state = NR_CHUNK_READY; nr_spool_update_chunk(&m); }
+        if (nr_spool_get_chunk(cm->local_id, &m)) {
+            m.state = NR_CHUNK_READY;
+            m.next_attempt_mono_ms = 0;
+            nr_spool_update_chunk(&m);
+        }
         status_set_error("Auth abgelehnt (Zugangsdaten prüfen)", 401);
     } else if (res.status >= 200 && res.status < 300 && res.body) {
         cJSON *j = cJSON_Parse(res.body);
         cJSON *receipt = j ? cJSON_GetObjectItem(j, "receipt") : NULL;
-        if (receipt) accept_receipt(cfg, cm->local_id, receipt);
-        else if (nr_spool_get_chunk(cm->local_id, &m)) { m.state = NR_CHUNK_UPLOADED; nr_spool_update_chunk(&m); }
+        if (receipt) {
+            accept_receipt(cfg, cm->local_id, receipt);
+            accepted = true;
+            ESP_LOGI(TAG, "chunk %.8s seq %u uploaded (HTTP %d)", cm->local_id, cm->sequence, res.status);
+        } else if (nr_spool_get_chunk(cm->local_id, &m)) {
+            // 2xx without a receipt is unexpected; keep bytes and retry.
+            schedule_retry(&m, false);
+            status_set_error("upload: missing receipt", res.status);
+        }
         if (j) cJSON_Delete(j);
-    } else {
-        if (nr_spool_get_chunk(cm->local_id, &m)) { m.state = NR_CHUNK_FAILED; nr_spool_update_chunk(&m); }
+    } else if (res.status == 404) {
+        // Session/source gone or never declared: re-declare next cycle.
+        if (nr_spool_get_session(cm->session_id, &sess)) {
+            sess.synced = false;
+            nr_spool_put_session(&sess);
+        }
+        if (nr_spool_get_chunk(cm->local_id, &m)) {
+            m.state = NR_CHUNK_READY;
+            m.next_attempt_mono_ms = nr_time_monotonic_ms() + 3000;
+            nr_spool_update_chunk(&m);
+        }
+        status_set_error("upload HTTP 404 (session)", 404);
+    } else if (res.status == 409 || res.status == 422 || res.status == 400) {
+        // Permanent-ish validation / conflict: limited retries then park.
+        if (nr_spool_get_chunk(cm->local_id, &m)) schedule_retry(&m, true);
         char msg[64]; snprintf(msg, sizeof(msg), "upload HTTP %d", res.status);
         status_set_error(msg, res.status);
+        ESP_LOGW(TAG, "chunk %.8s seq %u permanent-ish HTTP %d", cm->local_id, cm->sequence, res.status);
+    } else {
+        // 408 / 429 / 5xx / other: transient.
+        if (nr_spool_get_chunk(cm->local_id, &m)) schedule_retry(&m, false);
+        char msg[64]; snprintf(msg, sizeof(msg), "upload HTTP %d", res.status);
+        status_set_error(msg, res.status);
+        ESP_LOGW(TAG, "chunk %.8s seq %u transient HTTP %d", cm->local_id, cm->sequence, res.status);
     }
     nr_http_result_free(&res);
+    return accepted;
 }
 
-typedef struct { const cyc_cfg_t *cfg; int uploaded; bool more; } up_ctx_t;
+typedef struct {
+    cyc_cfg_t *cfg;
+    int attempted;
+    int accepted;
+    bool more;
+    int64_t now_mono;
+} up_ctx_t;
 
 static bool upload_ready_cb(const nr_chunk_meta_t *m, void *ctx)
 {
@@ -530,9 +752,22 @@ static bool upload_ready_cb(const nr_chunk_meta_t *m, void *ctx)
     bool wants = m->state == NR_CHUNK_READY || m->state == NR_CHUNK_FAILED ||
                  m->state == NR_CHUNK_UPLOADING;  // UPLOADING => crash-recovered
     if (!wants) return true;
-    if (u->uploaded >= MAX_UPLOADS_CYCLE) { u->more = true; return false; }
-    upload_chunk(u->cfg, m);
-    u->uploaded++;
+
+    // Honour per-chunk exponential backoff so a flaky link doesn't thrash.
+    if (m->next_attempt_mono_ms > 0 && m->next_attempt_mono_ms > u->now_mono)
+        return true;
+
+    // Only spend a cycle slot on chunks whose session is already declared.
+    // Unsynced sessions used to burn the whole MAX_UPLOADS_CYCLE budget and
+    // leave the panel "N wartend" forever while declare was still blocked.
+    nr_session_rec_t sess;
+    if (!nr_spool_get_session(m->session_id, &sess) || !sess.synced || sess.start_epoch_ms == 0)
+        return true;
+
+    if (u->attempted >= MAX_UPLOADS_CYCLE) { u->more = true; return false; }
+
+    if (upload_chunk(u->cfg, m)) u->accepted++;
+    u->attempted++;
     return true;
 }
 
@@ -561,10 +796,18 @@ static bool cleanup_session_cb(const nr_session_rec_t *rec, void *ctx)
 
 static void pump_once(void)
 {
-    if (!nr_net_is_online()) return;
+    if (!nr_net_is_online()) {
+        s_drain_next = false;
+        s_cycle_backoff_ms = PUMP_IDLE_MS;
+        return;
+    }
 
     nr_config_t c; nr_config_get(&c);
-    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && c.auth_user[0] && c.auth_pass[0])) return;
+    bool has_auth = c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]);
+    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && has_auth)) {
+        s_drain_next = false;
+        return;
+    }
 
     cyc_cfg_t cfg = {0};
     nr_strlcpy(cfg.base, c.backend_url, sizeof(cfg.base));
@@ -576,26 +819,67 @@ static void pump_once(void)
     nr_strlcpy(cfg.device_name, c.device_name, sizeof(cfg.device_name));
     cfg.tls_insecure = c.tls_insecure;
 
-    if (!resolve_bearer(&cfg)) return;  // logged out / login failed: retry next cycle
+    if (!resolve_bearer(&cfg)) {
+        s_drain_next = false;
+        s_cycle_backoff_ms = PUMP_IDLE_MS;
+        return;  // logged out / login failed: retry next cycle
+    }
 
     ensure_meta(&cfg);
-    if (!ensure_device(&cfg)) return;   // no point declaring sessions without a device
+    if (!ensure_device(&cfg)) {
+        s_drain_next = false;
+        s_cycle_backoff_ms = PUMP_IDLE_MS;
+        return;   // no point declaring sessions without a device
+    }
     heartbeat(&cfg);
 
     sess_ctx_t sctx = { .cfg = &cfg };
     nr_spool_for_each_session(sync_session_cb, &sctx);
     nr_spool_for_each_gap(sync_gap_cb, &sctx);
 
-    poll_uploaded(&cfg);
+    int released = poll_uploaded(&cfg);
 
-    up_ctx_t uctx = { .cfg = &cfg, .uploaded = 0, .more = false };
+    up_ctx_t uctx = {
+        .cfg = &cfg,
+        .attempted = 0,
+        .accepted = 0,
+        .more = false,
+        .now_mono = nr_time_monotonic_ms(),
+    };
     nr_spool_for_each_chunk(upload_ready_cb, &uctx);
+
+    // After a successful batch, poll once more so short-lived terminal receipts
+    // free local audio without waiting a full idle interval.
+    if (uctx.accepted > 0) released += poll_uploaded(&cfg);
 
     nr_spool_for_each_session(cleanup_session_cb, NULL);
 
     esp_event_post(NR_EVENT, NR_EVT_UPLOAD_CHANGED, NULL, 0, 0);
 
-    if (uctx.more) nr_ingest_kick();   // large backlog: keep draining promptly
+    bool made_progress = (uctx.accepted > 0) || (released > 0);
+    if (made_progress && uctx.more) {
+        s_drain_next = true;
+        s_cycle_backoff_ms = PUMP_DRAIN_MS;
+        nr_ingest_kick();
+    } else if (made_progress) {
+        s_drain_next = false;
+        s_cycle_backoff_ms = PUMP_IDLE_MS;
+    } else if (uctx.attempted > 0 || uctx.more) {
+        // Work remains but nothing landed: ease off instead of tight-looping.
+        s_drain_next = false;
+        if (s_cycle_backoff_ms < BACKOFF_BASE_MS) s_cycle_backoff_ms = BACKOFF_BASE_MS;
+        else s_cycle_backoff_ms = s_cycle_backoff_ms < BACKOFF_MAX_MS
+                                     ? s_cycle_backoff_ms * 2 : BACKOFF_MAX_MS;
+        if (s_cycle_backoff_ms > BACKOFF_MAX_MS) s_cycle_backoff_ms = BACKOFF_MAX_MS;
+    } else {
+        s_drain_next = false;
+        s_cycle_backoff_ms = PUMP_IDLE_MS;
+    }
+
+    if (uctx.attempted || released) {
+        ESP_LOGI(TAG, "cycle: accepted=%d attempted=%d released=%d more=%d backoff=%dms",
+                 uctx.accepted, uctx.attempted, released, (int) uctx.more, s_cycle_backoff_ms);
+    }
 }
 
 static void pump_task(void *arg)
@@ -603,8 +887,13 @@ static void pump_task(void *arg)
     (void) arg;
     ESP_LOGI(TAG, "upload pump started");
     for (;;) {
-        // Wait for a kick or the periodic interval, whichever comes first.
-        xSemaphoreTake(s_kick, pdMS_TO_TICKS(PUMP_INTERVAL_MS));
+        int wait_ms = s_drain_next ? PUMP_DRAIN_MS : s_cycle_backoff_ms;
+        if (wait_ms < PUMP_DRAIN_MS) wait_ms = PUMP_DRAIN_MS;
+        if (wait_ms > BACKOFF_MAX_MS) wait_ms = BACKOFF_MAX_MS;
+        // Wait for a kick or the adaptive interval, whichever comes first.
+        xSemaphoreTake(s_kick, pdMS_TO_TICKS(wait_ms));
+        // Drain any coalesced kicks so a long cycle doesn't leave a stale give.
+        while (xSemaphoreTake(s_kick, 0) == pdTRUE) { /* discard */ }
         pump_once();
     }
 }
@@ -619,7 +908,9 @@ esp_err_t nr_ingest_init(void)
     s_kick = xSemaphoreCreateBinary();
     s_status_lock = xSemaphoreCreateMutex();
     if (!s_kick || !s_status_lock) return ESP_ERR_NO_MEM;
-    if (xTaskCreatePinnedToCore(pump_task, "nr_pump", 8192, NULL, 5, &s_task, tskNO_AFFINITY) != pdPASS)
+    // TLS + JSON + multipart needs a generous stack; 8 KiB was marginal and
+    // silent stack overflows look exactly like "stuck pending forever".
+    if (xTaskCreatePinnedToCore(pump_task, "nr_pump", 12288, NULL, 5, &s_task, tskNO_AFFINITY) != pdPASS)
         return ESP_FAIL;
     return ESP_OK;
 }

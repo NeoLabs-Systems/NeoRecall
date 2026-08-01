@@ -170,10 +170,28 @@ void nr_config_get(nr_config_t *out)
 bool nr_config_is_provisioned(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] &&
-              s_cfg.auth_user[0] && s_cfg.auth_pass[0];
+    bool has_auth = s_cfg.api_key[0] || (s_cfg.auth_user[0] && s_cfg.auth_pass[0]);
+    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] && has_auth;
     xSemaphoreGive(s_lock);
     return ok;
+}
+
+esp_err_t nr_config_set_device_id(const char *device_id)
+{
+    if (!device_id || strlen(device_id) != NR_UUID_LEN - 1) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (strcmp(s_cfg.device_id, device_id) == 0) { xSemaphoreGive(s_lock); return ESP_OK; }
+    nr_strlcpy(s_cfg.device_id, device_id, sizeof(s_cfg.device_id));
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        nvs_set_str(h, "device_id", s_cfg.device_id);
+        err = nvs_commit(h);
+        nvs_close(h);
+    }
+    xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "device_id reconciled to %.8s…", device_id);
+    return err;
 }
 
 void nr_config_apply_timezone(void)

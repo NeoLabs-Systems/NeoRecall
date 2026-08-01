@@ -30,6 +30,10 @@ rose (`#D98AA6`) reserved for the live-recording state.
   after the server returns a terminal receipt proving the transcript is
   persisted and the server's own audio copy was deleted — identical to the
   Flutter client's contract.
+- **Upload pump that keeps up.** Chunks upload with idempotent retries,
+  exponential backoff, adaptive drain cadence, payload-scaled HTTPS timeouts,
+  and automatic recovery from mid-PUT crashes, device-id drift, and invalid
+  timezones so a transient outage cannot leave audio "wartend" for hours.
 - **Memory-first spool.** Because this board has no SD card and only 16 MB of
   flash, chunks live in PSRAM and upload straight from RAM in the common case;
   they spill to a LittleFS partition only during a network/backend outage, so
@@ -93,9 +97,10 @@ Use the **USB-C port wired to the ESP32-S3 native USB** (H1/OTG) for flashing.
 2. Under **WLAN**, tap *"Netzwerke suchen"*, pick your network from the list, and
    type its password on the on-screen keyboard.
 3. Under **BACKEND**, enter the **NeoRecall backend URL** (origin only, e.g.
-   `https://recall.example.com` — the firmware appends `/api/v1`) and your
-   **API key**. Tick *"TLS-Zertifikat nicht prüfen"* only for a self-hosted
-   server with a self-signed certificate.
+   `https://recall.example.com` — the firmware appends `/api/v1`) and either an
+   **API key** (recommended) or your NeoRecall **username + password**. Tick
+   *"TLS-Zertifikat nicht prüfen"* only for a self-hosted server with a
+   self-signed certificate.
 4. Tap **"Speichern & verbinden"**. The panel joins Wi-Fi, syncs the clock, and
    starts recording.
 
@@ -107,8 +112,9 @@ re-applies the Wi-Fi credentials.
 Create an API key with at least the **`ingest:write`** scope (that scope also
 permits the one-time device registration). In the NeoRecall app/admin this is
 the standard "API keys" flow; the key looks like `nrk_ab12cd_…`. Paste it into
-the panel's setup page. The panel then appears in your NeoRecall device list as
-a **wearable** named "NeoRecall Panel".
+the panel's setup page. **Prefer an API key over username/password** — it works
+with 2FA-enabled accounts and is not subject to session expiry. The panel then
+appears in your NeoRecall device list as a **wearable** named "NeoRecall Panel".
 
 ---
 

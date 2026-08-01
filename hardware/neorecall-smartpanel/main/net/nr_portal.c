@@ -219,7 +219,8 @@ static esp_err_t post_save(httpd_req_t *req)
             nrs_set(&c, f, val);
     }
     free(body);
-    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] && c.auth_user[0] && c.auth_pass[0];
+    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] &&
+                    (c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]));
     nr_config_set(&c);
     ESP_LOGI(TAG, "settings saved via portal (provisioned=%d)", c.provisioned);
     // Tell the device UI the phone setup is complete so it can leave the settings

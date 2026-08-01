@@ -92,8 +92,13 @@ esp_err_t nr_config_set_server_limits(uint32_t target_ms, uint32_t overlap_ms,
                                       uint32_t min_ms, uint32_t max_ms,
                                       uint32_t max_upload_bytes);
 
-// True when Wi-Fi credentials and a backend URL + API key are all present.
+// True when Wi-Fi credentials, a backend URL, and either an API key or a
+// username+password pair are present.
 bool nr_config_is_provisioned(void);
+
+// Persist a corrected device UUID returned by the server (registration may
+// reconcile clientUuid to an existing device row with a different id).
+esp_err_t nr_config_set_device_id(const char *device_id);
 
 // Apply the configured POSIX TZ to the C runtime (setenv TZ + tzset).
 void nr_config_apply_timezone(void);

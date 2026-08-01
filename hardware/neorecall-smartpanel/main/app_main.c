@@ -35,6 +35,14 @@ static void on_time_synced(void *a, esp_event_base_t b, int32_t id, void *d)
     nr_ingest_kick();
 }
 
+// Config or network changes should wake the upload pump immediately so a
+// freshly provisioned panel starts draining instead of waiting the idle timer.
+static void on_pump_wake(void *a, esp_event_base_t b, int32_t id, void *d)
+{
+    (void) a; (void) b; (void) id; (void) d;
+    nr_ingest_kick();
+}
+
 static esp_err_t mount_spool(void)
 {
     esp_vfs_littlefs_conf_t conf = {
@@ -79,6 +87,9 @@ void app_main(void)
     ESP_ERROR_CHECK(nr_wifi_init());
     nr_time_init();
     esp_event_handler_instance_register(NR_EVENT, NR_EVT_TIME_SYNCED, on_time_synced, NULL, NULL);
+    esp_event_handler_instance_register(NR_EVENT, NR_EVT_CONFIG_CHANGED, on_pump_wake, NULL, NULL);
+    esp_event_handler_instance_register(NR_EVENT, NR_EVT_PORTAL_SAVED, on_pump_wake, NULL, NULL);
+    esp_event_handler_instance_register(NR_EVENT, NR_EVT_WIFI_CHANGED, on_pump_wake, NULL, NULL);
 
     // --- UI: dashboard, or the on-device setup screen on first boot --------
     if (board == ESP_OK) nr_ui_init();

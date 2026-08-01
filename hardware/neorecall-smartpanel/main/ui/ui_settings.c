@@ -298,7 +298,8 @@ static void save_cb(lv_event_t *e)
             default: break;
         }
     }
-    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] && c.auth_user[0] && c.auth_pass[0];
+    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] &&
+                    (c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]));
     nr_config_set(&c);
     nr_wifi_reconfigure();
     nr_weather_refresh_now();

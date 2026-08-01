@@ -55,6 +55,8 @@ typedef struct {
     bool is_final;
     nr_chunk_state_t state;
     uint8_t reupload_attempts;
+    uint8_t fail_count;                 // consecutive transient upload failures
+    int64_t next_attempt_mono_ms;       // 0 = eligible now (not durable; rebuilt after reboot)
     bool on_disk;                       // true once spilled to LittleFS
     int64_t created_monotonic_ms;       // for age-ordered spill/drop
 } nr_chunk_meta_t;

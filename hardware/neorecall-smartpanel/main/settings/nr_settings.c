@@ -18,7 +18,8 @@ const nrs_field_t NR_SETTINGS[] = {
 
     { NULL, "BACKEND", NULL, NRS_SECTION, 0, 0, 0, 0 },
     { "url", "Backend-URL", "https://recall.example.com", NRS_URL, OFF(backend_url), SZ(backend_url), 0, 0 },
-    { "user", "Benutzername", "dein NeoRecall-Login", NRS_TEXT, OFF(auth_user), SZ(auth_user), 0, 0 },
+    { "apikey", "API-Key", "nrk_… (empfohlen, ingest:write)", NRS_PASSWORD, OFF(api_key), SZ(api_key), 0, 0 },
+    { "user", "Benutzername", "oder Login statt API-Key", NRS_TEXT, OFF(auth_user), SZ(auth_user), 0, 0 },
     { "authpass", "Passwort", "leer lassen = unverändert", NRS_PASSWORD, OFF(auth_pass), SZ(auth_pass), 0, 0 },
     { "tls", "TLS-Zertifikat nicht prüfen", NULL, NRS_BOOL, OFF(tls_insecure), SZ(tls_insecure), 0, 0 },
 

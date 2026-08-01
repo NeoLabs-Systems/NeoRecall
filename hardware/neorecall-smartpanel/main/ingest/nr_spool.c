@@ -89,6 +89,7 @@ static char *chunk_to_json(const nr_chunk_meta_t *m)
     cJSON_AddBoolToObject(j, "is_final", m->is_final);
     cJSON_AddNumberToObject(j, "state", m->state);
     cJSON_AddNumberToObject(j, "reupload", m->reupload_attempts);
+    cJSON_AddNumberToObject(j, "fail_count", m->fail_count);
     char *s = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
     return s;
@@ -116,10 +117,15 @@ static bool chunk_from_json(const char *buf, nr_chunk_meta_t *m)
     v = cJSON_GetObjectItem(j, "is_final"); m->is_final = cJSON_IsTrue(v);
     v = cJSON_GetObjectItem(j, "state"); if (cJSON_IsNumber(v)) m->state = (nr_chunk_state_t) v->valueint;
     NUM(reupload_attempts, "reupload");
+    NUM(fail_count, "fail_count");
 #undef STR
 #undef NUM
     cJSON_Delete(j);
     m->on_disk = true;
+    // A power loss mid-PUT leaves UPLOADING on disk. The PUT is idempotent, so
+    // the only safe recovery is to retry from READY.
+    if (m->state == NR_CHUNK_UPLOADING) m->state = NR_CHUNK_READY;
+    m->next_attempt_mono_ms = 0;   // never durable; retry immediately after reboot
     return m->local_id[0] != '\0';
 }
 
