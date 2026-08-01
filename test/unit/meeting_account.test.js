@@ -37,7 +37,7 @@ test('Microsoft sessions are recognised from the login domain', () => {
 });
 
 test('an unknown provider is rejected instead of silently ignored', () => {
-  assert.throws(() => accounts.startSignIn('user-a', 'webex'), /Unknown meeting account provider/);
+  assert.throws(() => accounts.beginSignIn('user-a', 'webex'), /Unknown meeting account provider/);
 });
 
 // The same refusal from Google means opposite things depending on who the bot

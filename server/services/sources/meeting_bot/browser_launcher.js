@@ -43,14 +43,6 @@ function resolveChromePath() {
   return null;
 }
 
-// Whether this host can put a real window on a screen. Needed for the
-// interactive sign-in window: a headless box can run the bots, but nobody can
-// type a password into a browser it cannot display.
-function hasDisplay() {
-  if (process.platform === 'darwin' || process.platform === 'win32') return true;
-  return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
-}
-
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -239,36 +231,33 @@ async function createMeetingBrowser(opts = {}) {
   return launchDirect(opts);
 }
 
-// A plain, visible Chrome window for the one-time account sign-in.
+// A private, isolated browser for the one-time interactive account sign-in.
 //
-// Deliberately *not* automated: no remote-debugging port, no Playwright, no
-// stealth. Google refuses sign-in ("This browser or app may not be secure") in
-// a browser it can see is being driven, so the user signs in in an ordinary
-// window and NeoRecall only reads the resulting profile afterwards. The
-// password is typed into Google's own page and never passes through NeoRecall.
-function spawnSignInWindow({ chromePath, userDataDir, url }) {
-  const child = spawn(chromePath, [
-    `--user-data-dir=${userDataDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--window-size=1100,900',
-    '--new-window',
-    url,
-  ], { stdio: 'ignore', detached: false });
-  child.on('error', () => {});
-  return child;
-}
-
-// Attach to a profile just long enough to inspect its cookies (sign-in check).
-// Off-screen and short-lived; the caller must close it via dispose().
-async function openProfileForInspection(chromePath, userDataDir) {
-  return launchViaCdpSpawn(chromePath, { userDataDir, extraArgs: ['--disable-extensions'] });
+// This never touches the machine running NeoRecall's screen — it has none to
+// touch. `headless: true` (Chromium's "new" headless mode) renders the page
+// without opening any OS window at all, on any platform, inside Docker or not.
+// The caller streams that rendering to the user's own browser over CDP's
+// `Page.startScreencast` and forwards the user's clicks/keystrokes back over
+// `Input.dispatch*` (see signin_session.js) — so the sign-in is driven entirely
+// from the user's device, isolated to their own profile directory, and the
+// server host is never more than a relay. The password is typed into the
+// provider's real page inside that stream and never passes through NeoRecall
+// as text.
+async function launchSignInBrowser(userDataDir, { viewport = { width: 1024, height: 768 } } = {}) {
+  const context = await stealthChromium.launchPersistentContext(userDataDir, {
+    headless: true,
+    viewport,
+    ignoreHTTPSErrors: true,
+    args: ['--no-first-run', '--no-default-browser-check', '--disable-extensions'],
+  });
+  const page = context.pages()[0] || (await context.newPage());
+  const cdp = await context.newCDPSession(page);
+  const dispose = async () => { try { await context.close(); } catch (e) {} };
+  return { context, page, cdp, dispose };
 }
 
 module.exports = {
   createMeetingBrowser,
   resolveChromePath,
-  hasDisplay,
-  spawnSignInWindow,
-  openProfileForInspection,
+  launchSignInBrowser,
 };

@@ -109,18 +109,31 @@ join is fingerprinted on a clean page.
 Joining as an anonymous guest is the exception, not the rule: Google Meet, Zoom
 and Teams all refuse guests whenever the host restricts a meeting, and no amount
 of browser tuning changes that. The bot therefore joins as a signed-in
-participant. The user signs in once, by hand, in an ordinary Chrome window that
-the server opens on its own machine — deliberately *not* an automated browser,
-because providers block sign-in in one they can see is driven. NeoRecall never
-receives the password; it keeps only the browser profile Chrome writes, under
-`meeting_profiles/` in the runtime home, and reads it for cookie names and hosts
-only. No per-service API key or OAuth application is involved.
+participant, connected once per user rather than configured per meeting.
 
-Every join gets a throwaway clone of that profile, so concurrent meetings cannot
-fight over Chrome's single-instance lock and a crashed bot cannot damage the
-signed-in original. A refused join reports which of the two situations it was —
-an anonymous bot the meeting will not accept, or a signed-in account that was
-not invited — because the fixes are different.
+That connection step cannot assume anyone has access to the machine NeoRecall
+runs on — in a real deployment (Docker, a remote box) nobody does. So the
+browser that renders the sign-in page runs headless and isolated per user on
+the server, and is never displayed there: its screen is streamed live to the
+user's own browser tab over a WebSocket (`signin_relay.js`, CDP
+`Page.startScreencast`), and the user's clicks and keystrokes are relayed back
+the same way (`Input.dispatch*`). The user is, in effect, looking at and typing
+into their own private browser window the entire time — it just happens to be
+rendered on the server and piped through their device rather than opened as a
+window on it. The WebSocket is authorized by a one-time ticket minted by an
+already-authenticated REST call, since a browser `WebSocket` cannot carry a
+bearer token itself; the ticket is single-use and expires in a minute, so a
+leaked URL is worthless shortly after. NeoRecall never receives the password as
+text — it is typed into the provider's real page inside that stream — and keeps
+only the resulting browser profile under `meeting_profiles/` in the runtime
+home, read afterward for cookie names and hosts only. No per-service API key or
+OAuth application is involved.
+
+Every actual meeting join gets a throwaway clone of that profile, so concurrent
+meetings cannot fight over Chrome's single-instance lock and a crashed bot
+cannot damage the signed-in original. A refused join reports which of two
+situations it was — an anonymous bot the meeting will not accept, or a
+signed-in account that was not invited — because the fixes are different.
 
 ## Processing pipeline
 

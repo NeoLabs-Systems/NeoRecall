@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'main_controller.dart';
 import 'main_theme.dart';
@@ -443,6 +446,8 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
   Map<String, dynamic>? _status;
   bool _busy = false;
   String? _error;
+  // Set while the live sign-in view replaces the provider list.
+  Map<String, dynamic>? _liveSignIn;
 
   @override
   void initState() {
@@ -458,46 +463,66 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
     try {
       final result = await action();
       if (!mounted) return;
-      setState(() => _status = _statusOf(result));
+      setState(() => _status = Map<String, dynamic>.from(result as Map));
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) setState(() => _error = _friendly(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// sign-in returns `{provider, label, status}`; the others return the status
-  /// object itself.
-  Map<String, dynamic>? _statusOf(dynamic result) {
-    if (result is! Map) return _status;
-    final nested = result['status'];
-    return Map<String, dynamic>.from(nested is Map ? nested : result);
+  /// Server error messages are already written for people, not just logs, so
+  /// they are shown as-is; only the generic "couldn't reach the server" case
+  /// gets a friendlier wrapper here.
+  String _friendly(Object error) {
+    final text = '$error';
+    if (text.contains('SocketException') || text.contains('Connection') || text.contains('TimeoutException')) {
+      return "Couldn't reach NeoRecall. Check your connection and try again.";
+    }
+    return text.replaceFirst(RegExp(r'^Exception:\s*'), '');
   }
 
   Future<void> _load() => _call(() => widget.controller.api.request('GET', '/api/v1/sources/meeting/account'));
 
-  Future<void> _signIn(String provider) => _call(() => widget.controller.api
-      .request('POST', '/api/v1/sources/meeting/account/sign-in', body: {'provider': provider}));
-
-  Future<void> _complete() =>
-      _call(() => widget.controller.api.request('POST', '/api/v1/sources/meeting/account/complete'));
-
   Future<void> _signOut() => _call(() => widget.controller.api.request('DELETE', '/api/v1/sources/meeting/account'));
 
+  Future<void> _signIn(String provider) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await widget.controller.api
+          .request('POST', '/api/v1/sources/meeting/account/sign-in', body: {'provider': provider});
+      if (!mounted) return;
+      setState(() => _liveSignIn = Map<String, dynamic>.from(result as Map));
+    } catch (error) {
+      if (mounted) setState(() => _error = _friendly(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _onSignInFinished(Map<String, dynamic>? status, String? note) {
+    if (!mounted) return;
+    setState(() {
+      _liveSignIn = null;
+      if (status != null) _status = status;
+      _error = note;
+    });
+  }
+
   String _blockedMessage(String reason) => switch (reason) {
-        'no-chrome' =>
-          'Google Chrome was not found on the machine running NeoRecall. Install Chrome there, then reopen this dialog.',
-        'no-display' =>
-          'The machine running NeoRecall has no screen, so the sign-in window cannot be shown. Run the server on a machine with a display, or sign in there and copy the meeting_profiles directory across.',
-        'no-browser-support' =>
-          'This NeoRecall build cannot drive a browser, so meeting accounts are unavailable. Install the Playwright dependency on the server and restart it.',
-        _ => 'Signing in is not available on the machine running NeoRecall.',
+        'unavailable' =>
+          'Connecting an account isn’t available on this NeoRecall installation right now. The bot can still join meetings as a guest.',
+        _ => 'Connecting an account isn’t available right now.',
       };
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final status = _status;
+    final liveSignIn = _liveSignIn;
 
     if (status == null) {
       return Padding(
@@ -509,8 +534,7 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
     }
 
     final providers = (status['providers'] as List<dynamic>? ?? <dynamic>[]).cast<Map<String, dynamic>>();
-    final pending = status['signInPending'] as Map<String, dynamic>?;
-    final canSignIn = status['canSignIn'] == true;
+    final available = status['available'] == true;
     final emails = (status['accountEmails'] as List<dynamic>? ?? <dynamic>[]).join(', ');
 
     return Container(
@@ -527,31 +551,32 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
             children: [
               Icon(Icons.account_circle_outlined, size: 18, color: colors.primary),
               const SizedBox(width: 8),
-              const Expanded(child: Text('Meeting account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+              const Expanded(child: Text('Connect an account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
               if (_busy) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            'Meetings that do not accept guests will turn the bot away. Sign in once and it joins as a real participant instead. No API keys, and your password is typed into the provider’s own page — never into NeoRecall.',
-            style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
-          ),
-          if (emails.isNotEmpty) ...[
+          if (liveSignIn == null)
+            Text(
+              'Some meetings only let signed-in people in, and turn the notetaker away otherwise. Connect your account once and it will join as a real guest instead. Your password goes straight to Google, Microsoft, or Zoom — NeoRecall never sees it.',
+              style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+            ),
+          if (emails.isNotEmpty && liveSignIn == null) ...[
             const SizedBox(height: 6),
-            Text('Signed in as $emails', style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant)),
+            Text('Connected as $emails', style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant)),
           ],
           const SizedBox(height: 10),
-          if (pending != null)
-            _PendingSignIn(
-              provider: '${pending['provider']}',
-              busy: _busy,
-              onDone: _complete,
+          if (liveSignIn != null)
+            _RemoteSignInView(
+              controller: widget.controller,
+              session: liveSignIn,
+              onFinished: _onSignInFinished,
             )
-          else if (!canSignIn)
+          else if (!available)
             Text(_blockedMessage('${status['blockedReason']}'), style: TextStyle(fontSize: 12, color: colors.error))
           else
             ...providers.map((provider) => _providerRow(provider, colors)),
-          if (status['warning'] != null) ...[
+          if (status['warning'] != null && liveSignIn == null) ...[
             const SizedBox(height: 8),
             Text('${status['warning']}', style: TextStyle(fontSize: 11, color: colors.error)),
           ],
@@ -585,7 +610,7 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
           ),
           TextButton(
             onPressed: _busy ? null : () => connected ? _signOut() : _signIn('${provider['id']}'),
-            child: Text(connected ? 'Sign out' : 'Sign in', style: const TextStyle(fontSize: 12)),
+            child: Text(connected ? 'Disconnect' : 'Connect', style: const TextStyle(fontSize: 12)),
           ),
         ],
       ),
@@ -593,14 +618,185 @@ class _MeetingAccountPanelState extends State<_MeetingAccountPanel> {
   }
 }
 
-/// Shown while the Chrome window is open on the server. The user finishes there,
-/// then tells NeoRecall to close it and re-check what the profile holds.
-class _PendingSignIn extends StatelessWidget {
-  const _PendingSignIn({required this.provider, required this.busy, required this.onDone});
+/// A private, one-time sign-in session shown live inside the app.
+///
+/// The page the user is signing in to renders on the server, in a browser
+/// session that belongs only to them, and is streamed here frame by frame; taps
+/// and typing are sent back the same way. Nothing about the machine running
+/// NeoRecall is ever shown — this view IS the sign-in window, from the user's
+/// own device, for their account alone.
+class _RemoteSignInView extends StatefulWidget {
+  const _RemoteSignInView({required this.controller, required this.session, required this.onFinished});
 
-  final String provider;
-  final bool busy;
-  final Future<void> Function() onDone;
+  final NeoRecallController controller;
+  final Map<String, dynamic> session;
+  final void Function(Map<String, dynamic>? status, String? note) onFinished;
+
+  @override
+  State<_RemoteSignInView> createState() => _RemoteSignInViewState();
+}
+
+class _RemoteSignInViewState extends State<_RemoteSignInView> {
+  // Matches the fixed CDP viewport signin_session.js starts the screencast
+  // with; taps are rescaled from on-screen pixels into this space.
+  static const double _viewportWidth = 1024;
+  static const double _viewportHeight = 768;
+  static final Map<LogicalKeyboardKey, String> _namedKeys = {
+    LogicalKeyboardKey.backspace: 'Backspace',
+    LogicalKeyboardKey.enter: 'Enter',
+    LogicalKeyboardKey.numpadEnter: 'Enter',
+    LogicalKeyboardKey.tab: 'Tab',
+    LogicalKeyboardKey.escape: 'Escape',
+    LogicalKeyboardKey.arrowLeft: 'ArrowLeft',
+    LogicalKeyboardKey.arrowRight: 'ArrowRight',
+    LogicalKeyboardKey.arrowUp: 'ArrowUp',
+    LogicalKeyboardKey.arrowDown: 'ArrowDown',
+    LogicalKeyboardKey.delete: 'Delete',
+  };
+
+  WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _subscription;
+  Uint8List? _frame;
+  bool _connecting = true;
+  bool _closed = false;
+  Offset _lastPoint = Offset.zero;
+  final _typeCapture = TextEditingController();
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _connect();
+  }
+
+  void _connect() {
+    final Uri uri;
+    try {
+      uri = _relayUri();
+    } catch (error) {
+      _finish(status: null, note: "Couldn't start the sign-in session. Please try again.");
+      return;
+    }
+    final channel = WebSocketChannel.connect(uri);
+    _channel = channel;
+    _subscription = channel.stream.listen(_onMessage, onError: (_) => _onDisconnected(), onDone: _onDisconnected);
+  }
+
+  Uri _relayUri() {
+    final ticket = '${widget.session['ticket']}';
+    final path = '${widget.session['path']}';
+    var base = widget.controller.api.baseUrl.trim();
+    if (base.isEmpty) {
+      // Same-origin (the web build): derive the server's address from the
+      // page's own location, since a relative WebSocket URL isn't valid.
+      final origin = Uri.base;
+      base = '${origin.scheme}://${origin.host}${origin.hasPort ? ':${origin.port}' : ''}';
+    }
+    final httpUri = Uri.parse(base);
+    return Uri(
+      scheme: httpUri.scheme == 'https' ? 'wss' : 'ws',
+      host: httpUri.host,
+      port: httpUri.hasPort ? httpUri.port : null,
+      path: path,
+      queryParameters: {'ticket': ticket},
+    );
+  }
+
+  void _onMessage(dynamic raw) {
+    if (_closed) return;
+    Map<String, dynamic> message;
+    try {
+      message = jsonDecode(raw as String) as Map<String, dynamic>;
+    } catch (error) {
+      return; // not a message we understand — ignore rather than crash the view
+    }
+    switch (message['type']) {
+      case 'frame':
+        final data = message['data'];
+        if (data is String) {
+          setState(() {
+            _connecting = false;
+            _frame = base64Decode(data);
+          });
+        }
+      case 'result':
+        _finish(
+          status: message['status'] is Map ? Map<String, dynamic>.from(message['status'] as Map) : null,
+          note: message['message'] as String?,
+        );
+      case 'error':
+        _finish(status: null, note: message['message'] as String? ?? "Something went wrong. Please try again.");
+    }
+  }
+
+  void _onDisconnected() {
+    if (_closed) return;
+    _finish(status: null, note: "The sign-in session closed. If you finished signing in, try again to confirm it connected.");
+  }
+
+  void _finish({required Map<String, dynamic>? status, required String? note}) {
+    if (_closed) return;
+    _closed = true;
+    _subscription?.cancel();
+    try {
+      _channel?.sink.close();
+    } catch (error) {
+      // already gone
+    }
+    widget.onFinished(status, note);
+  }
+
+  void _sendInput(Map<String, dynamic> payload) {
+    final channel = _channel;
+    if (channel == null || _closed) return;
+    channel.sink.add(jsonEncode({'type': 'input', ...payload}));
+  }
+
+  void _sendFinish() {
+    final channel = _channel;
+    if (channel == null || _closed) return;
+    channel.sink.add(jsonEncode({'type': 'finish'}));
+  }
+
+  Offset _toViewport(Offset local, Size widgetSize) {
+    if (widgetSize.width == 0 || widgetSize.height == 0) return Offset.zero;
+    return Offset(
+      local.dx * _viewportWidth / widgetSize.width,
+      local.dy * _viewportHeight / widgetSize.height,
+    );
+  }
+
+  // The hidden field exists only to capture the OS/IME keyboard (and, on
+  // mobile, to bring up the on-screen keyboard). What it accumulates is
+  // forwarded and then cleared immediately, so it never holds real text —
+  // what the user is typing only ever appears on the streamed page itself.
+  void _onTypedTextChanged(String value) {
+    if (value.isEmpty) return;
+    _sendInput({'kind': 'insertText', 'text': value});
+    _typeCapture.clear();
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = _namedKeys[event.logicalKey];
+    if (key == null) return KeyEventResult.ignored;
+    _sendInput({'kind': 'key', 'key': key});
+    return KeyEventResult.handled;
+  }
+
+  @override
+  void dispose() {
+    _closed = true;
+    _subscription?.cancel();
+    try {
+      _channel?.sink.close();
+    } catch (error) {
+      // already gone
+    }
+    _typeCapture.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -609,14 +805,73 @@ class _PendingSignIn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'A Chrome window is open on the machine running NeoRecall. Sign in to $provider there, then come back and press Done.',
-          style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+          'Sign in to ${widget.session['label']} below.',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
-        FilledButton.tonal(
-          onPressed: busy ? null : () => onDone(),
-          child: const Text("Done — I've signed in"),
+        AspectRatio(
+          aspectRatio: _viewportWidth / _viewportHeight,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: colors.outlineVariant),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_frame != null) Image.memory(_frame!, gaplessPlayback: true, fit: BoxFit.fill),
+                if (_connecting)
+                  const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final size = Size(constraints.maxWidth, constraints.maxHeight);
+                    return Focus(
+                      focusNode: _focusNode,
+                      onKeyEvent: _onKeyEvent,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (details) {
+                          _focusNode.requestFocus();
+                          _lastPoint = _toViewport(details.localPosition, size);
+                          _sendInput({'kind': 'mouseMove', 'x': _lastPoint.dx, 'y': _lastPoint.dy});
+                          _sendInput({'kind': 'mouseDown', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
+                        },
+                        onTapUp: (details) {
+                          _lastPoint = _toViewport(details.localPosition, size);
+                          _sendInput({'kind': 'mouseUp', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
+                        },
+                        // A cancelled tap (e.g. a scroll took over mid-press) still
+                        // has the mouse logically down remotely; release it at the
+                        // last known point rather than leaving it stuck.
+                        onTapCancel: () => _sendInput({'kind': 'mouseUp', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'}),
+                        child: SizedBox.expand(
+                          child: Opacity(
+                            opacity: 0,
+                            child: TextField(
+                              controller: _typeCapture,
+                              onChanged: _onTypedTextChanged,
+                              decoration: const InputDecoration(border: InputBorder.none),
+                              style: const TextStyle(fontSize: 1, height: 0.01),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          'Tap the box above, then sign in as you normally would. When you’re done, press Finish.',
+          style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.tonal(onPressed: _sendFinish, child: const Text('Finish')),
       ],
     );
   }

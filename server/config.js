@@ -218,6 +218,7 @@ function getConfig() {
     jobMaxAttempts: integer('NEORECALL_JOB_MAX_ATTEMPTS', 5, { min: 1, max: 100 }),
     meetingJoinTimeoutMs: integer('NEORECALL_MEETING_JOIN_TIMEOUT_MS', 300_000, { min: 10_000 }),
     meetingLeaveGraceMs: integer('NEORECALL_MEETING_LEAVE_GRACE_MS', 30_000, { min: 5_000 }),
+    meetingSignInIdleTimeoutMs: integer('NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS', 10 * 60_000, { min: 30_000 }),
     diagnosticRetentionDays: integer('NEORECALL_DIAGNOSTIC_RETENTION_DAYS', 7, { min: 1, max: 90 }),
     diagnosticMaxEventsPerUser: integer('NEORECALL_DIAGNOSTIC_MAX_EVENTS_PER_USER', 500, { min: 50, max: 10_000 }),
     diagnosticExportMaxEvents: integer('NEORECALL_DIAGNOSTIC_EXPORT_MAX_EVENTS', 250, { min: 10, max: 1_000 }),

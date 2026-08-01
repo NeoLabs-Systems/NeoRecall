@@ -46,25 +46,22 @@ router.get('/discord/pairing/:token/status', (req, res) => {
 router.get('/types', (req, res) => res.json({ types: sources.availableTypes() }));
 
 // Meeting account: the bots join as a real signed-in participant instead of an
-// anonymous guest, which is what most meetings require. Sign-in happens in an
-// ordinary Chrome window on the machine running the server — no API keys, and no
-// password ever reaches NeoRecall.
+// anonymous guest, which is what most meetings require. Sign-in happens live,
+// in the user's own browser tab, against an isolated session on the server —
+// no API keys, no access to the server's own machine, and no password ever
+// reaches NeoRecall as text. This route only mints the one-time ticket the
+// client then uses to open the live sign-in socket (see signin_relay.js).
 const signInSchema = z.object({ provider: z.enum(Object.keys(meetingAccounts.PROVIDERS)) });
 
 router.get('/meeting/account', (req, res) => res.json(meetingAccounts.getStatus(req.auth.userId)));
 
 router.post('/meeting/account/sign-in', validate(signInSchema), (req, res) => {
   try {
-    res.json({ ...meetingAccounts.startSignIn(req.auth.userId, req.body.provider), status: meetingAccounts.getStatus(req.auth.userId) });
+    res.json(meetingAccounts.beginSignIn(req.auth.userId, req.body.provider));
   } catch (error) {
     res.status(409).json({ error: error.message });
   }
 });
-
-// Closes the sign-in window and reports which providers the profile now holds.
-router.post('/meeting/account/complete', asyncRoute(async (req, res) => {
-  res.json(await meetingAccounts.completeSignIn(req.auth.userId));
-}));
 
 router.delete('/meeting/account', asyncRoute(async (req, res) => {
   res.json(await meetingAccounts.signOut(req.auth.userId));

@@ -100,7 +100,10 @@ The character ceiling is deliberately set above what `NEORECALL_CONVERSATION_MAX
 lobby before giving up — a host has to notice the knock and admit it, so the
 default is generous. `NEORECALL_MEETING_LEAVE_GRACE_MS` is how long the bot may
 be absent from a call before the recording is ended, which is what stops it
-recording silence after a meeting is over.
+recording silence after a meeting is over. `NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS`
+bounds the live, browser-streamed account sign-in session (see Architecture) —
+it exists so a browser tab closed without pressing Finish, or a connection that
+silently drops, cannot hold an isolated per-user browser process open forever.
 
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.

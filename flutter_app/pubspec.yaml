@@ -35,6 +35,7 @@ dependencies:
   opus_codec_dart: ^3.0.5
   permission_handler: ^12.0.0+1
   universal_ble: 1.2.0
+  web_socket_channel: ^3.0.3
   # Pure-Dart MP3 decoder (no native/FFI, works on web + desktop + mobile) used
   # to decode HeyPocket wearable audio to PCM16 on-device, matching the other
   # wearable connectors. Pinned to a specific commit for reproducible builds.
