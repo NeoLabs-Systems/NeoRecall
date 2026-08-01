@@ -7,6 +7,26 @@ const { ensureRuntimeDirs } = require('../../runtime/paths');
 
 function randomToken(bytes = 32) { return crypto.randomBytes(bytes).toString('base64url'); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+/// Digests a file without holding it in memory.
+///
+/// A day of recording decodes to thousands of chunks, and reading each one whole
+/// only to hash it makes peak memory a function of the longest recording rather
+/// than of the block size.
+function sha256File(filename, blockSize = 1024 * 1024) {
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(blockSize);
+  const handle = fs.openSync(filename, 'r');
+  try {
+    let read = fs.readSync(handle, buffer, 0, blockSize, null);
+    while (read > 0) {
+      hash.update(buffer.subarray(0, read));
+      read = fs.readSync(handle, buffer, 0, blockSize, null);
+    }
+  } finally {
+    fs.closeSync(handle);
+  }
+  return hash.digest('hex');
+}
 function timingSafeStringEqual(left, right) {
   const a = Buffer.from(String(left || ''));
   const b = Buffer.from(String(right || ''));
@@ -41,5 +61,5 @@ function decryptString(payload) {
 }
 
 module.exports = {
-  randomToken, sha256, timingSafeStringEqual, hashPassword, verifyPassword, encryptString, decryptString,
+  randomToken, sha256, sha256File, timingSafeStringEqual, hashPassword, verifyPassword, encryptString, decryptString,
 };

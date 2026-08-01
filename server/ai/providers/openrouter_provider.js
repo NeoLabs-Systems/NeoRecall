@@ -5,7 +5,33 @@ const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 
 function extractContent(payload) {
-  const content = payload?.choices?.[0]?.message?.content;
+  // A model that ran out of completion budget still answers 200 with a
+  // perfectly ordinary-looking body whose JSON simply stops mid-string. Read as
+  // a parse error that is indistinguishable from a model that cannot follow the
+  // contract, and the remedy — more budget — is the one thing nobody would try.
+  // Reasoning models make this the common case rather than the rare one: their
+  // internal tokens are billed as completion tokens and count against the same
+  // limit, so most of the budget can be gone before the answer starts.
+  // OpenRouter can answer HTTP 200 and still carry a failure: a provider error
+  // in the payload or on the choice itself. Without this check that surfaces as
+  // "no message content", which hides the actual reason from the operator.
+  const embedded = payload?.error || payload?.choices?.[0]?.error;
+  if (embedded) {
+    throw Object.assign(new Error(embedded.message || 'OpenRouter reported a provider error.'), {
+      code: 'AI_PROVIDER_ERROR',
+      providerCode: embedded.code ?? null,
+    });
+  }
+  const choice = payload?.choices?.[0];
+  if (choice?.finish_reason === 'length') {
+    const usage = payload.usage || {};
+    throw Object.assign(new Error('OpenRouter stopped the completion at the token limit; the response is incomplete.'), {
+      code: 'AI_OUTPUT_TRUNCATED',
+      completionTokens: usage.completion_tokens ?? null,
+      reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? null,
+    });
+  }
+  const content = choice?.message?.content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((part) => part.text || '').join('');
   throw Object.assign(new Error('OpenRouter returned no message content.'), { code: 'AI_EMPTY_RESPONSE' });

@@ -13,6 +13,12 @@ function serialize(conversation) {
     result.topics = [];
   }
   delete result.topics_json;
+  // A conversation that is still recording carries a provisional insight, so a
+  // client can show what it is about before it ends. memory_worthy is unknown
+  // until an insight exists at all.
+  result.memory_worthy = result.memory_worthy === null || result.memory_worthy === undefined
+    ? null
+    : Boolean(result.memory_worthy);
   return result;
 }
 

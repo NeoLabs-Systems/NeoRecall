@@ -14,6 +14,7 @@ function handlerFor(type) {
   if (['cleanup_chunk_audio', 'sweep_temp_audio'].includes(type)) return require('./handlers/cleanup_handler');
   if (type === 'embed_search_documents') return require('./handlers/embed_handler');
   if (type === 'detect_boundaries') return require('./handlers/boundary_handler');
+  if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
   if (['maintenance', 'prune_events'].includes(type)) return require('./handlers/maintenance_handler');
   if (type === 'process_import') return require('./handlers/import_handler');
@@ -41,9 +42,12 @@ function markChunkFailure(job, error, willRetry) {
       const expiresAt = new Date(Date.now() + require('../config').getConfig().importFailedTtlHours * 60 * 60_000).toISOString();
       db.prepare("UPDATE audio_chunks SET state='retryable_failed',error_code=?,error_message=?,updated_at=? WHERE id=?")
         .run(error.code || 'TRANSCRIPTION_FAILED', String(error.message).slice(0, 500), new Date().toISOString(), chunk.id);
+      // The failing import is identified by the chunk's source; a session can
+      // hold several imports from the same device, so blaming the session would
+      // fail whichever import happened to create it.
       db.prepare(`UPDATE imports SET state='failed',error_code=?,expires_at=?,updated_at=? WHERE user_id=?
-        AND id=(SELECT substr(client_uuid,8) FROM recording_sessions WHERE id=?)`)
-        .run(error.code || 'TRANSCRIPTION_FAILED', expiresAt, new Date().toISOString(), chunk.user_id, chunk.session_id);
+        AND id=(SELECT substr(client_uuid,15) FROM recording_sources WHERE id=?)`)
+        .run(error.code || 'TRANSCRIPTION_FAILED', expiresAt, new Date().toISOString(), chunk.user_id, chunk.source_id);
     } else {
       try {
         tempAudio.unlinkStrict(chunk.temporary_path);

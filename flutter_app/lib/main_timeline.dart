@@ -231,6 +231,12 @@ class _TimelineEntry extends StatelessWidget {
     final visible = expanded ? group.segments : group.segments.take(2).toList();
     final remaining = group.segments.length - visible.length;
     final state = conversation?['state']?.toString();
+    // A conversation that is still being recorded carries a provisional insight
+    // so it can be read before it ends; the title and summary are refined once
+    // it closes and becomes a memory. A closed conversation can also hold a
+    // provisional insight — that is a description, not a live recording, so it
+    // gets no badge.
+    final provisional = state == 'open' && conversation?['insight_state']?.toString() == 'provisional';
     final generatedTitle = conversation?['title_en']?.toString().trim();
     final generatedSummary = conversation?['summary_en']?.toString().trim();
     final topics = ((conversation?['topics'] as List?) ?? const <dynamic>[])
@@ -338,6 +344,10 @@ class _TimelineEntry extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (provisional) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _LiveInsightBadge(palette: palette),
+                        ],
                         if (compact)
                           Text(
                             '$timeLabel–$endLabel',
@@ -457,6 +467,47 @@ class _TimelineEntry extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Marks a title and summary that describe a conversation which is still being
+/// recorded, so a reader knows the account is current rather than final.
+class _LiveInsightBadge extends StatelessWidget {
+  const _LiveInsightBadge({required this.palette});
+
+  final NeoRecallPalette palette;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: palette.accent.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: palette.accent.withValues(alpha: 0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 5,
+          height: 5,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: palette.accent,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'Recording',
+          style: TextStyle(
+            color: palette.accent,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _TopicChip extends StatelessWidget {

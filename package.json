@@ -40,6 +40,7 @@
     "test:unit": "NODE_ENV=test node --test test/unit/*.test.js",
     "test:api": "NODE_ENV=test node --test test/api/*.test.js",
     "test:e2e": "node scripts/e2e_smoke.js",
+    "test:e2e:live": "node scripts/e2e_live_smoke.js",
     "load:backlog": "node scripts/load_backlog.js",
     "verify:models": "node scripts/verify_models.js",
     "verify:no-audio": "node scripts/verify_no_audio_retained.js",

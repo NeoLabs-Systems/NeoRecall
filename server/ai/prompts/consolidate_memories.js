@@ -1,5 +1,11 @@
 'use strict';
 
+const { MEMORY_TYPES, MINI_MEMORY_KINDS, ENTITY_KINDS } = require('../schemas/consolidation_schema');
+
+function alternatives(values) {
+  return values.join('|');
+}
+
 function localTimestamp(iso, timezone) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -14,6 +20,7 @@ function compactInput(conversations, timezone) {
   const conversationAliases = new Map();
   const segmentAliases = new Map();
   const speakerAliases = new Map();
+  const reverseSpeakerAliases = new Map();
   const streamAliases = new Map();
   const reverseConversationAliases = new Map();
   const reverseSegmentAliases = new Map();
@@ -42,7 +49,11 @@ function compactInput(conversations, timezone) {
         reverseSegmentAliases.set(segmentAlias, segment.id);
         let speaker = null;
         if (segment.speakerClusterId) {
-          if (!speakerAliases.has(segment.speakerClusterId)) speakerAliases.set(segment.speakerClusterId, `speaker${speakerAliases.size + 1}`);
+          if (!speakerAliases.has(segment.speakerClusterId)) {
+            const alias = `speaker${speakerAliases.size + 1}`;
+            speakerAliases.set(segment.speakerClusterId, alias);
+            reverseSpeakerAliases.set(alias, segment.speakerClusterId);
+          }
           speaker = speakerAliases.get(segment.speakerClusterId);
         }
         return {
@@ -63,6 +74,7 @@ function compactInput(conversations, timezone) {
     segmentAliases,
     reverseConversationAliases,
     reverseSegmentAliases,
+    reverseSpeakerAliases,
   };
 }
 
@@ -83,10 +95,12 @@ function consolidationMessages({ conversations, previousDailySummary, timezone }
 All titles, summaries, topics, canonical entity names, and mini-memory text MUST be English, even when the source transcript is German or another language. Preserve proper names accurately.
 The input conversation objects are provisional local groups, not authoritative conversation boundaries. Produce conversationSections that partition the transcript into coherent real-world conversations or topic areas. You may merge adjacent input conversations when they belong to the same stream and same real conversation, and split any input conversation when its topic or real-world conversation changes. Never combine segments from different streams. A speaker change alone, a brief aside, or a short pause is not a topic boundary. Do not force a fixed number or duration of sections.
 Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories must be atomic and evidence-backed.
-Extract each distinct durable fact, decision, measurable requirement, task, promise, deadline, scheduled event, person or relationship, and location that is useful to recall. Perform a segment-by-segment completeness check so secondary assignees and commitments are not omitted merely because the parent memory mentions the topic. Each mini-memory must contain exactly one independently searchable assertion; never combine distinct requirements, decisions, assignments, or promises in one mini-memory. Do not turn proposals, questions, negations, or uncertain statements into established facts. If the source explicitly says there is no task, do not create a task or promise from the negative instruction.
+One real-world occasion is one memory. A single continuous meeting, lesson, lecture or call produces exactly one memory covering all of it, however long it ran and however many topics it moved through; use its internal topics and mini-memories to carry the detail instead of splitting it into several memories. A recording that merely spans a whole day is not one occasion: it produces one memory per distinct real-world occasion it captured. Choose the memory type that matches the occasion, and use ${alternatives(MEMORY_TYPES)} exactly as named — lesson covers a class, lecture, seminar or any taught session.
+Extract each distinct durable fact, decision, measurable requirement, task, promise, deadline, scheduled event, person or relationship, and location that is useful to recall. Perform a segment-by-segment completeness check so secondary assignees and commitments are not omitted merely because the parent memory mentions the topic. Completeness must not degrade with input length: a three-hour occasion carries proportionally more distinct facts, decisions, tasks and promises than a ten-minute one, and each phase of a long occasion deserves the same segment-by-segment attention as a short input would receive. Never summarize away extractable items because the input is large. Each mini-memory must contain exactly one independently searchable assertion; never combine distinct requirements, decisions, assignments, or promises in one mini-memory. Do not turn proposals, questions, negations, or uncertain statements into established facts. If the source explicitly says there is no task, do not create a task or promise from the negative instruction.
 When the evidence names the actor for a task or promise, include that actor in textEn as well as in the entity relation. Do not rely on entity metadata to make an atomic memory understandable. If the actor is not identifiable from the evidence, do not invent one.
+Each segment carries a speaker label. When the transcript itself identifies which speaker label a person entity's voice belongs to — for example the person introduces themselves, or another speaker addresses or names them while they are the one talking — set that entity's speakerAlias to that speaker label. Use null whenever the link is not directly supported by the transcript; never guess from a name alone, and never set speakerAlias for an entity that is not a person.
 When one input conversation contains unrelated topics, create separate sections and memories with the specific supporting segment IDs for each topic.
-Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. NeoRecall derives all output time ranges from cited segment IDs, so do not produce redundant timestamps.
+Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. NeoRecall derives all output time ranges from cited segment IDs, so do not produce redundant timestamps. Do not state calendar dates in titles, summaries, or mini-memory text unless the date is spoken in the transcript itself: recording metadata can carry a wrong device clock, and a date written into prose cannot be corrected afterwards.
 For mini-memory dueAt and occurredAt, NEVER calculate UTC. Return null or an object containing the exact local wall-clock value without an offset plus the applicable IANA timezone. Use the supplied user timezone for unqualified times. For a date-only deadline use 23:59:59 local time; for a date-only event use 00:00:00 local time. When the source gives only a vague part of day, retain that wording in text and return null rather than inventing an exact clock time. NeoRecall converts the object to UTC deterministically. Use null when the evidence does not support a date.
 Use dueAt for task or promise deadlines. Use occurredAt for events and past occurrences. Status is only for tasks and promises; use null for other kinds.
 Daily summary text covers memory-worthy material only. Exclude sections marked not memory-worthy. If there is no memory-worthy material and no previous daily summary, return dailySummary as null.
@@ -103,11 +117,12 @@ Use only segment IDs present in the input. Never invent facts or IDs. Importance
           topics: ['English topic'],
           sourceSegmentIds: ['contiguous input segment IDs'],
         }],
-        entities: [{ ref: 'response-local ID', kind: 'person|organization|project|location|other', canonicalNameEn: 'English canonical name', displayName: null,
-          aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }] }],
-        memories: [{ type: 'meeting|conversation|project_discussion|introduction|decision|experience|other', titleEn: 'English', summaryEn: 'English', importance: 1,
+        entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'English canonical name', displayName: null,
+          aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }],
+          speakerAlias: 'speaker label this person is heard speaking as, or null' }],
+        memories: [{ type: alternatives(MEMORY_TYPES), titleEn: 'English', summaryEn: 'English', importance: 1,
           sourceSegmentIds: ['input segment ID'], topics: ['English'],
-          entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: 'fact|event|location|person|relationship|task|promise',
+          entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: alternatives(MINI_MEMORY_KINDS),
             textEn: 'English atomic statement', importance: 1, confidence: 0.5,
             dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: null,
             sourceSegmentIds: ['input segment ID'], entities: [] }] }],

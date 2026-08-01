@@ -673,6 +673,7 @@ class NeoRecallController extends ChangeNotifier {
     try {
       await api.request('POST', '/api/v1/auth/logout');
     } catch (_) {}
+    _stopForegroundRefresh();
     sync.pump.accountId = null;
     api.token = null;
     accountId = null;
@@ -1056,13 +1057,9 @@ class NeoRecallController extends ChangeNotifier {
       if (recordingAccountId == null) {
         throw StateError('Sign in before starting a recording.');
       }
-      final deviceIdKey = 'deviceId:$recordingAccountId';
-      final deviceClientUuidKey = 'deviceClientUuid:$recordingAccountId';
-      final deviceId = _preferences!.getString(deviceIdKey) ?? _uuid.v4();
-      final clientUuid =
-          _preferences!.getString(deviceClientUuidKey) ?? _uuid.v4();
-      await _preferences!.setString(deviceIdKey, deviceId);
-      await _preferences!.setString(deviceClientUuidKey, clientUuid);
+      final identity = await _deviceIdentity(recordingAccountId);
+      final deviceId = identity.id;
+      final clientUuid = identity.clientUuid;
       final now = DateTime.now().toUtc();
       recordingStartedAt = now;
       final sessionId = _uuid.v4();
@@ -1583,8 +1580,44 @@ class NeoRecallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How often an open, authenticated app re-reads server-side results.
+  ///
+  /// A recording can run for hours, and its transcript, live conversation
+  /// insight and memories all appear while it is still going. Without a
+  /// foreground poll the screen would only change when the user pulled to
+  /// refresh or returned to the app, which is exactly the case this exists for.
+  static const Duration _foregroundRefreshInterval = Duration(seconds: 60);
+  Timer? _foregroundRefreshTimer;
+  bool _refreshing = false;
+
+  void _startForegroundRefresh() {
+    if (_foregroundRefreshTimer != null || !authenticated) return;
+    _foregroundRefreshTimer = Timer.periodic(
+      _foregroundRefreshInterval,
+      (_) => unawaited(refreshAll(silent: true)),
+    );
+  }
+
+  void _stopForegroundRefresh() {
+    _foregroundRefreshTimer?.cancel();
+    _foregroundRefreshTimer = null;
+  }
+
+  /// Stops foreground polling when the app leaves the screen. Capture, upload
+  /// and device sync are owned by the background runtime and keep running.
+  void onAppPaused() => _stopForegroundRefresh();
+
   Future<void> refreshAll({bool silent = false}) async {
-    if (!authenticated) return;
+    if (!authenticated) {
+      _stopForegroundRefresh();
+      return;
+    }
+    _startForegroundRefresh();
+    // Eight requests go out per refresh. On a slow or distant server one can
+    // outlast the interval, and a periodic timer would then stack refreshes
+    // until they starve everything else the app is doing.
+    if (_refreshing) return;
+    _refreshing = true;
     if (!silent) {
       loading = true;
       notifyListeners();
@@ -1647,6 +1680,7 @@ class NeoRecallController extends ChangeNotifier {
       cachedData = true;
       error = silent ? null : exception.toString();
     } finally {
+      _refreshing = false;
       loading = false;
       notifyListeners();
     }
@@ -1924,6 +1958,44 @@ class NeoRecallController extends ChangeNotifier {
   bool get _deviceSyncFailureIsPersistent =>
       deviceStorageSync.consecutiveFailures >= 1;
 
+  /// This client's durable device identity for [accountId], created once and
+  /// reused by recording and by device imports alike.
+  ///
+  /// Generating it here rather than at each call site is what keeps a drained
+  /// wearable recording attributable to the same device the live capture uses.
+  Future<({String id, String clientUuid})> _deviceIdentity(
+    String accountId,
+  ) async {
+    final idKey = 'deviceId:$accountId';
+    final clientUuidKey = 'deviceClientUuid:$accountId';
+    final id = _preferences!.getString(idKey) ?? _uuid.v4();
+    final clientUuid = _preferences!.getString(clientUuidKey) ?? _uuid.v4();
+    await _preferences!.setString(idKey, id);
+    await _preferences!.setString(clientUuidKey, clientUuid);
+    return (id: id, clientUuid: clientUuid);
+  }
+
+  /// Registers this client as a device so an import can be attributed to it, or
+  /// null when that is not possible.
+  ///
+  /// A failure here must not fail the import: an unattributed recording still
+  /// reaches the timeline, it just cannot be joined to the sweep before it.
+  Future<String?> _registeredDeviceId() async {
+    final account = accountId;
+    if (account == null || _preferences == null) return null;
+    try {
+      final identity = await _deviceIdentity(account);
+      return await api.registerDevice(
+        id: identity.id,
+        clientUuid: identity.clientUuid,
+        name: _deviceName,
+        platform: _platform,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _ingestDeviceRecording(WearableRecording recording) async {
     final contentHash = sha256.convert(recording.bytes).toString();
     final importId = _uuid.v5(
@@ -1949,6 +2021,10 @@ class NeoRecallController extends ChangeNotifier {
         filename: recording.filename,
         contentType: recording.contentType,
         captureTime: recording.capturedAt,
+        // A wearable is drained every few seconds, so consecutive sweeps are
+        // stretches of one recording. Naming the device lets the server keep
+        // them in one stream instead of one conversation per sweep.
+        deviceId: await _registeredDeviceId(),
       );
       ClientDiagnosticLog.instance.record(
         'device_import',
@@ -2028,9 +2104,31 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
+  /// Why the server declined to consolidate, in the user's terms.
+  ///
+  /// The request succeeds either way — declining is a normal answer, not an
+  /// error — so without this the button would report success while nothing was
+  /// queued.
+  static String _consolidationNotice(Map response) {
+    if (response['queued'] == true) return 'Memory consolidation queued.';
+    switch (response['reason']?.toString()) {
+      case 'insufficient_audio':
+        final seconds = ((response['requiredAudioMs'] as num?) ?? 60000) ~/ 1000;
+        return 'Too little recorded audio for memories. Recordings under '
+            '$seconds seconds are never sent to a language model.';
+      case 'insufficient_material':
+        return 'Not enough new speech to make memories from yet.';
+      case 'already_running':
+        return 'A memory consolidation is already running.';
+      default:
+        return 'Memories cannot be generated right now.';
+    }
+  }
+
   Future<void> consolidateNow() async {
-    await api.request('POST', '/api/v1/memories/consolidations');
-    notice = 'Memory consolidation queued.';
+    final response =
+        await api.request('POST', '/api/v1/memories/consolidations') as Map;
+    notice = _consolidationNotice(response);
     notifyListeners();
   }
 
@@ -2046,6 +2144,7 @@ class NeoRecallController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopForegroundRefresh();
     _chunkSubscription?.cancel();
     _partialSubscription?.cancel();
     _warningSubscription?.cancel();

@@ -123,15 +123,22 @@ function applyConversationSections(database, userId, runId, sections, conversati
     };
   });
 
+  // Refinement is the authoritative pass, so it also settles the conversation
+  // insight: whatever a live preview wrote while the conversation was still
+  // recording is replaced here and marked final, and no later preview may
+  // overwrite it.
   const update = database.prepare(`UPDATE conversations SET
     started_at=?,ended_at=?,state=?,boundary_method=?,boundary_score=NULL,boundary_version=?,
-    title_en=?,summary_en=?,topics_json=?,refined_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    title_en=?,summary_en=?,topics_json=?,memory_worthy=?,insight_state='final',insight_characters=?,
+    insight_updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),refined_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     refinement_run_id=?,origin_conversation_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
     WHERE id=? AND user_id=?`);
   const insert = database.prepare(`INSERT INTO conversations
     (id,user_id,started_at,ended_at,state,boundary_method,boundary_score,boundary_version,
-      title_en,summary_en,topics_json,refined_at,refinement_run_id,origin_conversation_id)
-    VALUES (?,?,?,?,?,?,NULL,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),?,?)`);
+      title_en,summary_en,topics_json,memory_worthy,insight_state,insight_characters,insight_updated_at,
+      refined_at,refinement_run_id,origin_conversation_id)
+    VALUES (?,?,?,?,?,?,NULL,?,?,?,?,?,'final',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+      strftime('%Y-%m-%dT%H:%M:%fZ','now'),?,?)`);
 
   for (const plan of plans) {
     const state = plan.memoryWorthy ? 'consolidated' : 'not_memory_worthy';
@@ -144,6 +151,8 @@ function applyConversationSections(database, userId, runId, sections, conversati
       plan.titleEn,
       plan.summaryEn,
       JSON.stringify(plan.topics),
+      Number(plan.memoryWorthy),
+      plan.segments.reduce((sum, segment) => sum + segment.text.length, 0),
       runId,
       plan.originConversationId,
     ];

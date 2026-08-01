@@ -1,5 +1,15 @@
 'use strict';
 
+// Provisional conversation boundaries. The reliable signals are time gaps and
+// the safety ceilings; the embedding-valley path below is deliberately
+// conservative and, measured on hours of real continuous speech, effectively
+// never fires (no adjacent similarity within 0.2 of the shipping threshold).
+// That is by intent, not neglect: its deepest valleys sit mid-sentence, because
+// segment embeddings track VAD fragmentation more than topic. Raising the
+// threshold to make it fire splits sentences, not topics — topic-level
+// splitting belongs to the consolidation model, which sees full transcript
+// context and may split or merge provisional conversations.
+
 const crypto = require('node:crypto');
 
 function cosine(left, right) {

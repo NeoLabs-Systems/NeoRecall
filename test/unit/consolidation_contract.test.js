@@ -43,6 +43,30 @@ test('consolidation input uses compact aliases and restores durable IDs', () => 
   assert.deepEqual(output.memories[0].miniMemories[0].sourceSegmentIds, [segmentId]);
 });
 
+test('an entity may report which speaker label its voice belongs to', () => {
+  const parsed = consolidationSchema.parse({
+    conversationSections: [{ titleEn: 'Introduction', summaryEn: 'Sumner introduced himself.', memoryWorthy: true, topics: [], sourceSegmentIds: ['segment-1'] }],
+    entities: [
+      { ref: 'person-1', kind: 'person', canonicalNameEn: 'Sumner Tilton', displayName: null, aliases: [], speakerAlias: 'speaker1' },
+      { ref: 'loc-1', kind: 'location', canonicalNameEn: 'City Hall', displayName: null, aliases: [] },
+    ],
+    memories: [], dailySummary: null,
+  });
+  assert.equal(parsed.entities[0].speakerAlias, 'speaker1');
+  assert.equal(parsed.entities[1].speakerAlias, undefined);
+  assert.deepEqual(consolidationJsonSchema.properties.entities.items.required, ['ref', 'kind', 'canonicalNameEn', 'displayName', 'aliases', 'speakerAlias']);
+});
+
+test('compactInput exposes speaker aliases in both directions so a response can be resolved back to a cluster', () => {
+  const prepared = prepareConsolidationRequest({ timezone: 'UTC', previousDailySummary: null, conversations: [{
+    id: 'conv-1', startedAt: '2026-07-14T08:00:00.000Z', endedAt: '2026-07-14T08:01:00.000Z', segments: [{
+      id: 'seg-1', started_at: '2026-07-14T08:00:00.000Z', ended_at: '2026-07-14T08:00:05.000Z',
+      text: 'My name is Sumner Tilton.', language: 'en', speakerClusterId: 'cluster-abc',
+    }],
+  }] });
+  assert.equal(prepared.references.reverseSpeakerAliases.get('speaker1'), 'cluster-abc');
+});
+
 test('dynamic consolidation schema restricts every transcript reference to compact segment aliases', () => {
   const schema = consolidationJsonSchemaFor(['s1', 's2']);
   assert.deepEqual(schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);

@@ -15,6 +15,11 @@ const aliases = z.preprocess((value) => {
 const entity = z.object({
   ref: z.string().min(1), kind: z.enum(['person', 'organization', 'project', 'location', 'other']),
   canonicalNameEn: z.string().min(1), displayName: z.string().min(1).nullable().optional(), aliases: aliases.default([]),
+  // The input speaker label (e.g. "speaker2") whose voice this person entity was
+  // identified as, when the transcript itself supports the link. Resolved back
+  // to the durable speaker cluster and used to name a voiceprint at no extra AI
+  // cost, since this rides along on the consolidation request already made.
+  speakerAlias: z.string().min(1).nullable().optional(),
 });
 const temporalReference = z.union([
   z.string().datetime(),
@@ -24,26 +29,38 @@ const temporalReference = z.union([
   }),
 ]).nullable();
 const entityReference = z.object({ ref: z.string().min(1), role: z.string().min(1) });
+// Exported so prompts describe exactly the taxonomy the schema enforces instead
+// of restating it in prose that can drift out of sync.
+const MEMORY_TYPES = Object.freeze([
+  'meeting', 'lesson', 'conversation', 'project_discussion', 'introduction', 'decision', 'experience', 'other',
+]);
+const MINI_MEMORY_KINDS = Object.freeze([
+  'fact', 'event', 'location', 'person', 'relationship', 'task', 'promise',
+]);
+const ENTITY_KINDS = Object.freeze(['person', 'organization', 'project', 'location', 'other']);
 const miniMemory = z.object({
-  kind: z.enum(['fact', 'event', 'location', 'person', 'relationship', 'task', 'promise']),
+  kind: z.enum(MINI_MEMORY_KINDS),
   textEn: z.string().min(1), importance: z.number().min(1).max(10), confidence: z.number().min(0).max(1),
   dueAt: temporalReference.optional(), occurredAt: temporalReference.optional(),
   status: z.enum(['open', 'completed', 'cancelled']).nullable().optional(), sourceSegmentIds: sourceIds,
   entities: z.array(entityReference).default([]),
 });
 const memory = z.object({
-  type: z.enum(['meeting', 'conversation', 'project_discussion', 'introduction', 'decision', 'experience', 'other']),
+  type: z.enum(MEMORY_TYPES),
   titleEn: z.string().min(1).max(TITLE_MAX_LENGTH), summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH), importance: z.number().min(1).max(10),
   sourceSegmentIds: sourceIds, topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
   entities: z.array(entityReference).default([]), miniMemories: z.array(miniMemory).default([]),
 });
-const conversationSection = z.object({
+// What NeoRecall shows for a conversation. Consolidation derives it for a final,
+// evidence-partitioned section; the live preview derives the same shape for a
+// conversation that is still recording, so both write the same columns.
+const conversationInsightFields = {
   titleEn: z.string().min(1).max(TITLE_MAX_LENGTH),
   summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH),
   memoryWorthy: z.boolean(),
   topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
-  sourceSegmentIds: sourceIds,
-});
+};
+const conversationSection = z.object({ ...conversationInsightFields, sourceSegmentIds: sourceIds });
 
 const consolidationSchema = z.object({
   conversationSections: z.array(conversationSection).min(1),
@@ -69,6 +86,17 @@ const entityReferenceJsonSchema = {
   properties: { ref: { type: 'string', minLength: 1 }, role: { type: 'string', minLength: 1 } },
 };
 const sourceIdsJsonSchema = { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } };
+const topicsJsonSchema = {
+  type: 'array', maxItems: TOPIC_MAX_COUNT,
+  items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
+};
+const conversationInsightRequired = Object.freeze(['titleEn', 'summaryEn', 'memoryWorthy', 'topics']);
+const conversationInsightJsonProperties = Object.freeze({
+  titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
+  summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
+  memoryWorthy: { type: 'boolean' },
+  topics: topicsJsonSchema,
+});
 
 const consolidationJsonSchema = {
   type: 'object', additionalProperties: false,
@@ -78,27 +106,18 @@ const consolidationJsonSchema = {
       type: 'array', minItems: 1,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['titleEn', 'summaryEn', 'memoryWorthy', 'topics', 'sourceSegmentIds'],
-        properties: {
-          titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
-          summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
-          memoryWorthy: { type: 'boolean' },
-          topics: {
-            type: 'array', maxItems: TOPIC_MAX_COUNT,
-            items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
-          },
-          sourceSegmentIds: sourceIdsJsonSchema,
-        },
+        required: [...conversationInsightRequired, 'sourceSegmentIds'],
+        properties: { ...conversationInsightJsonProperties, sourceSegmentIds: sourceIdsJsonSchema },
       },
     },
     entities: {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['ref', 'kind', 'canonicalNameEn', 'displayName', 'aliases'],
+        required: ['ref', 'kind', 'canonicalNameEn', 'displayName', 'aliases', 'speakerAlias'],
         properties: {
           ref: { type: 'string', minLength: 1 },
-          kind: { type: 'string', enum: ['person', 'organization', 'project', 'location', 'other'] },
+          kind: { type: 'string', enum: [...ENTITY_KINDS] },
           canonicalNameEn: { type: 'string', minLength: 1 }, displayName: nullableString,
           aliases: {
             type: 'array',
@@ -107,6 +126,7 @@ const consolidationJsonSchema = {
               properties: { value: { type: 'string', minLength: 1 }, language: nullableString },
             },
           },
+          speakerAlias: nullableString,
         },
       },
     },
@@ -116,15 +136,12 @@ const consolidationJsonSchema = {
         type: 'object', additionalProperties: false,
         required: ['type', 'titleEn', 'summaryEn', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
         properties: {
-          type: { type: 'string', enum: ['meeting', 'conversation', 'project_discussion', 'introduction', 'decision', 'experience', 'other'] },
+          type: { type: 'string', enum: [...MEMORY_TYPES] },
           titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
           summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
           importance: { type: 'number', minimum: 1, maximum: 10 },
           sourceSegmentIds: sourceIdsJsonSchema,
-          topics: {
-            type: 'array', maxItems: TOPIC_MAX_COUNT,
-            items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
-          },
+          topics: topicsJsonSchema,
           entities: { type: 'array', items: entityReferenceJsonSchema },
           miniMemories: {
             type: 'array',
@@ -132,7 +149,7 @@ const consolidationJsonSchema = {
               type: 'object', additionalProperties: false,
               required: ['kind', 'textEn', 'importance', 'confidence', 'dueAt', 'occurredAt', 'status', 'sourceSegmentIds', 'entities'],
               properties: {
-                kind: { type: 'string', enum: ['fact', 'event', 'location', 'person', 'relationship', 'task', 'promise'] },
+                kind: { type: 'string', enum: [...MINI_MEMORY_KINDS] },
                 textEn: { type: 'string', minLength: 1 }, importance: { type: 'number', minimum: 1, maximum: 10 },
                 confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema, occurredAt: temporalReferenceJsonSchema,
                 status: { anyOf: [{ type: 'string', enum: ['open', 'completed', 'cancelled'] }, { type: 'null' }] },
@@ -188,4 +205,10 @@ module.exports = {
   consolidationJsonSchema,
   consolidationJsonSchemaFor,
   normalizeConsolidationTimestamps,
+  conversationInsightFields,
+  conversationInsightJsonProperties,
+  conversationInsightRequired,
+  MEMORY_TYPES,
+  MINI_MEMORY_KINDS,
+  ENTITY_KINDS,
 };

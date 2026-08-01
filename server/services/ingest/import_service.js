@@ -113,6 +113,7 @@ async function importLocalFile(userId, filename, input) {
   const partSize = getConfig().importPartBytes;
   const record = declare(userId, {
     id: input.importId,
+    deviceId: input.deviceId,
     originalName: input.originalName,
     contentType: input.contentType,
     totalSize: stats.size,
@@ -161,10 +162,13 @@ function reconcileProcessing() {
   let completed = 0;
   const rows = db.prepare("SELECT * FROM imports WHERE state IN ('processing','failed') AND temporary_path IS NOT NULL").all();
   for (const record of rows) {
-    const session = db.prepare('SELECT id FROM recording_sessions WHERE user_id=? AND client_uuid=?').get(record.user_id, `import-${record.id}`);
-    if (!session) continue;
-    const pending = db.prepare(`SELECT 1 FROM audio_chunks WHERE session_id=?
-      AND state NOT IN ('transcribed','silent') LIMIT 1`).get(session.id);
+    // Addressed by source, not by session: several imports from one device share
+    // a session so a drained recording stays one conversation, and this import
+    // is finished when *its* audio is, not when the whole stream is.
+    const source = db.prepare('SELECT id FROM recording_sources WHERE client_uuid=?').get(`import-source-${record.id}`);
+    if (!source) continue;
+    const pending = db.prepare(`SELECT 1 FROM audio_chunks WHERE source_id=?
+      AND state NOT IN ('transcribed','silent') LIMIT 1`).get(source.id);
     if (pending) continue;
     try { fs.unlinkSync(record.temporary_path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     db.prepare("UPDATE imports SET state='completed',temporary_path=NULL,expires_at=NULL,error_code=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(record.id);

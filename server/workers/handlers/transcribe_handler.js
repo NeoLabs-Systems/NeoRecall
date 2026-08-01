@@ -35,6 +35,30 @@ function absoluteIso(sessionStart, monotonicOffsetMs, relativeMs) {
   return new Date(Date.parse(sessionStart) + monotonicOffsetMs + relativeMs).toISOString();
 }
 
+/// The speaker cluster each audio component was resolving to right before this
+/// chunk, keyed by component name.
+///
+/// Diarization runs independently per chunk, so identity across a chunk
+/// boundary depends entirely on this: the resolver in speaker_matching uses it
+/// to keep a continuous speaker's cluster instead of splintering it the moment
+/// a fresh segmentation drifts below the plain matching threshold. Only the
+/// immediately preceding chunk is consulted — continuity is a claim about an
+/// actual time gap between two segments, not about how many chunks separate
+/// them, so this works the same whether chunks are one second or two minutes
+/// long. An absent or silent previous chunk simply yields no anchor, and
+/// resolution falls back to ordinary matching.
+function boundaryContinuity(database, chunk) {
+  const anchors = new Map();
+  if (!chunk.sequence) return anchors;
+  const rows = database.prepare(`SELECT source_component,speaker_cluster_id clusterId,ended_at endedAt
+    FROM transcript_segments
+    WHERE chunk_id=(SELECT id FROM audio_chunks WHERE source_id=? AND sequence=? AND user_id=?)
+      AND speaker_cluster_id IS NOT NULL
+    ORDER BY chunk_end_ms DESC`).all(chunk.source_id, chunk.sequence - 1, chunk.user_id);
+  for (const row of rows) if (!anchors.has(row.source_component)) anchors.set(row.source_component, row);
+  return anchors;
+}
+
 function previousSegments(database, chunk) {
   return database.prepare(`SELECT t.text,t.asr_confidence asrConfidence,
     (julianday(t.started_at)-2440587.5)*86400000 startMs,(julianday(t.ended_at)-2440587.5)*86400000 endMs
@@ -75,6 +99,7 @@ function persistSegments(chunk, inferred) {
   db.transaction(() => {
     db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
     const speakerCache = new Map();
+    const continuity = boundaryContinuity(db, chunk);
     const recurringMatching = settings.get(chunk.user_id).recurringSpeakerMatching;
     const insertSegment = db.prepare(`INSERT INTO transcript_segments
       (public_id,user_id,chunk_id,speaker_cluster_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text,language,asr_confidence,speaker_confidence,overlapping_speech)
@@ -89,7 +114,10 @@ function persistSegments(chunk, inferred) {
         let resolved = speakerCache.get(key);
         if (!resolved) {
           const embedding = segment.speakerEmbedding instanceof Float32Array ? segment.speakerEmbedding : new Float32Array(Object.values(segment.speakerEmbedding));
-          cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding });
+          const anchor = continuity.get(segment.sourceComponent || 'combined');
+          const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
+          cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
+            continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null });
           voiceprint = matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching });
           resolved = { cluster, voiceprint, embedding };
           speakerCache.set(key, resolved);
@@ -160,4 +188,4 @@ async function handle(job, inference) {
   return finishCleanup(chunk, count);
 }
 
-module.exports = { handle, persistSegments, finishCleanup, updateContiguous };
+module.exports = { handle, persistSegments, finishCleanup, updateContiguous, boundaryContinuity };

@@ -226,27 +226,54 @@ class NeoRecallApiClient {
     );
   }
 
+  /// Device kind this client reports for [platform].
+  static String deviceKindFor(String platform) => platform == 'web'
+      ? 'browser'
+      : (platform == 'android' || platform == 'ios')
+      ? 'mobile'
+      : 'desktop';
+
+  /// Registers this client as a device and returns the id the server holds.
+  ///
+  /// Registration is keyed on the client UUID and is therefore idempotent, so it
+  /// is safe to call before any request that needs the device to exist — an
+  /// import that wants its audio attributed to this device, for instance.
+  Future<String> registerDevice({
+    required String id,
+    required String clientUuid,
+    required String name,
+    required String platform,
+    Map<String, dynamic> capabilities = const <String, dynamic>{},
+  }) async {
+    final device =
+        await request(
+              'POST',
+              '/api/v1/devices',
+              body: <String, dynamic>{
+                'id': id,
+                'clientUuid': clientUuid,
+                'name': name,
+                'platform': platform,
+                'kind': deviceKindFor(platform),
+                'capabilities': capabilities,
+              },
+            )
+            as Map;
+    return device['id'] as String;
+  }
+
   Future<void> syncSession(LocalRecordingDeclaration session) async {
-    await request(
-      'POST',
-      '/api/v1/devices',
-      body: <String, dynamic>{
-        'id': session.deviceId,
-        'clientUuid': session.deviceClientUuid,
-        'name': session.deviceName,
-        'platform': session.platform,
-        'kind': session.platform == 'web'
-            ? 'browser'
-            : (session.platform == 'android' || session.platform == 'ios')
-            ? 'mobile'
-            : 'desktop',
-        'capabilities': <String, dynamic>{
-          'microphone': session.sourceKind != 'system',
-          'systemAudio': <String>{
-            'system',
-            'combined',
-          }.contains(session.sourceKind),
-        },
+    await registerDevice(
+      id: session.deviceId,
+      clientUuid: session.deviceClientUuid,
+      name: session.deviceName,
+      platform: session.platform,
+      capabilities: <String, dynamic>{
+        'microphone': session.sourceKind != 'system',
+        'systemAudio': <String>{
+          'system',
+          'combined',
+        }.contains(session.sourceKind),
       },
     );
     try {
@@ -306,6 +333,7 @@ class NeoRecallApiClient {
     required String filename,
     required String contentType,
     DateTime? captureTime,
+    String? deviceId,
   }) async {
     final digest = sha256.convert(bytes).toString();
     final declared =
@@ -320,6 +348,10 @@ class NeoRecallApiClient {
                 'sha256': digest,
                 if (captureTime != null)
                   'captureTime': captureTime.toUtc().toIso8601String(),
+                // Naming the device is what lets the server recognise
+                // consecutive sync sweeps as one recording instead of one
+                // conversation each.
+                'deviceId': ?deviceId,
                 'timezone': 'UTC',
               },
             )

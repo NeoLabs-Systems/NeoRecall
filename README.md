@@ -45,7 +45,8 @@ Read the [installation guide](docs/docs/installation.md) before exposing the ser
 
 - **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
 - **Transcription and search are local.** CPU inference, multilingual embeddings, FTS5, and sqlite-vec keep the continuous path free of paid tokens.
-- **LLMs are rare and budgeted.** OpenRouter is called only for eligible memory consolidations and explicit Ask searches, with durable rate gates.
+- **LLMs are rare and budgeted.** OpenRouter is called only for eligible memory consolidations, live conversation previews, and explicit Ask searches, with durable rate gates.
+- **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.
 - **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
 - **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) with PKCE OAuth to search memories and transcript evidence through read-only, token-free retrieval tools.
 

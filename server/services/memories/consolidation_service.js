@@ -10,6 +10,21 @@ const jobs = require('../jobs/job_service');
 const ai = require('../../ai/ai_engine');
 const searchIndex = require('../../embeddings/search_index_service');
 const refinement = require('../conversations/conversation_refinement_service');
+const material = require('../conversations/conversation_material_service');
+const speakerIdentity = require('../speakers/speaker_identity_service');
+
+// Failures that mean the model could not produce a valid answer for this exact
+// input. Resending the same conversations reproduces them, so they drive the
+// narrowing and quarantine policy below; transport failures never do.
+//
+// A truncated completion belongs here even though nothing was wrong with the
+// model's reasoning: it means the answer this input demands did not fit in the
+// budget, and carrying fewer conversations next time is exactly the right
+// response. If a single conversation still cannot fit, quarantine eventually
+// stops the bleeding and the operator raises AI_CONSOLIDATION_MAX_OUTPUT_TOKENS.
+const VALIDATION_FAILURE_CODES = Object.freeze([
+  'AI_REFERENCE_INVALID', 'AI_SCHEMA_INVALID', 'AI_TEMPORAL_INVALID', 'AI_OUTPUT_TRUNCATED',
+]);
 
 function localDate(iso, timezone) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso));
@@ -22,43 +37,37 @@ function lastOutbound(userId) {
 }
 
 function candidateConversations(userId) {
-  const db = getDatabase();
-  const conversations = db.prepare(`SELECT c.*,
-    (SELECT ac.session_id FROM transcript_segments ts JOIN audio_chunks ac ON ac.id=ts.chunk_id
-      WHERE ts.conversation_id=c.id ORDER BY ts.started_at LIMIT 1) session_id
-    FROM conversations c WHERE c.user_id=? AND c.state='closed'
-    ORDER BY c.started_at`).all(userId);
-  return conversations.filter((conversation) => {
-    const segments = db.prepare('SELECT chunk_id FROM transcript_segments WHERE conversation_id=? AND user_id=?').all(conversation.id, userId);
-    if (!segments.length) return false;
-    return segments.every(({ chunk_id: chunkId }) => {
-      const chunk = db.prepare('SELECT source_id,sequence FROM audio_chunks WHERE id=? AND user_id=?').get(chunkId, userId);
-      return !db.prepare(`SELECT 1 FROM audio_chunks WHERE source_id=? AND sequence<=? AND state NOT IN ('transcribed','silent') LIMIT 1`).get(chunk.source_id, chunk.sequence);
-    });
-  });
+  return material.listByState(userId, ['closed'])
+    .filter((conversation) => material.isComplete(userId, conversation.id));
+}
+
+/// True when the most recent consolidation could not be validated.
+///
+/// Candidates are always taken oldest-first, so a conversation the model cannot
+/// partition would otherwise reappear in every later run and stop memory
+/// generation for good. After such a failure the next run carries a single
+/// conversation, which both isolates the cause and stops a whole batch from
+/// being blamed for one bad member.
+function narrowingAfterFailure(userId) {
+  const previous = getDatabase().prepare('SELECT state,error_code FROM consolidation_runs WHERE user_id=? ORDER BY reserved_at DESC LIMIT 1').get(userId);
+  return Boolean(previous && previous.state === 'failed' && VALIDATION_FAILURE_CODES.includes(previous.error_code));
 }
 
 function buildCandidates(userId) {
-  const db = getDatabase();
-  const maxCharacters = processingSettings.get().maxConsolidationInputChars;
+  const { maxConsolidationInputChars: maxCharacters, maxConsolidationConversations: maxCount } = processingSettings.get();
+  const narrowed = narrowingAfterFailure(userId);
   const output = [];
   let characters = 0;
   for (const conversation of candidateConversations(userId)) {
-    const segments = db.prepare(`SELECT public_id id,started_at,ended_at,text,language,speaker_cluster_id speakerClusterId
-      FROM transcript_segments WHERE conversation_id=? AND user_id=?
-      ORDER BY started_at,ended_at,public_id`).all(conversation.id, userId);
-    const size = segments.reduce((sum, segment) => sum + segment.text.length, 0);
-    if (output.length && characters + size > maxCharacters) break;
-    output.push({
-      id: conversation.id,
-      sessionId: conversation.session_id,
-      startedAt: conversation.started_at,
-      endedAt: conversation.ended_at,
-      segments,
-    });
+    if (output.length && (narrowed || output.length >= maxCount)) break;
+    const candidate = material.material(userId, conversation);
+    if (output.length && characters + candidate.characters > maxCharacters) break;
+    const { characters: size, ...rest } = candidate;
+    output.push(rest);
     characters += size;
   }
-  return { conversations: output, characters };
+  const audioMs = output.reduce((sum, conversation) => sum + material.durationMs(conversation), 0);
+  return { conversations: output, characters, audioMs, narrowed };
 }
 
 function eligibility(userId) {
@@ -72,8 +81,62 @@ function eligibility(userId) {
   const nextEligibleAt = previous ? new Date(Date.parse(previous.sent_at) + interval).toISOString() : new Date(0).toISOString();
   if (Date.parse(nextEligibleAt) > Date.now()) return { eligible: false, reason: 'interval', nextEligibleAt };
   const candidates = buildCandidates(userId);
-  if (candidates.characters < processingConfig.minNewMaterialChars) return { eligible: false, reason: 'insufficient_material', materialCharacters: candidates.characters, requiredCharacters: processingConfig.minNewMaterialChars };
+  if (!candidates.conversations.length) {
+    return { eligible: false, reason: 'insufficient_material', materialCharacters: 0, requiredCharacters: processingConfig.minNewMaterialChars };
+  }
+  // A hard floor on what may cause a request. Everything below it — including
+  // the waiting-material sweep further down, which exists precisely to
+  // consolidate material that never reaches the character threshold — stops
+  // here, so a one-minute recording never reaches a model. Once longer material
+  // does justify a request, the short conversations still in the candidate set
+  // are carried along at no extra cost.
+  if (candidates.audioMs < processingConfig.minAiAudioMs) {
+    return { eligible: false, reason: 'insufficient_audio', materialAudioMs: candidates.audioMs, requiredAudioMs: processingConfig.minAiAudioMs };
+  }
+  // The character threshold exists so trivial material does not pay for a
+  // request, but on its own it can strand a short conversation indefinitely: a
+  // ten-minute call at the end of a day would stay a transcript with no memory
+  // until unrelated speech happened to arrive. Waiting material is therefore
+  // consolidated anyway once it has waited long enough.
+  if (candidates.characters < processingConfig.minNewMaterialChars) {
+    const waitingSince = Date.parse(candidates.conversations[0].endedAt);
+    const consolidateAfter = new Date(waitingSince + processingConfig.maxConsolidationLatencyMs).toISOString();
+    if (Date.now() < Date.parse(consolidateAfter)) {
+      return { eligible: false, reason: 'insufficient_material', materialCharacters: candidates.characters,
+        requiredCharacters: processingConfig.minNewMaterialChars, consolidateAfter };
+    }
+  }
   return { eligible: true, nextEligibleAt, ...candidates };
+}
+
+/// Records that a consolidation could not be validated.
+///
+/// Only the conversations the run actually carried are charged, and a
+/// conversation that reaches the configured limit is quarantined: it keeps its
+/// transcript and stays readable, but it no longer enters candidate sets, so one
+/// unpartitionable conversation cannot stop every later memory.
+function recordValidationFailure(userId, conversationIds, errorCode) {
+  if (!conversationIds.length) return { quarantined: [] };
+  const db = getDatabase();
+  const limit = processingSettings.get().consolidationMaxFailures;
+  return db.transaction(() => {
+    const quarantined = [];
+    for (const conversationId of conversationIds) {
+      const row = db.prepare(`UPDATE conversations SET consolidation_failures=consolidation_failures+1,
+        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=? AND state='closed'
+        RETURNING consolidation_failures`).get(conversationId, userId);
+      if (!row || row.consolidation_failures < limit) continue;
+      db.prepare(`UPDATE conversations SET quarantined_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),quarantine_reason=?
+        WHERE id=? AND user_id=?`).run(errorCode, conversationId, userId);
+      quarantined.push(conversationId);
+    }
+    if (quarantined.length) {
+      db.prepare(`INSERT INTO event_outbox (user_id,event_type,resource_type,resource_id,payload_json,expires_at)
+        VALUES (?,'consolidation.quarantined','user',?,?,?)`).run(userId, userId,
+        JSON.stringify({ conversationIds: quarantined, errorCode }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
+    }
+    return { quarantined };
+  })();
 }
 
 function request(userId, { manual = false } = {}) {
@@ -135,7 +198,7 @@ function anchorMemoryRanges(output, conversations) {
   return output;
 }
 
-function persist(userId, runId, output, conversations, aiRequestId) {
+function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map()) {
   validateReferences(output, conversations);
   anchorMemoryRanges(output, conversations);
   const db = getDatabase();
@@ -168,6 +231,10 @@ function persist(userId, runId, output, conversations, aiRequestId) {
       const aliasInsert = db.prepare('INSERT OR IGNORE INTO entity_aliases (entity_id,alias,language) VALUES (?,?,?)');
       for (const alias of entity.aliases) aliasInsert.run(row.id, alias.value, alias.language || null);
     }
+    // Best-effort: names a voiceprint from the same response that just built the
+    // entity graph, at no extra AI cost. Never throws — an unresolved alias or a
+    // cluster with no voiceprint yet is simply skipped.
+    speakerIdentity.linkEntitiesToSpeakers(db, userId, output.entities, entityIds, speakerClusters);
     for (const memory of output.memories) {
       const publicId = crypto.randomUUID();
       const result = db.prepare(`INSERT INTO memories
@@ -270,15 +337,18 @@ async function execute(runId, reservedConversationIds = null) {
       .get(run.user_id, summaryTargetDate, userSettings.timezone) || null;
     const response = await ai.consolidate(run.user_id, { conversations, previousDailySummary: previous, timezone: userSettings.timezone });
     aiRequestId = response.requestId;
-    persist(run.user_id, runId, response.value, conversations, response.requestId);
+    persist(run.user_id, runId, response.value, conversations, response.requestId, response.speakerClusters);
     return { runId, memories: response.value.memories.length };
   } catch (error) {
     if (aiRequestId && error.code === 'AI_REFERENCE_INVALID') {
       db.prepare("UPDATE ai_requests SET state='failed',error_code='AI_REFERENCE_INVALID' WHERE id=?").run(aiRequestId);
       error.aiRequestId = aiRequestId;
     }
-    db.prepare(`UPDATE consolidation_runs SET state='failed',ai_request_id=?,error_code=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
-      .run(error.aiRequestId || null, error.code || 'CONSOLIDATION_FAILED', runId);
+    db.prepare(`UPDATE consolidation_runs SET state='failed',ai_request_id=?,error_code=?,error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
+      .run(error.aiRequestId || null, error.code || 'CONSOLIDATION_FAILED', String(error.message || '').slice(0, 2000), runId);
+    if (VALIDATION_FAILURE_CODES.includes(error.code)) {
+      recordValidationFailure(run.user_id, conversations.map((conversation) => conversation.id), error.code);
+    }
     throw error;
   }
 }
@@ -288,4 +358,7 @@ function latest(userId) {
   return { run, eligibility: eligibility(userId) };
 }
 
-module.exports = { eligibility, request, execute, latest, validateReferences, anchorMemoryRanges, localDate };
+module.exports = {
+  eligibility, request, execute, latest, validateReferences, anchorMemoryRanges, localDate,
+  recordValidationFailure, buildCandidates, VALIDATION_FAILURE_CODES,
+};

@@ -12,7 +12,16 @@ async function handle(job) {
   }
   if (job.type === 'maintenance') {
     const finalized = summaries.finalizeCoveredDays();
-    db.prepare(`UPDATE consolidation_runs SET state='failed',error_code='WORKER_INTERRUPTED',completed_at=?
+    // A run stuck in 'reserved' or 'running' means the worker process that held
+    // it died mid-flight (crash, OOM, deploy) before it could reach either
+    // branch of execute()'s try/catch — so nothing ever marked it failed. Left
+    // alone that row blocks every future consolidation for the user forever,
+    // since eligibility() treats 'reserved'/'running' as an active run. This is
+    // deliberately not a validation failure: a crash says nothing about whether
+    // the input itself was consolidatable, so it must never feed the narrowing
+    // or quarantine policy that a real model rejection does.
+    db.prepare(`UPDATE consolidation_runs SET state='failed',error_code='WORKER_INTERRUPTED',
+      error_message='The worker process did not complete this run.',completed_at=?
       WHERE state IN ('reserved','running') AND reserved_at<?`).run(new Date().toISOString(), new Date(Date.now() - 30 * 60_000).toISOString());
     const importService = require('../../services/ingest/import_service');
     const importsCompleted = importService.reconcileProcessing();

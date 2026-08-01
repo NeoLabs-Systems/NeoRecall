@@ -10,6 +10,20 @@ const diarization = require('../diarization');
 const { alignSegments } = require('../speaker_alignment');
 const { detect: detectLanguage } = require('tinyld');
 
+/// Language of a transcript segment the recogniser did not label itself.
+///
+/// The statistical detector needs enough text to work with: on a short
+/// utterance it still returns its best guess, and that guess is frequently
+/// wrong — real recordings produce "Gentlemen." labelled Afrikaans and "Uh"
+/// labelled Klingon. An unknown language is honest and harmless; a confidently
+/// wrong one is a false statement that reaches both the interface and the
+/// consolidation prompt. Below the configured length the answer is therefore
+/// no answer.
+function statisticalLanguage(text, minimumCharacters) {
+  if (!text || text.length < minimumCharacters) return null;
+  return detectLanguage(text) || null;
+}
+
 class SherpaProvider extends TranscriptionProvider {
   constructor() { super(); this.recognizer = null; }
   requiredFiles() {
@@ -43,7 +57,7 @@ class SherpaProvider extends TranscriptionProvider {
     recognizer.decode(stream);
     const result = recognizer.getResult(stream);
     const text = String(result.text || '').trim();
-    return { text, language: result.lang || (text ? detectLanguage(text) : null), tokens: result.tokens || [],
+    return { text, language: result.lang || statisticalLanguage(text, getConfig().languageDetectionMinimumCharacters), tokens: result.tokens || [],
       timestamps: result.timestamps || [], durations: result.durations || [], asrConfidence: null };
   }
   async transcribe({ components }) {
@@ -62,4 +76,4 @@ class SherpaProvider extends TranscriptionProvider {
   }
 }
 
-module.exports = { SherpaProvider };
+module.exports = { SherpaProvider, statisticalLanguage };

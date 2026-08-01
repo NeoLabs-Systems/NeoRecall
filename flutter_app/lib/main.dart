@@ -65,6 +65,8 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     // of waiting for the periodic upload timer or a connectivity event.
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.onAppResumed());
+    } else {
+      controller.onAppPaused();
     }
   }
 
