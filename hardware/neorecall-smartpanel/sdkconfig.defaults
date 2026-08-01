@@ -35,6 +35,9 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_LWIP_MAX_SOCKETS=16
+# Phone browsers send >512 B of request headers to the captive portal.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=768
 
 # --- TLS: verify public hosts via the bundled Mozilla roots; allow an opt-in
 #     insecure mode for self-hosted/self-signed NeoRecall backends -----------

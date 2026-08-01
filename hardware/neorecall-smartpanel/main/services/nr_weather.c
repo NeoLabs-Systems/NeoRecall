@@ -23,6 +23,8 @@ static nr_weather_t s_wx;
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_wake;
 
+static void on_net_evt(void *a, esp_event_base_t b, int32_t id, void *d);
+
 nr_wx_cat_t nr_weather_map(int code, char *desc, size_t n)
 {
     const char *d; nr_wx_cat_t cat;
@@ -147,6 +149,7 @@ esp_err_t nr_weather_init(void)
     // a generous stack; too small silently fails the handshake ("loading" forever).
     if (xTaskCreatePinnedToCore(weather_task, "nr_weather", 8192, NULL, 4, NULL, tskNO_AFFINITY) != pdPASS)
         return ESP_FAIL;
+    esp_event_handler_instance_register(NR_EVENT, NR_EVT_WIFI_CHANGED, on_net_evt, NULL, NULL);
     return ESP_OK;
 }
 
@@ -159,5 +162,13 @@ void nr_weather_get(nr_weather_t *out)
 
 void nr_weather_refresh_now(void)
 {
+    if (s_wake) xSemaphoreGive(s_wake);
+}
+
+// Wake immediately when connectivity changes (e.g. we just came online) instead
+// of waiting out the 10-minute refresh timer — otherwise weather stays "loading".
+static void on_net_evt(void *a, esp_event_base_t b, int32_t id, void *d)
+{
+    (void) a; (void) b; (void) id; (void) d;
     if (s_wake) xSemaphoreGive(s_wake);
 }

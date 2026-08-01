@@ -20,6 +20,12 @@ esp_err_t nr_time_init(void);
 // True once we have obtained a real wall clock at least once (year >= 2024).
 bool nr_time_is_valid(void);
 
+// Seed the wall clock from an HTTP "Date" response header (RFC 1123, e.g.
+// "Wed, 01 Aug 2026 12:34:56 GMT"). Used to show a correct time within the first
+// HTTP round-trip after coming online, without waiting for SNTP. No-op once the
+// clock is already valid (SNTP remains authoritative).
+void nr_time_seed_from_http_date(const char *http_date);
+
 // Monotonic milliseconds since boot — never jumps, safe for durations/offsets.
 int64_t nr_time_monotonic_ms(void);
 

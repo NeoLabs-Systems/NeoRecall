@@ -171,6 +171,10 @@ class NeoRecallController extends ChangeNotifier {
   bool autostartEnabled = false;
   bool preferBluetoothCapture = true;
   String? preferredDeviceLabel;
+  // Latest battery percentage reported by the connected wearable, if any.
+  // Cleared whenever the link drops or a different device is preferred, since
+  // a stale reading would otherwise linger in the UI.
+  int? preferredDeviceBatteryLevel;
   String? error;
   String? notice;
   String? accountId;
@@ -665,6 +669,7 @@ class NeoRecallController extends ChangeNotifier {
     await audioDeviceSessions.bindAccount(null);
     await ClientDiagnosticLog.instance.bindAccount(null);
     preferredDeviceLabel = null;
+    preferredDeviceBatteryLevel = null;
     try {
       await api.request('POST', '/api/v1/auth/logout');
     } catch (_) {}
@@ -903,12 +908,15 @@ class NeoRecallController extends ChangeNotifier {
     await audioDeviceSessions.prefer(device);
     preferBluetoothCapture = true;
     preferredDeviceLabel = device.displayName;
+    // The freshly connected device hasn't pushed a battery reading yet.
+    preferredDeviceBatteryLevel = null;
     notifyListeners();
   }
 
   Future<void> clearPreferredBluetoothDevice() async {
     await audioDeviceSessions.clearPreferred();
     preferredDeviceLabel = null;
+    preferredDeviceBatteryLevel = null;
     notifyListeners();
   }
 
@@ -1273,7 +1281,10 @@ class NeoRecallController extends ChangeNotifier {
     if (!isMobileCapturePlatform) return false;
     if (!authenticated || !consentAccepted) return false;
     if (!preferBluetoothCapture) return false;
-    if (isRecording || _resumingMobileCapture || _switchingMobileSource) {
+    if (isRecording ||
+        _stoppingRecording ||
+        _resumingMobileCapture ||
+        _switchingMobileSource) {
       return false;
     }
     // Offline-first wearables record on the device itself; there is no live
@@ -1380,6 +1391,11 @@ class NeoRecallController extends ChangeNotifier {
       case DeviceControlEventType.wake:
         unawaited(audioDeviceSessions.connectPreferred());
       case DeviceControlEventType.battery:
+        final level = event.payload['level'];
+        if (level is int && level >= 0) {
+          preferredDeviceBatteryLevel = level.clamp(0, 100);
+          notifyListeners();
+        }
       case DeviceControlEventType.singlePress:
       case DeviceControlEventType.doublePress:
       case DeviceControlEventType.longPress:
@@ -1402,6 +1418,7 @@ class NeoRecallController extends ChangeNotifier {
     );
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
+      preferredDeviceBatteryLevel = null;
       deviceStorageSync.onDeviceUnlinked();
     } else if (state == DeviceTransportState.connectedStandby) {
       // §9: after each (re)connect, pull anything the device recorded offline,

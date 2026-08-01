@@ -6,6 +6,7 @@ const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit, encodeCursor, decodeCursor } = require('../../utils/pagination');
 const searchIndex = require('../../embeddings/search_index_service');
 const { createLogger } = require('../../utils/logger');
+const { SPEAKER_NAME_COLUMNS, SPEAKER_NAME_JOINS } = require('../../db/speaker_resolution_sql');
 
 const logger = createLogger('recordings');
 
@@ -104,11 +105,9 @@ function transcript(userId, id, query = {}) {
   get(userId, id);
   const limit = pageLimit(query.limit, 250, 100);
   const cursor = Number(query.cursor || 0);
-  const segments = getDatabase().prepare(`SELECT t.*,v.display_name voiceprint_name,cs.local_label
+  const segments = getDatabase().prepare(`SELECT t.*,${SPEAKER_NAME_COLUMNS}
     FROM transcript_segments t JOIN audio_chunks c ON c.id=t.chunk_id
-    LEFT JOIN speaker_turns st ON st.chunk_id=t.chunk_id AND st.cluster_id=t.speaker_cluster_id AND st.start_ms<=t.chunk_start_ms AND st.end_ms>=t.chunk_end_ms
-    LEFT JOIN voiceprints v ON v.id=st.voiceprint_id
-    LEFT JOIN conversation_speakers cs ON cs.conversation_id=t.conversation_id AND cs.cluster_id=t.speaker_cluster_id
+    ${SPEAKER_NAME_JOINS}
     WHERE c.session_id=? AND t.user_id=? AND t.id>? ORDER BY t.id LIMIT ?`).all(id, userId, cursor, limit + 1);
   const more = segments.length > limit;
   return { items: segments.slice(0, limit), nextCursor: more ? String(segments[limit - 1].id) : null };

@@ -417,6 +417,7 @@ class _RecordScreenState extends State<RecordScreen> {
           ? '$type · Preferred — not connected'
           : '$type · Ready for audio',
       connected: connected,
+      batteryLevel: connected ? controller.preferredDeviceBatteryLevel : null,
       actionLabel: compatibilityUnknown
           ? 'Check'
           : preferred
@@ -1139,6 +1140,7 @@ class _DeviceRow extends StatelessWidget {
     required this.connected,
     required this.actionLabel,
     required this.onAction,
+    this.batteryLevel,
   });
 
   final String name;
@@ -1146,6 +1148,9 @@ class _DeviceRow extends StatelessWidget {
   final bool connected;
   final String actionLabel;
   final VoidCallback? onAction;
+  // Latest battery percentage for this device, if the connected wearable has
+  // reported one yet.
+  final int? batteryLevel;
 
   @override
   Widget build(BuildContext context) {
@@ -1196,12 +1201,51 @@ class _DeviceRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
+          if (batteryLevel != null) ...<Widget>[
+            _BatteryIndicator(level: batteryLevel!, palette: palette),
+            const SizedBox(width: AppSpacing.sm),
+          ],
           if (connected)
             Icon(Icons.check_circle, size: 18, color: palette.success)
           else
             TextButton(onPressed: onAction, child: Text(actionLabel)),
         ],
       ),
+    );
+  }
+}
+
+class _BatteryIndicator extends StatelessWidget {
+  const _BatteryIndicator({required this.level, required this.palette});
+
+  final int level;
+  final NeoRecallPalette palette;
+
+  IconData get _icon {
+    if (level <= 15) return Icons.battery_alert_rounded;
+    if (level <= 35) return Icons.battery_2_bar_rounded;
+    if (level <= 65) return Icons.battery_4_bar_rounded;
+    if (level <= 90) return Icons.battery_5_bar_rounded;
+    return Icons.battery_full_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = level <= 15 ? palette.warning : palette.textSecondary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(_icon, size: 16, color: color),
+        const SizedBox(width: 2),
+        Text(
+          '$level%',
+          style: TextStyle(
+            color: color,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

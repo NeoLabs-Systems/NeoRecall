@@ -214,8 +214,9 @@ jobs:
             VERSION="commit-${GITHUB_SHA:0:12}"
           fi
           mkdir -p ../dist
-          # No custom release keystore is configured; Flutter uses the debug
-          # signing config already set for release builds in this repo.
+          # Release builds use the fixed debug keystore committed at
+          # android/app/debug.keystore (see build.gradle.kts) so every build
+          # shares the same signature and can be installed as an update.
           flutter build apk --release --no-pub
           unzip -l build/app/outputs/flutter-apk/app-release.apk |
             grep -Eq 'lib/(arm64-v8a|armeabi-v7a|x86_64)/libopus\.so'

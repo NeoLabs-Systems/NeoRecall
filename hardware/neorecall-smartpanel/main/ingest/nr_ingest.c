@@ -163,15 +163,13 @@ static bool do_login(const cyc_cfg_t *cfg)
     return ok;
 }
 
-// Set s_bearer for this cycle. Returns false if no usable credential exists.
+// Set s_bearer for this cycle by logging in with username+password. Returns
+// false if credentials are missing or the login failed (retried next cycle).
 static bool resolve_bearer(const cyc_cfg_t *cfg)
 {
-    if (cfg->username[0] && cfg->password[0]) {
-        if (!s_login_token[0] && !do_login(cfg)) { s_bearer[0] = '\0'; return false; }
-        nr_strlcpy(s_bearer, s_login_token, sizeof(s_bearer));
-    } else {
-        nr_strlcpy(s_bearer, cfg->api_key, sizeof(s_bearer));
-    }
+    if (!(cfg->username[0] && cfg->password[0])) { s_bearer[0] = '\0'; return false; }
+    if (!s_login_token[0] && !do_login(cfg)) { s_bearer[0] = '\0'; return false; }
+    nr_strlcpy(s_bearer, s_login_token, sizeof(s_bearer));
     return s_bearer[0] != '\0';
 }
 
@@ -566,8 +564,7 @@ static void pump_once(void)
     if (!nr_net_is_online()) return;
 
     nr_config_t c; nr_config_get(&c);
-    bool has_auth = c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]);
-    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && has_auth)) return;
+    if (!(c.provisioned && c.wifi_ssid[0] && c.backend_url[0] && c.auth_user[0] && c.auth_pass[0])) return;
 
     cyc_cfg_t cfg = {0};
     nr_strlcpy(cfg.base, c.backend_url, sizeof(cfg.base));

@@ -32,6 +32,18 @@ void nr_recorder_set_paused(bool paused);
 
 void nr_recorder_get_status(nr_recorder_status_t *out);
 
+// Discard the current recording: delete the current session's not-yet-uploaded
+// audio + its session, then STOP (pause) capture — nothing further is uploaded
+// until the user resumes. Audio already accepted by the backend cannot be
+// recalled from the device.
+void nr_recorder_discard(void);
+
+// Discard the entire upload backlog: delete every spooled session, chunk, and
+// gap that has not yet been accepted by the backend, and open a fresh session.
+// Recording continues (subject to the current pause state); this just clears the
+// "N pending" queue. Audio already accepted by the backend is unaffected.
+void nr_recorder_discard_all(void);
+
 #ifdef __cplusplus
 }
 #endif

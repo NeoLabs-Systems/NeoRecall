@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
+// The on-device settings screen. All fields are generated from the shared
+// NR_SETTINGS schema (see settings/nr_settings.h) — the exact same definition
+// the Wi-Fi captive portal uses — so the two never drift and there is no
+// duplicated field list.
 #include "ui/ui_settings.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "lvgl.h"
 #include "esp_system.h"
@@ -14,26 +19,31 @@
 #include "ui/nr_ui.h"
 #include "board/nr_board.h"
 #include "config/nr_config.h"
+#include "settings/nr_settings.h"
 #include "net/nr_wifi.h"
 #include "services/nr_geo.h"
 #include "services/nr_weather.h"
+#include "ingest/nr_recorder.h"
 #include "util/nr_util.h"
 
-static lv_obj_t *s_scr, *s_kb;
-static lv_obj_t *dd_ssid, *ta_pass, *ta_url, *ta_key, *ta_city, *ta_user, *ta_authpass;
-static lv_obj_t *sw_tls, *sw_loc_auto, *sw_24h, *sw_units, *sw_night, *sw_night_off, *sw_ota;
-static lv_obj_t *sl_bri_day, *sl_bri_night;
-static lv_obj_t *rol_sh, *rol_sm, *rol_eh, *rol_em;
+#define MAX_FIELDS 48
 
-// Wi-Fi scan results, filled by a background task and applied on the LVGL task.
+static lv_obj_t *s_scr, *s_kb;
+static lv_obj_t *s_w[MAX_FIELDS];    // primary widget per schema field
+static lv_obj_t *s_w2[MAX_FIELDS];   // secondary widget (minute roller for TIME)
+static lv_obj_t *s_dd_ssid;          // the SSID dropdown (for scan population)
+static lv_obj_t *s_ta_city;          // the city text field (for geocode search)
+
 static char s_scan[20][33];
 static int s_scan_n;
 static volatile bool s_scanning;
+static char s_city_query[96];
+static volatile bool s_city_busy;
 
 static const char *HOURS = "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23";
 static const char *MINS5 = "00\n05\n10\n15\n20\n25\n30\n35\n40\n45\n50\n55";
 
-// ---- builders --------------------------------------------------------------
+// ---- widget builders -------------------------------------------------------
 
 static lv_obj_t *section(lv_obj_t *parent, const char *title)
 {
@@ -78,31 +88,62 @@ static lv_obj_t *row(lv_obj_t *parent, const char *label)
     return r;
 }
 
-// A labelled full-width text field (with optional password masking).
-static lv_obj_t *field(lv_obj_t *parent, const char *label, const char *placeholder, bool password);
-
-static lv_obj_t *add_switch(lv_obj_t *parent, const char *label, bool on)
+static void ta_focus_cb(lv_event_t *e)
 {
-    lv_obj_t *r = row(parent, label);
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_FOCUSED && code != LV_EVENT_CLICKED) return;
+    lv_obj_t *ta = lv_event_get_target(e);
+    lv_keyboard_set_textarea(s_kb, ta);
+    lv_obj_remove_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_kb);
+    lv_obj_scroll_to_view_recursive(ta, LV_ANIM_ON);
+}
+static void kb_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }
+}
+
+static lv_obj_t *make_textarea(lv_obj_t *card, const char *label, const char *hint)
+{
+    lv_obj_t *box = row(card, "");
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_t *l = lv_label_create(box);
+    lv_obj_set_style_text_color(l, NRC_TX2, 0);
+    lv_obj_set_style_text_font(l, &nr_font_14, 0);
+    lv_label_set_text(l, label);
+    lv_obj_t *ta = lv_textarea_create(box);
+    lv_textarea_set_one_line(ta, true);
+    lv_obj_set_width(ta, lv_pct(100));
+    if (hint) lv_textarea_set_placeholder_text(ta, hint);
+    lv_obj_add_event_cb(ta, ta_focus_cb, LV_EVENT_ALL, NULL);
+    return ta;
+}
+
+static lv_obj_t *make_switch(lv_obj_t *card, const char *label)
+{
+    lv_obj_t *r = row(card, label);
     lv_obj_t *sw = lv_switch_create(r);
     lv_obj_set_style_bg_color(sw, NRC_GOLD, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
     return sw;
 }
 
-static lv_obj_t *add_slider(lv_obj_t *parent, const char *label, int min, int max, int val)
+static lv_obj_t *make_slider(lv_obj_t *card, const char *label, int min, int max)
 {
-    lv_obj_t *r = row(parent, label);
+    lv_obj_t *r = row(card, label);
     lv_obj_t *sl = lv_slider_create(r);
     lv_obj_set_width(sl, 180);
     lv_slider_set_range(sl, min, max);
-    lv_slider_set_value(sl, val, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(sl, NRC_GOLD, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(sl, NRC_GOLD, LV_PART_KNOB);
     return sl;
 }
 
-static lv_obj_t *time_roller(lv_obj_t *parent, const char *opts)
+static lv_obj_t *make_roller(lv_obj_t *parent, const char *opts)
 {
     lv_obj_t *rol = lv_roller_create(parent);
     lv_roller_set_options(rol, opts, LV_ROLLER_MODE_NORMAL);
@@ -115,191 +156,6 @@ static lv_obj_t *time_roller(lv_obj_t *parent, const char *opts)
     lv_obj_set_style_text_color(rol, NRC_BG, LV_PART_SELECTED);
     return rol;
 }
-
-// ---- events ----------------------------------------------------------------
-
-// Show the keyboard when a field is tapped. Note: we deliberately do NOT hide
-// on DEFOCUSED — tapping a key defocuses the textarea, which would otherwise
-// snap the keyboard shut on every keystroke.
-static void ta_focus_cb(lv_event_t *e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code != LV_EVENT_FOCUSED && code != LV_EVENT_CLICKED) return;
-    lv_obj_t *ta = lv_event_get_target(e);
-    lv_keyboard_set_textarea(s_kb, ta);
-    lv_obj_remove_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_kb);
-    lv_obj_scroll_to_view_recursive(ta, LV_ANIM_ON);   // lift the field above the keyboard
-}
-
-// Hide the keyboard only via its own OK (check) / close buttons.
-static void kb_cb(lv_event_t *e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
-        lv_keyboard_set_textarea(s_kb, NULL);
-    }
-}
-
-static lv_obj_t *field(lv_obj_t *parent, const char *label, const char *placeholder, bool password)
-{
-    lv_obj_t *box = row(parent, "");
-    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_t *l = lv_label_create(box);
-    lv_obj_set_style_text_color(l, NRC_TX2, 0);
-    lv_obj_set_style_text_font(l, &nr_font_14, 0);
-    lv_label_set_text(l, label);
-    lv_obj_t *ta = lv_textarea_create(box);
-    lv_textarea_set_one_line(ta, true);
-    lv_obj_set_width(ta, lv_pct(100));
-    if (placeholder) lv_textarea_set_placeholder_text(ta, placeholder);
-    if (password) lv_textarea_set_password_mode(ta, true);
-    lv_obj_add_event_cb(ta, ta_focus_cb, LV_EVENT_ALL, NULL);
-    return ta;
-}
-
-// Rebuild the SSID dropdown from the latest scan (runs on the LVGL task).
-static void apply_scan(void *unused)
-{
-    (void) unused;
-    if (!dd_ssid) return;
-    nr_config_t c; nr_config_get(&c);
-    char opts[20 * 34 + 64];
-    opts[0] = '\0';
-    int sel = 0, idx = 0;
-    bool current_listed = false;
-    for (int i = 0; i < s_scan_n; i++) if (strcmp(s_scan[i], c.wifi_ssid) == 0) current_listed = true;
-    if (c.wifi_ssid[0] && !current_listed) { strcat(opts, c.wifi_ssid); idx = 1; }
-    for (int i = 0; i < s_scan_n; i++) {
-        if (opts[0]) strcat(opts, "\n");
-        if (strcmp(s_scan[i], c.wifi_ssid) == 0) sel = idx;
-        strcat(opts, s_scan[i]);
-        idx++;
-    }
-    if (opts[0] == '\0') strcpy(opts, "(keine Netzwerke gefunden)");
-    lv_dropdown_set_options(dd_ssid, opts);
-    lv_dropdown_set_selected(dd_ssid, sel);
-}
-
-static void scan_task(void *arg)
-{
-    (void) arg;
-    s_scan_n = nr_wifi_scan(s_scan, 20);
-    // Touch LVGL only under its lock (this runs off the LVGL task).
-    if (nr_board_lock(2000)) { apply_scan(NULL); nr_board_unlock(); }
-    s_scanning = false;
-    vTaskDelete(NULL);
-}
-
-// Kick a background scan (guarded against overlapping scans).
-static void start_scan(void)
-{
-    if (s_scanning) return;
-    s_scanning = true;
-    lv_dropdown_set_options(dd_ssid, "Suche …");
-    if (xTaskCreate(scan_task, "wifi_scan", 4096, NULL, 4, NULL) != pdPASS) s_scanning = false;
-}
-
-static void scan_btn_cb(lv_event_t *e) { (void) e; start_scan(); }
-
-static void load_values(void)
-{
-    nr_config_t c; nr_config_get(&c);
-    lv_textarea_set_text(ta_url, c.backend_url);
-    lv_textarea_set_text(ta_key, c.api_key);
-    lv_textarea_set_text(ta_user, c.auth_user);
-    lv_textarea_set_text(ta_authpass, "");   // never echo the stored password
-    lv_textarea_set_text(ta_pass, "");
-    lv_textarea_set_text(ta_city, c.city);
-    if (c.tls_insecure) lv_obj_add_state(sw_tls, LV_STATE_CHECKED); else lv_obj_remove_state(sw_tls, LV_STATE_CHECKED);
-    if (c.location_auto) lv_obj_add_state(sw_loc_auto, LV_STATE_CHECKED); else lv_obj_remove_state(sw_loc_auto, LV_STATE_CHECKED);
-    if (c.clock_24h) lv_obj_add_state(sw_24h, LV_STATE_CHECKED); else lv_obj_remove_state(sw_24h, LV_STATE_CHECKED);
-    if (!c.units_metric) lv_obj_add_state(sw_units, LV_STATE_CHECKED); else lv_obj_remove_state(sw_units, LV_STATE_CHECKED);
-    if (c.night_enabled) lv_obj_add_state(sw_night, LV_STATE_CHECKED); else lv_obj_remove_state(sw_night, LV_STATE_CHECKED);
-    if (c.night_mode == NR_NIGHT_OFF) lv_obj_add_state(sw_night_off, LV_STATE_CHECKED); else lv_obj_remove_state(sw_night_off, LV_STATE_CHECKED);
-    lv_slider_set_value(sl_bri_day, c.brightness_day, LV_ANIM_OFF);
-    lv_slider_set_value(sl_bri_night, c.brightness_night, LV_ANIM_OFF);
-    lv_roller_set_selected(rol_sh, c.night_start_min / 60, LV_ANIM_OFF);
-    lv_roller_set_selected(rol_sm, (c.night_start_min % 60) / 5, LV_ANIM_OFF);
-    lv_roller_set_selected(rol_eh, c.night_end_min / 60, LV_ANIM_OFF);
-    lv_roller_set_selected(rol_em, (c.night_end_min % 60) / 5, LV_ANIM_OFF);
-    if (c.ota_enabled) lv_obj_add_state(sw_ota, LV_STATE_CHECKED); else lv_obj_remove_state(sw_ota, LV_STATE_CHECKED);
-    // Show whatever we last found, then refresh in the background.
-    apply_scan(NULL);
-    start_scan();
-}
-
-static void save_cb(lv_event_t *e)
-{
-    (void) e;
-    nr_config_t c; nr_config_get(&c);
-
-    char ssid[33] = {0};
-    lv_dropdown_get_selected_str(dd_ssid, ssid, sizeof(ssid));
-    bool ssid_valid = ssid[0] && ssid[0] != '(' && strcmp(ssid, "Suche …") != 0;
-    bool ssid_changed = ssid_valid && strcmp(ssid, c.wifi_ssid) != 0;
-    if (ssid_valid) nr_strlcpy(c.wifi_ssid, ssid, sizeof(c.wifi_ssid));
-
-    const char *pass = lv_textarea_get_text(ta_pass);
-    // Empty password: keep the old one for the same network; clear it (open
-    // network) only when the network changed.
-    if (pass[0]) nr_strlcpy(c.wifi_pass, pass, sizeof(c.wifi_pass));
-    else if (ssid_changed) c.wifi_pass[0] = '\0';
-
-    nr_strlcpy(c.backend_url, lv_textarea_get_text(ta_url), sizeof(c.backend_url));
-    nr_strlcpy(c.api_key, lv_textarea_get_text(ta_key), sizeof(c.api_key));
-    nr_strlcpy(c.auth_user, lv_textarea_get_text(ta_user), sizeof(c.auth_user));
-    const char *authpass = lv_textarea_get_text(ta_authpass);
-    if (authpass[0]) nr_strlcpy(c.auth_pass, authpass, sizeof(c.auth_pass));  // empty keeps the stored one
-    nr_strlcpy(c.city, lv_textarea_get_text(ta_city), sizeof(c.city));
-    c.tls_insecure = lv_obj_has_state(sw_tls, LV_STATE_CHECKED);
-    c.location_auto = lv_obj_has_state(sw_loc_auto, LV_STATE_CHECKED);
-    c.clock_24h = lv_obj_has_state(sw_24h, LV_STATE_CHECKED);
-    c.units_metric = !lv_obj_has_state(sw_units, LV_STATE_CHECKED);
-    c.night_enabled = lv_obj_has_state(sw_night, LV_STATE_CHECKED);
-    c.night_mode = lv_obj_has_state(sw_night_off, LV_STATE_CHECKED) ? NR_NIGHT_OFF : NR_NIGHT_DIM;
-    c.brightness_day = lv_slider_get_value(sl_bri_day);
-    c.brightness_night = lv_slider_get_value(sl_bri_night);
-    c.night_start_min = lv_roller_get_selected(rol_sh) * 60 + lv_roller_get_selected(rol_sm) * 5;
-    c.night_end_min = lv_roller_get_selected(rol_eh) * 60 + lv_roller_get_selected(rol_em) * 5;
-    c.ota_enabled = lv_obj_has_state(sw_ota, LV_STATE_CHECKED);
-    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] &&
-                    (c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]));
-
-    nr_config_set(&c);
-    nr_wifi_reconfigure();       // apply Wi-Fi credentials and connect
-    nr_weather_refresh_now();
-    nr_ui_show_dashboard();
-}
-
-// City lookup does a blocking HTTPS request, so it must run off the LVGL task
-// (a TLS handshake would overflow the UI task stack — the "Stadt suchen" crash).
-static char s_city_query[96];
-static volatile bool s_city_busy;
-static void city_task(void *arg)
-{
-    (void) arg;
-    nr_geo_from_city(s_city_query);
-    nr_weather_refresh_now();
-    s_city_busy = false;
-    vTaskDelete(NULL);
-}
-static void city_search_cb(lv_event_t *e)
-{
-    (void) e;
-    const char *city = lv_textarea_get_text(ta_city);
-    if (!city || !city[0] || s_city_busy) return;
-    nr_strlcpy(s_city_query, city, sizeof(s_city_query));
-    s_city_busy = true;
-    if (xTaskCreate(city_task, "nr_city", 8192, NULL, 4, NULL) != pdPASS) s_city_busy = false;
-}
-
-static void reconnect_cb(lv_event_t *e) { (void) e; nr_wifi_reconfigure(); }
-static void restart_cb(lv_event_t *e) { (void) e; esp_restart(); }
-static void back_cb(lv_event_t *e) { (void) e; nr_ui_show_dashboard(); }
-static void on_show(lv_event_t *e) { (void) e; load_values(); }
 
 static lv_obj_t *action_button(lv_obj_t *parent, const char *text, lv_color_t bg, lv_color_t fg, lv_event_cb_t cb)
 {
@@ -317,19 +173,192 @@ static lv_obj_t *action_button(lv_obj_t *parent, const char *text, lv_color_t bg
     return b;
 }
 
-// ---- create ----------------------------------------------------------------
+// ---- Wi-Fi scan (populates the SSID dropdown) ------------------------------
+
+static void apply_scan(void *unused)
+{
+    (void) unused;
+    if (!s_dd_ssid) return;
+    nr_config_t c; nr_config_get(&c);
+    char opts[20 * 34 + 64];
+    opts[0] = '\0';
+    int sel = 0, idx = 0;
+    bool listed = false;
+    for (int i = 0; i < s_scan_n; i++) if (strcmp(s_scan[i], c.wifi_ssid) == 0) listed = true;
+    if (c.wifi_ssid[0] && !listed) { strcat(opts, c.wifi_ssid); idx = 1; }
+    for (int i = 0; i < s_scan_n; i++) {
+        if (opts[0]) strcat(opts, "\n");
+        if (strcmp(s_scan[i], c.wifi_ssid) == 0) sel = idx;
+        strcat(opts, s_scan[i]);
+        idx++;
+    }
+    if (opts[0] == '\0') strcpy(opts, "(keine Netzwerke gefunden)");
+    lv_dropdown_set_options(s_dd_ssid, opts);
+    lv_dropdown_set_selected(s_dd_ssid, sel);
+}
+
+static void scan_task(void *arg)
+{
+    (void) arg;
+    s_scan_n = nr_wifi_scan(s_scan, 20);
+    if (nr_board_lock(2000)) { apply_scan(NULL); nr_board_unlock(); }
+    s_scanning = false;
+    vTaskDelete(NULL);
+}
+static void start_scan(void)
+{
+    if (s_scanning || !s_dd_ssid) return;
+    s_scanning = true;
+    lv_dropdown_set_options(s_dd_ssid, "Suche …");
+    if (xTaskCreate(scan_task, "wifi_scan", 4096, NULL, 4, NULL) != pdPASS) s_scanning = false;
+}
+static void scan_btn_cb(lv_event_t *e) { (void) e; start_scan(); }
+
+// ---- city geocode (background; TLS must not run on the LVGL task) ----------
+
+static void city_task(void *arg)
+{
+    (void) arg;
+    nr_geo_from_city(s_city_query);
+    nr_weather_refresh_now();
+    s_city_busy = false;
+    vTaskDelete(NULL);
+}
+static void city_search_cb(lv_event_t *e)
+{
+    (void) e;
+    if (!s_ta_city || s_city_busy) return;
+    const char *city = lv_textarea_get_text(s_ta_city);
+    if (!city || !city[0]) return;
+    nr_strlcpy(s_city_query, city, sizeof(s_city_query));
+    s_city_busy = true;
+    if (xTaskCreate(city_task, "nr_city", 8192, NULL, 4, NULL) != pdPASS) s_city_busy = false;
+}
+
+// ---- load / save (both drive off the schema) -------------------------------
+
+static void load_values(void)
+{
+    nr_config_t c; nr_config_get(&c);
+    char v[NR_CFG_URL_MAX];
+    for (int i = 0; i < NR_SETTINGS_COUNT; i++) {
+        const nrs_field_t *f = &NR_SETTINGS[i];
+        lv_obj_t *w = s_w[i];
+        if (!w) continue;
+        nrs_get(&c, f, v, sizeof(v));
+        switch (f->type) {
+            case NRS_TEXT: case NRS_URL:
+                lv_textarea_set_text(w, v); break;
+            case NRS_PASSWORD:
+                lv_textarea_set_text(w, ""); break;   // never echo stored secrets
+            case NRS_SSID:
+                apply_scan(NULL); break;              // dropdown filled by scan
+            case NRS_BOOL: case NRS_BOOL_INV: case NRS_NIGHTMODE:
+                if (v[0] == '1') lv_obj_add_state(w, LV_STATE_CHECKED); else lv_obj_remove_state(w, LV_STATE_CHECKED);
+                break;
+            case NRS_PCT:
+                lv_slider_set_value(w, atoi(v), LV_ANIM_OFF); break;
+            case NRS_TIME: {
+                int h = 0, m = 0; sscanf(v, "%d:%d", &h, &m);
+                lv_roller_set_selected(w, h, LV_ANIM_OFF);
+                if (s_w2[i]) lv_roller_set_selected(s_w2[i], m / 5, LV_ANIM_OFF);
+                break;
+            }
+            default: break;
+        }
+    }
+    start_scan();
+}
+
+static void save_cb(lv_event_t *e)
+{
+    (void) e;
+    nr_config_t c; nr_config_get(&c);
+    char v[NR_CFG_URL_MAX];
+    for (int i = 0; i < NR_SETTINGS_COUNT; i++) {
+        const nrs_field_t *f = &NR_SETTINGS[i];
+        lv_obj_t *w = s_w[i];
+        if (!w) continue;
+        switch (f->type) {
+            case NRS_TEXT: case NRS_URL: case NRS_PASSWORD:
+                nrs_set(&c, f, lv_textarea_get_text(w)); break;
+            case NRS_SSID: {
+                char ssid[33]; lv_dropdown_get_selected_str(w, ssid, sizeof(ssid));
+                if (ssid[0] && ssid[0] != '(' && strcmp(ssid, "Suche …") != 0) nrs_set(&c, f, ssid);
+                break;
+            }
+            case NRS_BOOL: case NRS_BOOL_INV: case NRS_NIGHTMODE:
+                nrs_set(&c, f, lv_obj_has_state(w, LV_STATE_CHECKED) ? "1" : "0"); break;
+            case NRS_PCT:
+                snprintf(v, sizeof(v), "%d", (int) lv_slider_get_value(w)); nrs_set(&c, f, v); break;
+            case NRS_TIME:
+                snprintf(v, sizeof(v), "%02d:%02d", (int) lv_roller_get_selected(w),
+                         (int) (s_w2[i] ? lv_roller_get_selected(s_w2[i]) * 5 : 0));
+                nrs_set(&c, f, v); break;
+            default: break;
+        }
+    }
+    c.provisioned = c.wifi_ssid[0] && c.backend_url[0] && c.auth_user[0] && c.auth_pass[0];
+    nr_config_set(&c);
+    nr_wifi_reconfigure();
+    nr_weather_refresh_now();
+    nr_ui_show_dashboard();
+}
+
+static void reconnect_cb(lv_event_t *e) { (void) e; nr_wifi_reconfigure(); }
+static void restart_cb(lv_event_t *e) { (void) e; esp_restart(); }
+static void back_cb(lv_event_t *e) { (void) e; nr_ui_show_dashboard(); }
+static void on_show(lv_event_t *e) { (void) e; load_values(); }
+
+// Purge the whole pending-upload backlog after a confirmation.
+static void discard_all_confirm_cb(lv_event_t *e)
+{
+    lv_obj_t *mb = lv_event_get_user_data(e);
+    nr_recorder_discard_all();
+    if (mb) lv_msgbox_close(mb);
+}
+static void discard_all_cb(lv_event_t *e)
+{
+    (void) e;
+    lv_obj_t *mb = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mb, "Alle wartenden verwerfen?");
+    lv_msgbox_add_text(mb, "Alle lokal gespeicherten, noch nicht hochgeladenen Aufnahmen werden gelöscht. Das lässt sich nicht rückgängig machen.");
+    lv_obj_t *ok = lv_msgbox_add_footer_button(mb, "Alle löschen");
+    lv_obj_set_style_bg_color(ok, NRC_DANGER, 0);
+    lv_obj_add_event_cb(ok, discard_all_confirm_cb, LV_EVENT_CLICKED, mb);
+    lv_msgbox_add_close_button(mb);
+}
+
+// Start the config hotspot and show the SSID + URL to enter from a phone.
+static void open_ap_cb(lv_event_t *e)
+{
+    (void) e;
+    nr_wifi_start_ap();
+    char ssid[33]; nr_wifi_ap_ssid(ssid);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Verbinde dein Handy mit dem WLAN\n\n%s\n\nund öffne http://192.168.4.1", ssid);
+    lv_obj_t *mb = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mb, "Einrichtung per Handy");
+    lv_msgbox_add_text(mb, msg);
+    lv_msgbox_add_close_button(mb);
+}
+
+// ---- build -----------------------------------------------------------------
 
 lv_obj_t *ui_settings_create(void)
 {
     s_scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_scr, NRC_BG, 0);
+    // Inherit a Latin-1 font so textareas/dropdown/keyboard render umlauts
+    // (widgets that don't set their own font would fall back to ASCII-only).
+    lv_obj_set_style_text_font(s_scr, &nr_font_16, 0);
     lv_obj_set_flex_flow(s_scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(s_scr, 16, 0);
     lv_obj_set_style_pad_row(s_scr, 8, 0);
     lv_obj_set_scroll_dir(s_scr, LV_DIR_VER);
     lv_obj_add_event_cb(s_scr, on_show, LV_EVENT_SCREEN_LOAD_START, NULL);
 
-    // Header
+    // Header: back + title
     lv_obj_t *head = row(s_scr, "");
     lv_obj_t *back = lv_button_create(head);
     lv_obj_set_size(back, 44, 44);
@@ -346,65 +375,63 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_style_text_color(title, NRC_TX, 0);
     lv_label_set_text(title, "Einstellungen");
 
-    // --- Wi-Fi (all on-device) ---
-    lv_obj_t *sec = section(s_scr, "WLAN");
-    lv_obj_t *wrow = row(sec, "");
-    lv_obj_set_flex_flow(wrow, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(wrow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_t *wl = lv_label_create(wrow);
-    lv_obj_set_style_text_color(wl, NRC_TX2, 0);
-    lv_obj_set_style_text_font(wl, &nr_font_14, 0);
-    lv_label_set_text(wl, "Netzwerk");
-    dd_ssid = lv_dropdown_create(wrow);
-    lv_obj_set_width(dd_ssid, lv_pct(100));
-    lv_dropdown_set_options(dd_ssid, "Suche …");
-    lv_obj_set_style_bg_color(dd_ssid, NRC_CARD2, 0);
-    lv_obj_set_style_border_color(dd_ssid, NRC_BORDER, 0);
-    lv_obj_set_style_text_color(dd_ssid, NRC_TX, 0);
-    action_button(sec, LV_SYMBOL_REFRESH "  Netzwerke suchen", NRC_CARD2, NRC_GOLD, scan_btn_cb);
-    ta_pass = field(sec, "Passwort (leer lassen = unverändert)", "WLAN-Passwort", false);
+    // Generate every field from the shared schema. The schema starts with a
+    // section, which opens the first card.
+    lv_obj_t *card = NULL;
+    for (int i = 0; i < NR_SETTINGS_COUNT && i < MAX_FIELDS; i++) {
+        const nrs_field_t *f = &NR_SETTINGS[i];
+        s_w[i] = s_w2[i] = NULL;
+        switch (f->type) {
+            case NRS_SECTION:
+                card = section(s_scr, f->label);
+                break;
+            case NRS_TEXT: case NRS_URL: case NRS_PASSWORD:
+                s_w[i] = make_textarea(card, f->label, f->hint);
+                if (strcmp(f->id, "city") == 0) {
+                    s_ta_city = s_w[i];
+                    action_button(card, LV_SYMBOL_GPS "  Stadt suchen", NRC_CARD2, NRC_GOLD, city_search_cb);
+                }
+                break;
+            case NRS_SSID: {
+                lv_obj_t *box = row(card, "");
+                lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+                lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+                lv_obj_t *l = lv_label_create(box);
+                lv_obj_set_style_text_color(l, NRC_TX2, 0);
+                lv_obj_set_style_text_font(l, &nr_font_14, 0);
+                lv_label_set_text(l, f->label);
+                s_dd_ssid = lv_dropdown_create(box);
+                lv_obj_set_width(s_dd_ssid, lv_pct(100));
+                lv_dropdown_set_options(s_dd_ssid, "Suche …");
+                lv_obj_set_style_bg_color(s_dd_ssid, NRC_CARD2, 0);
+                lv_obj_set_style_border_color(s_dd_ssid, NRC_BORDER, 0);
+                lv_obj_set_style_text_color(s_dd_ssid, NRC_TX, 0);
+                s_w[i] = s_dd_ssid;
+                action_button(card, LV_SYMBOL_REFRESH "  Netzwerke suchen", NRC_CARD2, NRC_GOLD, scan_btn_cb);
+                break;
+            }
+            case NRS_BOOL: case NRS_BOOL_INV: case NRS_NIGHTMODE:
+                s_w[i] = make_switch(card, f->label);
+                break;
+            case NRS_PCT:
+                s_w[i] = make_slider(card, f->label, f->min, f->max);
+                break;
+            case NRS_TIME: {
+                lv_obj_t *r = row(card, f->label);
+                s_w[i] = make_roller(r, HOURS);
+                s_w2[i] = make_roller(r, MINS5);
+                break;
+            }
+        }
+    }
 
-    // --- Backend ---
-    sec = section(s_scr, "BACKEND");
-    ta_url = field(sec, "Backend-URL", "https://recall.example.com", false);
-    ta_user = field(sec, "Benutzername (Login)", "dein NeoRecall-Login", false);
-    ta_authpass = field(sec, "Passwort (Login)", "leer lassen = unverändert", false);
-    ta_key = field(sec, "… oder API-Key statt Login", "nrk_...", false);
-    sw_tls = add_switch(sec, "TLS-Zertifikat nicht prüfen", false);
-
-    // --- Location ---
-    sec = section(s_scr, "STANDORT");
-    sw_loc_auto = add_switch(sec, "Automatisch (per IP)", true);
-    ta_city = field(sec, "Stadt", "z. B. Berlin", false);
-    action_button(sec, LV_SYMBOL_GPS "  Stadt suchen", NRC_CARD2, NRC_GOLD, city_search_cb);
-
-    // --- Display ---
-    sec = section(s_scr, "ANZEIGE");
-    sw_24h = add_switch(sec, "24-Stunden-Uhr", true);
-    sw_units = add_switch(sec, "Fahrenheit statt Celsius", false);
-    sl_bri_day = add_slider(sec, "Helligkeit Tag", 5, 100, 90);
-    sl_bri_night = add_slider(sec, "Helligkeit Nacht", 0, 100, 12);
-
-    // --- Night mode ---
-    sec = section(s_scr, "NACHTMODUS");
-    sw_night = add_switch(sec, "Nachtmodus aktiv", false);
-    sw_night_off = add_switch(sec, "Display ganz aus (statt dimmen)", false);
-    lv_obj_t *rstart = row(sec, "Beginn");
-    rol_sh = time_roller(rstart, HOURS);
-    rol_sm = time_roller(rstart, MINS5);
-    lv_obj_t *rend = row(sec, "Ende");
-    rol_eh = time_roller(rend, HOURS);
-    rol_em = time_roller(rend, MINS5);
-
-    // --- Software update (OTA) ---
-    sec = section(s_scr, "SOFTWARE-UPDATE (OTA)");
-    sw_ota = add_switch(sec, "Automatische Updates (aus dem NeoRecall-Repo)", true);
-
-    // --- Actions ---
-    sec = section(s_scr, "AKTIONEN");
-    action_button(sec, LV_SYMBOL_SAVE "  Speichern & verbinden", NRC_GOLD, NRC_BG, save_cb);
-    action_button(sec, LV_SYMBOL_WIFI "  Erneut verbinden", NRC_CARD2, NRC_TX, reconnect_cb);
-    action_button(sec, LV_SYMBOL_REFRESH "  Neu starten", NRC_CARD2, NRC_TX2, restart_cb);
+    // Actions
+    card = section(s_scr, "AKTIONEN");
+    action_button(card, LV_SYMBOL_SAVE "  Speichern & verbinden", NRC_GOLD, NRC_BG, save_cb);
+    action_button(card, LV_SYMBOL_WIFI "  Einrichtung per Handy (Hotspot)", NRC_CARD2, NRC_GOLD_HI, open_ap_cb);
+    action_button(card, LV_SYMBOL_WIFI "  Erneut verbinden", NRC_CARD2, NRC_TX, reconnect_cb);
+    action_button(card, LV_SYMBOL_TRASH "  Wartende Aufnahmen verwerfen", NRC_CARD2, NRC_DANGER, discard_all_cb);
+    action_button(card, LV_SYMBOL_REFRESH "  Neu starten", NRC_CARD2, NRC_TX2, restart_cb);
 
     // spacer so the last card clears the keyboard
     lv_obj_t *spacer = lv_obj_create(s_scr);
@@ -412,9 +439,7 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_style_bg_opa(spacer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(spacer, 0, 0);
 
-    // Keyboard: FLOATING so it ignores the screen's flex layout and stays fixed
-    // at the bottom (a non-floating child would be laid out inside the scroll
-    // flow and effectively unusable). Hidden until a text field is focused.
+    // Floating keyboard (stays fixed at the bottom, not in the scroll flow)
     s_kb = lv_keyboard_create(s_scr);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_size(s_kb, lv_pct(100), lv_pct(45));

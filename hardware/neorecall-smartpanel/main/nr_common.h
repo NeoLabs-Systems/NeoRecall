@@ -50,6 +50,7 @@ typedef enum {
     NR_EVT_UPLOAD_CHANGED,     // spool backlog / terminal receipts changed
     NR_EVT_WEATHER_CHANGED,    // fresh weather available
     NR_EVT_CONFIG_CHANGED,     // persisted settings mutated
+    NR_EVT_PORTAL_SAVED,       // user completed setup via the phone captive portal
 } nr_event_id_t;
 
 // Coarse connectivity state shown on the dashboard and used to gate uploads.

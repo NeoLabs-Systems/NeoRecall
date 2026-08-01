@@ -227,9 +227,10 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
             ),
     );
 
-    return Material(
-      type: MaterialType.transparency,
-      child: AmbientBackdrop(
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      resizeToAvoidBottomInset: true,
+      body: AmbientBackdrop(
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) => SingleChildScrollView(

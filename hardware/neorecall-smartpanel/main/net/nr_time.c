@@ -50,6 +50,35 @@ esp_err_t nr_time_init(void)
 
 bool nr_time_is_valid(void) { return s_valid; }
 
+// Days since 1970-01-01 for a proleptic-Gregorian date (m in 1..12). Avoids
+// timegm(), which ESP's newlib does not declare, and the TZ side effects of
+// mktime(). (Howard Hinnant's days_from_civil.)
+static int64_t days_from_civil(int y, unsigned m, unsigned d)
+{
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned) (y - era * 400);
+    unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int64_t) doe - 719468;
+}
+
+void nr_time_seed_from_http_date(const char *http_date)
+{
+    if (s_valid || !http_date) return;   // SNTP is authoritative; only seed once
+    struct tm tm = {0};
+    // RFC 1123, always English/GMT: "Wed, 01 Aug 2026 12:34:56 GMT"
+    if (strptime(http_date, "%a, %d %b %Y %H:%M:%S", &tm) == NULL) return;
+    time_t secs = (time_t) (days_from_civil(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday) * 86400
+                            + tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec);
+    if (secs < 1735689600 /* 2025-01-01 */) return;
+    struct timeval tv = { .tv_sec = secs, .tv_usec = 0 };
+    settimeofday(&tv, NULL);
+    s_valid = true;
+    ESP_LOGI(TAG, "wall clock seeded from HTTP Date header");
+    esp_event_post(NR_EVENT, NR_EVT_TIME_SYNCED, NULL, 0, 0);
+}
+
 int64_t nr_time_monotonic_ms(void) { return esp_timer_get_time() / 1000; }
 
 int64_t nr_time_epoch_ms(void)

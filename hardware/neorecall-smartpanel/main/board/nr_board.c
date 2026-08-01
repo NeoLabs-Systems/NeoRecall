@@ -302,7 +302,7 @@ static esp_err_t lvgl_init(void)
 
     lvgl_port_display_cfg_t disp_cfg = {
         .panel_handle = s_panel,
-        .buffer_size = BRD_LCD_H_RES * 40,     // partial draw buffers (40 lines) in PSRAM
+        .buffer_size = BRD_LCD_H_RES * 160,    // larger partial buffers (160 lines) = smoother scroll
         .double_buffer = true,
         .hres = BRD_LCD_H_RES,
         .vres = BRD_LCD_V_RES,

@@ -223,12 +223,11 @@ class DeviceSessionController {
         _scheduleReconnect();
       }
     });
-    _controlSub = adapter.controlEvents.listen((event) {
-      _controlEvents.add(event);
-      _messages.add(
-        'Device event ${event.type.name} from ${device.displayName}',
-      );
-    });
+    // Control events (button presses, battery pushes, power state) are raw
+    // wearable telemetry, not user-facing warnings — forward them on
+    // controlEvents for callers that care (e.g. battery UI) but never surface
+    // their names as a banner.
+    _controlSub = adapter.controlEvents.listen(_controlEvents.add);
     try {
       await adapter.connect(device);
       _reconnectAttempt = 0;

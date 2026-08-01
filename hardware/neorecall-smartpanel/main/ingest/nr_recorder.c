@@ -25,6 +25,7 @@ static const char *TAG = "nr_rec";
 #define WAV_HEADER       44
 #define READ_SAMPLES     1600                       // 100 ms per read
 #define MIC_ERR_LIMIT    10                         // consecutive read failures -> recover
+#define MAX_SESSION_MS   (12LL * 60 * 60 * 1000)    // auto-pause after 12 h of recording
 
 typedef struct {
     // session
@@ -259,8 +260,39 @@ static void capture_task(void *arg)
 
     int mic_errors = 0;
     bool mic_up = false;
+    bool await_provision = false;
 
     for (;;) {
+        // --- not configured yet: stay idle ---------------------------------
+        // Before setup there is no backend to send to, so recording would just
+        // pile up chunks that show as "N wartend" forever. Hold the mic off and
+        // don't touch the timeline until the user has provisioned the device.
+        if (!nr_config_is_provisioned()) {
+            if (mic_up) { nr_mic_stop(); mic_up = false; }
+            if (r->state != NR_CAP_IDLE) {
+                xSemaphoreTake(s_lock, portMAX_DELAY);
+                r->state = NR_CAP_IDLE;
+                r->level = 0;
+                r->discont_active = false;
+                r->fill_samples = 0;
+                xSemaphoreGive(s_lock);
+                esp_event_post(NR_EVENT, NR_EVT_RECORDING_CHANGED, NULL, 0, 0);
+            }
+            await_provision = true;
+            vTaskDelay(pdMS_TO_TICKS(300));
+            continue;
+        }
+        if (await_provision) {
+            // Just got provisioned: drop the empty placeholder session and open a
+            // fresh one so the timeline starts clean with a correct start time.
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            nr_spool_delete_session(r->session.id);
+            open_new_session(r);
+            r->discont_active = false;
+            xSemaphoreGive(s_lock);
+            await_provision = false;
+        }
+
         bool paused = r->want_paused;
 
         // --- paused: hold, accumulate a user_paused gap ---------------------
@@ -285,7 +317,15 @@ static void capture_task(void *arg)
                 mic_up = true;
                 mic_errors = 0;
                 xSemaphoreTake(s_lock, portMAX_DELAY);
-                end_discontinuity(r);           // closes a pause or fault span
+                // Resuming after the 12 h cap starts a fresh session (reset window);
+                // an ordinary pause just closes its gap.
+                if (r->session.start_monotonic_ms &&
+                    nr_time_monotonic_ms() - r->session.start_monotonic_ms > MAX_SESSION_MS) {
+                    r->discont_active = false;
+                    open_new_session(r);
+                } else {
+                    end_discontinuity(r);       // closes a pause or fault span
+                }
                 r->state = NR_CAP_RECORDING;
                 xSemaphoreGive(s_lock);
                 esp_event_post(NR_EVENT, NR_EVT_RECORDING_CHANGED, NULL, 0, 0);
@@ -330,7 +370,16 @@ static void capture_task(void *arg)
         r->fill_samples += take;
         // emit when we have a full target's worth
         if ((r->fill_samples / SAMPLES_PER_MS) >= r->target_ms) emit_chunk(r, false);
+        bool over_cap = r->session.start_monotonic_ms &&
+                        (nr_time_monotonic_ms() - r->session.start_monotonic_ms > MAX_SESSION_MS);
         xSemaphoreGive(s_lock);
+
+        // Safety cap: auto-pause after 12 h so recording can't run away forever.
+        if (over_cap && !r->want_paused) {
+            ESP_LOGI(TAG, "12 h recording cap reached; auto-pausing");
+            nr_config_set_recording_enabled(false);
+            r->want_paused = true;
+        }
     }
 }
 
@@ -375,4 +424,73 @@ void nr_recorder_get_status(nr_recorder_status_t *out)
     out->elapsed_ms = nr_time_monotonic_ms() - s_rec.session.start_monotonic_ms;
     out->sequence = s_rec.sequence;
     xSemaphoreGive(s_lock);
+}
+
+// Delete this session's local, not-yet-sent chunks. Chunks already in flight or
+// accepted by the backend are left alone (they can't be recalled from here).
+typedef struct { const char *sid; } discard_ctx_t;
+static bool discard_chunk_cb(const nr_chunk_meta_t *m, void *ctx)
+{
+    discard_ctx_t *d = ctx;
+    if (strcmp(m->session_id, d->sid) != 0) return true;
+    if (m->state == NR_CHUNK_UPLOADING || m->state == NR_CHUNK_UPLOADED || m->state == NR_CHUNK_TERMINAL) return true;
+    nr_spool_delete_chunk(m->local_id);
+    return true;
+}
+
+void nr_recorder_discard(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    char sid[NR_UUID_LEN];
+    nr_strlcpy(sid, s_rec.session.id, sizeof(sid));
+    discard_ctx_t d = { .sid = sid };
+    nr_spool_for_each_chunk(discard_chunk_cb, &d);
+    nr_spool_delete_session(sid);
+    s_rec.fill_samples = 0;              // drop the currently-buffered audio too
+    s_rec.first_in_run = true;
+    s_rec.discont_active = false;
+    s_rec.want_paused = true;           // stop capture; nothing more is uploaded
+    open_new_session(&s_rec);           // keep a valid session for when the user resumes
+    xSemaphoreGive(s_lock);
+    nr_config_set_recording_enabled(false);   // persist the pause across reboots
+    ESP_LOGW(TAG, "recording discarded and paused");
+    nr_ingest_kick();
+}
+
+// Delete the entire upload backlog: every spooled session, chunk, and gap. A
+// chunk that is mid-PUT is left alone so we don't yank a file out from under the
+// pump; everything else is purged and a clean session is opened.
+static bool purge_chunk_cb(const nr_chunk_meta_t *m, void *ctx)
+{
+    (void) ctx;
+    if (m->state == NR_CHUNK_UPLOADING) return true;
+    nr_spool_delete_chunk(m->local_id);
+    return true;
+}
+static bool purge_gap_cb(const nr_gap_rec_t *g, void *ctx)
+{
+    (void) ctx;
+    nr_spool_delete_gap(g->id);
+    return true;
+}
+static bool purge_session_cb(const nr_session_rec_t *s, void *ctx)
+{
+    (void) ctx;
+    nr_spool_delete_session(s->id);
+    return true;
+}
+
+void nr_recorder_discard_all(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    nr_spool_for_each_chunk(purge_chunk_cb, NULL);
+    nr_spool_for_each_gap(purge_gap_cb, NULL);
+    nr_spool_for_each_session(purge_session_cb, NULL);
+    s_rec.fill_samples = 0;
+    s_rec.first_in_run = true;
+    s_rec.discont_active = false;
+    open_new_session(&s_rec);           // fresh session, sequence 0
+    xSemaphoreGive(s_lock);
+    ESP_LOGW(TAG, "discarded ALL pending recordings");
+    nr_ingest_kick();
 }

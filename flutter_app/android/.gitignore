@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Committed on purpose: fixed debug-signing key so release APKs built in CI
+# keep a stable signature across builds and can be installed as updates.
+!app/debug.keystore

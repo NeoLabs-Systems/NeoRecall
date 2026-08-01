@@ -34,12 +34,14 @@ static lv_obj_t *s_clock, *s_date, *s_city;
 static lv_obj_t *s_wx_icon, *s_wx_temp, *s_wx_desc, *s_wx_hilo;
 static lv_obj_t *s_rec_dot, *s_rec_text, *s_eq[EQ_BARS];
 static lv_obj_t *s_pause_btn, *s_pause_icon;
+static lv_obj_t *s_discard_btn;
 static lv_obj_t *s_status;
 
 static int64_t s_wake_until_ms;     // tap-to-wake deadline during night mode
 static bool s_night_active;         // currently inside the night window (dim or off)
 static int s_last_min = -1;
 static int s_last_wx_code = -100000;
+static volatile bool s_leave_settings;   // set from the portal-saved event, consumed in tick_cb
 
 // ---- small builders --------------------------------------------------------
 
@@ -160,6 +162,24 @@ static void pause_cb(lv_event_t *e)
 
 static void gear_cb(lv_event_t *e) { (void) e; nr_ui_show_settings(); }
 
+static void discard_confirm_cb(lv_event_t *e)
+{
+    lv_obj_t *mb = lv_event_get_user_data(e);
+    nr_recorder_discard();
+    if (mb) lv_msgbox_close(mb);
+}
+static void discard_cb(lv_event_t *e)
+{
+    (void) e;
+    lv_obj_t *mb = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mb, "Aufnahme verwerfen?");
+    lv_msgbox_add_text(mb, "Die lokale, noch nicht hochgeladene Aufnahme wird gelöscht und die Aufnahme gestoppt.");
+    lv_obj_t *ok = lv_msgbox_add_footer_button(mb, "Verwerfen");
+    lv_obj_set_style_bg_color(ok, NRC_DANGER, 0);
+    lv_obj_add_event_cb(ok, discard_confirm_cb, LV_EVENT_CLICKED, mb);
+    lv_msgbox_add_close_button(mb);
+}
+
 static void dash_gesture_cb(lv_event_t *e)
 {
     (void) e;
@@ -185,6 +205,7 @@ static void build_dashboard(void)
 {
     s_dash = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_dash, NRC_BG, 0);
+    lv_obj_set_style_text_font(s_dash, &nr_font_16, 0);   // Latin-1 default for umlauts
     lv_obj_set_style_bg_grad_color(s_dash, NRC_BG2, 0);
     lv_obj_set_style_bg_grad_dir(s_dash, LV_GRAD_DIR_VER, 0);
     lv_obj_remove_flag(s_dash, LV_OBJ_FLAG_SCROLLABLE);
@@ -278,6 +299,21 @@ static void build_dashboard(void)
     lv_label_set_text(s_pause_icon, LV_SYMBOL_PAUSE);
     lv_obj_center(s_pause_icon);
 
+    // Discard button, bottom-right (only visible while recording)
+    s_discard_btn = lv_button_create(s_dash);
+    lv_obj_set_size(s_discard_btn, 60, 60);
+    lv_obj_align(s_discard_btn, LV_ALIGN_BOTTOM_RIGHT, -22, -20);
+    lv_obj_set_style_radius(s_discard_btn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_discard_btn, NRC_CARD, 0);
+    lv_obj_set_style_border_color(s_discard_btn, NRC_DANGER, 0);
+    lv_obj_set_style_border_width(s_discard_btn, 2, 0);
+    lv_obj_set_style_shadow_width(s_discard_btn, 0, 0);
+    lv_obj_add_event_cb(s_discard_btn, discard_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *dic = mk_label(s_discard_btn, &nr_font_24, NRC_DANGER);
+    lv_label_set_text(dic, LV_SYMBOL_TRASH);
+    lv_obj_center(dic);
+    lv_obj_add_flag(s_discard_btn, LV_OBJ_FLAG_HIDDEN);
+
     // Status bar
     s_status = mk_label(s_dash, &nr_font_14, NRC_TX3);
     lv_label_set_text(s_status, "");
@@ -336,6 +372,8 @@ static void refresh_recording(void)
     lv_label_set_text(s_pause_icon, r.state == NR_CAP_PAUSED ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
     lv_obj_set_style_border_color(s_pause_btn, r.state == NR_CAP_PAUSED ? NRC_GOLD : NRC_ROSE, 0);
     lv_obj_set_style_text_color(s_pause_icon, r.state == NR_CAP_PAUSED ? NRC_GOLD : NRC_ROSE, 0);
+    if (live) lv_obj_remove_flag(s_discard_btn, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(s_discard_btn, LV_OBJ_FLAG_HIDDEN);
 
     // Equalizer: lively when recording, flat when not.
     static const int weight[EQ_BARS] = {40, 70, 100, 85, 100, 65, 45};
@@ -361,6 +399,14 @@ static void refresh_status(void)
     nr_net_state_t net = nr_net_state();
     nr_ingest_status_t ing; nr_ingest_get_status(&ing);
 
+    if (nr_wifi_ap_active()) {
+        char ssid[33]; nr_wifi_ap_ssid(ssid);
+        char line[80];
+        snprintf(line, sizeof(line), LV_SYMBOL_WIFI "  Hotspot: %s → 192.168.4.1", ssid);
+        lv_label_set_text(s_status, line);
+        lv_obj_set_style_text_color(s_status, NRC_GOLD_HI, 0);
+        return;
+    }
     if (!ing.provisioned) {
         lv_label_set_text(s_status, LV_SYMBOL_SETTINGS "  Einrichtung nötig – tippe auf das Zahnrad");
         lv_obj_set_style_text_color(s_status, NRC_GOLD_HI, 0);
@@ -373,7 +419,7 @@ static void refresh_status(void)
         default: net_txt = LV_SYMBOL_WARNING " Offline"; break;
     }
     if (ing.pending_upload > 0)
-        snprintf(line, sizeof(line), "%s   %s %u wartend", net_txt, LV_SYMBOL_UPLOAD, ing.pending_upload);
+        snprintf(line, sizeof(line), "%s   %s %u wartend", net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload);
     else if (net == NR_NET_ONLINE && ing.provisioned)
         snprintf(line, sizeof(line), "%s   %s synchron", net_txt, LV_SYMBOL_OK);
     else
@@ -413,9 +459,24 @@ static void apply_night(void)
     nr_board_set_backlight(c.night_mode == NR_NIGHT_OFF ? 0 : c.brightness_night);
 }
 
+// Posted from the captive portal (other task) when phone setup completes; the
+// actual screen switch must happen on the LVGL task, so just raise a flag here.
+static void on_portal_saved(void *a, esp_event_base_t b, int32_t id, void *d)
+{
+    (void) a; (void) b; (void) id; (void) d;
+    s_leave_settings = true;
+}
+
 static void tick_cb(lv_timer_t *t)
 {
     (void) t;
+    // Setup finished on the phone -> leave the on-device settings screen so the
+    // two views don't disagree about whether configuration is done.
+    if (s_leave_settings) {
+        s_leave_settings = false;
+        if (lv_screen_active() != s_dash) nr_ui_show_dashboard();
+        nr_weather_refresh_now();   // fetch weather now that we're configured
+    }
     if (lv_screen_active() == s_dash) {
         refresh_clock();
         refresh_weather();
@@ -442,12 +503,14 @@ void nr_ui_show_settings(void)
 esp_err_t nr_ui_init(void)
 {
     if (!nr_board_lock(1000)) return ESP_FAIL;
+    lv_obj_set_style_text_font(lv_layer_top(), &nr_font_16, 0);   // umlauts in msgboxes
     build_dashboard();
     lv_screen_load(s_dash);
     lv_timer_create(tick_cb, 200, NULL);
+    esp_event_handler_instance_register(NR_EVENT, NR_EVT_PORTAL_SAVED, on_portal_saved, NULL, NULL);
     apply_night();
     // First boot: nothing is configured yet, so drop the user straight into the
-    // on-device setup screen (Wi-Fi + backend URL + API key).
+    // on-device setup screen (Wi-Fi + backend URL + login).
     if (!nr_config_is_provisioned()) {
         s_settings = ui_settings_create();
         if (s_settings) lv_screen_load(s_settings);

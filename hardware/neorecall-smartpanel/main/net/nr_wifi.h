@@ -30,6 +30,13 @@ bool nr_net_is_online(void);
 // Copy the current IPv4 address string. Returns false when not connected.
 bool nr_wifi_ip(char out[16]);
 
+// Optional config hotspot (SoftAP) + captive portal, so settings can be entered
+// from a phone browser instead of the touchscreen. Toggled on the device.
+esp_err_t nr_wifi_start_ap(void);
+void nr_wifi_stop_ap(void);
+bool nr_wifi_ap_active(void);
+void nr_wifi_ap_ssid(char out[33]);   // stable per-device SSID
+
 #ifdef __cplusplus
 }
 #endif

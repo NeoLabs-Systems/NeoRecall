@@ -170,8 +170,8 @@ void nr_config_get(nr_config_t *out)
 bool nr_config_is_provisioned(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool has_auth = s_cfg.api_key[0] || (s_cfg.auth_user[0] && s_cfg.auth_pass[0]);
-    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] && has_auth;
+    bool ok = s_cfg.provisioned && s_cfg.wifi_ssid[0] && s_cfg.backend_url[0] &&
+              s_cfg.auth_user[0] && s_cfg.auth_pass[0];
     xSemaphoreGive(s_lock);
     return ok;
 }

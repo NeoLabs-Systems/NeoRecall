@@ -8,14 +8,18 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_mac.h"
 
 #include "config/nr_config.h"
 #include "ingest/nr_ingest.h"
+#include "net/nr_portal.h"
 #include "util/nr_util.h"
 
 static const char *TAG = "nr_wifi";
 
 static esp_netif_t *s_sta_netif;
+static esp_netif_t *s_ap_netif;
+static bool s_ap_active;
 static volatile nr_net_state_t s_state = NR_NET_BOOT;
 static int s_backoff_ms = 1000;
 static TimerHandle_t s_retry_timer;
@@ -77,6 +81,7 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
         ESP_LOGI(TAG, "online: %s", s_ip);
         set_state(NR_NET_ONLINE);
         nr_ingest_kick();
+        if (s_ap_active) nr_wifi_stop_ap();   // config succeeded: tear down the hotspot
     }
 }
 
@@ -170,3 +175,50 @@ bool nr_wifi_ip(char out[16])
     nr_strlcpy(out, s_ip, 16);
     return s_state == NR_NET_ONLINE;
 }
+
+// ---- optional config hotspot + captive portal ------------------------------
+
+void nr_wifi_ap_ssid(char out[33])
+{
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    snprintf(out, 33, "NeoRecall-Panel-%02X%02X", mac[4], mac[5]);
+}
+
+esp_err_t nr_wifi_start_ap(void)
+{
+    if (s_ap_active) return ESP_OK;
+    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
+
+    char ssid[33];
+    nr_wifi_ap_ssid(ssid);
+    wifi_config_t ap = {0};
+    nr_strlcpy((char *) ap.ap.ssid, ssid, sizeof(ap.ap.ssid));
+    ap.ap.ssid_len = strlen(ssid);
+    ap.ap.channel = 1;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_OPEN;   // open network -> one-tap join from a phone
+
+    NR_RETURN_ON_ERR(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    NR_RETURN_ON_ERR(esp_wifi_set_config(WIFI_IF_AP, &ap));
+    // The station may have been configured; keep it trying in the background.
+    if (have_ssid()) esp_wifi_connect();
+
+    s_ap_active = true;
+    nr_portal_start();
+    esp_event_post(NR_EVENT, NR_EVT_WIFI_CHANGED, NULL, 0, 0);   // UI shows the portal banner
+    ESP_LOGI(TAG, "config hotspot up: %s (open) -> http://192.168.4.1", ssid);
+    return ESP_OK;
+}
+
+void nr_wifi_stop_ap(void)
+{
+    if (!s_ap_active) return;
+    nr_portal_stop();
+    s_ap_active = false;
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_event_post(NR_EVENT, NR_EVT_WIFI_CHANGED, NULL, 0, 0);
+    ESP_LOGI(TAG, "config hotspot down");
+}
+
+bool nr_wifi_ap_active(void) { return s_ap_active; }

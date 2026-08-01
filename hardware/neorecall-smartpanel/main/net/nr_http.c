@@ -5,9 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <strings.h>
+
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+
+#include "net/nr_time.h"
 
 static const char *TAG = "nr_http";
 
@@ -29,6 +33,13 @@ void nr_http_result_free(nr_http_result_t *r)
 
 static esp_err_t on_event(esp_http_client_event_t *e)
 {
+    // Seed the wall clock from the server's Date header the moment any response
+    // arrives, so the UI shows the time without waiting out a slow SNTP sync.
+    if (e->event_id == HTTP_EVENT_ON_HEADER) {
+        if (e->header_key && strcasecmp(e->header_key, "Date") == 0)
+            nr_time_seed_from_http_date(e->header_value);
+        return ESP_OK;
+    }
     if (e->event_id != HTTP_EVENT_ON_DATA || !e->user_data) return ESP_OK;
     body_acc_t *a = e->user_data;
     if (a->overflow) return ESP_OK;
@@ -50,8 +61,12 @@ static void configure_tls(esp_http_client_config_t *cfg, const char *url, bool i
 {
     if (strncmp(url, "https://", 8) == 0) {
         if (insecure) {
-            cfg->crt_bundle_attach = NULL;      // no CA => esp-tls does not verify
-            cfg->skip_cert_common_name_check = true;
+            // No CA bundle => esp-tls uses MBEDTLS_SSL_VERIFY_NONE (no verification).
+            // Deliberately do NOT set skip_cert_common_name_check: in esp-tls that
+            // flag also clears SNI (mbedtls_ssl_set_hostname(NULL)), and SNI-strict
+            // frontends — e.g. an ECDSA vhost behind a reverse proxy — reject a
+            // no-SNI ClientHello with a fatal handshake_failure alert (-0x7780).
+            cfg->crt_bundle_attach = NULL;
         } else {
             cfg->crt_bundle_attach = esp_crt_bundle_attach;  // Mozilla root store
         }

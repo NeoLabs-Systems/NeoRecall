@@ -10,6 +10,22 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    signingConfigs {
+        getByName("debug") {
+            // Fixed keystore committed to the repo (android/app/debug.keystore)
+            // so every build machine and every CI run signs with the same
+            // key. Without this, Android Gradle Plugin auto-generates a new
+            // random debug key on any machine that lacks
+            // ~/.android/debug.keystore (e.g. every fresh GitHub Actions
+            // runner), so each CI-built APK gets a different signature and
+            // can't be installed as an update over the previous one.
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
