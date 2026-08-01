@@ -12,8 +12,10 @@ const { getDatabase } = require('../../db/database');
 /// break the whole service at require time.
 const SOURCE_TYPES = {
   discord: () => require('./discord_source'),
-  meeting: () => require('./meeting_source'),
   plaud: () => require('./plaud_source'),
+  google_meet: () => require('./google_meet_source'),
+  zoom: () => require('./zoom_source'),
+  microsoft_teams: () => require('./microsoft_teams_source'),
 };
 
 /// Config keys that hold credentials and must never be echoed back to a client.
@@ -79,6 +81,16 @@ const sourcesService = {
   init() {
     try {
       const db = getDatabase();
+      // Legacy browser-bot meeting links are no longer supported.
+      try {
+        const removed = db.prepare("DELETE FROM sources WHERE type = 'meeting'").run();
+        if (removed.changes > 0) {
+          console.log(`[Sources] Removed ${removed.changes} legacy meeting-bot source(s).`);
+        }
+      } catch (cleanupError) {
+        console.error('[Sources] Failed to clean up legacy meeting sources:', cleanupError.message);
+      }
+
       for (const row of db.prepare('SELECT * FROM sources WHERE enabled = 1').all()) {
         let source;
         try {
@@ -144,6 +156,10 @@ const sourcesService = {
     // one: the client never receives secrets back and would otherwise blank them
     // out by round-tripping a redacted config.
     const config = data.config ? { ...existing.config, ...data.config } : existing.config;
+    // Never persist redacted placeholders as real secrets.
+    for (const key of SECRET_CONFIG_KEYS) {
+      if (config[key] === '••••••••') config[key] = existing.config[key];
+    }
     const name = data.name ?? existing.name;
     const enabled = data.enabled !== undefined ? (data.enabled ? 1 : 0) : (existing.enabled ? 1 : 0);
 
@@ -168,6 +184,16 @@ const sourcesService = {
       } catch (_) { /* teardown is best-effort */ }
     }
     db.prepare('DELETE FROM sources WHERE user_id = ? AND id = ?').run(userId, id);
+  },
+
+  async syncNow(userId, id) {
+    const source = this.get(userId, id);
+    const driver = driverFor(source.type);
+    if (!driver || typeof driver.syncNow !== 'function') {
+      throw new Error('This source does not support manual sync.');
+    }
+    const result = await driver.syncNow(source);
+    return { ok: true, ...result };
   },
 };
 

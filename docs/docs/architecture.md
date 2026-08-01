@@ -101,39 +101,24 @@ only when it transfers something or keeps failing.
 
 ## Meeting sources
 
-A meeting link is recorded by a bot that joins the call in a real browser and
-taps the WebRTC audio streams, feeding the same ingest pipeline as any other
-source. Nothing is injected into the page before the bot is admitted, so the
-join is fingerprinted on a clean page.
+Google Meet, Zoom, and Microsoft Teams are each a separate external source.
+Users connect them once from the Sources screen with the platform’s official
+OAuth flow. NeoRecall then polls the platform APIs for **cloud recordings** and
+hands each finished file to the ordinary import pipeline (`importLocalFile`),
+the same path used for PLAUD and manual uploads. Nothing joins the live call,
+so anti-bot join checks do not apply.
 
-Joining as an anonymous guest is the exception, not the rule: Google Meet, Zoom
-and Teams all refuse guests whenever the host restricts a meeting, and no amount
-of browser tuning changes that. The bot therefore joins as a signed-in
-participant, connected once per user rather than configured per meeting.
+The server must be configured with an OAuth application per platform
+(`GOOGLE_MEET_OAUTH_*`, `ZOOM_OAUTH_*`, `MICROSOFT_TEAMS_OAUTH_*`) and a public
+URL for redirect URIs. Platforms without credentials simply appear as
+unavailable in the catalog. Per-user access and refresh tokens live on the
+source row (redacted on read); tokens refresh automatically until the user
+revokes access or reconnects.
 
-That connection step cannot assume anyone has access to the machine NeoRecall
-runs on — in a real deployment (Docker, a remote box) nobody does. So the
-browser that renders the sign-in page runs headless and isolated per user on
-the server, and is never displayed there: its screen is streamed live to the
-user's own browser tab over a WebSocket (`signin_relay.js`, CDP
-`Page.startScreencast`), and the user's clicks and keystrokes are relayed back
-the same way (`Input.dispatch*`). The user is, in effect, looking at and typing
-into their own private browser window the entire time — it just happens to be
-rendered on the server and piped through their device rather than opened as a
-window on it. The WebSocket is authorized by a one-time ticket minted by an
-already-authenticated REST call, since a browser `WebSocket` cannot carry a
-bearer token itself; the ticket is single-use and expires in a minute, so a
-leaked URL is worthless shortly after. NeoRecall never receives the password as
-text — it is typed into the provider's real page inside that stream — and keeps
-only the resulting browser profile under `meeting_profiles/` in the runtime
-home, read afterward for cookie names and hosts only. No per-service API key or
-OAuth application is involved.
-
-Every actual meeting join gets a throwaway clone of that profile, so concurrent
-meetings cannot fight over Chrome's single-instance lock and a crashed bot
-cannot damage the signed-in original. A refused join reports which of two
-situations it was — an anonymous bot the meeting will not accept, or a
-signed-in account that was not invited — because the fixes are different.
+Recordings appear only after the platform has produced a cloud recording
+(Workspace Meet → Drive, Zoom cloud recording, Teams organizer recordings).
+Audio is mixed by the platform; NeoRecall still runs VAD, ASR, and diarization
+on import.
 
 ## Processing pipeline
 

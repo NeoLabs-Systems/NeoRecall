@@ -220,6 +220,10 @@ const plaudSourceService = {
       console.log(`[PlaudSource] Stopped source ${sourceId}`);
     }
   },
+
+  async syncNow(source) {
+    return sweep(source);
+  },
 };
 
 module.exports = plaudSourceService;

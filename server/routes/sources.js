@@ -5,15 +5,18 @@ const { z } = require('zod');
 const sources = require('../services/sources');
 const { requireAuth } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { slidingWindow } = require('../middleware/rate_limit');
+const oauthConnection = require('../services/sources/oauth/connection_service');
+const { isMeetingPlatform } = require('../services/sources/platforms/catalog');
+const { HttpError } = require('../middleware/error_handler');
 
 const router = express.Router();
 
 const pairingService = require('../services/sources/pairing_service');
-const meetingAccounts = require('../services/sources/meeting_bot/meeting_account_service');
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
-// Public endpoint for the JS snippet
+// Public endpoint for the Discord JS snippet
 router.post('/discord/pair', express.json(), (req, res, next) => {
   try {
     const { pairingToken, discordToken } = req.body;
@@ -26,6 +29,36 @@ router.post('/discord/pair', express.json(), (req, res, next) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+// OAuth callback is unauthenticated: the browser is redirected here by the
+// provider without our bearer token. Identity is carried by the signed state.
+router.get(
+  '/oauth/:provider/callback',
+  slidingWindow({ windowMs: 15 * 60_000, limit: 60, key: (req) => req.ip }),
+  asyncRoute(async (req, res) => {
+    const provider = req.params.provider;
+    if (!isMeetingPlatform(provider)) {
+      throw new HttpError(404, 'UNKNOWN_PROVIDER', `Unknown meeting platform: ${provider}`);
+    }
+    try {
+      const result = await oauthConnection.completeAuthorize(req, provider, {
+        code: req.query.code,
+        state: req.query.state,
+        error: req.query.error,
+        errorDescription: req.query.error_description,
+      });
+      res.redirect(result.redirectTo);
+    } catch (error) {
+      const message = error.message || 'Sign-in failed.';
+      const redirectTo = oauthConnection.appReturnUrl(req, {
+        status: 'error',
+        provider,
+        message,
+      });
+      res.redirect(redirectTo);
+    }
+  }),
+);
 
 router.use(requireAuth);
 
@@ -45,27 +78,23 @@ router.get('/discord/pairing/:token/status', (req, res) => {
 // Which source types this build can run, so the client offers only real ones.
 router.get('/types', (req, res) => res.json({ types: sources.availableTypes() }));
 
-// Meeting account: the bots join as a real signed-in participant instead of an
-// anonymous guest, which is what most meetings require. Sign-in happens live,
-// in the user's own browser tab, against an isolated session on the server —
-// no API keys, no access to the server's own machine, and no password ever
-// reaches NeoRecall as text. This route only mints the one-time ticket the
-// client then uses to open the live sign-in socket (see signin_relay.js).
-const signInSchema = z.object({ provider: z.enum(Object.keys(meetingAccounts.PROVIDERS)) });
-
-router.get('/meeting/account', (req, res) => res.json(meetingAccounts.getStatus(req.auth.userId)));
-
-router.post('/meeting/account/sign-in', validate(signInSchema), (req, res) => {
-  try {
-    res.json(meetingAccounts.beginSignIn(req.auth.userId, req.body.provider));
-  } catch (error) {
-    res.status(409).json({ error: error.message });
-  }
+// Meeting platforms available on this install + per-user connection state.
+router.get('/catalog', (req, res) => {
+  res.json(oauthConnection.catalogForUser(req.auth.userId));
 });
 
-router.delete('/meeting/account', asyncRoute(async (req, res) => {
-  res.json(await meetingAccounts.signOut(req.auth.userId));
-}));
+// Start OAuth for a meeting platform. Returns a URL the client opens in a browser.
+router.get(
+  '/oauth/:provider/start',
+  slidingWindow({ windowMs: 15 * 60_000, limit: 30, key: (req) => req.auth?.userId || req.ip }),
+  (req, res, next) => {
+    try {
+      res.json(oauthConnection.beginAuthorize(req, req.auth.userId, req.params.provider));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 const verifySchema = z.object({
   type: z.string().min(1),
@@ -101,6 +130,10 @@ router.get('/', (req, res) => res.json({ sources: sources.list(req.auth.userId) 
 
 router.post('/', validate(createSchema), (req, res, next) => {
   try {
+    // Meeting platforms must be connected via OAuth, not created with a blank config.
+    if (isMeetingPlatform(req.body.type)) {
+      return next(new HttpError(400, 'OAUTH_REQUIRED', 'Connect this platform with OAuth from the Sources screen.'));
+    }
     res.status(201).json(sources.create(req.auth.userId, req.body));
   } catch (error) {
     next(error);
@@ -122,6 +155,10 @@ router.patch('/:id', validate(updateSchema), (req, res, next) => {
     next(error);
   }
 });
+
+router.post('/:id/sync', asyncRoute(async (req, res) => {
+  res.json(await sources.syncNow(req.auth.userId, req.params.id));
+}));
 
 router.delete('/:id', (req, res, next) => {
   try {

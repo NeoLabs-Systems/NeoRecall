@@ -96,14 +96,31 @@ Conversation boundaries expose separate controls for hard and soft silence gaps,
 
 The character ceiling is deliberately set above what `NEORECALL_CONVERSATION_MAXIMUM_MS` can produce, so duration rather than transcript length is what ends a conversation. A lower ceiling would split a long lecture or meeting into several conversations and therefore several memories purely because it ran long. Lowering it to suit a small-context model is supported, but `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` must stay large enough for the sections and memories a full-size input justifies — a completion cut off mid-JSON is indistinguishable from a validation failure.
 
-`NEORECALL_MEETING_JOIN_TIMEOUT_MS` is how long a meeting bot waits in the
-lobby before giving up — a host has to notice the knock and admit it, so the
-default is generous. `NEORECALL_MEETING_LEAVE_GRACE_MS` is how long the bot may
-be absent from a call before the recording is ended, which is what stops it
-recording silence after a meeting is over. `NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS`
-bounds the live, browser-streamed account sign-in session (see Architecture) —
-it exists so a browser tab closed without pressing Finish, or a connection that
-silently drops, cannot hold an isolated per-user browser process open forever.
+## Meeting cloud-recording OAuth
+
+Meeting platforms import cloud recordings through official APIs rather than
+joining live calls. An administrator registers an OAuth app with each provider
+and sets:
+
+| Variable | Purpose |
+|---|---|
+| `NEORECALL_PUBLIC_URL` | Public base URL used to build OAuth redirect URIs |
+| `GOOGLE_MEET_OAUTH_CLIENT_ID` / `GOOGLE_MEET_OAUTH_CLIENT_SECRET` | Google Cloud OAuth client (Meet + Drive Meet scopes) |
+| `ZOOM_OAUTH_CLIENT_ID` / `ZOOM_OAUTH_CLIENT_SECRET` | Zoom OAuth app with `recording:read` and `user:read` |
+| `MICROSOFT_TEAMS_OAUTH_CLIENT_ID` / `MICROSOFT_TEAMS_OAUTH_CLIENT_SECRET` | Entra app for Graph meeting recordings |
+| `MICROSOFT_TEAMS_OAUTH_TENANT` | Entra tenant (`common` by default) |
+
+Register these redirect URIs with each provider:
+
+```text
+{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/google_meet/callback
+{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/zoom/callback
+{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/microsoft_teams/callback
+```
+
+Users connect their own accounts from the Sources screen. Tokens are stored per
+user on the source row and never echoed back by the API. Platforms without
+server credentials appear as unavailable in the catalog.
 
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.

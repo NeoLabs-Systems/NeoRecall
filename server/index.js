@@ -27,9 +27,6 @@ if (!process.env.NEORECALL_ROLE) {
     require('./services/sources').init();
     const config = getConfig();
     const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
-    // WebSocket upgrades happen outside Express's request/response cycle, so
-    // this is wired directly onto the http.Server rather than as a route.
-    require('./services/sources/meeting_bot/signin_relay').attach(server);
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
   }).catch((error) => { logger.error('Server startup failed', { error }); process.exitCode = 1; });
 } else {

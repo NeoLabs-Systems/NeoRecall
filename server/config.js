@@ -216,9 +216,15 @@ function getConfig() {
     schedulerIntervalMs: integer('NEORECALL_SCHEDULER_INTERVAL_MS', 60_000, { min: 1_000 }),
     jobLeaseMs: integer('NEORECALL_JOB_LEASE_MS', 300_000, { min: 10_000 }),
     jobMaxAttempts: integer('NEORECALL_JOB_MAX_ATTEMPTS', 5, { min: 1, max: 100 }),
-    meetingJoinTimeoutMs: integer('NEORECALL_MEETING_JOIN_TIMEOUT_MS', 300_000, { min: 10_000 }),
-    meetingLeaveGraceMs: integer('NEORECALL_MEETING_LEAVE_GRACE_MS', 30_000, { min: 5_000 }),
-    meetingSignInIdleTimeoutMs: integer('NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS', 10 * 60_000, { min: 30_000 }),
+    // Outbound OAuth apps for meeting cloud-recording sources. Empty means the
+    // platform is unavailable on this install until an admin configures it.
+    googleMeetOauthClientId: process.env.GOOGLE_MEET_OAUTH_CLIENT_ID || null,
+    googleMeetOauthClientSecret: process.env.GOOGLE_MEET_OAUTH_CLIENT_SECRET || null,
+    zoomOauthClientId: process.env.ZOOM_OAUTH_CLIENT_ID || null,
+    zoomOauthClientSecret: process.env.ZOOM_OAUTH_CLIENT_SECRET || null,
+    microsoftTeamsOauthClientId: process.env.MICROSOFT_TEAMS_OAUTH_CLIENT_ID || null,
+    microsoftTeamsOauthClientSecret: process.env.MICROSOFT_TEAMS_OAUTH_CLIENT_SECRET || null,
+    microsoftTeamsOauthTenant: process.env.MICROSOFT_TEAMS_OAUTH_TENANT || 'common',
     diagnosticRetentionDays: integer('NEORECALL_DIAGNOSTIC_RETENTION_DAYS', 7, { min: 1, max: 90 }),
     diagnosticMaxEventsPerUser: integer('NEORECALL_DIAGNOSTIC_MAX_EVENTS_PER_USER', 500, { min: 50, max: 10_000 }),
     diagnosticExportMaxEvents: integer('NEORECALL_DIAGNOSTIC_EXPORT_MAX_EVENTS', 250, { min: 10, max: 1_000 }),
