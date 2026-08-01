@@ -14,6 +14,7 @@ on:
     branches: [beta, main]
     paths:
       - hardware/neorecall-smartpanel/**
+      - .github/workflows/build-firmware.yml
   workflow_dispatch:
 
 permissions:
@@ -38,29 +39,40 @@ jobs:
           target: esp32s3
           path: hardware/neorecall-smartpanel
 
+      # esp-idf-ci-action builds inside Docker as root, so the build/ tree is
+      # root-owned. Reclaim it before any host-side step touches the artifacts.
+      - name: Fix build directory ownership
+        run: sudo chown -R "$(id -u):$(id -g)" hardware/neorecall-smartpanel/build
+
       - name: Assemble OTA manifest
         id: manifest
         working-directory: hardware/neorecall-smartpanel/build
         run: |
           set -euo pipefail
           BIN=neorecall_smartpanel.bin
+          test -f "$BIN"
           SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
           # Firmware version comes from the app project version (idf app-desc),
           # falling back to the short commit SHA.
-          VER=$(python -c "import json;print(json.load(open('project_description.json')).get('project_version',''))" 2>/dev/null || true)
+          VER=$(python3 -c "import json;print(json.load(open('project_description.json')).get('project_version',''))" 2>/dev/null || true)
           [ -n "$VER" ] || VER="g${GITHUB_SHA::7}"
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/firmware-latest/${BIN}"
-          cat > manifest.json <<EOF
-          {
-            "version": "${VER}",
-            "sha256": "${SHA}",
-            "url": "${URL}",
-            "commit": "${GITHUB_SHA}",
-            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export VER SHA URL
+          python3 - <<'PY'
+          import json, os, datetime
+          manifest = {
+              "version": os.environ["VER"],
+              "sha256": os.environ["SHA"],
+              "url": os.environ["URL"],
+              "commit": os.environ["GITHUB_SHA"],
+              "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
           }
-          EOF
+          with open("manifest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          print(json.dumps(manifest, indent=2))
+          PY
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
-          cat manifest.json
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
