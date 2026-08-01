@@ -21,6 +21,11 @@
 
 static const char *TAG = "nr_ota";
 
+// Fixed to the NeoRecall repo — not user-configurable. The build-firmware GitHub
+// Action publishes this manifest on the rolling `firmware-latest` release.
+#define NR_OTA_MANIFEST_URL \
+    "https://github.com/NeoLabs-Systems/NeoRecall/releases/download/firmware-latest/manifest.json"
+
 #define CHECK_INTERVAL_MS   (6 * 60 * 60 * 1000)   // every 6 hours
 #define STARTUP_GRACE_MS    60000                  // confirm boot healthy after 60 s
 
@@ -109,14 +114,14 @@ done:
 static void check_once(void)
 {
     nr_config_t c; nr_config_get(&c);
-    if (!c.ota_enabled || !c.ota_url[0] || !nr_net_is_online()) return;
+    if (!c.ota_enabled || !nr_net_is_online()) return;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_status.checking = true;
     xSemaphoreGive(s_lock);
 
     nr_http_result_t res;
-    esp_err_t err = nr_http_get(c.ota_url, false, 15000, &res);
+    esp_err_t err = nr_http_get(NR_OTA_MANIFEST_URL, false, 15000, &res);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_status.checking = false;
     xSemaphoreGive(s_lock);

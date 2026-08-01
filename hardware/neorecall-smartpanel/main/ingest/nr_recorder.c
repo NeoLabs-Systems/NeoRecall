@@ -198,6 +198,12 @@ static bool recover_session_cb(const nr_session_rec_t *rec, void *ctx)
     nr_session_rec_t s = *rec;
     maxseq_ctx_t x = { .max_seq = -1, .sid = s.id };
     nr_spool_for_each_chunk(maxseq_cb, &x);
+    // An empty session that was never declared to the server (no chunks, not
+    // synced) is just reboot churn — drop it instead of littering the backend.
+    if (x.max_seq < 0 && !s.synced) {
+        nr_spool_delete_session(s.id);
+        return true;
+    }
     s.ended = true;
     s.interrupted = true;
     if (x.max_seq >= 0) s.final_sequence = x.max_seq;

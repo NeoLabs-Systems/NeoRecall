@@ -24,7 +24,6 @@ static lv_obj_t *dd_ssid, *ta_pass, *ta_url, *ta_key, *ta_city, *ta_user, *ta_au
 static lv_obj_t *sw_tls, *sw_loc_auto, *sw_24h, *sw_units, *sw_night, *sw_night_off, *sw_ota;
 static lv_obj_t *sl_bri_day, *sl_bri_night;
 static lv_obj_t *rol_sh, *rol_sm, *rol_eh, *rol_em;
-static lv_obj_t *ta_ota_url;
 
 // Wi-Fi scan results, filled by a background task and applied on the LVGL task.
 static char s_scan[20][33];
@@ -119,15 +118,25 @@ static lv_obj_t *time_roller(lv_obj_t *parent, const char *opts)
 
 // ---- events ----------------------------------------------------------------
 
+// Show the keyboard when a field is tapped. Note: we deliberately do NOT hide
+// on DEFOCUSED — tapping a key defocuses the textarea, which would otherwise
+// snap the keyboard shut on every keystroke.
 static void ta_focus_cb(lv_event_t *e)
 {
-    lv_obj_t *ta = lv_event_get_target(e);
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_FOCUSED) {
-        lv_keyboard_set_textarea(s_kb, ta);
-        lv_obj_remove_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_kb);
-    } else if (code == LV_EVENT_DEFOCUSED || code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+    if (code != LV_EVENT_FOCUSED && code != LV_EVENT_CLICKED) return;
+    lv_obj_t *ta = lv_event_get_target(e);
+    lv_keyboard_set_textarea(s_kb, ta);
+    lv_obj_remove_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_kb);
+    lv_obj_scroll_to_view_recursive(ta, LV_ANIM_ON);   // lift the field above the keyboard
+}
+
+// Hide the keyboard only via its own OK (check) / close buttons.
+static void kb_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
         lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(s_kb, NULL);
     }
@@ -216,7 +225,6 @@ static void load_values(void)
     lv_roller_set_selected(rol_sm, (c.night_start_min % 60) / 5, LV_ANIM_OFF);
     lv_roller_set_selected(rol_eh, c.night_end_min / 60, LV_ANIM_OFF);
     lv_roller_set_selected(rol_em, (c.night_end_min % 60) / 5, LV_ANIM_OFF);
-    lv_textarea_set_text(ta_ota_url, c.ota_url);
     if (c.ota_enabled) lv_obj_add_state(sw_ota, LV_STATE_CHECKED); else lv_obj_remove_state(sw_ota, LV_STATE_CHECKED);
     // Show whatever we last found, then refresh in the background.
     apply_scan(NULL);
@@ -256,7 +264,6 @@ static void save_cb(lv_event_t *e)
     c.brightness_night = lv_slider_get_value(sl_bri_night);
     c.night_start_min = lv_roller_get_selected(rol_sh) * 60 + lv_roller_get_selected(rol_sm) * 5;
     c.night_end_min = lv_roller_get_selected(rol_eh) * 60 + lv_roller_get_selected(rol_em) * 5;
-    nr_strlcpy(c.ota_url, lv_textarea_get_text(ta_ota_url), sizeof(c.ota_url));
     c.ota_enabled = lv_obj_has_state(sw_ota, LV_STATE_CHECKED);
     c.provisioned = c.wifi_ssid[0] && c.backend_url[0] &&
                     (c.api_key[0] || (c.auth_user[0] && c.auth_pass[0]));
@@ -267,11 +274,26 @@ static void save_cb(lv_event_t *e)
     nr_ui_show_dashboard();
 }
 
+// City lookup does a blocking HTTPS request, so it must run off the LVGL task
+// (a TLS handshake would overflow the UI task stack — the "Stadt suchen" crash).
+static char s_city_query[96];
+static volatile bool s_city_busy;
+static void city_task(void *arg)
+{
+    (void) arg;
+    nr_geo_from_city(s_city_query);
+    nr_weather_refresh_now();
+    s_city_busy = false;
+    vTaskDelete(NULL);
+}
 static void city_search_cb(lv_event_t *e)
 {
     (void) e;
     const char *city = lv_textarea_get_text(ta_city);
-    if (city && city[0]) { nr_geo_from_city(city); nr_weather_refresh_now(); }
+    if (!city || !city[0] || s_city_busy) return;
+    nr_strlcpy(s_city_query, city, sizeof(s_city_query));
+    s_city_busy = true;
+    if (xTaskCreate(city_task, "nr_city", 8192, NULL, 4, NULL) != pdPASS) s_city_busy = false;
 }
 
 static void reconnect_cb(lv_event_t *e) { (void) e; nr_wifi_reconfigure(); }
@@ -340,13 +362,13 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_style_border_color(dd_ssid, NRC_BORDER, 0);
     lv_obj_set_style_text_color(dd_ssid, NRC_TX, 0);
     action_button(sec, LV_SYMBOL_REFRESH "  Netzwerke suchen", NRC_CARD2, NRC_GOLD, scan_btn_cb);
-    ta_pass = field(sec, "Passwort (leer lassen = unverändert)", "WLAN-Passwort", true);
+    ta_pass = field(sec, "Passwort (leer lassen = unverändert)", "WLAN-Passwort", false);
 
     // --- Backend ---
     sec = section(s_scr, "BACKEND");
     ta_url = field(sec, "Backend-URL", "https://recall.example.com", false);
     ta_user = field(sec, "Benutzername (Login)", "dein NeoRecall-Login", false);
-    ta_authpass = field(sec, "Passwort (Login)", "leer lassen = unverändert", true);
+    ta_authpass = field(sec, "Passwort (Login)", "leer lassen = unverändert", false);
     ta_key = field(sec, "… oder API-Key statt Login", "nrk_...", false);
     sw_tls = add_switch(sec, "TLS-Zertifikat nicht prüfen", false);
 
@@ -376,8 +398,7 @@ lv_obj_t *ui_settings_create(void)
 
     // --- Software update (OTA) ---
     sec = section(s_scr, "SOFTWARE-UPDATE (OTA)");
-    sw_ota = add_switch(sec, "Automatische Updates", true);
-    ta_ota_url = field(sec, "Update-Manifest-URL", "https://github.com/…/firmware-latest/manifest.json", false);
+    sw_ota = add_switch(sec, "Automatische Updates (aus dem NeoRecall-Repo)", true);
 
     // --- Actions ---
     sec = section(s_scr, "AKTIONEN");
@@ -391,10 +412,16 @@ lv_obj_t *ui_settings_create(void)
     lv_obj_set_style_bg_opa(spacer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(spacer, 0, 0);
 
-    // Keyboard (hidden until a text field is focused)
+    // Keyboard: FLOATING so it ignores the screen's flex layout and stays fixed
+    // at the bottom (a non-floating child would be laid out inside the scroll
+    // flow and effectively unusable). Hidden until a text field is focused.
     s_kb = lv_keyboard_create(s_scr);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(s_kb, lv_pct(100), lv_pct(45));
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_keyboard_set_textarea(s_kb, NULL);
+    lv_obj_add_event_cb(s_kb, kb_cb, LV_EVENT_ALL, NULL);
 
     load_values();
     return s_scr;

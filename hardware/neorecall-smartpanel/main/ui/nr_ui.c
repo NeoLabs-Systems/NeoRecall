@@ -36,8 +36,8 @@ static lv_obj_t *s_rec_dot, *s_rec_text, *s_eq[EQ_BARS];
 static lv_obj_t *s_pause_btn, *s_pause_icon;
 static lv_obj_t *s_status;
 
-static int64_t s_wake_until_ms;     // night-off tap-to-wake deadline
-static bool s_night_dark;           // currently blanked by the schedule
+static int64_t s_wake_until_ms;     // tap-to-wake deadline during night mode
+static bool s_night_active;         // currently inside the night window (dim or off)
 static int s_last_min = -1;
 static int s_last_wx_code = -100000;
 
@@ -167,11 +167,12 @@ static void dash_gesture_cb(lv_event_t *e)
     if (d == LV_DIR_TOP) nr_ui_show_settings();
 }
 
-// Any touch wakes the panel during a night-off period.
+// A touch wakes the panel to full brightness for a few seconds during night mode
+// — whether it is dimmed or fully off.
 static void wake_cb(lv_event_t *e)
 {
     (void) e;
-    if (s_night_dark) {
+    if (s_night_active) {
         nr_config_t c; nr_config_get(&c);
         s_wake_until_ms = nr_time_monotonic_ms() + (int64_t) c.wake_seconds * 1000;
         nr_board_set_backlight(c.brightness_day);
@@ -344,7 +345,8 @@ static void refresh_recording(void)
         int h = 6;
         if (live) {
             float wob = 0.55f + 0.45f * ((float) ((phase * (i + 3)) % 7) / 6.0f);
-            h = 6 + (int) (r.level * weight[i] * 0.34f * wob);
+            // sqrt makes quiet room sound clearly visible instead of a flat line.
+            h = 6 + (int) (sqrtf(r.level) * weight[i] * 0.42f * wob);
             if (h > 40) h = 40;
         }
         lv_obj_set_height(s_eq[i], h);
@@ -398,19 +400,17 @@ static void apply_night(void)
     bool have = nr_time_local(&tm);
     int mod = have ? tm.tm_hour * 60 + tm.tm_min : -1;
     bool night = have && in_night_window(&c, mod);
+    s_night_active = night;
 
-    if (night && s_wake_until_ms && nr_time_monotonic_ms() < s_wake_until_ms) {
-        s_night_dark = false;                 // temporarily awake after a tap
+    if (!night) { s_wake_until_ms = 0; nr_board_set_backlight(c.brightness_day); return; }
+
+    // Inside the night window: a recent tap keeps full brightness briefly.
+    if (s_wake_until_ms && nr_time_monotonic_ms() < s_wake_until_ms) {
+        nr_board_set_backlight(c.brightness_day);
         return;
     }
     s_wake_until_ms = 0;
-    if (night) {
-        s_night_dark = (c.night_mode == NR_NIGHT_OFF);
-        nr_board_set_backlight(c.night_mode == NR_NIGHT_OFF ? 0 : c.brightness_night);
-    } else {
-        s_night_dark = false;
-        nr_board_set_backlight(c.brightness_day);
-    }
+    nr_board_set_backlight(c.night_mode == NR_NIGHT_OFF ? 0 : c.brightness_night);
 }
 
 static void tick_cb(lv_timer_t *t)
@@ -423,7 +423,7 @@ static void tick_cb(lv_timer_t *t)
         refresh_status();
     }
     static int night_div;
-    if (++night_div >= 25) { night_div = 0; apply_night(); }   // ~ every 5 s
+    if (++night_div >= 5) { night_div = 0; apply_night(); }   // ~ every 1 s (snappy wake)
 }
 
 // ---- navigation ------------------------------------------------------------

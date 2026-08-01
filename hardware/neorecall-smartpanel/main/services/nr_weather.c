@@ -143,7 +143,9 @@ esp_err_t nr_weather_init(void)
     s_lock = xSemaphoreCreateMutex();
     s_wake = xSemaphoreCreateBinary();
     if (!s_lock || !s_wake) return ESP_ERR_NO_MEM;
-    if (xTaskCreatePinnedToCore(weather_task, "nr_weather", 6144, NULL, 4, NULL, tskNO_AFFINITY) != pdPASS)
+    // 8 KB: this task does TLS (ipwho.is geolocation + Open-Meteo) which needs
+    // a generous stack; too small silently fails the handshake ("loading" forever).
+    if (xTaskCreatePinnedToCore(weather_task, "nr_weather", 8192, NULL, 4, NULL, tskNO_AFFINITY) != pdPASS)
         return ESP_FAIL;
     return ESP_OK;
 }

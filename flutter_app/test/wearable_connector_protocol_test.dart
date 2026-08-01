@@ -167,6 +167,33 @@ void main() {
     },
   );
 
+  group('HeyPocket capture time', () {
+    // A synced recording that lands on the wrong day is indistinguishable from
+    // one that never synced: the user looks where they recorded and finds
+    // nothing. The time is in the file id, not in the listing date.
+    test('comes from the file id, not just the day', () {
+      const file = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731180000');
+      final captured = file.capturedAt!;
+      expect(captured.isUtc, isTrue);
+      expect(captured, DateTime(2026, 7, 31, 18).toUtc());
+    });
+
+    test('two recordings from one day do not collapse onto one instant', () {
+      const morning = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731080000');
+      const evening = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731203000');
+      expect(morning.capturedAt, isNot(evening.capturedAt));
+      expect(
+        evening.capturedAt!.difference(morning.capturedAt!),
+        const Duration(hours: 12, minutes: 30),
+      );
+    });
+
+    test('a file id without a timestamp still falls back to its day', () {
+      const file = HeyPocketStoredFile(date: '2026-07-31', fileId: '0007');
+      expect(file.capturedAt, DateTime.tryParse('2026-07-31')?.toUtc());
+    });
+  });
+
   test('HeyPocket readBatteryLevel round-trips APP&BAT/MCU&BAT', () async {
     final transport = _FakeWearableTransport();
     final connector = HeyPocketConnector(

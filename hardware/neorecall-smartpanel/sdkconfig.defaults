@@ -30,6 +30,9 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 # --- FreeRTOS / system ------------------------------------------------------
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+# Wi-Fi/lwip run callbacks in the FreeRTOS timer daemon; the 2 KB default
+# overflows during scan/connect state changes.
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_LWIP_MAX_SOCKETS=16
 

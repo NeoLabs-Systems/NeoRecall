@@ -17,7 +17,7 @@
 
 static const char *TAG = "nr_mic";
 
-#define ES7210_MIC_GAIN 0x0A   // PGA gain code (~+30 dB); tune for the room
+#define ES7210_MIC_GAIN 0x0E   // PGA gain code (max, ~+37.5 dB) for room pickup
 #define STEREO_SCRATCH  512    // frames per I2S read
 
 static i2s_chan_handle_t s_rx;

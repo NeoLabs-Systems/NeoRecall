@@ -15,6 +15,21 @@ function migrate(database = getDatabase()) {
   )`);
   const migrationsPath = path.join(__dirname, 'migrations');
   const files = fs.readdirSync(migrationsPath).filter((name) => /^\d{3}_.+\.js$/.test(name)).sort();
+  // Applied migrations are keyed by version, so two files sharing a number make
+  // the second one unreachable: the first is recorded as that version and the
+  // second is skipped forever, silently, on every install. Refuse to start
+  // instead of running a partial schema.
+  const seen = new Map();
+  for (const filename of files) {
+    const version = Number(filename.slice(0, 3));
+    if (seen.has(version)) {
+      throw new Error(
+        `Duplicate migration version ${version}: ${seen.get(version)} and ${filename}. `
+        + 'Renumber one of them; a shared version silently skips the second.',
+      );
+    }
+    seen.set(version, filename);
+  }
   for (const filename of files) {
     const version = Number(filename.slice(0, 3));
     if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) continue;
