@@ -34,7 +34,8 @@ static const char HEAD[] =
 ".w{max-width:480px;margin:0 auto}.logo{display:flex;align-items:center;gap:12px;margin-bottom:14px}"
 ".ring{width:32px;height:32px;border-radius:9px;background:#151922;position:relative}"
 ".ring:after{content:'';position:absolute;inset:6px;border:3px solid var(--gold);border-radius:50%}"
-".ring:before{content:'';position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3px 0 0 -3px;"
+/* Even 8px + -4px margin keeps the rose center on whole pixels (7px/-3.5 was off). */
+".ring:before{content:'';position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;"
 "background:var(--rose);border-radius:50%;z-index:2}"
 "h1{font-size:19px;margin:0;letter-spacing:-.4px}"
 ".sec{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.2px;margin:20px 0 8px 4px}"
