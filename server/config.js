@@ -199,6 +199,14 @@ function getConfig() {
     // material already justified, where including it costs nothing extra.
     minAiAudioMs: integer('NEORECALL_MIN_AI_AUDIO_MS', 60_000, { min: 0 }),
     minNewMaterialChars: integer('NEORECALL_MIN_NEW_MATERIAL_CHARS', 1500, { min: 1 }),
+    // How substantial a conversation section must be before it may become an
+    // episodic memory card. Below either floor the section still gets a title
+    // and summary on the timeline; durable one-liners belong in mini-memories
+    // when they appear inside a larger worthy occasion, not as their own memory.
+    // The model is instructed the same way; these floors enforce it when the
+    // model over-promotes brief exchanges.
+    minMemoryEvidenceMs: integer('NEORECALL_MIN_MEMORY_EVIDENCE_MS', 120_000, { min: 0 }),
+    minMemoryEvidenceChars: integer('NEORECALL_MIN_MEMORY_EVIDENCE_CHARS', 400, { min: 0 }),
     maxConsolidationInputChars: integer('NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS', 250_000, { min: 1000 }),
     // The character limit alone does not bound the *output*: many short
     // conversations produce a section and a memory each, and a completion that
@@ -216,15 +224,12 @@ function getConfig() {
     schedulerIntervalMs: integer('NEORECALL_SCHEDULER_INTERVAL_MS', 60_000, { min: 1_000 }),
     jobLeaseMs: integer('NEORECALL_JOB_LEASE_MS', 300_000, { min: 10_000 }),
     jobMaxAttempts: integer('NEORECALL_JOB_MAX_ATTEMPTS', 5, { min: 1, max: 100 }),
-    // Outbound OAuth apps for meeting cloud-recording sources. Empty means the
-    // platform is unavailable on this install until an admin configures it.
-    googleMeetOauthClientId: process.env.GOOGLE_MEET_OAUTH_CLIENT_ID || null,
-    googleMeetOauthClientSecret: process.env.GOOGLE_MEET_OAUTH_CLIENT_SECRET || null,
-    zoomOauthClientId: process.env.ZOOM_OAUTH_CLIENT_ID || null,
-    zoomOauthClientSecret: process.env.ZOOM_OAUTH_CLIENT_SECRET || null,
-    microsoftTeamsOauthClientId: process.env.MICROSOFT_TEAMS_OAUTH_CLIENT_ID || null,
-    microsoftTeamsOauthClientSecret: process.env.MICROSOFT_TEAMS_OAUTH_CLIENT_SECRET || null,
-    microsoftTeamsOauthTenant: process.env.MICROSOFT_TEAMS_OAUTH_TENANT || 'common',
+    // Live meeting bot (Playwright joins Meet / Zoom / Teams as a notetaker).
+    // Per-user account sign-in is stored as a browser profile; no admin OAuth
+    // app registration is required for these platforms.
+    meetingJoinTimeoutMs: integer('NEORECALL_MEETING_JOIN_TIMEOUT_MS', 300_000, { min: 10_000 }),
+    meetingLeaveGraceMs: integer('NEORECALL_MEETING_LEAVE_GRACE_MS', 30_000, { min: 5_000 }),
+    meetingSignInIdleTimeoutMs: integer('NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS', 10 * 60_000, { min: 30_000 }),
     diagnosticRetentionDays: integer('NEORECALL_DIAGNOSTIC_RETENTION_DAYS', 7, { min: 1, max: 90 }),
     diagnosticMaxEventsPerUser: integer('NEORECALL_DIAGNOSTIC_MAX_EVENTS_PER_USER', 500, { min: 50, max: 10_000 }),
     diagnosticExportMaxEvents: integer('NEORECALL_DIAGNOSTIC_EXPORT_MAX_EVENTS', 250, { min: 10, max: 1_000 }),

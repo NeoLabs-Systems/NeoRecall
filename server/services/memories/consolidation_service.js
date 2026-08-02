@@ -167,6 +167,71 @@ function normalizeIdentity(value) {
   return value.normalize('NFKC').trim().toLocaleLowerCase('en-US').replace(/\s+/g, ' ');
 }
 
+function segmentEvidenceStats(conversations) {
+  const stats = new Map();
+  for (const conversation of conversations) {
+    for (const segment of conversation.segments) {
+      stats.set(segment.id, {
+        durationMs: Math.max(0, Date.parse(segment.ended_at) - Date.parse(segment.started_at)),
+        characters: String(segment.text || '').length,
+      });
+    }
+  }
+  return stats;
+}
+
+function evidenceForSegmentIds(segmentIds, stats) {
+  let durationMs = 0;
+  let characters = 0;
+  for (const id of segmentIds) {
+    const row = stats.get(id);
+    if (!row) continue;
+    durationMs += row.durationMs;
+    characters += row.characters;
+  }
+  return { durationMs, characters };
+}
+
+/// Demote thin conversation sections the model over-promoted to memory-worthy.
+///
+/// Brief exchanges still get a title and summary on the timeline; they must not
+/// become episodic memory cards. Atomic facts from short speech are what
+/// mini-memories are for — and those only attach under a worthy parent memory.
+function applyMemoryWorthinessFloors(output, conversations, floors = processingSettings.get()) {
+  const minMs = Number(floors.minMemoryEvidenceMs ?? 0);
+  const minChars = Number(floors.minMemoryEvidenceChars ?? 0);
+  if (minMs <= 0 && minChars <= 0) return output;
+
+  const stats = segmentEvidenceStats(conversations);
+  for (const section of output.conversationSections) {
+    if (!section.memoryWorthy) continue;
+    const evidence = evidenceForSegmentIds(section.sourceSegmentIds, stats);
+    if (evidence.durationMs < minMs || evidence.characters < minChars) {
+      section.memoryWorthy = false;
+    }
+  }
+
+  const worthySegmentIds = new Set(output.conversationSections
+    .filter((section) => section.memoryWorthy)
+    .flatMap((section) => section.sourceSegmentIds));
+
+  output.memories = (output.memories || []).filter((memory) => (
+    memory.sourceSegmentIds.length > 0
+    && memory.sourceSegmentIds.every((id) => worthySegmentIds.has(id))
+  )).map((memory) => ({
+    ...memory,
+    miniMemories: (memory.miniMemories || []).filter((mini) => (
+      mini.sourceSegmentIds.length > 0
+      && mini.sourceSegmentIds.every((id) => worthySegmentIds.has(id))
+    )),
+  }));
+
+  if (!output.conversationSections.some((section) => section.memoryWorthy)) {
+    output.dailySummary = null;
+  }
+  return output;
+}
+
 function validateReferences(output, conversations) {
   const segmentIds = new Set(conversations.flatMap((conversation) => conversation.segments.map((segment) => segment.id)));
   refinement.validateConversationSections(output.conversationSections, conversations);
@@ -199,6 +264,7 @@ function anchorMemoryRanges(output, conversations) {
 }
 
 function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map()) {
+  applyMemoryWorthinessFloors(output, conversations);
   validateReferences(output, conversations);
   anchorMemoryRanges(output, conversations);
   const db = getDatabase();
@@ -360,6 +426,7 @@ function latest(userId) {
 }
 
 module.exports = {
-  eligibility, request, execute, latest, validateReferences, anchorMemoryRanges, localDate,
+  eligibility, request, execute, latest, validateReferences, applyMemoryWorthinessFloors,
+  anchorMemoryRanges, localDate,
   recordValidationFailure, buildCandidates, VALIDATION_FAILURE_CODES,
 };

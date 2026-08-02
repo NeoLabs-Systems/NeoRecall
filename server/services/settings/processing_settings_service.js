@@ -30,6 +30,8 @@ const schema = z.object({
   conversationPreviewFullCharacters: z.number().int().min(1).max(2_000_000).optional(),
   minAiAudioMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
   minNewMaterialChars: z.number().int().min(1).max(1_000_000).optional(),
+  minMemoryEvidenceMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
+  minMemoryEvidenceChars: z.number().int().min(0).max(1_000_000).optional(),
   maxConsolidationInputChars: z.number().int().min(1_000).max(2_000_000).optional(),
   maxConsolidationConversations: z.number().int().min(1).max(200).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),

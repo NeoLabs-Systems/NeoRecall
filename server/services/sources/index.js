@@ -12,14 +12,16 @@ const { getDatabase } = require('../../db/database');
 /// break the whole service at require time.
 const SOURCE_TYPES = {
   discord: () => require('./discord_source'),
+  meeting: () => require('./meeting_source'),
   plaud: () => require('./plaud_source'),
-  google_meet: () => require('./google_meet_source'),
-  zoom: () => require('./zoom_source'),
-  microsoft_teams: () => require('./microsoft_teams_source'),
 };
 
 /// Config keys that hold credentials and must never be echoed back to a client.
 const SECRET_CONFIG_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'password', 'apiKey']);
+
+/// Cloud-recording OAuth platforms were replaced by live meeting-bot joins.
+/// Rows left over from that period cannot start; drop them on boot.
+const RETIRED_CLOUD_TYPES = Object.freeze(['google_meet', 'zoom', 'microsoft_teams']);
 
 function driverFor(type) {
   const load = SOURCE_TYPES[type];
@@ -81,14 +83,14 @@ const sourcesService = {
   init() {
     try {
       const db = getDatabase();
-      // Legacy browser-bot meeting links are no longer supported.
       try {
-        const removed = db.prepare("DELETE FROM sources WHERE type = 'meeting'").run();
+        const placeholders = RETIRED_CLOUD_TYPES.map(() => '?').join(',');
+        const removed = db.prepare(`DELETE FROM sources WHERE type IN (${placeholders})`).run(...RETIRED_CLOUD_TYPES);
         if (removed.changes > 0) {
-          console.log(`[Sources] Removed ${removed.changes} legacy meeting-bot source(s).`);
+          console.log(`[Sources] Removed ${removed.changes} retired cloud-recording source(s); meetings now join live as a bot.`);
         }
       } catch (cleanupError) {
-        console.error('[Sources] Failed to clean up legacy meeting sources:', cleanupError.message);
+        console.error('[Sources] Failed to clean up retired cloud sources:', cleanupError.message);
       }
 
       for (const row of db.prepare('SELECT * FROM sources WHERE enabled = 1').all()) {
@@ -131,10 +133,21 @@ const sourcesService = {
       throw new Error(`Unknown source type: ${data.type}`);
     }
 
-    // Enforce one source per platform per user
-    const existingCount = db.prepare('SELECT COUNT(*) as count FROM sources WHERE user_id = ? AND type = ?').get(userId, data.type);
-    if (existingCount.count > 0) {
-      throw new Error(`A source of type ${data.type} is already configured. You can only have one per platform.`);
+    // Discord and PLAUD are long-lived one-per-user connectors. Meeting links
+    // are one-shot join jobs (retired when the call ends), so multiple may exist
+    // only as a single active link at a time — still one row of type meeting.
+    if (data.type !== 'meeting') {
+      const existingCount = db.prepare('SELECT COUNT(*) as count FROM sources WHERE user_id = ? AND type = ?').get(userId, data.type);
+      if (existingCount.count > 0) {
+        throw new Error(`A source of type ${data.type} is already configured. You can only have one per platform.`);
+      }
+    } else {
+      const activeMeeting = db.prepare("SELECT id FROM sources WHERE user_id = ? AND type = 'meeting' AND enabled = 1").get(userId);
+      if (activeMeeting) {
+        throw new Error('A meeting bot is already joining or recording. Wait for it to finish or disconnect it first.');
+      }
+      // Drop any leftover disabled meeting rows so the UI stays clean.
+      db.prepare("DELETE FROM sources WHERE user_id = ? AND type = 'meeting'").run(userId);
     }
 
     const id = crypto.randomUUID();

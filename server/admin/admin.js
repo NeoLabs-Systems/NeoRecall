@@ -87,6 +87,8 @@ const settingLabels = {
   conversationMaximumMs: 'Maximum conversation duration (ms)',
   conversationMaximumCharacters: 'Maximum conversation characters',
   minNewMaterialChars: 'Minimum new characters',
+  minMemoryEvidenceMs: 'Minimum memory evidence (ms)',
+  minMemoryEvidenceChars: 'Minimum memory evidence characters',
   maxConsolidationInputChars: 'Maximum consolidation characters',
 };
 

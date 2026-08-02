@@ -99,26 +99,23 @@ share a single policy. Repeated failures back off instead of hammering a device
 that is out of range or busy, and an unattended poll stays silent — it reports
 only when it transfers something or keeps failing.
 
-## Meeting sources
+## Live capture sources
 
-Google Meet, Zoom, and Microsoft Teams are each a separate external source.
-Users connect them once from the Sources screen with the platform’s official
-OAuth flow. NeoRecall then polls the platform APIs for **cloud recordings** and
-hands each finished file to the ordinary import pipeline (`importLocalFile`),
-the same path used for PLAUD and manual uploads. Nothing joins the live call,
-so anti-bot join checks do not apply.
+Discord voice and Google Meet / Zoom / Microsoft Teams share one product
+surface: a **live notetaker bot** that joins while the call is happening and
+streams audio into the ordinary ingest pipeline. There is no admin OAuth app
+per platform and no wait for cloud recordings after the meeting ends.
 
-The server must be configured with an OAuth application per platform
-(`GOOGLE_MEET_OAUTH_*`, `ZOOM_OAUTH_*`, `MICROSOFT_TEAMS_OAUTH_*`) and a public
-URL for redirect URIs. Platforms without credentials simply appear as
-unavailable in the catalog. Per-user access and refresh tokens live on the
-source row (redacted on read); tokens refresh automatically until the user
-revokes access or reconnects.
+- **Discord** — each user pastes their own bot token and trigger usernames.
+  When a listed person joins a voice channel, the bot joins and records every
+  speaker until they leave.
+- **Meetings** — each user pastes a Meet, Zoom, or Teams link. Playwright
+  drives a real Chrome session that joins as a notetaker and captures tab
+  audio as PCM chunks. Optional per-user account sign-in (live browser relay)
+  stores an isolated browser profile so the bot is admitted as a real guest
+  rather than turned away as anonymous. No password is stored as text.
 
-Recordings appear only after the platform has produced a cloud recording
-(Workspace Meet → Drive, Zoom cloud recording, Teams organizer recordings).
-Audio is mixed by the platform; NeoRecall still runs VAD, ASR, and diarization
-on import.
+PLAUD remains a separate import connector for finished wearable files.
 
 ## Processing pipeline
 

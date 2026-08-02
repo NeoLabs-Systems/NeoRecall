@@ -35,6 +35,8 @@ Because cost is per request rather than per conversation, the floor gates what m
 
 `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` is the environment-enforced interval floor; a user can request a longer interval but never a shorter one. It defaults to five minutes so a finished conversation becomes a memory while it is still recent. `NEORECALL_MIN_NEW_MATERIAL_CHARS` prevents calls for trivial new material, and `NEORECALL_MAX_CONSOLIDATION_LATENCY_MS` bounds how long material may wait below that threshold before it is consolidated anyway — without it, a short conversation could stay a transcript indefinitely. Neither of those overrides the audio floor.
 
+`NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are how substantial a conversation section must be before it may become an episodic memory card (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary on the timeline, but it is not memory-worthy: brief exchanges and one-liner logistics do not become their own memory cards. Atomic facts and tasks belong in mini-memories under a larger worthy occasion. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
+
 A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. The retry exists because measurement demanded it: against a live model, two of seven real consolidation requests failed on the first attempt for transient reasons, and without a retry each one costs a paid request and postpones every memory to the next scheduler tick. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter.
 
 `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` provides a hard completion budget for that one request. Conversation titles, summaries, and topic arrays are also schema-bounded, while redundant model-generated timestamps and conversation IDs are omitted and derived from cited segments on the server.
@@ -96,31 +98,20 @@ Conversation boundaries expose separate controls for hard and soft silence gaps,
 
 The character ceiling is deliberately set above what `NEORECALL_CONVERSATION_MAXIMUM_MS` can produce, so duration rather than transcript length is what ends a conversation. A lower ceiling would split a long lecture or meeting into several conversations and therefore several memories purely because it ran long. Lowering it to suit a small-context model is supported, but `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` must stay large enough for the sections and memories a full-size input justifies — a completion cut off mid-JSON is indistinguishable from a validation failure.
 
-## Meeting cloud-recording OAuth
+## Live meeting bot
 
-Meeting platforms import cloud recordings through official APIs rather than
-joining live calls. An administrator registers an OAuth app with each provider
-and sets:
+Meet / Zoom / Teams joins use Playwright + Chrome on the NeoRecall host. Users
+configure everything from the Sources screen (meeting link + optional account
+sign-in); no admin OAuth client registration is required.
 
 | Variable | Purpose |
 |---|---|
-| `NEORECALL_PUBLIC_URL` | Public base URL used to build OAuth redirect URIs |
-| `GOOGLE_MEET_OAUTH_CLIENT_ID` / `GOOGLE_MEET_OAUTH_CLIENT_SECRET` | Google Cloud OAuth client (Meet + Drive Meet scopes) |
-| `ZOOM_OAUTH_CLIENT_ID` / `ZOOM_OAUTH_CLIENT_SECRET` | Zoom OAuth app with `recording:read` and `user:read` |
-| `MICROSOFT_TEAMS_OAUTH_CLIENT_ID` / `MICROSOFT_TEAMS_OAUTH_CLIENT_SECRET` | Entra app for Graph meeting recordings |
-| `MICROSOFT_TEAMS_OAUTH_TENANT` | Entra tenant (`common` by default) |
+| `NEORECALL_MEETING_JOIN_TIMEOUT_MS` | How long the bot may wait in the lobby before giving up (default 5 minutes) |
+| `NEORECALL_MEETING_LEAVE_GRACE_MS` | Quiet period after the call ends before tearing down capture (default 30 seconds) |
+| `NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS` | Idle timeout for the live per-user account sign-in relay (default 10 minutes) |
 
-Register these redirect URIs with each provider:
-
-```text
-{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/google_meet/callback
-{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/zoom/callback
-{NEORECALL_PUBLIC_URL}/api/v1/sources/oauth/microsoft_teams/callback
-```
-
-Users connect their own accounts from the Sources screen. Tokens are stored per
-user on the source row and never echoed back by the API. Platforms without
-server credentials appear as unavailable in the catalog.
+Install Chrome for Playwright (`npx playwright install chrome`) so Google Meet
+joins are reliable; Chromium is used as a fallback.
 
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.

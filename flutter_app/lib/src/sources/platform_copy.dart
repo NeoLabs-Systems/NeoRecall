@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 
 /// Client-side presentation metadata for source integrations.
-///
-/// Meeting platforms also come from the server catalog; this map supplies
-/// icons and fallbacks when the catalog is unavailable.
 class SourcePlatformCopy {
   const SourcePlatformCopy({
     required this.id,
@@ -11,6 +8,7 @@ class SourcePlatformCopy {
     required this.icon,
     required this.description,
     this.auth = 'manual',
+    this.category = SourceCategory.liveCapture,
     this.prerequisites = const <String>[],
     this.connectLabel = 'Setup',
   });
@@ -20,8 +18,16 @@ class SourcePlatformCopy {
   final IconData icon;
   final String description;
   final String auth;
+  final SourceCategory category;
   final List<String> prerequisites;
   final String connectLabel;
+}
+
+enum SourceCategory {
+  /// Discord voice + Meet / Zoom / Teams notetaker bots — same product surface.
+  liveCapture,
+  /// Wearable / import accounts (PLAUD).
+  import,
 }
 
 const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
@@ -29,9 +35,25 @@ const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
     id: 'discord',
     name: 'Discord',
     icon: Icons.discord,
-    description: 'Automatically record specific users in voice channels you join.',
+    description:
+        'Joins voice channels as your bot and records when people you list are present.',
     auth: 'manual',
+    category: SourceCategory.liveCapture,
     connectLabel: 'Setup',
+  ),
+  SourcePlatformCopy(
+    id: 'meeting',
+    name: 'Meetings',
+    icon: Icons.video_call_outlined,
+    description:
+        'Joins Google Meet, Zoom, or Microsoft Teams as a notetaker bot and records live audio during the call.',
+    auth: 'manual',
+    category: SourceCategory.liveCapture,
+    connectLabel: 'Join a meeting',
+    prerequisites: <String>[
+      'Paste a Meet, Zoom, or Teams meeting link',
+      'Optional: connect your account so the bot is admitted (not as a guest)',
+    ],
   ),
   SourcePlatformCopy(
     id: 'plaud',
@@ -39,42 +61,8 @@ const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
     icon: Icons.cloud_sync_outlined,
     description: 'Import recordings from your PLAUD wearable via your PLAUD account.',
     auth: 'manual',
+    category: SourceCategory.import,
     connectLabel: 'Setup',
-  ),
-  SourcePlatformCopy(
-    id: 'google_meet',
-    name: 'Google Meet',
-    icon: Icons.video_call_outlined,
-    description: 'Import cloud recordings from Google Meet after each call.',
-    auth: 'oauth',
-    connectLabel: 'Connect Google',
-    prerequisites: <String>[
-      'Google Workspace account that can record Meet calls',
-      'Recordings saved to Google Drive',
-    ],
-  ),
-  SourcePlatformCopy(
-    id: 'zoom',
-    name: 'Zoom',
-    icon: Icons.videocam_outlined,
-    description: 'Import cloud recordings from your Zoom account after each meeting.',
-    auth: 'oauth',
-    connectLabel: 'Connect Zoom',
-    prerequisites: <String>[
-      'Zoom account with cloud recording enabled',
-    ],
-  ),
-  SourcePlatformCopy(
-    id: 'microsoft_teams',
-    name: 'Microsoft Teams',
-    icon: Icons.groups_outlined,
-    description: 'Import cloud recordings from Microsoft Teams meetings you organize.',
-    auth: 'oauth',
-    connectLabel: 'Connect Microsoft',
-    prerequisites: <String>[
-      'Microsoft work or school account that can record Teams meetings',
-      'Access as meeting organizer for recordings',
-    ],
   ),
 ];
 
