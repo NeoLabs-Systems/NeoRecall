@@ -5,10 +5,10 @@
 // touch panel) into an always-on NeoRecall room recorder with a dashboard.
 //
 // Design goals, in priority order:
-//   1. Never lose audio. Capture runs 24/7 and audio is only released after the
-//      NeoRecall backend proves a terminal transcript receipt (the reliability
-//      invariant from AGENTS.md). Every dropped span is declared as a truthful
-//      capture gap, never silently discarded.
+//   1. Stream audio reliably. Capture runs 24/7 and uploads ASAP. Terminal
+//      receipts still prove transcript persistence (AGENTS.md). On this board
+//      there is no durable store: failed/stale audio is abandoned with a
+//      truthful capture gap rather than left "pending" forever.
 //   2. Stay up. Every long-running activity is an independent supervised task
 //      that recovers from its own failures without taking the device down.
 //   3. Be beautiful and useful sitting in a room: clock, weekday, date and
@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define NR_FIRMWARE_VERSION "1.0.1"
+#define NR_FIRMWARE_VERSION "1.0.2"
 
 // UUID string length including the null terminator ("8-4-4-4-12").
 #define NR_UUID_LEN 37

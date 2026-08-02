@@ -21,6 +21,7 @@
 #include "config/nr_config.h"
 #include "settings/nr_settings.h"
 #include "net/nr_wifi.h"
+#include "net/nr_ota.h"
 #include "services/nr_geo.h"
 #include "services/nr_weather.h"
 #include "ingest/nr_recorder.h"
@@ -33,6 +34,9 @@ static lv_obj_t *s_w[MAX_FIELDS];    // primary widget per schema field
 static lv_obj_t *s_w2[MAX_FIELDS];   // secondary widget (minute roller for TIME)
 static lv_obj_t *s_dd_ssid;          // the SSID dropdown (for scan population)
 static lv_obj_t *s_ta_city;          // the city text field (for geocode search)
+static lv_obj_t *s_ota_ver;          // running firmware version label
+static lv_obj_t *s_ota_status;       // last OTA result / progress line
+static lv_timer_t *s_ota_timer;      // polls status while the check is in flight
 
 static char s_scan[20][33];
 static int s_scan_n;
@@ -308,8 +312,85 @@ static void save_cb(lv_event_t *e)
 
 static void reconnect_cb(lv_event_t *e) { (void) e; nr_wifi_reconfigure(); }
 static void restart_cb(lv_event_t *e) { (void) e; esp_restart(); }
-static void back_cb(lv_event_t *e) { (void) e; nr_ui_show_dashboard(); }
-static void on_show(lv_event_t *e) { (void) e; load_values(); }
+static void back_cb(lv_event_t *e)
+{
+    (void) e;
+    if (s_ota_timer) { lv_timer_del(s_ota_timer); s_ota_timer = NULL; }
+    nr_ui_show_dashboard();
+}
+
+// ---- OTA manual check ------------------------------------------------------
+
+static void refresh_ota_labels(void)
+{
+    if (!s_ota_ver && !s_ota_status) return;
+    nr_ota_status_t st; nr_ota_get_status(&st);
+    if (s_ota_ver) {
+        char line[96];
+        if (st.running_version[0])
+            snprintf(line, sizeof(line), "Installiert: %s", st.running_version);
+        else
+            snprintf(line, sizeof(line), "Installiert: %s", NR_FIRMWARE_VERSION);
+        lv_label_set_text(s_ota_ver, line);
+    }
+    if (s_ota_status) {
+        char line[120];
+        if (st.updating)
+            snprintf(line, sizeof(line), "Lädt Update … %d%%", st.progress);
+        else if (st.checking)
+            snprintf(line, sizeof(line), "Prüfe auf Updates …");
+        else if (st.status[0])
+            snprintf(line, sizeof(line), "%s", st.status);
+        else
+            snprintf(line, sizeof(line), "Noch nicht geprüft");
+        lv_label_set_text(s_ota_status, line);
+        lv_obj_set_style_text_color(s_ota_status,
+            (st.updating || st.checking) ? NRC_GOLD_HI :
+            (strstr(st.status, "fehlgeschlagen") || strstr(st.status, "Offline") ||
+             strstr(st.status, "ungültig")) ? NRC_DANGER : NRC_TX2, 0);
+    }
+}
+
+static void ota_poll_cb(lv_timer_t *t)
+{
+    (void) t;
+    refresh_ota_labels();
+    nr_ota_status_t st; nr_ota_get_status(&st);
+    if (!st.checking && !st.updating && s_ota_timer) {
+        lv_timer_del(s_ota_timer);
+        s_ota_timer = NULL;
+    }
+}
+
+static void ota_check_cb(lv_event_t *e)
+{
+    (void) e;
+    nr_ota_status_t st; nr_ota_get_status(&st);
+    if (st.updating || st.checking) {
+        refresh_ota_labels();
+        return;
+    }
+    if (!nr_net_is_online()) {
+        lv_obj_t *mb = lv_msgbox_create(NULL);
+        lv_msgbox_add_title(mb, "Software-Update");
+        lv_msgbox_add_text(mb, "Keine Netzwerkverbindung. Verbinde dich zuerst mit WLAN.");
+        lv_msgbox_add_close_button(mb);
+        refresh_ota_labels();
+        return;
+    }
+    // Force=true so the button works even when auto-updates are toggled off.
+    nr_ota_check_now(true);
+    if (s_ota_status) lv_label_set_text(s_ota_status, "Prüfung gestartet …");
+    if (!s_ota_timer)
+        s_ota_timer = lv_timer_create(ota_poll_cb, 500, NULL);
+}
+
+static void on_show(lv_event_t *e)
+{
+    (void) e;
+    load_values();
+    refresh_ota_labels();
+}
 
 // Purge the whole pending-upload backlog after a confirmation.
 static void discard_all_confirm_cb(lv_event_t *e)
@@ -413,6 +494,21 @@ lv_obj_t *ui_settings_create(void)
             }
             case NRS_BOOL: case NRS_BOOL_INV: case NRS_NIGHTMODE:
                 s_w[i] = make_switch(card, f->label);
+                // Under the OTA toggle: version, last result, manual check button.
+                if (f->id && strcmp(f->id, "ota") == 0 && card) {
+                    s_ota_ver = lv_label_create(card);
+                    lv_obj_set_style_text_font(s_ota_ver, &nr_font_14, 0);
+                    lv_obj_set_style_text_color(s_ota_ver, NRC_TX2, 0);
+                    lv_label_set_text(s_ota_ver, "Installiert: …");
+                    s_ota_status = lv_label_create(card);
+                    lv_obj_set_style_text_font(s_ota_status, &nr_font_14, 0);
+                    lv_obj_set_style_text_color(s_ota_status, NRC_TX2, 0);
+                    lv_label_set_long_mode(s_ota_status, LV_LABEL_LONG_WRAP);
+                    lv_obj_set_width(s_ota_status, lv_pct(100));
+                    lv_label_set_text(s_ota_status, "Noch nicht geprüft");
+                    action_button(card, LV_SYMBOL_DOWNLOAD "  Jetzt prüfen & aktualisieren",
+                                  NRC_CARD2, NRC_GOLD, ota_check_cb);
+                }
                 break;
             case NRS_PCT:
                 s_w[i] = make_slider(card, f->label, f->min, f->max);

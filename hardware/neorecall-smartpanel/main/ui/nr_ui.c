@@ -420,21 +420,26 @@ static void refresh_status(void)
     }
     if (ing.pending_upload > 0) {
         if (ing.last_error[0] && net == NR_NET_ONLINE)
-            snprintf(line, sizeof(line), "%s   %s %u wartend · %s",
+            snprintf(line, sizeof(line), "%s   %s %u senden · %s",
                      net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload, ing.last_error);
         else
-            snprintf(line, sizeof(line), "%s   %s %u wartend",
+            snprintf(line, sizeof(line), "%s   %s %u senden …",
                      net_txt, LV_SYMBOL_UPLOAD, (unsigned) ing.pending_upload);
-    } else if (ing.needs_attention > 0)
-        snprintf(line, sizeof(line), "%s   %s %u prüfen",
-                 net_txt, LV_SYMBOL_WARNING, (unsigned) ing.needs_attention);
+    } else if (ing.awaiting_receipt > 0)
+        snprintf(line, sizeof(line), "%s   %s %u verarbeitet …",
+                 net_txt, LV_SYMBOL_OK, (unsigned) ing.awaiting_receipt);
+    else if (ing.last_error[0] && strstr(ing.last_error, "verworfen") && net == NR_NET_ONLINE)
+        snprintf(line, sizeof(line), "%s   %s %s",
+                 net_txt, LV_SYMBOL_WARNING, ing.last_error);
     else if (net == NR_NET_ONLINE && ing.provisioned)
         snprintf(line, sizeof(line), "%s   %s synchron", net_txt, LV_SYMBOL_OK);
     else
         snprintf(line, sizeof(line), "%s", net_txt);
     lv_label_set_text(s_status, line);
     lv_obj_set_style_text_color(s_status,
-        (ing.needs_attention || (ing.pending_upload && ing.last_error[0])) ? NRC_DANGER : NRC_TX3, 0);
+        (ing.pending_upload && ing.last_error[0]) ||
+        (ing.last_error[0] && strstr(ing.last_error, "verworfen"))
+            ? NRC_DANGER : NRC_TX3, 0);
 }
 
 // ---- night schedule --------------------------------------------------------

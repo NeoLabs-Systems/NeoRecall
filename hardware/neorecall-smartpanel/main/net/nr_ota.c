@@ -32,6 +32,7 @@ static const char *TAG = "nr_ota";
 static SemaphoreHandle_t s_wake;
 static SemaphoreHandle_t s_lock;
 static nr_ota_status_t s_status;
+static volatile bool s_force_check;   // set by nr_ota_check_now(true)
 
 static void set_status(const char *msg)
 {
@@ -113,12 +114,30 @@ done:
 
 static void check_once(void)
 {
-    nr_config_t c; nr_config_get(&c);
-    if (!c.ota_enabled || !nr_net_is_online()) return;
+    bool force = s_force_check;
+    s_force_check = false;
 
+    nr_config_t c; nr_config_get(&c);
+    s_status.enabled = c.ota_enabled;
+
+    if (!nr_net_is_online()) {
+        if (force) set_status("Offline – kein Update möglich");
+        return;
+    }
+    // Periodic polls honour the auto-update switch; a forced manual check does not.
+    if (!c.ota_enabled && !force) return;
+
+    // Don't stack a second download on an in-flight update.
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_status.checking = true;
+    bool busy = s_status.updating || s_status.checking;
+    if (!busy) s_status.checking = true;
     xSemaphoreGive(s_lock);
+    if (busy) {
+        if (force) set_status("Update läuft bereits …");
+        return;
+    }
+
+    set_status(force ? "Manuelle Prüfung …" : "Prüfe auf Updates …");
 
     nr_http_result_t res;
     esp_err_t err = nr_http_get(NR_OTA_MANIFEST_URL, false, 15000, &res);
@@ -150,6 +169,8 @@ static void check_once(void)
             return;
         }
         set_status("Firmware ist aktuell");
+    } else {
+        set_status("Update-Manifest unvollständig");
     }
     cJSON_Delete(j);
 }
@@ -172,7 +193,11 @@ static void ota_task(void *arg)
     }
 }
 
-void nr_ota_check_now(void) { if (s_wake) xSemaphoreGive(s_wake); }
+void nr_ota_check_now(bool force)
+{
+    if (force) s_force_check = true;
+    if (s_wake) xSemaphoreGive(s_wake);
+}
 
 esp_err_t nr_ota_init(void)
 {

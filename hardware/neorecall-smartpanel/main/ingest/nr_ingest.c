@@ -21,17 +21,25 @@
 
 static const char *TAG = "nr_ingest";
 
-// Idle cadence when the backlog is empty or nothing progressed. While a backlog
-// is actively draining we re-arm almost immediately so capture cannot outrun us.
-#define PUMP_IDLE_MS           8000
-#define PUMP_DRAIN_MS          400
-#define MAX_UPLOADS_CYCLE      8
-#define MAX_POLL_IDS           80
-#define REUPLOAD_LIMIT         3
-#define TRANSIENT_FAIL_LIMIT   12   // after this many transient failures → needs_attention
-#define PERMANENT_FAIL_LIMIT   3    // permanent 4xx after this many tries → needs_attention
-#define BACKOFF_BASE_MS        2000
-#define BACKOFF_MAX_MS         120000
+// Stream-first policy: this board has no durable storage worth relying on.
+// Chunks live briefly in PSRAM, upload ASAP, and are abandoned with an honest
+// capture gap if they cannot reach the backend in time. Forever-"pending" is
+// treated as a bug, not a backlog state.
+//
+// Idle cadence when the backlog is empty. While actively draining we re-arm
+// almost immediately so capture cannot outrun the pump.
+#define PUMP_IDLE_MS              4000
+#define PUMP_DRAIN_MS             250
+#define MAX_UPLOADS_CYCLE         6
+#define MAX_POLL_IDS              80
+#define REUPLOAD_LIMIT            2
+#define TRANSIENT_FAIL_LIMIT      5    // short-lived retries, then give up
+#define PERMANENT_FAIL_LIMIT      2    // permanent 4xx → give up quickly
+#define SESSION_DECLARE_FAIL_LIMIT 6   // unsynced session → drop local audio
+#define MAX_CHUNK_HOLD_MS         90000   // abandon unuploaded audio after 90 s
+#define MAX_AWAIT_RECEIPT_MS      (30 * 60 * 1000)  // meta-only: drop after 30 min
+#define BACKOFF_BASE_MS           1500
+#define BACKOFF_MAX_MS            20000
 
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_kick;
@@ -42,6 +50,7 @@ static bool s_meta_fetched;
 static int64_t s_last_heartbeat_ms;
 static bool s_drain_next;                 // last cycle made progress with remaining work
 static int s_cycle_backoff_ms = PUMP_IDLE_MS;
+static uint32_t s_abandoned_total;
 
 // Snapshot of config used for a whole cycle so it cannot change mid-request.
 typedef struct {
@@ -92,8 +101,10 @@ void nr_ingest_get_status(nr_ingest_status_t *out)
     nr_spool_stats_t st; nr_spool_stats(&st);
     xSemaphoreTake(s_status_lock, portMAX_DELAY);
     *out = s_status;
+    out->abandoned_total = s_abandoned_total;
     xSemaphoreGive(s_status_lock);
     out->pending_upload = st.pending_upload;
+    out->awaiting_receipt = st.awaiting_receipt;
     out->needs_attention = st.needs_attention;
     out->backlog_bytes = st.bytes_used;
     out->backlog_ram_bytes = st.bytes_in_ram;
@@ -278,6 +289,39 @@ static void heartbeat(const cyc_cfg_t *cfg)
     }
 }
 
+// ---- abandon (stream give-up) ----------------------------------------------
+
+// Drop a local chunk that cannot be delivered. Always record a sequence-covered
+// gap so later chunks on the same session are not blocked by "missing"
+// sequences once the session reaches the server. The gap sits locally until the
+// session is declared, then syncs.
+static void abandon_chunk(const nr_chunk_meta_t *cm, nr_gap_reason_t reason, const char *why)
+{
+    if (!cm) return;
+    nr_session_rec_t sess;
+    if (nr_spool_get_session(cm->session_id, &sess) || cm->session_id[0]) {
+        nr_gap_rec_t g = {0};
+        nr_uuid_v4(g.id);
+        nr_strlcpy(g.session_id, cm->session_id, sizeof(g.session_id));
+        nr_strlcpy(g.source_id, cm->source_id, sizeof(g.source_id));
+        g.start_offset_ms = cm->monotonic_offset_ms;
+        g.end_offset_ms = cm->monotonic_offset_ms + (cm->duration_ms ? cm->duration_ms : 1);
+        if (g.end_offset_ms <= g.start_offset_ms) g.end_offset_ms = g.start_offset_ms + 1;
+        g.start_sequence = (int32_t) cm->sequence;
+        g.end_sequence = (int32_t) cm->sequence;
+        g.reason = reason;
+        nr_spool_put_gap(&g);
+    }
+    nr_spool_delete_chunk(cm->local_id);
+    xSemaphoreTake(s_status_lock, portMAX_DELAY);
+    s_abandoned_total++;
+    xSemaphoreGive(s_status_lock);
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Audio verworfen: %s", why ? why : "upload failed");
+    status_set_error(msg, 0);
+    ESP_LOGW(TAG, "abandoned chunk %.8s seq %u (%s)", cm->local_id, cm->sequence, why ? why : "?");
+}
+
 // ---- session sync ----------------------------------------------------------
 
 static void declare_session(cyc_cfg_t *cfg, nr_session_rec_t *rec)
@@ -320,6 +364,7 @@ static void declare_session(cyc_cfg_t *cfg, nr_session_rec_t *rec)
     cJSON *j = api_send(cfg, "POST", "/ingest/sessions", body, &status);
     if (status == 200 || status == 201) {
         rec->synced = true;
+        rec->declare_fail_count = 0;
         nr_spool_put_session(rec);
         ESP_LOGI(TAG, "session %.8s declared", rec->id);
         if (j) cJSON_Delete(j);
@@ -363,6 +408,7 @@ static void declare_session(cyc_cfg_t *cfg, nr_session_rec_t *rec)
         if (j) cJSON_Delete(j);
         if (status == 200 || status == 201) {
             rec->synced = true;
+            rec->declare_fail_count = 0;
             nr_spool_put_session(rec);
             ESP_LOGI(TAG, "session %.8s declared (UTC fallback)", rec->id);
             return;
@@ -373,6 +419,9 @@ static void declare_session(cyc_cfg_t *cfg, nr_session_rec_t *rec)
         s_device_registered = false;
         status_set_error("Session: Gerät fehlt – re-register", 404);
     }
+    if (rec->declare_fail_count < 255) rec->declare_fail_count++;
+    nr_spool_put_session(rec);
+    ESP_LOGW(TAG, "session %.8s declare fail #%u (HTTP %d)", rec->id, rec->declare_fail_count, status);
 }
 
 static void close_session(const cyc_cfg_t *cfg, nr_session_rec_t *rec)
@@ -500,27 +549,42 @@ static bool accept_receipt(const cyc_cfg_t *cfg, const char *local_id, const cJS
     }
     if (!strcmp(state, "reupload_required")) {
         m.reupload_attempts++;
+        // No local payload left → cannot re-upload on this board; honest gap.
+        if (!m.has_payload || m.reupload_attempts >= REUPLOAD_LIMIT) {
+            abandon_chunk(&m, NR_GAP_CAPTURE_ERROR, "reupload not possible");
+            return false;
+        }
         m.fail_count = 0;
         m.next_attempt_mono_ms = 0;
-        m.state = (m.reupload_attempts >= REUPLOAD_LIMIT) ? NR_CHUNK_NEEDS_ATTENTION : NR_CHUNK_READY;
-        // Clear server id so a re-PUT is a clean attempt.
-        if (m.state == NR_CHUNK_READY) m.server_chunk_id[0] = '\0';
+        m.state = NR_CHUNK_READY;
+        m.server_chunk_id[0] = '\0';
         nr_spool_update_chunk(&m);
         ESP_LOGW(TAG, "chunk %.8s reupload_required (attempt %u)", local_id, m.reupload_attempts);
         return false;
     }
     // uploaded / persisted_cleanup_pending / other non-terminal
     if (!m.server_chunk_id[0]) {
-        // Receipt without a chunkId cannot be polled — re-upload next cycle.
+        // Receipt without a chunkId cannot be polled — re-upload next cycle if
+        // we still hold the bytes; otherwise give up.
+        if (!m.has_payload) {
+            abandon_chunk(&m, NR_GAP_CAPTURE_ERROR, "upload receipt incomplete");
+            return false;
+        }
         m.state = NR_CHUNK_READY;
         m.next_attempt_mono_ms = 0;
         nr_spool_update_chunk(&m);
         return false;
     }
+    bool first_upload = (m.state != NR_CHUNK_UPLOADED);
     m.state = NR_CHUNK_UPLOADED;
     m.fail_count = 0;
     m.next_attempt_mono_ms = 0;
+    if (first_upload || m.uploaded_monotonic_ms == 0)
+        m.uploaded_monotonic_ms = nr_time_monotonic_ms();
     nr_spool_update_chunk(&m);
+    // Stream-first: free the WAV as soon as the server accepted it. Meta stays
+    // for terminal-receipt polling. Power-loss already risked RAM-only audio.
+    if (m.has_payload) nr_spool_release_payload(local_id);
     return false;
 }
 
@@ -611,14 +675,13 @@ static void schedule_retry(nr_chunk_meta_t *m, bool permanent)
     m->fail_count = (uint8_t) (m->fail_count < 255 ? m->fail_count + 1 : 255);
     uint8_t limit = permanent ? PERMANENT_FAIL_LIMIT : TRANSIENT_FAIL_LIMIT;
     if (m->fail_count >= limit) {
-        m->state = NR_CHUNK_NEEDS_ATTENTION;
-        m->next_attempt_mono_ms = 0;
-        ESP_LOGE(TAG, "chunk %.8s parked as needs_attention after %u failures",
-                 m->local_id, m->fail_count);
-    } else {
-        m->state = NR_CHUNK_FAILED;
-        m->next_attempt_mono_ms = nr_time_monotonic_ms() + backoff_ms_for(m->fail_count);
+        // No durable store: give up instead of parking "pending" forever.
+        abandon_chunk(m, permanent ? NR_GAP_CAPTURE_ERROR : NR_GAP_STORAGE_FULL,
+                      permanent ? "upload rejected" : "upload retries exhausted");
+        return;
     }
+    m->state = NR_CHUNK_FAILED;
+    m->next_attempt_mono_ms = nr_time_monotonic_ms() + backoff_ms_for(m->fail_count);
     nr_spool_update_chunk(m);
 }
 
@@ -631,9 +694,8 @@ static bool upload_chunk(cyc_cfg_t *cfg, const nr_chunk_meta_t *cm)
 
     const uint8_t *mem = NULL; size_t len = 0; char path[192];
     if (!nr_spool_borrow_wav(cm->local_id, &mem, &len, path, sizeof(path))) {
-        ESP_LOGW(TAG, "chunk %.8s missing WAV bytes", cm->local_id);
-        nr_chunk_meta_t m = *cm;
-        schedule_retry(&m, true);
+        ESP_LOGW(TAG, "chunk %.8s missing WAV bytes — abandoning", cm->local_id);
+        abandon_chunk(cm, NR_GAP_CAPTURE_ERROR, "audio bytes lost");
         return false;
     }
 
@@ -771,7 +833,7 @@ static bool upload_ready_cb(const nr_chunk_meta_t *m, void *ctx)
     return true;
 }
 
-// ---- session cleanup -------------------------------------------------------
+// ---- session cleanup + stale reclaim ---------------------------------------
 
 typedef struct { const char *sid; bool found; } has_chunk_ctx_t;
 static bool has_chunk_cb(const nr_chunk_meta_t *m, void *ctx)
@@ -792,10 +854,113 @@ static bool cleanup_session_cb(const nr_session_rec_t *rec, void *ctx)
     return true;
 }
 
+typedef struct {
+    int64_t now_mono;
+    int abandoned;
+} reclaim_ctx_t;
+
+// Drop anything that has outlived the stream hold window so the UI never shows
+// "N wartend" for hours. Session-declare failures are treated the same way:
+// without a server session the audio cannot leave the device.
+static bool reclaim_stale_cb(const nr_chunk_meta_t *m, void *ctx)
+{
+    reclaim_ctx_t *r = ctx;
+    int64_t created = m->created_monotonic_ms > 0 ? m->created_monotonic_ms : r->now_mono;
+    int64_t age = r->now_mono - created;
+    if (age < 0) age = 0;
+
+    if (m->state == NR_CHUNK_NEEDS_ATTENTION) {
+        abandon_chunk(m, NR_GAP_CAPTURE_ERROR, "needs attention");
+        r->abandoned++;
+        return true;
+    }
+
+    if (m->state == NR_CHUNK_UPLOADED) {
+        int64_t up = m->uploaded_monotonic_ms > 0 ? m->uploaded_monotonic_ms : created;
+        if (r->now_mono - up > MAX_AWAIT_RECEIPT_MS) {
+            // Server never produced a terminal receipt. Meta-only; free the slot.
+            // We already released the WAV after upload, so this is bookkeeping.
+            if (m->server_chunk_id[0]) {
+                // Best-effort release so the server can clean client_released_at.
+                // (May no-op if not yet terminal.)
+            }
+            nr_spool_delete_chunk(m->local_id);
+            r->abandoned++;
+            ESP_LOGW(TAG, "chunk %.8s receipt timeout — dropped meta", m->local_id);
+        }
+        return true;
+    }
+
+    if (m->state == NR_CHUNK_TERMINAL) {
+        nr_spool_delete_chunk(m->local_id);
+        return true;
+    }
+
+    // READY / FAILED / UPLOADING / REUPLOAD: bounded hold.
+    if (age > MAX_CHUNK_HOLD_MS) {
+        abandon_chunk(m, NR_GAP_STORAGE_FULL, "stream hold timeout");
+        r->abandoned++;
+        return true;
+    }
+
+    nr_session_rec_t sess;
+    if (!nr_spool_get_session(m->session_id, &sess)) {
+        abandon_chunk(m, NR_GAP_CAPTURE_ERROR, "session missing");
+        r->abandoned++;
+        return true;
+    }
+    if (!sess.synced && sess.declare_fail_count >= SESSION_DECLARE_FAIL_LIMIT) {
+        abandon_chunk(m, NR_GAP_CAPTURE_ERROR, "session declare failed");
+        r->abandoned++;
+        return true;
+    }
+    return true;
+}
+
+typedef struct { const char *sid; } gap_purge_ctx_t;
+static bool purge_gaps_for_session_cb(const nr_gap_rec_t *g, void *ctx)
+{
+    gap_purge_ctx_t *p = ctx;
+    if (strcmp(g->session_id, p->sid) == 0) nr_spool_delete_gap(g->id);
+    return true;
+}
+
+typedef struct { int dropped; } dead_sess_ctx_t;
+static bool drop_dead_session_cb(const nr_session_rec_t *rec, void *ctx)
+{
+    dead_sess_ctx_t *d = ctx;
+    // Never delete the live (non-ended) session — the recorder owns it.
+    if (!rec->ended) return true;
+    if (rec->synced && rec->close_synced) return true;  // cleaned by cleanup_session_cb
+    if (!rec->synced && rec->declare_fail_count < SESSION_DECLARE_FAIL_LIMIT) return true;
+    has_chunk_ctx_t h = { .sid = rec->id, .found = false };
+    nr_spool_for_each_chunk(has_chunk_cb, &h);
+    if (!h.found) {
+        // Session never reached the server: its gaps are undeliverable too.
+        if (!rec->synced) {
+            gap_purge_ctx_t gp = { .sid = rec->id };
+            nr_spool_for_each_gap(purge_gaps_for_session_cb, &gp);
+        }
+        nr_spool_delete_session(rec->id);
+        d->dropped++;
+        ESP_LOGW(TAG, "dropped undeliverable session %.8s", rec->id);
+    }
+    return true;
+}
+
 // ---- one pump cycle --------------------------------------------------------
 
 static void pump_once(void)
 {
+    // Even offline: enforce the hold window so PSRAM cannot fill with audio that
+    // will never leave the device. Gaps for abandoned spans are queued and sync
+    // once the link and session are available.
+    reclaim_ctx_t rctx = { .now_mono = nr_time_monotonic_ms(), .abandoned = 0 };
+    nr_spool_for_each_chunk(reclaim_stale_cb, &rctx);
+    if (rctx.abandoned > 0) {
+        esp_event_post(NR_EVENT, NR_EVT_UPLOAD_CHANGED, NULL, 0, 0);
+    }
+
     if (!nr_net_is_online()) {
         s_drain_next = false;
         s_cycle_backoff_ms = PUMP_IDLE_MS;
@@ -837,6 +1002,13 @@ static void pump_once(void)
     nr_spool_for_each_session(sync_session_cb, &sctx);
     nr_spool_for_each_gap(sync_gap_cb, &sctx);
 
+    // Reclaim again after session declare so freshly-failed sessions free audio.
+    rctx.now_mono = nr_time_monotonic_ms();
+    rctx.abandoned = 0;
+    nr_spool_for_each_chunk(reclaim_stale_cb, &rctx);
+    dead_sess_ctx_t dctx = { .dropped = 0 };
+    nr_spool_for_each_session(drop_dead_session_cb, &dctx);
+
     int released = poll_uploaded(&cfg);
 
     up_ctx_t uctx = {
@@ -856,16 +1028,18 @@ static void pump_once(void)
 
     esp_event_post(NR_EVENT, NR_EVT_UPLOAD_CHANGED, NULL, 0, 0);
 
-    bool made_progress = (uctx.accepted > 0) || (released > 0);
+    bool made_progress = (uctx.accepted > 0) || (released > 0) || (rctx.abandoned > 0);
     if (made_progress && uctx.more) {
         s_drain_next = true;
         s_cycle_backoff_ms = PUMP_DRAIN_MS;
         nr_ingest_kick();
-    } else if (made_progress) {
-        s_drain_next = false;
-        s_cycle_backoff_ms = PUMP_IDLE_MS;
-    } else if (uctx.attempted > 0 || uctx.more) {
-        // Work remains but nothing landed: ease off instead of tight-looping.
+    } else if (made_progress || uctx.more) {
+        // Keep draining while work remains (including awaiting-receipt polls).
+        s_drain_next = uctx.more || (uctx.accepted > 0);
+        s_cycle_backoff_ms = s_drain_next ? PUMP_DRAIN_MS : PUMP_IDLE_MS;
+        if (s_drain_next) nr_ingest_kick();
+    } else if (uctx.attempted > 0) {
+        // Work attempted but nothing landed: ease off instead of tight-looping.
         s_drain_next = false;
         if (s_cycle_backoff_ms < BACKOFF_BASE_MS) s_cycle_backoff_ms = BACKOFF_BASE_MS;
         else s_cycle_backoff_ms = s_cycle_backoff_ms < BACKOFF_MAX_MS
@@ -876,9 +1050,10 @@ static void pump_once(void)
         s_cycle_backoff_ms = PUMP_IDLE_MS;
     }
 
-    if (uctx.attempted || released) {
-        ESP_LOGI(TAG, "cycle: accepted=%d attempted=%d released=%d more=%d backoff=%dms",
-                 uctx.accepted, uctx.attempted, released, (int) uctx.more, s_cycle_backoff_ms);
+    if (uctx.attempted || released || rctx.abandoned) {
+        ESP_LOGI(TAG, "cycle: accepted=%d attempted=%d released=%d abandoned=%d more=%d backoff=%dms",
+                 uctx.accepted, uctx.attempted, released, rctx.abandoned,
+                 (int) uctx.more, s_cycle_backoff_ms);
     }
 }
 

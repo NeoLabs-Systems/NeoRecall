@@ -90,6 +90,7 @@ static char *chunk_to_json(const nr_chunk_meta_t *m)
     cJSON_AddNumberToObject(j, "state", m->state);
     cJSON_AddNumberToObject(j, "reupload", m->reupload_attempts);
     cJSON_AddNumberToObject(j, "fail_count", m->fail_count);
+    cJSON_AddBoolToObject(j, "has_payload", m->has_payload);
     char *s = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
     return s;
@@ -118,6 +119,9 @@ static bool chunk_from_json(const char *buf, nr_chunk_meta_t *m)
     v = cJSON_GetObjectItem(j, "state"); if (cJSON_IsNumber(v)) m->state = (nr_chunk_state_t) v->valueint;
     NUM(reupload_attempts, "reupload");
     NUM(fail_count, "fail_count");
+    v = cJSON_GetObjectItem(j, "has_payload");
+    // Pre-1.0.2 sidecars omit has_payload; a matching .wav means payload is present.
+    m->has_payload = v ? cJSON_IsTrue(v) : true;
 #undef STR
 #undef NUM
     cJSON_Delete(j);
@@ -126,6 +130,7 @@ static bool chunk_from_json(const char *buf, nr_chunk_meta_t *m)
     // the only safe recovery is to retry from READY.
     if (m->state == NR_CHUNK_UPLOADING) m->state = NR_CHUNK_READY;
     m->next_attempt_mono_ms = 0;   // never durable; retry immediately after reboot
+    m->uploaded_monotonic_ms = 0;
     return m->local_id[0] != '\0';
 }
 
@@ -143,6 +148,7 @@ static char *session_to_json(const nr_session_rec_t *r)
     cJSON_AddBoolToObject(j, "close_synced", r->close_synced);
     cJSON_AddBoolToObject(j, "interrupted", r->interrupted);
     cJSON_AddNumberToObject(j, "final_sequence", r->final_sequence);
+    cJSON_AddNumberToObject(j, "declare_fails", r->declare_fail_count);
     char *s = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
     return s;
@@ -166,6 +172,7 @@ static bool session_from_json(const char *buf, nr_session_rec_t *r)
     r->close_synced = cJSON_IsTrue(cJSON_GetObjectItem(j, "close_synced"));
     r->interrupted = cJSON_IsTrue(cJSON_GetObjectItem(j, "interrupted"));
     v = cJSON_GetObjectItem(j, "final_sequence"); if (cJSON_IsNumber(v)) r->final_sequence = v->valueint;
+    v = cJSON_GetObjectItem(j, "declare_fails"); if (cJSON_IsNumber(v)) r->declare_fail_count = (uint8_t) v->valueint;
     cJSON_Delete(j);
     return r->id[0] != '\0';
 }
@@ -218,7 +225,7 @@ static chunk_node_t *find_chunk(const char *id)
 
 static esp_err_t spill_chunk_locked(chunk_node_t *n)
 {
-    if (n->meta.on_disk) return ESP_OK;
+    if (n->meta.on_disk || !n->meta.has_payload || !n->mem) return ESP_OK;
     char wav[160], js[160];
     path_for('c', n->meta.local_id, "wav", wav, sizeof(wav));
     path_for('c', n->meta.local_id, "js", js, sizeof(js));
@@ -232,18 +239,21 @@ static esp_err_t spill_chunk_locked(chunk_node_t *n)
     free(n->mem);
     n->mem = NULL;
     n->meta.on_disk = true;
-    s_bytes_ram -= n->meta.byte_size;
+    if (s_bytes_ram >= n->meta.byte_size) s_bytes_ram -= n->meta.byte_size;
+    else s_bytes_ram = 0;
     ESP_LOGI(TAG, "spilled chunk %.8s (%u B) to flash", n->meta.local_id, n->meta.byte_size);
     return ESP_OK;
 }
 
 // Reclaim RAM by spilling the oldest memory-backed chunks until under budget.
+// Prefer spilling only when the backend is lagging; steady-state stream should
+// free from RAM after each successful upload without ever writing flash.
 static void relieve_memory_locked(void)
 {
     while (s_bytes_ram > s_mem_budget) {
         chunk_node_t *oldest = NULL;
         for (chunk_node_t *n = s_chunks; n; n = n->next) {
-            if (n->meta.on_disk) continue;
+            if (!n->meta.has_payload || n->meta.on_disk) continue;
             // Never move a chunk whose bytes are currently borrowed for upload.
             if (n->meta.state == NR_CHUNK_UPLOADING) continue;
             if (!oldest || n->meta.created_monotonic_ms < oldest->meta.created_monotonic_ms) oldest = n;
@@ -255,15 +265,20 @@ static void relieve_memory_locked(void)
 
 static void free_chunk_files_locked(chunk_node_t *n)
 {
-    if (n->meta.on_disk) {
-        char wav[160], js[160];
+    char js[160];
+    path_for('c', n->meta.local_id, "js", js, sizeof(js));
+    remove(js);
+    if (n->meta.on_disk && n->meta.has_payload) {
+        char wav[160];
         path_for('c', n->meta.local_id, "wav", wav, sizeof(wav));
-        path_for('c', n->meta.local_id, "js", js, sizeof(js));
         remove(wav);
-        remove(js);
     } else if (n->mem) {
         free(n->mem);
-        s_bytes_ram -= n->meta.byte_size;
+        n->mem = NULL;
+        if (n->meta.has_payload) {
+            if (s_bytes_ram >= n->meta.byte_size) s_bytes_ram -= n->meta.byte_size;
+            else s_bytes_ram = 0;
+        }
     }
 }
 
@@ -328,11 +343,35 @@ esp_err_t nr_spool_init(const char *dir, size_t mem_budget_bytes, uint64_t cap_b
             if (chunk_from_json(buf, &m)) {
                 char wav[160]; path_for('c', m.local_id, "wav", wav, sizeof(wav));
                 struct stat st;
+                int64_t boot_mono = nr_time_monotonic_ms();
                 if (stat(wav, &st) == 0 && (uint32_t) st.st_size == m.byte_size) {
                     chunk_node_t *n = calloc(1, sizeof(*n));
-                    if (n) { n->meta = m; n->meta.created_monotonic_ms = 0; n->next = s_chunks; s_chunks = n; }
+                    if (n) {
+                        n->meta = m;
+                        n->meta.has_payload = true;
+                        n->meta.on_disk = true;
+                        // Fresh hold window after reboot — one more stream attempt.
+                        n->meta.created_monotonic_ms = boot_mono;
+                        n->next = s_chunks;
+                        s_chunks = n;
+                    }
+                } else if (!m.has_payload && (m.state == NR_CHUNK_UPLOADED || m.state == NR_CHUNK_TERMINAL)) {
+                    // Meta-only retention after payload release — keep for receipt polling.
+                    chunk_node_t *n = calloc(1, sizeof(*n));
+                    if (n) {
+                        n->meta = m;
+                        n->meta.has_payload = false;
+                        n->meta.on_disk = false;
+                        n->meta.created_monotonic_ms = boot_mono;
+                        if (n->meta.uploaded_monotonic_ms == 0)
+                            n->meta.uploaded_monotonic_ms = boot_mono;
+                        n->next = s_chunks;
+                        s_chunks = n;
+                    }
                 } else {
                     remove(path);  // sidecar without matching wav: incomplete
+                    char wav_rm[160]; path_for('c', m.local_id, "wav", wav_rm, sizeof(wav_rm));
+                    remove(wav_rm);
                 }
             }
         } else if (name[0] == 's' && name[1] == '_') {
@@ -387,7 +426,9 @@ esp_err_t nr_spool_put_chunk(const nr_chunk_meta_t *meta, const void *wav, size_
     n->meta = *meta;
     n->meta.byte_size = (uint32_t) wav_len;
     n->meta.on_disk = false;
+    n->meta.has_payload = true;
     n->meta.created_monotonic_ms = nr_time_monotonic_ms();
+    n->meta.uploaded_monotonic_ms = 0;
     n->mem = copy;
 
     LOCK();
@@ -416,18 +457,24 @@ esp_err_t nr_spool_update_chunk(const nr_chunk_meta_t *meta)
     LOCK();
     chunk_node_t *n = find_chunk(meta->local_id);
     if (!n) { UNLOCK(); return ESP_ERR_NOT_FOUND; }
-    uint8_t *mem = n->mem;
     bool was_disk = n->meta.on_disk;
+    bool had_payload = n->meta.has_payload;
+    uint8_t *mem = n->mem;
+    int64_t created = n->meta.created_monotonic_ms;
     n->meta = *meta;
-    n->meta.on_disk = was_disk;   // backing is owned by the spool, not the caller
+    n->meta.on_disk = was_disk;       // backing is owned by the spool, not the caller
+    n->meta.has_payload = had_payload;
+    n->meta.created_monotonic_ms = created;
+    n->mem = mem;
     esp_err_t err = ESP_OK;
-    if (was_disk) {
+    if (was_disk || !had_payload) {
+        // Persist sidecar when on disk, or when meta-only (so reboot can poll).
         char js[160]; path_for('c', n->meta.local_id, "js", js, sizeof(js));
         char *sidecar = chunk_to_json(&n->meta);
         if (sidecar) { err = write_atomic(js, sidecar, strlen(sidecar)); free(sidecar); }
         else err = ESP_ERR_NO_MEM;
+        if (!had_payload) n->meta.on_disk = false;  // js only; no wav
     }
-    (void) mem;
     UNLOCK();
     return err;
 }
@@ -449,7 +496,7 @@ bool nr_spool_borrow_wav(const char *local_id, const uint8_t **mem, size_t *len,
 {
     LOCK();
     chunk_node_t *n = find_chunk(local_id);
-    if (!n) { UNLOCK(); return false; }
+    if (!n || !n->meta.has_payload) { UNLOCK(); return false; }
     if (n->meta.on_disk) {
         if (mem) *mem = NULL;
         path_for('c', local_id, "wav", path, path_len);
@@ -460,6 +507,40 @@ bool nr_spool_borrow_wav(const char *local_id, const uint8_t **mem, size_t *len,
     if (len) *len = n->meta.byte_size;
     UNLOCK();
     return true;
+}
+
+esp_err_t nr_spool_release_payload(const char *local_id)
+{
+    LOCK();
+    chunk_node_t *n = find_chunk(local_id);
+    if (!n) { UNLOCK(); return ESP_ERR_NOT_FOUND; }
+    if (!n->meta.has_payload) { UNLOCK(); return ESP_OK; }
+
+    if (n->meta.on_disk) {
+        char wav[160];
+        path_for('c', n->meta.local_id, "wav", wav, sizeof(wav));
+        remove(wav);
+        n->meta.on_disk = false;
+    } else if (n->mem) {
+        free(n->mem);
+        n->mem = NULL;
+        if (s_bytes_ram >= n->meta.byte_size) s_bytes_ram -= n->meta.byte_size;
+        else s_bytes_ram = 0;
+    }
+    n->meta.has_payload = false;
+
+    // Keep a durable meta sidecar so reboot can finish receipt polling.
+    char js[160]; path_for('c', n->meta.local_id, "js", js, sizeof(js));
+    char *sidecar = chunk_to_json(&n->meta);
+    esp_err_t err = ESP_OK;
+    if (sidecar) {
+        err = write_atomic(js, sidecar, strlen(sidecar));
+        free(sidecar);
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+    UNLOCK();
+    return err;
 }
 
 void nr_spool_for_each_chunk(nr_chunk_iter_fn fn, void *ctx)
@@ -582,10 +663,13 @@ void nr_spool_stats(nr_spool_stats_t *out)
     LOCK();
     for (chunk_node_t *n = s_chunks; n; n = n->next) {
         out->chunk_count++;
-        out->bytes_used += n->meta.byte_size;
-        if (!n->meta.on_disk) out->bytes_in_ram += n->meta.byte_size;
+        if (n->meta.has_payload) {
+            out->bytes_used += n->meta.byte_size;
+            if (!n->meta.on_disk) out->bytes_in_ram += n->meta.byte_size;
+        }
         if (n->meta.state == NR_CHUNK_NEEDS_ATTENTION) out->needs_attention++;
-        else if (n->meta.state != NR_CHUNK_UPLOADED && n->meta.state != NR_CHUNK_TERMINAL) out->pending_upload++;
+        else if (n->meta.state == NR_CHUNK_UPLOADED) out->awaiting_receipt++;
+        else if (n->meta.state != NR_CHUNK_TERMINAL) out->pending_upload++;
     }
     out->cap_bytes = s_cap_bytes;
     UNLOCK();
@@ -596,10 +680,12 @@ bool nr_spool_enforce_cap(nr_spool_drop_t *dropped)
     bool did = false;
     LOCK();
     uint64_t total = 0;
-    for (chunk_node_t *n = s_chunks; n; n = n->next) total += n->meta.byte_size;
+    for (chunk_node_t *n = s_chunks; n; n = n->next)
+        if (n->meta.has_payload) total += n->meta.byte_size;
     if (total > s_cap_bytes) {
         chunk_node_t *oldest = NULL;
         for (chunk_node_t *n = s_chunks; n; n = n->next) {
+            if (!n->meta.has_payload) continue;                 // meta-only does not consume the cap
             if (n->meta.state == NR_CHUNK_TERMINAL) continue;
             if (n->meta.state == NR_CHUNK_UPLOADING) continue;   // in flight; don't free its bytes
             if (!oldest || n->meta.created_monotonic_ms < oldest->meta.created_monotonic_ms) oldest = n;

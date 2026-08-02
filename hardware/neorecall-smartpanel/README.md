@@ -26,18 +26,20 @@ rose (`#D98AA6`) reserved for the live-recording state.
   the clock are up — and only ever pauses when *you* pause it. Every gap in
   audio (pause, a mic fault, a reboot, storage pressure) is declared to the
   backend as a truthful capture gap; nothing is silently dropped.
-- **The reliability invariant.** Audio is released and deleted locally *only*
-  after the server returns a terminal receipt proving the transcript is
-  persisted and the server's own audio copy was deleted — identical to the
-  Flutter client's contract.
-- **Upload pump that keeps up.** Chunks upload with idempotent retries,
-  exponential backoff, adaptive drain cadence, payload-scaled HTTPS timeouts,
-  and automatic recovery from mid-PUT crashes, device-id drift, and invalid
-  timezones so a transient outage cannot leave audio "wartend" for hours.
-- **Memory-first spool.** Because this board has no SD card and only 16 MB of
-  flash, chunks live in PSRAM and upload straight from RAM in the common case;
-  they spill to a LittleFS partition only during a network/backend outage, so
-  24/7 operation does not wear the flash.
+- **Stream-first reliability.** This board has no SD card worth trusting for
+  long-term audio. Chunks live briefly in PSRAM and upload as soon as they are
+  cut. After the server accepts a PUT, the local WAV is freed immediately and
+  only lightweight metadata is kept to poll the terminal receipt. If a chunk
+  cannot leave the device within ~90 s (or after a few upload retries), it is
+  **abandoned with an honest capture gap** — the UI never shows "pending"
+  forever, because there is nowhere durable to park failed audio.
+- **Terminal-receipt release for bookkeeping.** Once the server proves the
+  transcript is persisted and its own audio copy was deleted, the local
+  metadata is deleted and `chunks/released` is sent — the same reliability
+  contract as the Flutter client, adapted for a stream-only device.
+- **Upload pump that keeps up.** Idempotent retries with short exponential
+  backoff, adaptive drain cadence, payload-scaled HTTPS timeouts, and automatic
+  recovery from mid-PUT crashes, device-id drift, and invalid timezones.
 - **Dashboard**: clock (12/24 h), weekday + date, and keyless weather with an
   animated equalizer that comes alive while recording.
 - **Bottom-left pause/resume** button, exactly as requested. The pause state is
@@ -149,14 +151,14 @@ The panel updates itself from GitHub:
    `beta`, publishes a rolling **`firmware-latest`** pre-release with the `.bin`
    plus a `manifest.json` (version, download URL, sha256).
 2. On the device, **Settings → Software-Update (OTA)**: enable "Automatische
-   Updates" and paste the manifest URL
-   `https://github.com/<owner>/<repo>/releases/download/firmware-latest/manifest.json`.
-3. The panel checks every 6 h (and once shortly after boot); if the manifest
-   version differs from the running one it downloads via `esp_https_ota`,
-   verifies the image and reboots. A bad image is rolled back automatically by
-   the bootloader (rollback enabled), and a healthy boot is confirmed after a
-   60 s grace period. The repo/release must be public so the device can fetch it
-   without credentials.
+   Updates" (the panel always uses the NeoRecall `firmware-latest` manifest).
+3. The panel checks every 6 h (and once shortly after boot). You can also tap
+   **„Jetzt prüfen & aktualisieren“** any time — that works even when automatic
+   updates are off. If the manifest version differs from the running one it
+   downloads via `esp_https_ota`, verifies the image and reboots. A bad image is
+   rolled back automatically by the bootloader (rollback enabled), and a healthy
+   boot is confirmed after a 60 s grace period. The repo/release must be public
+   so the device can fetch it without credentials.
 
 ## Board bring-up (verified working)
 
@@ -194,8 +196,8 @@ main/
   net/nr_http.*           TLS HTTP helper + streaming multipart WAV PUT
   net/nr_wifi.*           station reconnect + on-device network scan
   net/nr_ota.*            esp_https_ota client (manifest poll + rollback confirm)
-  ingest/nr_spool.*       durable memory-first chunk/session/gap store
-  ingest/nr_ingest.*      the upload pump (protocol state machine)
+  ingest/nr_spool.*       stream spool (PSRAM hold, brief flash spill, meta after PUT)
+  ingest/nr_ingest.*      the upload pump (stream + bounded-hold give-up)
   ingest/nr_recorder.*    24/7 capture → WAV chunker → spool
   board/nr_board.*        I2C, ST7701 panel, GT911 touch, backlight, LVGL
   board/nr_mic.*          ES7210 + I2S microphone capture

@@ -19,8 +19,10 @@ typedef struct {
     bool provisioned;
     bool device_registered;
     bool server_reachable;
-    uint32_t pending_upload;
-    uint32_t needs_attention;
+    uint32_t pending_upload;         // still needs PUT
+    uint32_t awaiting_receipt;       // uploaded; waiting for terminal
+    uint32_t needs_attention;        // should be rare; auto-abandoned soon
+    uint32_t abandoned_total;        // lifetime count of stream give-ups
     uint64_t backlog_bytes;
     uint64_t backlog_ram_bytes;
     int64_t last_receipt_epoch_ms;   // last terminal/accepted receipt

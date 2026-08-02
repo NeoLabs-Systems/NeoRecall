@@ -58,7 +58,9 @@ typedef struct {
     uint8_t fail_count;                 // consecutive transient upload failures
     int64_t next_attempt_mono_ms;       // 0 = eligible now (not durable; rebuilt after reboot)
     bool on_disk;                       // true once spilled to LittleFS
+    bool has_payload;                   // false after WAV freed post-upload (meta only)
     int64_t created_monotonic_ms;       // for age-ordered spill/drop
+    int64_t uploaded_monotonic_ms;      // when state first became UPLOADED (0 if not)
 } nr_chunk_meta_t;
 
 typedef struct {
@@ -73,6 +75,7 @@ typedef struct {
     bool close_synced;                  // PATCH close acknowledged
     bool interrupted;                   // close status: interrupted vs ended
     int32_t final_sequence;             // last sequence, -1 while open
+    uint8_t declare_fail_count;         // consecutive POST /sessions failures
 } nr_session_rec_t;
 
 typedef struct {
@@ -110,9 +113,15 @@ void nr_spool_delete_chunk(const char *local_id);
 // Access a chunk's WAV bytes for upload. For memory-backed chunks this returns a
 // borrowed pointer valid until the next spool mutation on that chunk; for
 // disk-backed chunks it returns NULL and fills path so the caller streams the
-// file. Exactly one of (*mem) / path is produced.
+// file. Exactly one of (*mem) / path is produced. Returns false when the
+// payload was already released (post-upload meta-only retention).
 bool nr_spool_borrow_wav(const char *local_id, const uint8_t **mem, size_t *len,
                          char *path, size_t path_len);
+
+// Free the WAV payload after a successful upload. Metadata is retained so the
+// pump can still poll terminal receipts; a later reupload_required without
+// bytes is treated as unrecoverable on this board (no durable storage).
+esp_err_t nr_spool_release_payload(const char *local_id);
 
 // Snapshot-iterate chunk metadata (ordered by created time). The callback runs
 // WITHOUT the spool lock held, so it may call back into the spool safely.
@@ -139,9 +148,10 @@ void nr_spool_for_each_gap(nr_gap_iter_fn fn, void *ctx);
 
 typedef struct {
     uint32_t chunk_count;
-    uint32_t pending_upload;    // not yet UPLOADED/TERMINAL
+    uint32_t pending_upload;    // READY/FAILED/UPLOADING with payload still to send
+    uint32_t awaiting_receipt;  // UPLOADED, polling for terminal
     uint32_t needs_attention;
-    uint64_t bytes_used;        // sum of chunk WAV sizes (RAM + disk)
+    uint64_t bytes_used;        // sum of retained WAV payload sizes (RAM + disk)
     uint64_t bytes_in_ram;
     uint64_t cap_bytes;
 } nr_spool_stats_t;

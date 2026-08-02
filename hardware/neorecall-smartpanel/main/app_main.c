@@ -72,10 +72,12 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(nr_config_init());
 
-    // --- Durable spool (memory-first, LittleFS overflow) -------------------
+    // --- Stream spool (PSRAM hold, brief LittleFS overflow only) -----------
     ESP_ERROR_CHECK(mount_spool());
-    // ~2.5 MB kept in PSRAM before spilling; hard cap ~10 MB of retained audio.
-    ESP_ERROR_CHECK(nr_spool_init(BRD_SPOOL_MOUNT, 2500u * 1024u, 10ull * 1024 * 1024));
+    // Hold at most ~2 chunks in RAM (~2 MB) before spill; hard cap ~4 MB so a
+    // stuck backend cannot accumulate minutes of audio on a board with no SD.
+    // The pump abandons anything older than MAX_CHUNK_HOLD_MS regardless.
+    ESP_ERROR_CHECK(nr_spool_init(BRD_SPOOL_MOUNT, 2000u * 1024u, 4ull * 1024 * 1024));
 
     // --- Display bring-up (so the UI can render) ---------------------------
     esp_err_t board = nr_board_init();

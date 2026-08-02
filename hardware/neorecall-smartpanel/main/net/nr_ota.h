@@ -23,7 +23,11 @@ typedef struct {
 } nr_ota_status_t;
 
 esp_err_t nr_ota_init(void);
-void nr_ota_check_now(void);        // trigger an immediate check
+
+// Trigger an immediate check (and install if a newer image is available).
+// force=true runs even when automatic updates are disabled in config — used by
+// the Settings "Jetzt prüfen" button.
+void nr_ota_check_now(bool force);
 void nr_ota_get_status(nr_ota_status_t *out);
 
 #ifdef __cplusplus
