@@ -7,6 +7,22 @@ const TITLE_MAX_LENGTH = 160;
 const SUMMARY_MAX_LENGTH = 2_000;
 const TOPIC_MAX_LENGTH = 100;
 const TOPIC_MAX_COUNT = 12;
+// A single consumer-facing emoji (may be multi-codepoint, e.g. 👨‍👩‍👧‍👦).
+const EMOJI_MAX_LENGTH = 16;
+const DEFAULT_MEMORY_EMOJI = Object.freeze({
+  meeting: '🤝',
+  lesson: '📚',
+  conversation: '💬',
+  project_discussion: '📋',
+  introduction: '👋',
+  decision: '⚖️',
+  experience: '✨',
+  other: '💭',
+});
+
+function defaultEmojiForType(type) {
+  return DEFAULT_MEMORY_EMOJI[type] || DEFAULT_MEMORY_EMOJI.other;
+}
 const sourceIds = z.array(z.string().min(1)).min(1);
 const aliases = z.preprocess((value) => {
   if (!Array.isArray(value)) return value;
@@ -47,7 +63,10 @@ const miniMemory = z.object({
 });
 const memory = z.object({
   type: z.enum(MEMORY_TYPES),
-  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH), summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH), importance: z.number().min(1).max(10),
+  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH), summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH),
+  // One emoji that visually categorizes the occasion for the consumer list.
+  emoji: z.string().min(1).max(EMOJI_MAX_LENGTH),
+  importance: z.number().min(1).max(10),
   sourceSegmentIds: sourceIds, topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
   entities: z.array(entityReference).default([]), miniMemories: z.array(miniMemory).default([]),
 });
@@ -134,11 +153,12 @@ const consolidationJsonSchema = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['type', 'titleEn', 'summaryEn', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
+        required: ['type', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
         properties: {
           type: { type: 'string', enum: [...MEMORY_TYPES] },
           titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
           summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
+          emoji: { type: 'string', minLength: 1, maxLength: EMOJI_MAX_LENGTH },
           importance: { type: 'number', minimum: 1, maximum: 10 },
           sourceSegmentIds: sourceIdsJsonSchema,
           topics: topicsJsonSchema,
@@ -211,4 +231,9 @@ module.exports = {
   MEMORY_TYPES,
   MINI_MEMORY_KINDS,
   ENTITY_KINDS,
+  DEFAULT_MEMORY_EMOJI,
+  defaultEmojiForType,
+  TITLE_MAX_LENGTH,
+  SUMMARY_MAX_LENGTH,
+  EMOJI_MAX_LENGTH,
 };

@@ -11,6 +11,7 @@
     "type": "project_discussion",
     "titleEn": "Project plan discussion",
     "summaryEn": "Alex agreed to prepare the report by Friday.",
+    "emoji": "📋",
     "importance": 8,
     "sourceSegmentIds": ["segment-id"],
     "topics": ["Project planning"],

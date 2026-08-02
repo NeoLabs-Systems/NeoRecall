@@ -238,8 +238,9 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
     for (const memory of output.memories) {
       const publicId = crypto.randomUUID();
       const result = db.prepare(`INSERT INTO memories
-        (public_id,user_id,type,title_en,summary_en,importance,started_at,ended_at,consolidation_run_id)
-        VALUES (?,?,?,?,?,?,?,?,?)`).run(publicId, userId, memory.type, memory.titleEn, memory.summaryEn, memory.importance, memory.startedAt, memory.endedAt, runId);
+        (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(publicId, userId, memory.type, memory.titleEn, memory.summaryEn,
+        memory.emoji, memory.importance, memory.startedAt, memory.endedAt, runId);
       const memoryId = Number(result.lastInsertRowid);
       const sourceInsert = db.prepare('INSERT OR IGNORE INTO memory_sources (memory_id,conversation_id,segment_id) VALUES (?,?,?)');
       const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(

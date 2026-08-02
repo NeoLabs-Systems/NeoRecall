@@ -4,9 +4,11 @@ const { provider } = require('./provider_registry');
 const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps } = require('./schemas/consolidation_schema');
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
 const { answerSchema } = require('./schemas/answer_schema');
+const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
 const { prepareConsolidationRequest, restoreReferenceIds } = require('./prompts/consolidate_memories');
 const { conversationPreviewMessages } = require('./prompts/preview_conversation');
 const { answerMessages } = require('./prompts/answer_question');
+const { mergeMemoryMessages } = require('./prompts/merge_memories');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
 
@@ -114,4 +116,48 @@ async function answer(userId, question, context, beforeAttempt) {
   throw lastError;
 }
 
-module.exports = { consolidate, previewConversation, answer, TRANSIENT_AI_CODES };
+/// Rewrite title/summary/emoji/type for a user-initiated multi-memory merge.
+/// Small structured output; uses the preview token budget rather than full
+/// consolidation, because the answer is a single card of prose.
+async function rewriteMergedMemory(userId, memories) {
+  const config = getConfig();
+  const retries = config.aiMaxRetries;
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await provider().chatJSON({
+        userId,
+        purpose: 'memory_merge',
+        model: config.aiPreviewModel || config.aiDefaultModel,
+        messages: mergeMemoryMessages(memories),
+        maxTokens: Math.min(config.aiPreviewMaxOutputTokens, 8_000),
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'neorecall_memory_merge',
+            strict: true,
+            schema: memoryMergeJsonSchema,
+          },
+        },
+      });
+      const parsed = memoryMergeSchema.safeParse(response.value);
+      if (!parsed.success) {
+        markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+        throw Object.assign(new Error('OpenRouter memory-merge output did not match the required schema.'), {
+          code: 'AI_SCHEMA_INVALID',
+          details: parsed.error.flatten(),
+          aiRequestId: response.requestId,
+        });
+      }
+      return { value: parsed.data, requestId: response.requestId };
+    } catch (error) {
+      lastError = error;
+      if (attempt === retries || !TRANSIENT_AI_CODES.includes(error.code)) throw error;
+    }
+  }
+  throw lastError;
+}
+
+module.exports = {
+  consolidate, previewConversation, answer, rewriteMergedMemory, TRANSIENT_AI_CODES,
+};

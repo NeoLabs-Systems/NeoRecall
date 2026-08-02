@@ -1625,8 +1625,8 @@ class NeoRecallController extends ChangeNotifier {
     try {
       final results = await Future.wait<dynamic>(<Future<dynamic>>[
         api.request('GET', '/api/v1/recordings'),
-        api.request('GET', '/api/v1/memories'),
-        api.request('GET', '/api/v1/mini-memories'),
+        api.request('GET', '/api/v1/memories?archived=all&limit=200'),
+        api.request('GET', '/api/v1/mini-memories?limit=200'),
         api.request('GET', '/api/v1/speakers'),
         api.request('GET', '/api/v1/devices'),
         api.request('GET', '/api/v1/transcripts?limit=100'),
@@ -2104,32 +2104,76 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
-  /// Why the server declined to consolidate, in the user's terms.
-  ///
-  /// The request succeeds either way — declining is a normal answer, not an
-  /// error — so without this the button would report success while nothing was
-  /// queued.
-  static String _consolidationNotice(Map response) {
-    if (response['queued'] == true) return 'Memory consolidation queued.';
-    switch (response['reason']?.toString()) {
-      case 'insufficient_audio':
-        final seconds = ((response['requiredAudioMs'] as num?) ?? 60000) ~/ 1000;
-        return 'Too little recorded audio for memories. Recordings under '
-            '$seconds seconds are never sent to a language model.';
-      case 'insufficient_material':
-        return 'Not enough new speech to make memories from yet.';
-      case 'already_running':
-        return 'A memory consolidation is already running.';
-      default:
-        return 'Memories cannot be generated right now.';
-    }
+  Future<void> deleteMiniMemory(String id) async {
+    await api.request('DELETE', '/api/v1/mini-memories/$id');
+    miniMemories = miniMemories.where((mini) => mini.id != id).toList();
+    notifyListeners();
   }
 
-  Future<void> consolidateNow() async {
-    final response =
-        await api.request('POST', '/api/v1/memories/consolidations') as Map;
-    notice = _consolidationNotice(response);
+  /// Full memory detail including linked transcript segments and mini-memories.
+  Future<Map<String, dynamic>> loadMemoryDetail(String id) async {
+    final payload =
+        await api.request('GET', '/api/v1/memories/$id') as Map<dynamic, dynamic>;
+    return Map<String, dynamic>.from(payload);
+  }
+
+  Future<Map<String, dynamic>> loadMiniMemoryDetail(String id) async {
+    final payload = await api.request('GET', '/api/v1/mini-memories/$id')
+        as Map<dynamic, dynamic>;
+    return Map<String, dynamic>.from(payload);
+  }
+
+  Future<void> renameMemory(String id, String title) async {
+    await api.request(
+      'PATCH',
+      '/api/v1/memories/$id',
+      body: <String, dynamic>{'titleEn': title},
+    );
+    await refreshAll(silent: true);
+  }
+
+  Future<void> updateMemory(
+    String id, {
+    bool? pinned,
+    bool? archived,
+  }) async {
+    final body = <String, dynamic>{};
+    if (pinned != null) body['pinned'] = pinned;
+    if (archived != null) body['archived'] = archived;
+    if (body.isEmpty) return;
+    await api.request('PATCH', '/api/v1/memories/$id', body: body);
+    await refreshAll(silent: true);
+  }
+
+  Future<void> deleteMemory(String id) async {
+    await api.request('DELETE', '/api/v1/memories/$id');
+    memories = memories.where((memory) => memory.id != id).toList();
     notifyListeners();
+  }
+
+  /// Mass pin / archive / delete for the consumer multi-select bar.
+  Future<void> bulkMemories(List<String> ids, String action) async {
+    if (ids.isEmpty) return;
+    await api.request(
+      'POST',
+      '/api/v1/memories/bulk',
+      body: <String, dynamic>{'ids': ids, 'action': action},
+    );
+    await refreshAll(silent: true);
+  }
+
+  /// Merge two or more memories into one with a rewritten title and summary.
+  Future<Map<String, dynamic>> mergeMemories(List<String> ids) async {
+    if (ids.length < 2) {
+      throw StateError('Select at least two memories to merge.');
+    }
+    final payload = await api.request(
+      'POST',
+      '/api/v1/memories/merge',
+      body: <String, dynamic>{'ids': ids},
+    ) as Map<dynamic, dynamic>;
+    await refreshAll(silent: true);
+    return Map<String, dynamic>.from(payload);
   }
 
   void selectPage(RecallPage value) {
