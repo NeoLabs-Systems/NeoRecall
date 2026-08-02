@@ -140,8 +140,16 @@ class SignInSession extends EventEmitter {
         case 'key': {
           const named = NAMED_KEYS[message.key];
           if (!named) break;
-          await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...named });
-          await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...named });
+          // CDP expects windowsVirtualKeyCode / key (DOM key value). A bare
+          // keyCode is ignored by modern Chrome, so Backspace etc. never fire.
+          const payload = {
+            windowsVirtualKeyCode: named.keyCode,
+            nativeVirtualKeyCode: named.keyCode,
+            code: named.code,
+            key: message.key,
+          };
+          await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...payload });
+          await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...payload });
           break;
         }
         default:

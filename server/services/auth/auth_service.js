@@ -44,9 +44,23 @@ async function register({ username, email, password }, context = {}) {
   return { user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)), session: createSession(id, context) };
 }
 
+function normalizeTwoFactorCode(value) {
+  // Users (and authenticator UIs) often insert spaces or dashes; recovery codes
+  // may be pasted with separators. Strip them before verifying.
+  return String(value || '').replace(/[\s-]+/g, '').trim();
+}
+
+function recoveryCodeHash(code) {
+  return sha256(normalizeTwoFactorCode(code).toUpperCase());
+}
+
 function consumeRecoveryCode(userId, code) {
   if (!code) return false;
-  const row = getDatabase().prepare('SELECT id FROM user_recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL').get(userId, sha256(String(code).toUpperCase()));
+  const normalized = recoveryCodeHash(code);
+  // Legacy rows were hashed with the display form ("XXXXX-XXXXX"); accept both.
+  const legacy = sha256(String(code).toUpperCase());
+  const row = getDatabase().prepare(`SELECT id FROM user_recovery_codes
+    WHERE user_id = ? AND used_at IS NULL AND (code_hash = ? OR code_hash = ?)`).get(userId, normalized, legacy);
   if (!row) return false;
   getDatabase().prepare("UPDATE user_recovery_codes SET used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(row.id);
   return true;
@@ -56,9 +70,10 @@ function verifySecondFactor(userId, value) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM user_two_factor WHERE user_id = ? AND pending = 0').get(userId);
   if (!factor) return true;
-  if (!value) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
+  const code = normalizeTwoFactorCode(value);
+  if (!code) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
   if (factor.locked_until && Date.parse(factor.locked_until) > Date.now()) throw new HttpError(429, 'TWO_FACTOR_LOCKED', 'Two-factor authentication is temporarily locked.');
-  const valid = authenticator.check(String(value), decryptString(factor.secret_encrypted)) || consumeRecoveryCode(userId, value);
+  const valid = authenticator.check(code, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(userId, code);
   if (valid) {
     db.prepare('UPDATE user_two_factor SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?').run(userId);
     return true;
@@ -139,13 +154,13 @@ function beginTwoFactor(userId, username) {
 function activateTwoFactor(userId, code) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM user_two_factor WHERE user_id = ? AND pending = 1').get(userId);
-  if (!factor || !authenticator.check(String(code || ''), decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
+  if (!factor || !authenticator.check(normalizeTwoFactorCode(code), decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
   const codes = Array.from({ length: 10 }, () => randomToken(8).slice(0, 10).toUpperCase());
   db.transaction(() => {
     db.prepare("UPDATE user_two_factor SET pending=0, enabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?").run(userId);
     db.prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
     const insert = db.prepare('INSERT INTO user_recovery_codes (id, user_id, code_hash) VALUES (?, ?, ?)');
-    for (const recoveryCode of codes) insert.run(crypto.randomUUID(), userId, sha256(recoveryCode));
+    for (const recoveryCode of codes) insert.run(crypto.randomUUID(), userId, recoveryCodeHash(recoveryCode));
   })();
   return codes;
 }
@@ -171,7 +186,7 @@ async function regenerateRecoveryCodes(userId, password, code) {
   getDatabase().transaction(() => {
     getDatabase().prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
     const insert = getDatabase().prepare('INSERT INTO user_recovery_codes (id, user_id, code_hash) VALUES (?, ?, ?)');
-    for (const recoveryCode of codes) insert.run(crypto.randomUUID(), userId, sha256(recoveryCode.replace(/-/g, '')));
+    for (const recoveryCode of codes) insert.run(crypto.randomUUID(), userId, recoveryCodeHash(recoveryCode));
   })();
   return codes;
 }

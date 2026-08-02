@@ -247,6 +247,9 @@ class _RemoteSignInViewState extends State<RemoteSignInView> {
   @override
   void initState() {
     super.initState();
+    // Attach to the TextField's own FocusNode so we see keys before EditableText
+    // swallows Backspace on an always-empty field.
+    _focusNode.onKeyEvent = _onKeyEvent;
     _connect();
   }
 
@@ -351,23 +354,37 @@ class _RemoteSignInViewState extends State<RemoteSignInView> {
   // mobile, to bring up the on-screen keyboard). What it accumulates is
   // forwarded and then cleared immediately, so it never holds real text —
   // what the user is typing only ever appears on the streamed page itself.
+  //
+  // Named keys (Backspace, arrows, …) never land here: a field that is always
+  // emptied after each character swallows Backspace without calling onChanged.
+  // Those keys are intercepted in _onKeyEvent first.
   void _onTypedTextChanged(String value) {
     if (value.isEmpty) return;
     _sendInput({'kind': 'insertText', 'text': value});
-    _typeCapture.clear();
+    // Synchronous clear — controller.clear() defers a frame and races the next
+    // keystroke, which is what made typing feel "weird" (dropped/doubled chars).
+    _typeCapture.value = const TextEditingValue(
+      text: '',
+      selection: TextSelection.collapsed(offset: 0),
+    );
   }
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final key = _namedKeys[event.logicalKey];
-    if (key == null) return KeyEventResult.ignored;
-    _sendInput({'kind': 'key', 'key': key});
+    // Hold-to-delete and hold-to-repeat arrows need KeyRepeatEvent as well.
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final named = _namedKeys[event.logicalKey];
+    if (named == null) return KeyEventResult.ignored;
+    _sendInput({'kind': 'key', 'key': named});
+    // Handled: stop the empty TextField from eating Backspace/Delete/Enter/Tab.
     return KeyEventResult.handled;
   }
 
   @override
   void dispose() {
     _closed = true;
+    _focusNode.onKeyEvent = null;
     _subscription?.cancel();
     try {
       _channel?.sink.close();
@@ -408,34 +425,43 @@ class _RemoteSignInViewState extends State<RemoteSignInView> {
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final size = Size(constraints.maxWidth, constraints.maxHeight);
-                    return Focus(
-                      focusNode: _focusNode,
-                      onKeyEvent: _onKeyEvent,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: (details) {
-                          _focusNode.requestFocus();
-                          _lastPoint = _toViewport(details.localPosition, size);
-                          _sendInput({'kind': 'mouseMove', 'x': _lastPoint.dx, 'y': _lastPoint.dy});
-                          _sendInput({'kind': 'mouseDown', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
-                        },
-                        onTapUp: (details) {
-                          _lastPoint = _toViewport(details.localPosition, size);
-                          _sendInput({'kind': 'mouseUp', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
-                        },
-                        // A cancelled tap (e.g. a scroll took over mid-press) still
-                        // has the mouse logically down remotely; release it at the
-                        // last known point rather than leaving it stuck.
-                        onTapCancel: () => _sendInput({'kind': 'mouseUp', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'}),
-                        child: SizedBox.expand(
-                          child: Opacity(
-                            opacity: 0,
-                            child: TextField(
-                              controller: _typeCapture,
-                              onChanged: _onTypedTextChanged,
-                              decoration: const InputDecoration(border: InputBorder.none),
-                              style: const TextStyle(fontSize: 1, height: 0.01),
-                            ),
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (details) {
+                        _focusNode.requestFocus();
+                        _lastPoint = _toViewport(details.localPosition, size);
+                        _sendInput({'kind': 'mouseMove', 'x': _lastPoint.dx, 'y': _lastPoint.dy});
+                        _sendInput({'kind': 'mouseDown', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
+                      },
+                      onTapUp: (details) {
+                        _lastPoint = _toViewport(details.localPosition, size);
+                        _sendInput({'kind': 'mouseUp', 'x': _lastPoint.dx, 'y': _lastPoint.dy, 'button': 'left'});
+                      },
+                      // A cancelled tap (e.g. a scroll took over mid-press) still
+                      // has the mouse logically down remotely; release it at the
+                      // last known point rather than leaving it stuck.
+                      onTapCancel: () => _sendInput({
+                        'kind': 'mouseUp',
+                        'x': _lastPoint.dx,
+                        'y': _lastPoint.dy,
+                        'button': 'left',
+                      }),
+                      child: SizedBox.expand(
+                        child: Opacity(
+                          opacity: 0,
+                          child: TextField(
+                            // Same FocusNode the key interceptor is attached to,
+                            // so Backspace is handled before EditableText eats it.
+                            focusNode: _focusNode,
+                            controller: _typeCapture,
+                            onChanged: _onTypedTextChanged,
+                            autofocus: true,
+                            enableSuggestions: false,
+                            autocorrect: false,
+                            enableIMEPersonalizedLearning: false,
+                            keyboardType: TextInputType.visiblePassword,
+                            decoration: const InputDecoration(border: InputBorder.none),
+                            style: const TextStyle(fontSize: 1, height: 0.01),
                           ),
                         ),
                       ),
