@@ -41,7 +41,7 @@ test('one outbound request creates English memories and a durable interval gate'
           topics: ['Launch'], sourceSegmentIds: ['s2'] },
       ],
       entities: [{ ref: 'person-1', kind: 'person', canonicalNameEn: 'Alex', displayName: 'Alex', aliases: [] }],
-      memories: [{ type: 'project_discussion', titleEn: 'Project planning', summaryEn: 'Alex agreed to prepare the release plan.', importance: 8,
+      memories: [{ type: 'project_discussion', titleEn: 'Project planning', summaryEn: 'Alex agreed to prepare the release plan.', emoji: '📋', importance: 8,
         sourceSegmentIds: ['s1'],
         topics: ['Release planning'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [{ kind: 'promise', textEn: 'Alex promised to prepare the release plan.',
           importance: 8, confidence: 0.95, dueAt: null, occurredAt: '2026-07-13T10:04:00.000Z', status: 'open', sourceSegmentIds: ['s1'], entities: [{ ref: 'person-1', role: 'promisor' }] }] }],
@@ -114,7 +114,7 @@ test('a self-introduction identified during consolidation names the voiceprint a
       res.end(JSON.stringify({ id: 'generation-identity-test', usage: { prompt_tokens: 50, completion_tokens: 25, cost: 0.0005 }, choices: [{ message: { content: JSON.stringify({
         conversationSections: [{ titleEn: 'Introduction', summaryEn: 'Alex introduced himself.', memoryWorthy: true, topics: ['Introduction'], sourceSegmentIds: ['s1'] }],
         entities: [{ ref: 'person-1', kind: 'person', canonicalNameEn: 'Alex', displayName: 'Alex', aliases: [], speakerAlias: 'speaker1' }],
-        memories: [{ type: 'introduction', titleEn: 'Alex introduces himself', summaryEn: 'Alex said his name is Alex.', importance: 3,
+        memories: [{ type: 'introduction', titleEn: 'Alex introduces himself', summaryEn: 'Alex said his name is Alex.', emoji: '👋', importance: 3,
           sourceSegmentIds: ['s1'], topics: ['Introduction'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [] }],
         dailySummary: { localDate: '2026-07-15', timezone: 'UTC', summaryEn: 'Alex introduced himself.' },
       }) } }] }));
