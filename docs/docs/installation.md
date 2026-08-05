@@ -9,8 +9,10 @@ NeoRecall requires Node.js 20 or newer, a supported 64-bit host, and enough free
 
 ## npm and the user service
 
+NeoRecall is not yet published to the npm registry; install the CLI globally straight from GitHub instead.
+
 ```bash
-npm install --global neorecall
+npm install --global github:NeoLabs-Systems/NeoRecall
 neorecall install
 neorecall setup
 neorecall start

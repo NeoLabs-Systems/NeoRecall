@@ -17,7 +17,7 @@ the privacy guide before recording anyone else.
 ## 🚀 Start here
 
 ```bash
-npm install -g neorecall
+npm install -g github:NeoLabs-Systems/NeoRecall
 neorecall install
 neorecall setup
 neorecall start

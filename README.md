@@ -31,7 +31,7 @@
 ## 🚀 Install
 
 ```bash
-npm i -g neorecall
+npm i -g github:NeoLabs-Systems/NeoRecall
 neorecall install
 neorecall setup
 neorecall start
