@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: build-site-${{ github.ref }}
@@ -31,8 +33,16 @@ jobs:
           mkdir -p _site/docs
           cp -R landing/. _site/
           cp -R docs/build/. _site/docs/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: neorecall-site
           path: _site
-          if-no-files-found: error
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
