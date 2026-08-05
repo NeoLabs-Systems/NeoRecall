@@ -19,9 +19,9 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 
 ## Local inference
 
-`TRANSCRIPTION_PROVIDER=sherpa` selects the native CPU pipeline. `NEORECALL_SHERPA_THREADS` controls native inference threads. An OpenAI-compatible transcription endpoint can be selected with `TRANSCRIPTION_PROVIDER=openai_compatible`, `TRANSCRIPTION_API_BASE_URL`, and an optional key; this is separate from OpenRouter and is intended for self-hosted speech servers.
+`TRANSCRIPTION_PROVIDER=sherpa` (the default) selects the native CPU pipeline, running Whisper large-v3 fully on-device through `sherpa-onnx`. `NEORECALL_SHERPA_THREADS` controls native inference threads. An OpenAI-compatible transcription endpoint can be selected with `TRANSCRIPTION_PROVIDER=openai-compatible`, `TRANSCRIPTION_API_BASE_URL`, and an optional key; this is separate from OpenRouter and is intended for self-hosted or remote speech servers, and defaults to requesting `whisper-large-v3` unless `TRANSCRIPTION_API_MODEL` overrides it.
 
-The embedding model must produce exactly 384 dimensions. Setup probes it before startup. Model files and their revisions are pinned in `models/manifest.json`.
+The embedding model must produce exactly 384 dimensions. `neorecall install` downloads and verifies every local model, including the ASR model, with no manual step; `neorecall setup` re-runs the same download/verify pass on demand (for example after switching release channel). Model files and their revisions are pinned in `models/manifest.json`.
 
 When the recogniser does not label a segment's language itself, a statistical detector fills in — but only above `NEORECALL_LANGUAGE_DETECTION_MIN_CHARACTERS`. Below it there is not enough text to decide, and the detector answers anyway: three hours of real council audio produced "Gentlemen." labelled Afrikaans and "Uh" labelled Klingon. A segment shorter than the threshold is left with no language, which is honest, rather than a confident wrong one that reaches both the interface and the consolidation prompt. Set it to `0` to trust every detection.
 

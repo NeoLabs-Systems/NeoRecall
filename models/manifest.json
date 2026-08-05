@@ -2,22 +2,17 @@
   "schemaVersion": 1,
   "models": [
     {
-      "id": "parakeet-tdt-0.6b-v3-int8",
-      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78",
-      "license": "See NVIDIA Parakeet model license",
-      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
-      "archive": {
-        "filename": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
-        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
-        "size": 487170055,
-        "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
-        "stripComponents": 1
+      "id": "whisper-large-v3-int8",
+      "revision": "2a6507094dd6020d939d78e3f1834a1d06267fca",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/main/LICENSE",
+      "huggingFace": {
+        "repo": "csukuangfj/sherpa-onnx-whisper-large-v3"
       },
       "files": [
-        { "path": "asr/encoder.int8.onnx", "archivePath": "encoder.int8.onnx", "size": 652184281, "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247" },
-        { "path": "asr/decoder.int8.onnx", "archivePath": "decoder.int8.onnx", "size": 11845275, "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e" },
-        { "path": "asr/joiner.int8.onnx", "archivePath": "joiner.int8.onnx", "size": 6355277, "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3" },
-        { "path": "asr/tokens.txt", "archivePath": "tokens.txt", "size": 93939, "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d" }
+        { "path": "asr/encoder.int8.onnx", "hubPath": "large-v3-encoder.int8.onnx", "size": 766671985, "sha256": "d531cf17248acc43e8c09b472a0877055e770877857a5332fc1304b36534ec85" },
+        { "path": "asr/decoder.int8.onnx", "hubPath": "large-v3-decoder.int8.onnx", "size": 1008265203, "sha256": "ebc6bfd88e162a46cb3edee8a7e727e1dcbc65cabecb19e2573695e4d495e1af" },
+        { "path": "asr/tokens.txt", "hubPath": "large-v3-tokens.txt", "size": 816730, "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126" }
       ]
     },
     {

@@ -24,11 +24,25 @@ function statisticalLanguage(text, minimumCharacters) {
   return detectLanguage(text) || null;
 }
 
+/// Whisper's encoder has a fixed 30-second context; sherpa-onnx silently
+/// truncates and discards anything past it in a single decode call. VAD spans
+/// are usually well under that, but an uninterrupted monologue can exceed it,
+/// so long spans are hard-cut into 30-second windows before decoding.
+const WHISPER_WINDOW_SAMPLES = 30 * 16000;
+function windowForWhisper(span) {
+  if (span.samples.length <= WHISPER_WINDOW_SAMPLES) return [span];
+  const windows = [];
+  for (let offset = 0; offset < span.samples.length; offset += WHISPER_WINDOW_SAMPLES) {
+    windows.push({ startSample: span.startSample + offset, samples: span.samples.subarray(offset, offset + WHISPER_WINDOW_SAMPLES) });
+  }
+  return windows;
+}
+
 class SherpaProvider extends TranscriptionProvider {
   constructor() { super(); this.recognizer = null; }
   requiredFiles() {
     const files = [
-      ...['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'].map((name) => path.join(paths().models, 'asr', name)),
+      ...['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'].map((name) => path.join(paths().models, 'asr', name)),
       path.join(paths().models, 'vad', 'silero_vad.onnx'),
     ];
     if (getConfig().diarizationEnabled) files.push(
@@ -43,8 +57,11 @@ class SherpaProvider extends TranscriptionProvider {
       if (!this.requiredFiles().every((filename) => fs.existsSync(filename))) throw Object.assign(new Error('Local speech models are missing. Run `neorecall setup`.'), { code: 'TRANSCRIPTION_MODELS_MISSING' });
       const { OfflineRecognizer } = require('sherpa-onnx-node');
       const directory = path.join(paths().models, 'asr');
+      // featureDim is read from the encoder's own ONNX metadata (128 mel bins for
+      // large-v3) and this value is ignored on the whisper decode path; sampleRate
+      // is the only field that matters here.
       this.recognizer = new OfflineRecognizer({ featConfig: { sampleRate: 16000, featureDim: 80 }, modelConfig: {
-        transducer: { encoder: path.join(directory, 'encoder.int8.onnx'), decoder: path.join(directory, 'decoder.int8.onnx'), joiner: path.join(directory, 'joiner.int8.onnx') },
+        whisper: { encoder: path.join(directory, 'encoder.int8.onnx'), decoder: path.join(directory, 'decoder.int8.onnx'), task: 'transcribe' },
         tokens: path.join(directory, 'tokens.txt'), numThreads: getConfig().sherpaThreads, provider: 'cpu', debug: 0,
       } });
     }
@@ -64,7 +81,7 @@ class SherpaProvider extends TranscriptionProvider {
     const output = [];
     for (const component of components) {
       const turns = getConfig().diarizationEnabled ? diarization.diarize(component.samples) : [];
-      const speech = vad.speechSegments(component.samples);
+      const speech = vad.speechSegments(component.samples).flatMap(windowForWhisper);
       const decoded = speech.map((span) => {
         const result = this.transcribeSpeech(span);
         const startMs = Math.round(span.startSample / 16);
