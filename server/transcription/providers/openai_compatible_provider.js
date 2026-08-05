@@ -12,7 +12,7 @@ class OpenAICompatibleProvider extends TranscriptionProvider {
     const bytes = fs.readFileSync(filename);
     const form = new FormData();
     form.append('file', new Blob([bytes]), 'chunk.audio');
-    form.append('model', process.env.TRANSCRIPTION_API_MODEL || 'whisper-1');
+    form.append('model', process.env.TRANSCRIPTION_API_MODEL || 'whisper-large-v3');
     form.append('response_format', 'verbose_json');
     const response = await fetch(`${config.transcriptionApiBaseUrl.replace(/\/$/, '')}/v1/audio/transcriptions`, {
       method: 'POST', headers: config.transcriptionApiKey ? { Authorization: `Bearer ${config.transcriptionApiKey}` } : {}, body: form,
