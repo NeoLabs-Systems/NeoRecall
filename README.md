@@ -52,6 +52,8 @@ Read the [installation guide](docs/docs/installation.md) before exposing the ser
 
 ## 📚 Documentation
 
+Read the documentation [here](https://neolabs-systems.github.io/NeoRecall/).
+
 Use [GitHub Discussions](https://github.com/NeoLabs-Systems/NeoRecall/discussions)
 for questions and [GitHub Issues](https://github.com/NeoLabs-Systems/NeoRecall/issues)
 for reproducible bugs. Security reports belong in the process described by
