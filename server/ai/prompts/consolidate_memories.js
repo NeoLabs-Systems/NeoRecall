@@ -78,7 +78,85 @@ function compactInput(conversations, timezone) {
   };
 }
 
-function consolidationMessages({ conversations, previousDailySummary, timezone }, preparedReferences = null) {
+/// Splits the compacted transcript into windows that each fit one request.
+///
+/// A model running on this machine holds a fixed number of tokens at once, and a
+/// four-hour lecture does not fit in any of them. Windows are cut on segment
+/// boundaries and stay in order, so every window is a contiguous stretch of one
+/// stream — which is what section validation requires and what lets the engine
+/// join a section that spans two windows back together afterwards.
+///
+/// A conversation is never split across windows unless it is too large to be a
+/// window on its own, so in the ordinary case a window is one whole occasion.
+function windowConversations(compactConversations, budgetCharacters) {
+  const windows = [];
+  let current = [];
+  let size = 0;
+  const flush = () => { if (current.length) windows.push(current); current = []; size = 0; };
+
+  for (const conversation of compactConversations) {
+    const envelope = JSON.stringify({ ...conversation, segments: [] }).length;
+    let batch = [];
+    let batchSize = envelope;
+    const pushBatch = () => {
+      if (!batch.length) return;
+      current.push({ ...conversation, segments: batch });
+      size += batchSize;
+      batch = [];
+      batchSize = envelope;
+    };
+    for (const segment of conversation.segments) {
+      const segmentSize = JSON.stringify(segment).length;
+      // A single segment larger than a whole window cannot be split further —
+      // it is one recognized utterance — so it is placed alone and the request
+      // is allowed to be oversized rather than silently dropped. The provider
+      // refuses it if it truly does not fit, which surfaces as a configuration
+      // problem instead of as missing evidence.
+      if (batch.length && size + batchSize + segmentSize > budgetCharacters) {
+        pushBatch();
+        flush();
+      }
+      batch.push(segment);
+      batchSize += segmentSize;
+    }
+    pushBatch();
+    if (size >= budgetCharacters) flush();
+  }
+  flush();
+  return windows.length ? windows : [[]];
+}
+
+/// What the next window is told about the occasion still in progress.
+///
+/// Only the trailing section can continue — windows are chronological — so this
+/// carries exactly that one section and the memory built from it, not the whole
+/// history. The size of a request therefore does not grow with the number of
+/// windows already processed.
+function carryOverFor(merged) {
+  if (!merged?.conversationSections?.length) return null;
+  const section = merged.conversationSections.at(-1);
+  const memory = merged.memories.length ? merged.memories.at(-1) : null;
+  const sectionSegments = new Set(section.sourceSegmentIds);
+  const continuable = memory && memory.sourceSegmentIds.some((id) => sectionSegments.has(id)) ? memory : null;
+  return {
+    section: {
+      titleEn: section.titleEn, summaryEn: section.summaryEn, topics: section.topics, memoryWorthy: section.memoryWorthy,
+    },
+    memory: continuable ? {
+      type: continuable.type, titleEn: continuable.titleEn, summaryEn: continuable.summaryEn,
+      emoji: continuable.emoji, importance: continuable.importance, topics: continuable.topics,
+    } : null,
+  };
+}
+
+const WINDOW_INSTRUCTIONS = `This request is one window of a transcript that was too long to read at once. The window before it has already been described, and its description is supplied as carryOver. The occasion it describes may still be running in this window.
+Set continuesPrevious to true on your FIRST conversation section when this window opens in the middle of the occasion carryOver.section describes, and on the memory built from that section when it continues carryOver.memory. In that case write the title and summary of the WHOLE occasion — everything carryOver already says plus what this window adds — because NeoRecall replaces the earlier text with yours. Never refer to a previous window, never say the transcript is partial, and never repeat carryOver's segment IDs: cite only segment IDs from this window.
+Set continuesPrevious to false on every other section and memory, including when this window opens a new occasion. Only the first section of the window may set it to true.
+Return dailySummary as null: the last window of the transcript writes it.`;
+
+const FINAL_WINDOW_INSTRUCTIONS = 'This is the last window of the transcript, so it writes dailySummary.';
+
+function consolidationMessages({ conversations, previousDailySummary, timezone, carryOver = null, finalWindow = true }, preparedReferences = null) {
   const references = preparedReferences || compactInput(conversations, timezone);
   const compactPreviousSummary = previousDailySummary ? {
     localDate: previousDailySummary.local_date,
@@ -107,37 +185,63 @@ For mini-memory dueAt and occurredAt, NEVER calculate UTC. Return null or an obj
 Use dueAt for task or promise deadlines. Use occurredAt for events and past occurrences. Status is only for tasks and promises; use null for other kinds.
 Daily summary text covers memory-worthy material only. Exclude sections marked not memory-worthy. If there is no memory-worthy material and no previous daily summary, return dailySummary as null.
 Across conversationSections, include EVERY input segment ID exactly once. Each section must contain a non-empty, chronologically contiguous range from one stream. Preserve segment order. Never omit, duplicate, reorder, or invent segment IDs.
-Use only segment IDs present in the input. Never invent facts or IDs. Importance is 1–10. Confidence reflects evidential certainty. Return no prose outside JSON.`,
+Use only segment IDs present in the input. Never invent facts or IDs. Importance is 1–10. Confidence reflects evidential certainty. Return no prose outside JSON.
+${carryOver ? WINDOW_INSTRUCTIONS : FINAL_WINDOW_INSTRUCTIONS}`,
     },
     {
       role: 'user',
-      content: JSON.stringify({ timezone, previousDailySummary: compactPreviousSummary, conversations: references.compactConversations, outputContract: {
-        conversationSections: [{
-          titleEn: 'Concise English title',
-          summaryEn: 'Faithful English summary',
-          memoryWorthy: true,
-          topics: ['English topic'],
-          sourceSegmentIds: ['contiguous input segment IDs'],
-        }],
-        entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'English canonical name', displayName: null,
-          aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }],
-          speakerAlias: 'speaker label this person is heard speaking as, or null' }],
-        memories: [{ type: alternatives(MEMORY_TYPES), titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
-          sourceSegmentIds: ['input segment ID'], topics: ['English'],
-          entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: alternatives(MINI_MEMORY_KINDS),
-            textEn: 'English atomic statement', importance: 1, confidence: 0.5,
-            dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: null,
-            sourceSegmentIds: ['input segment ID'], entities: [] }] }],
-        dailySummary: { localDate: 'YYYY-MM-DD', timezone, summaryEn: 'English cumulative summary' },
-      } }),
+      content: JSON.stringify({
+        timezone,
+        previousDailySummary: compactPreviousSummary,
+        ...(carryOver ? { carryOver } : {}),
+        conversations: references.compactConversations,
+        outputContract: {
+          conversationSections: [{
+            titleEn: 'Concise English title',
+            summaryEn: 'Faithful English summary',
+            memoryWorthy: true,
+            continuesPrevious: false,
+            topics: ['English topic'],
+            sourceSegmentIds: ['contiguous input segment IDs'],
+          }],
+          entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'English canonical name', displayName: null,
+            aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }],
+            speakerAlias: 'speaker label this person is heard speaking as, or null' }],
+          memories: [{ type: alternatives(MEMORY_TYPES), continuesPrevious: false, titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
+            sourceSegmentIds: ['input segment ID'], topics: ['English'],
+            entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: alternatives(MINI_MEMORY_KINDS),
+              textEn: 'English atomic statement', importance: 1, confidence: 0.5,
+              dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: null,
+              sourceSegmentIds: ['input segment ID'], entities: [] }] }],
+          dailySummary: finalWindow ? { localDate: 'YYYY-MM-DD', timezone, summaryEn: 'English cumulative summary' } : null,
+        },
+      }),
     },
   ];
 }
 
-function prepareConsolidationRequest(input) {
+/// Builds every request one consolidation run needs.
+///
+/// Aliasing happens once for the whole candidate set, so a segment has the same
+/// identifier in whichever window it lands and the engine can resolve every
+/// response against one reference table. `budgetCharacters` is what the provider
+/// can read in a single request; when the transcript fits inside it there is
+/// exactly one window and the result is identical to the unwindowed request.
+function prepareConsolidationRequest(input, budgetCharacters = Infinity) {
   const references = compactInput(input.conversations, input.timezone);
-  const messages = consolidationMessages(input, references);
-  return { messages, references };
+  const windows = windowConversations(references.compactConversations, budgetCharacters);
+  return {
+    references,
+    windows: windows.map((compactConversations, index) => ({
+      compactConversations,
+      segmentIds: compactConversations.flatMap((conversation) => conversation.segments.map((segment) => segment.id)),
+      messages: (carryOver) => consolidationMessages({
+        ...input,
+        carryOver,
+        finalWindow: index === windows.length - 1,
+      }, { ...references, compactConversations }),
+    })),
+  };
 }
 
 function restoreReferenceIds(output, references) {
@@ -152,4 +256,7 @@ function restoreReferenceIds(output, references) {
   return output;
 }
 
-module.exports = { consolidationMessages, prepareConsolidationRequest, restoreReferenceIds, compactInput, localTimestamp };
+module.exports = {
+  consolidationMessages, prepareConsolidationRequest, restoreReferenceIds, compactInput, localTimestamp,
+  windowConversations, carryOverFor,
+};

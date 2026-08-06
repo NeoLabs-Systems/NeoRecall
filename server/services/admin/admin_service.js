@@ -33,7 +33,7 @@ function stats() {
     cleanupPending: db.prepare("SELECT COUNT(*) count FROM audio_chunks WHERE state='persisted_cleanup_pending'").get().count,
     vector: { ready: isVectorReady(), version: expectedVecVersion },
     ai: db.prepare(`SELECT purpose,COUNT(*) attempts,COALESCE(SUM(prompt_tokens),0) prompt_tokens,
-      COALESCE(SUM(completion_tokens),0) completion_tokens,COALESCE(SUM(cost_usd),0) cost_usd FROM ai_requests GROUP BY purpose`).all(),
+      COALESCE(SUM(completion_tokens),0) completion_tokens FROM ai_requests GROUP BY purpose`).all(),
     processing: db.prepare(`SELECT metric,AVG(value) average,MAX(value) maximum,unit FROM processing_metrics
       WHERE created_at>? GROUP BY metric,unit`).all(new Date(Date.now() - 24 * 60 * 60_000).toISOString()),
   };

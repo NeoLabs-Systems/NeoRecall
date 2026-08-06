@@ -26,12 +26,14 @@ test('consolidation input uses compact aliases and restores durable IDs', () => 
       text: 'Mira übernimmt die Aufgabe.', language: 'de', speakerClusterId: 'durable-speaker-id',
     }],
   }] });
-  const payload = JSON.parse(prepared.messages[1].content);
+  assert.equal(prepared.windows.length, 1, 'Input that fits needs exactly one request.');
+  const messages = prepared.windows[0].messages(null);
+  const payload = JSON.parse(messages[1].content);
   assert.equal(payload.conversations[0].id, 'c1');
   assert.equal(payload.conversations[0].segments[0].id, 's1');
   assert.equal(payload.conversations[0].segments[0].speaker, 'speaker1');
-  assert.equal(prepared.messages[1].content.includes(conversationId), false);
-  assert.equal(prepared.messages[1].content.includes(segmentId), false);
+  assert.equal(messages[1].content.includes(conversationId), false);
+  assert.equal(messages[1].content.includes(segmentId), false);
   const output = { conversationSections: [{
     titleEn: 'Task assignment', summaryEn: 'Mira accepted a task.', memoryWorthy: true, topics: ['Planning'], sourceSegmentIds: ['s1'],
   }], memories: [{

@@ -17,8 +17,8 @@ Flutter durable ledger
   -> temporary audio unlink
   -> terminal receipt/outbox event
   -> local embeddings and boundaries
-  -> provisional OpenRouter preview while a conversation is still open
-  -> final OpenRouter consolidation once a conversation closes
+  -> provisional local-model preview while a conversation is still open
+  -> final local-model consolidation once a conversation closes
 ```
 
 Nothing in that chain waits for a recording to end. Chunks upload during capture,
@@ -161,32 +161,61 @@ replaces whatever the preview wrote, and the memories. One real-world occasion
 therefore yields exactly one memory however long it ran, while a device left
 recording all day yields one memory per occasion it captured.
 
-Preview cost is bounded by transcript growth rather than elapsed time — a first
+Preview work is bounded by transcript growth rather than elapsed time — a first
 preview needs a minimum amount of transcript, each refresh needs a minimum amount
 of *new* transcript, and two previews of one conversation stay a minimum interval
-apart — so an uninterrupted stream cannot spend without producing anything new.
+apart — so an uninterrupted stream cannot occupy the model without producing
+anything new.
 
-## Memory and token budget
+## Generation
 
-No amount of recorded audio below a configured floor may cause an outbound
-request. The floor is checked before every other gate, so neither the live
-preview, nor the waiting-material sweep, nor an explicit request by hand can
-send a one-minute recording to a model. It bounds what may *start* a request
-rather than what a request may contain: a short conversation is still carried
-along in a request that longer material already justified, because cost is per
-request and including it there is free.
+The language model runs in the NeoRecall process through llama.cpp. It is
+downloaded and verified like every other model, it is loaded once and held while
+work keeps arriving, and requests are serialized so two jobs cannot each claim a
+GPU's worth of memory. Nothing about a request leaves the machine. An operator
+who would rather send generation to an endpoint they run — another host on the
+LAN, an existing Ollama or llama-server instance, a hosted service — can select
+an OpenAI-compatible provider instead; that is a deliberate configuration step,
+not a default.
 
-The SQLite budget gate is per user and survives restarts. A consolidation is eligible only after the effective interval, sufficient complete material, and OpenRouter configuration. Material that stays under the character threshold is consolidated anyway once it has waited past a configured latency bound, so a short conversation cannot be stranded as a transcript with no memory.
+Every contract is compiled into a sampling grammar, so the model may only emit
+tokens that keep the answer schema-valid. Prose around the JSON, a missing field
+and an invented enum value are structurally impossible rather than caught after
+generation. Length bounds on prose and date patterns have no grammar form and are
+still checked afterwards: an over-long field is trimmed, an invalid date rejected.
+
+A local context holds a fixed number of tokens, and a four-hour lecture does not
+fit in one. Consolidation therefore reads a long transcript in windows cut on
+segment boundaries and processed in order, each window told what the occasion
+looked like when the previous one stopped. The model marks the section — and the
+memory built from it — that carries on, and the windows are folded back into one
+answer, so a long occasion still yields exactly one section and one memory. A
+transcript that fits is a single request and behaves as it always did. A prompt
+that cannot fit at all is refused before generation rather than silently losing
+the beginning of the transcript to a context shift.
+
+## Memory scheduling
+
+The gates that used to ration outbound requests are off by default and remain
+configurable. Generation costs seconds of the host's own CPU rather than money,
+so a conversation is consolidated on the scheduler tick after it closes and one
+conversation is read per run — the unit a memory is anchored to — rather than a
+dozen batched together to amortize a price. An operator whose machine cannot keep
+up with its own recordings can restore any of the old floors; the audio floor in
+particular remains a hard gate that no path can bypass.
+
+A consolidation is eligible only after the effective interval, sufficient complete
+material, and an available model. The per-user SQLite gate survives restarts.
 
 Consolidation candidates are ordered oldest-first, which makes an unpartitionable conversation a hazard in permanent operation: it would re-enter every later run and stop memory generation for good. A validation failure therefore narrows the next run to a single conversation, and a conversation that keeps failing is quarantined — still readable, no longer a candidate. The same single structured response refines provisional boundaries, writes a title and summary for every final conversation, and creates English episodic memories, atomic mini-memories, entities, importance values, and an incremental daily summary. The model may split a long provisional conversation or merge adjacent provisional conversations from the same recording stream.
 
 Refinement is evidence-addressed and transactional. The model must partition every input segment exactly once into chronological, contiguous, single-stream sections. Server-side validation rejects missing, duplicated, reordered, invented, or cross-device segment references before any conversation is changed. Segment membership, conversation speakers, summaries, topics, memories, and source links then commit together or roll back together.
 
-A validation failure records the specific reason it failed, not only a code, so a real occurrence is diagnosable from its stored row instead of requiring a fresh paid request to see the same answer again. A worker process that dies mid-run — a crash, an out-of-memory kill, a deploy — leaves a run marked `running` with nothing left alive to fail it; a periodic sweep reconciles any such run past a bounded age, so one interrupted process cannot permanently block a user's memory generation. That reconciliation is deliberately excluded from the narrowing and quarantine policy: a crash says nothing about whether the input itself was consolidatable.
+A validation failure records the specific reason it failed, not only a code, so a real occurrence is diagnosable from its stored row instead of requiring the same minutes of generation again just to see the answer. A worker process that dies mid-run — a crash, an out-of-memory kill, a deploy — leaves a run marked `running` with nothing left alive to fail it; a periodic sweep reconciles any such run past a bounded age, so one interrupted process cannot permanently block a user's memory generation. That reconciliation is deliberately excluded from the narrowing and quarantine policy: a crash says nothing about whether the input itself was consolidatable.
 
 ## Search
 
-Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented OpenRouter request with result citations.
+Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the same local model, with result citations.
 
 ## NeoAgent boundary
 
@@ -194,4 +223,4 @@ NeoAgent is an OAuth client of NeoRecall, not another processing worker. It
 receives seven read-only tools for on-demand local search and evidence access.
 Audio, voice embeddings, ingest, settings, memory mutation, consolidation, and
 Ask remain inside NeoRecall. This avoids duplicated memory stores and prevents
-an otherwise unnecessary second OpenRouter request.
+an otherwise unnecessary second round of generation.

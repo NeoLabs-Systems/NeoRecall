@@ -8,6 +8,7 @@ const settings = require('../settings/settings_service');
 const processingSettings = require('../settings/processing_settings_service');
 const jobs = require('../jobs/job_service');
 const ai = require('../../ai/ai_engine');
+const aiProviders = require('../../ai/provider_registry');
 const searchIndex = require('../../embeddings/search_index_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
@@ -22,8 +23,13 @@ const speakerIdentity = require('../speakers/speaker_identity_service');
 // budget, and carrying fewer conversations next time is exactly the right
 // response. If a single conversation still cannot fit, quarantine eventually
 // stops the bleeding and the operator raises AI_CONSOLIDATION_MAX_OUTPUT_TOKENS.
+//
+// A request that overran the context belongs here for the same reason. Windowing
+// keeps ordinary input inside it, so reaching this means one indivisible piece of
+// evidence — a single recognized utterance — is larger than the whole window, and
+// resending it reproduces the failure exactly.
 const VALIDATION_FAILURE_CODES = Object.freeze([
-  'AI_REFERENCE_INVALID', 'AI_SCHEMA_INVALID', 'AI_TEMPORAL_INVALID', 'AI_OUTPUT_TRUNCATED',
+  'AI_REFERENCE_INVALID', 'AI_SCHEMA_INVALID', 'AI_TEMPORAL_INVALID', 'AI_OUTPUT_TRUNCATED', 'AI_CONTEXT_EXCEEDED',
 ]);
 
 function localDate(iso, timezone) {
@@ -73,7 +79,7 @@ function buildCandidates(userId) {
 function eligibility(userId) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
-  if (!config.openRouterApiKey || !config.aiDefaultModel) return { eligible: false, reason: 'openrouter_not_configured' };
+  if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
   const active = getDatabase().prepare("SELECT id FROM consolidation_runs WHERE user_id=? AND state IN ('reserved','running')").get(userId);
   if (active) return { eligible: false, reason: 'already_running', runId: active.id };
   const interval = Math.max(settings.get(userId).consolidationIntervalMs, config.minConsolidationIntervalMs);
@@ -146,7 +152,7 @@ function request(userId, { manual = false } = {}) {
       const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(state.nextEligibleAt) - Date.now()) / 1000));
       throw new HttpError(429, 'CONSOLIDATION_INTERVAL', 'The consolidation interval has not elapsed.', { retryAfterSeconds, nextEligibleAt: state.nextEligibleAt });
     }
-    if (manual && state.reason === 'openrouter_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'OpenRouter and AI_DEFAULT_MODEL must be configured.');
+    if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The language model is not available. Run `neorecall setup` to install it, or configure an endpoint with AI_PROVIDER=openai_compatible.');
     return state;
   }
   const id = crypto.randomUUID();

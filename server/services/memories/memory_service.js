@@ -1,11 +1,11 @@
 'use strict';
 
 const { getDatabase } = require('../../db/database');
-const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit } = require('../../utils/pagination');
 const searchIndex = require('../../embeddings/search_index_service');
 const ai = require('../../ai/ai_engine');
+const aiProviders = require('../../ai/provider_registry');
 const {
   defaultEmojiForType, MEMORY_TYPES, TITLE_MAX_LENGTH, SUMMARY_MAX_LENGTH,
 } = require('../../ai/schemas/consolidation_schema');
@@ -386,9 +386,8 @@ function deterministicMergeProse(memories) {
 }
 
 async function composeMergedProse(userId, memories) {
-  const config = getConfig();
   const fallback = deterministicMergeProse(memories);
-  if (!config.openRouterApiKey || !config.aiDefaultModel) {
+  if (!aiProviders.ready()) {
     return { prose: fallback, rewritten: false, requestId: null };
   }
   try {

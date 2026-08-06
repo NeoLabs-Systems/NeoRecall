@@ -9,8 +9,8 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-error-detail-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
-process.env.AI_DEFAULT_MODEL = 'test/model';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_MODEL = 'test/model';
 process.env.NEORECALL_MIN_NEW_MATERIAL_CHARS = '1';
 process.env.NEORECALL_MIN_AI_AUDIO_MS = '0';
 
@@ -73,7 +73,7 @@ test('a validation failure keeps its specific reason, not just its code', async 
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
 
   await assert.rejects(() => consolidation.execute(runId));
 

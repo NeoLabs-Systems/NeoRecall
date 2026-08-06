@@ -77,8 +77,8 @@ function characterCount(segments) {
   return segments.reduce((sum, segment) => sum + segment.text.length, 0);
 }
 
-/// How much audio a conversation spans, which is what decides whether it is
-/// worth an outbound LLM request. Character counts cannot answer that: they
+/// How much audio a conversation spans, which is what the configurable audio
+/// floor is measured against. Character counts cannot answer that question: they
 /// scale with how fast someone talks, not with how long they talked.
 function durationMs(conversation) {
   const started = Date.parse(conversation.started_at ?? conversation.startedAt);

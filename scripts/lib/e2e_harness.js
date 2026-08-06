@@ -1,8 +1,16 @@
 'use strict';
 
 // Shared scaffolding for the end-to-end smoke runs: a real server process with
-// the real speech models, a stubbed OpenRouter, and the polling helpers both
-// runs need. Only the scenario lives in each script.
+// the real speech models, a stubbed language-model endpoint, and the polling
+// helpers both runs need. Only the scenario lives in each script.
+//
+// The stub speaks the OpenAI chat-completions contract and the server is pointed
+// at it with AI_PROVIDER=openai_compatible, so the smoke run exercises the whole
+// pipeline in seconds without loading two and a half gigabytes of weights and
+// without its assertions depending on what a real model happened to write. The
+// local provider is covered where its behaviour actually differs: the grammar it
+// derives from each contract, and the windowing that keeps a long transcript
+// inside its context.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -120,12 +128,13 @@ function defaultConsolidation(input) {
       summaryEn: 'A bilingual project discussion assigned follow-up work.',
       memoryWorthy: true,
       topics: ['Project planning'],
+      continuesPrevious: false,
       sourceSegmentIds: segmentIds,
     })),
     entities: [],
     memories: [{
-      type: 'project_discussion', titleEn: 'Project discussion', summaryEn: 'A bilingual project discussion assigned follow-up work.',
-      importance: 7, sourceSegmentIds, topics: ['Project planning'], entities: [],
+      type: 'project_discussion', continuesPrevious: false, titleEn: 'Project discussion', summaryEn: 'A bilingual project discussion assigned follow-up work.',
+      emoji: '📋', importance: 7, sourceSegmentIds, topics: ['Project planning'], entities: [],
       miniMemories: [{ kind: 'task', textEn: 'Follow up on the discussed project work.', importance: 7, confidence: 0.8,
         dueAt: null, occurredAt: null, status: 'open', sourceSegmentIds: [segment.id], entities: [] }],
     }],
@@ -141,10 +150,10 @@ function defaultAsk(input) {
   return { answer: 'The recalled discussion concerned project work and a follow-up.', citations: input.context.length ? [{ sourceId: input.context[0].sourceId }] : [] };
 }
 
-/// A stand-in OpenRouter that answers each prompt kind with a valid contract
+/// A stand-in model endpoint that answers each prompt kind with a valid contract
 /// response and records what it was asked, so a scenario can assert on the
 /// request rather than only on what was stored.
-function openRouterMock(handlers = {}) {
+function modelEndpointMock(handlers = {}) {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -185,7 +194,7 @@ async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, t
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `neorecall-${label}-`));
   fs.symlinkSync(sourceModels, path.join(home, 'models'), 'dir');
   const port = await freePort();
-  const mock = openRouterMock(mockHandlers);
+  const mock = modelEndpointMock(mockHandlers);
   await new Promise((resolve) => mock.server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${port}`;
   let logs = '';
@@ -199,9 +208,9 @@ async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, t
       NEORECALL_PORT: String(port),
       NEORECALL_REQUIRE_VECTOR: 'true',
       NEORECALL_TRANSFORMERS_LOCAL_PATH: path.join(home, 'models'),
-      OPENROUTER_API_KEY: 'e2e-key',
-      OPENROUTER_BASE_URL: `http://127.0.0.1:${mock.server.address().port}`,
-      AI_DEFAULT_MODEL: 'e2e/mock',
+      AI_PROVIDER: 'openai_compatible',
+      AI_API_BASE_URL: `http://127.0.0.1:${mock.server.address().port}`,
+      AI_API_MODEL: 'e2e/mock',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -251,6 +260,6 @@ async function runScenario(label, options, scenario) {
 
 module.exports = {
   assert, progress, delay, freePort, api, pollFactory, sliceWav, wavDurationMs, wavParts,
-  openRouterMock, startServer, runScenario, requireModels,
+  modelEndpointMock, startServer, runScenario, requireModels,
   defaultConsolidation, defaultPreview, defaultAsk,
 };

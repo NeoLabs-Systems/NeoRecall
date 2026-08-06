@@ -83,6 +83,7 @@
     "zod": "3.25.76"
   },
   "optionalDependencies": {
+    "node-llama-cpp": "3.19.1",
     "sherpa-onnx-node": "1.13.4"
   },
   "devDependencies": {

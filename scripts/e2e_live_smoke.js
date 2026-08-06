@@ -54,8 +54,9 @@ async function main() {
       NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS: '20',
       NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS: '10',
       NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS: '0',
-      // The fixture is eighteen seconds of speech; the floor that keeps a
-      // short real recording away from a model would block this run.
+      // Pinned rather than inherited: the fixture is eighteen seconds of
+      // speech, and the audio floor an operator may raise must not decide
+      // whether this run reaches a model.
       NEORECALL_MIN_AI_AUDIO_MS: '0',
       NEORECALL_MIN_NEW_MATERIAL_CHARS: '1',
       NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS: '0',

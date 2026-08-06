@@ -8,11 +8,12 @@ const path = require('node:path');
 const http = require('node:http');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-truncation-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_MODEL = 'test/model';
 
 const { migrate } = require('../../server/db/migrate');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
-const provider = require('../../server/ai/providers/openrouter_provider');
+const provider = require('../../server/ai/providers/openai_compatible_provider');
 const { VALIDATION_FAILURE_CODES } = require('../../server/services/memories/consolidation_service');
 
 migrate();
@@ -28,7 +29,7 @@ async function respondWith(body) {
     req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)); });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
 }
 
 test('a completion stopped at the token limit is reported as truncation, not as bad JSON', async () => {
@@ -43,7 +44,7 @@ test('a completion stopped at the token limit is reported as truncation, not as 
   });
 
   await assert.rejects(
-    () => provider.chatJSON({ userId: null, purpose: 'consolidation', model: 'test/model', messages: [{ role: 'user', content: '{}' }] }),
+    () => provider.chatJSON({ userId: null, purpose: 'consolidation', messages: [{ role: 'user', content: '{}' }] }),
     (error) => {
       assert.equal(error.code, 'AI_OUTPUT_TRUNCATED');
       assert.equal(error.completionTokens, 15979);
@@ -57,11 +58,11 @@ test('a completion stopped at the token limit is reported as truncation, not as 
 });
 
 test('a provider error inside an HTTP 200 is surfaced with its own reason, not as an empty response', async () => {
-  // OpenRouter can answer 200 with an error object in the body; reading that as
+  // A gateway can answer 200 with an error object in the body; reading that as
   // "no message content" hides the one line that explains the failure.
   await respondWith({ id: 'err-1', error: { message: 'Provider returned error', code: 502 } });
   await assert.rejects(
-    () => provider.chatJSON({ userId: null, purpose: 'consolidation', model: 'test/model', messages: [{ role: 'user', content: '{}' }] }),
+    () => provider.chatJSON({ userId: null, purpose: 'consolidation', messages: [{ role: 'user', content: '{}' }] }),
     (error) => {
       assert.equal(error.code, 'AI_PROVIDER_ERROR');
       assert.equal(error.providerCode, 502);
@@ -77,7 +78,7 @@ test('a complete answer is still parsed normally', async () => {
     usage: { prompt_tokens: 10, completion_tokens: 10 },
     choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }],
   });
-  const response = await provider.chatJSON({ userId: null, purpose: 'consolidation', model: 'test/model', messages: [{ role: 'user', content: '{}' }] });
+  const response = await provider.chatJSON({ userId: null, purpose: 'consolidation', messages: [{ role: 'user', content: '{}' }] });
   assert.deepEqual(response.value, { ok: true });
 });
 
@@ -119,7 +120,7 @@ test('a consolidation whose first answer is empty succeeds on the retry', async 
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
 
   const result = await ai.consolidate(null, {
     conversations: [{ id: 'c1', sessionId: 's1', startedAt: '2026-08-01T10:00:00.000Z', endedAt: '2026-08-01T10:30:00.000Z',

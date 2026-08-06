@@ -6,6 +6,8 @@ const processingSettings = require('../settings/processing_settings_service');
 const jobs = require('../jobs/job_service');
 const settings = require('../settings/settings_service');
 const ai = require('../../ai/ai_engine');
+const aiProviders = require('../../ai/provider_registry');
+const { inputBudgetCharacters } = require('../../ai/context_budget');
 const material = require('./conversation_material_service');
 
 // Live insight for a conversation consolidation will not describe.
@@ -38,7 +40,12 @@ function thresholds() {
     refreshCharacters: processing.conversationPreviewRefreshCharacters,
     minimumIntervalMs: processing.conversationPreviewMinIntervalMs,
     fullCharacters: processing.conversationPreviewFullCharacters,
-    enabled: Boolean(config.openRouterApiKey && config.aiPreviewModel),
+    // The most transcript one preview request may carry. A rolling refresh sends
+    // only the speech recorded since the last one, which is normally small, but a
+    // conversation whose previews kept failing can accumulate more than the model
+    // can read at once.
+    budgetCharacters: inputBudgetCharacters(config.aiPreviewMaxOutputTokens),
+    enabled: aiProviders.ready(),
   };
 }
 
@@ -105,6 +112,39 @@ function request(userId, database = getDatabase()) {
   return { queued };
 }
 
+/// Keeps the leading segments that fit in one request.
+///
+/// Truncation is from the end, never the beginning: a preview that describes the
+/// opening of a conversation and stops is a correct description of a prefix,
+/// which is exactly what a preview claims to be. The refresh path then rolls
+/// forward from where this one stopped, so the part left out here is described
+/// by the next request rather than lost.
+function fitToBudget(segments, budgetCharacters) {
+  const output = [];
+  let used = 0;
+  for (const segment of segments) {
+    const size = String(segment.text || '').length;
+    if (output.length && used + size > budgetCharacters) break;
+    output.push(segment);
+    used += size;
+  }
+  return output;
+}
+
+/// How much of the conversation a preview over these segments will have
+/// described: everything from its start through the last segment sent, since a
+/// rolling refresh carries the earlier description forward with it.
+function describedCharacters(allSegments, sent) {
+  if (!sent.length) return 0;
+  const lastId = sent.at(-1).id;
+  let total = 0;
+  for (const segment of allSegments) {
+    total += String(segment.text || '').length;
+    if (segment.id === lastId) break;
+  }
+  return total;
+}
+
 /// Chooses what to send for this refresh.
 ///
 /// Below the full-read threshold the whole transcript goes out, which is exact.
@@ -113,6 +153,11 @@ function request(userId, database = getDatabase()) {
 /// matter how long the conversation has been running. A conversation that was
 /// split by boundary detection can end up not containing the text its previous
 /// preview described; that is detected here and falls back to a full read.
+///
+/// Either shape is finally cut to what the model can read at once. That bound
+/// only bites when a conversation grew far beyond the full-read threshold before
+/// its first successful preview, and it costs nothing then: the description
+/// continues on the next refresh instead of the request failing.
 function previewInput(userId, conversation, limits, database = getDatabase()) {
   const all = material.material(userId, conversation, database);
   const rolling = conversation.insight_state === PROVISIONAL
@@ -120,17 +165,20 @@ function previewInput(userId, conversation, limits, database = getDatabase()) {
     && conversation.title_en
     && conversation.summary_en
     && all.characters > limits.fullCharacters;
-  if (!rolling) return { conversation: all, previousInsight: null, characters: all.characters };
-  const fresh = material.segmentsAfter(userId, conversation.id, conversation.insight_covered_through, database);
-  if (!fresh.length || fresh.length === all.segments.length) {
-    return { conversation: all, previousInsight: null, characters: all.characters };
-  }
+  const fresh = rolling ? material.segmentsAfter(userId, conversation.id, conversation.insight_covered_through, database) : [];
+  const continuing = rolling && fresh.length > 0 && fresh.length !== all.segments.length;
+  const candidate = continuing ? fresh : all.segments;
+  const segments = fitToBudget(candidate, limits.budgetCharacters);
   let topics = [];
-  try { topics = JSON.parse(conversation.topics_json || '[]'); } catch { topics = []; }
+  if (continuing) {
+    try { topics = JSON.parse(conversation.topics_json || '[]'); } catch { topics = []; }
+  }
   return {
-    conversation: { ...all, segments: fresh },
-    previousInsight: { titleEn: conversation.title_en, summaryEn: conversation.summary_en, topics },
-    characters: all.characters,
+    conversation: { ...all, segments },
+    previousInsight: continuing
+      ? { titleEn: conversation.title_en, summaryEn: conversation.summary_en, topics }
+      : null,
+    characters: describedCharacters(all.segments, segments),
   };
 }
 

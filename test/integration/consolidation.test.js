@@ -10,8 +10,8 @@ const crypto = require('node:crypto');
 const request = require('supertest');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-consolidation-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
-process.env.AI_DEFAULT_MODEL = 'test/model';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_MODEL = 'test/model';
 process.env.NEORECALL_MIN_NEW_MATERIAL_CHARS = '1';
 process.env.NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS = '3600000';
 process.env.NEORECALL_MIN_MEMORY_EVIDENCE_MS = '0';
@@ -52,7 +52,7 @@ test('one outbound request creates English memories and a durable interval gate'
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
   const registration = await request(app).post('/api/v1/auth/register').send({ username: 'memory-user', password: 'a long and unique password' });
   const userId = registration.body.user.id; const db = getDatabase();
   const device = crypto.randomUUID(); const session = crypto.randomUUID(); const source = crypto.randomUUID(); const chunk = crypto.randomUUID();
@@ -74,7 +74,6 @@ test('one outbound request creates English memories and a durable interval gate'
   assert.equal(outboundBody.response_format.type, 'json_schema');
   assert.equal(outboundBody.response_format.json_schema.strict, true);
   assert.deepEqual(outboundBody.response_format.json_schema.schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
-  assert.equal(outboundBody.provider.require_parameters, true);
   // The completion budget is always sent; its size is configuration, not contract.
   assert.equal(outboundBody.max_tokens, require('../../server/config').getConfig().aiConsolidationMaxOutputTokens);
   assert.equal(outboundBody.messages[1].content.includes(conversationId), false);
@@ -123,7 +122,7 @@ test('a self-introduction identified during consolidation names the voiceprint a
     });
   });
   await new Promise((resolve) => identityServer.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${identityServer.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${identityServer.address().port}`;
   try {
     const registration = await request(app).post('/api/v1/auth/register').send({ username: 'identity-user', password: 'a long and unique password' });
     const userId = registration.body.user.id; const db = getDatabase();

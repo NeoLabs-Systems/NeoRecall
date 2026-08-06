@@ -1,8 +1,8 @@
 'use strict';
 
-// User-initiated memory merges may rewrite title, summary and emoji through
-// OpenRouter. That needs its own ai_requests purpose so admin accounting does
-// not confuse merges with consolidations or Ask.
+// User-initiated memory merges may rewrite title, summary and emoji through the
+// language model. That needs its own ai_requests purpose so admin accounting
+// does not confuse merges with consolidations or Ask.
 
 function up(db) {
   db.exec(`

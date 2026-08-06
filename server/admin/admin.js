@@ -12,7 +12,7 @@ const pages = {
   overview: ['Overview', 'System health, queue state and retained data.'],
   users: ['Users', 'Accounts and their isolated recording activity.'],
   jobs: ['Jobs', 'Background processing, retries and terminal failures.'],
-  ai: ['AI requests', 'Remote analysis usage and cost.'],
+  ai: ['AI requests', 'Language model usage.'],
   audit: ['Audit log', 'Security-sensitive administrative changes.'],
   processing: ['Processing', 'Live diarization, deduplication and consolidation thresholds.'],
   security: ['Security', 'Admin authentication and access control.'],
@@ -115,7 +115,7 @@ async function load({ announce = false } = {}) {
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
   const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
-  const aiCost = stats.ai.reduce((sum, row) => sum + Number(row.cost_usd || 0), 0);
+  const aiTokens = stats.ai.reduce((sum, row) => sum + Number(row.prompt_tokens || 0) + Number(row.completion_tokens || 0), 0);
   const tiles = [
     ['Users', stats.users, 'ok'],
     ['Recordings', stats.recordings, 'ok'],
@@ -124,7 +124,7 @@ async function load({ announce = false } = {}) {
     ['Temporary audio', `${(stats.temporaryAudioBytes / 1048576).toFixed(1)} MB`, stats.temporaryAudioBytes ? 'warn' : 'ok'],
     ['Cleanup pending', stats.cleanupPending, stats.cleanupPending ? 'warn' : 'ok'],
     ['Vector index', stats.vector.ready ? `Ready · ${stats.vector.version}` : 'Unavailable', stats.vector.ready ? 'ok' : 'fail'],
-    ['AI cost', `$${aiCost.toFixed(4)}`, 'ok'],
+    ['AI tokens', aiTokens.toLocaleString(), 'ok'],
   ];
   document.querySelector('#status').innerHTML = tiles.map(([label, value, state]) => `<article class="status-tile"><span class="status-dot ${state}"></span><div><div class="status-label">${escapeHtml(label)}</div><div class="status-detail">${escapeHtml(value)}</div></div></article>`).join('');
   document.querySelector('#workers').textContent = stats.workers.length
@@ -135,7 +135,7 @@ async function load({ announce = false } = {}) {
     : '<span>No processing samples yet</span>';
   document.querySelector('#users').innerHTML = userData.users.length ? userData.users.map((user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`).join('') : renderEmpty(6, 'No accounts found.');
   document.querySelector('#jobs').innerHTML = jobData.jobs.length ? jobData.jobs.map((job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`).join('') : renderEmpty(5, 'No jobs found.');
-  document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td>$${Number(entry.cost_usd || 0).toFixed(5)}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(6, 'No AI requests found.');
+  document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(5, 'No AI requests found.');
   document.querySelector('#audit').innerHTML = auditData.entries.length ? auditData.entries.map((entry) => `<tr><td>${escapeHtml(entry.actor_type)}${entry.actor_id ? `<small>${escapeHtml(entry.actor_id.slice(0, 8))}</small>` : ''}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml([entry.resource_type, entry.resource_id].filter(Boolean).join(' · '))}</td><td>${dateLabel(entry.created_at)}</td></tr>`).join('') : renderEmpty(4, 'No audit entries found.');
   const jobBadge = document.querySelector('#job-badge');
   jobBadge.hidden = failed === 0;

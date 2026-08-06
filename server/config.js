@@ -26,10 +26,22 @@ function boolean(name, fallback) {
   throw new Error(`${name} must be true or false.`);
 }
 
-// A capable model with a large context that supports strict JSON schema output,
-// at a price that survives an always-on recorder. Overridable with
-// AI_DEFAULT_MODEL; nothing in the pipeline depends on this particular model.
-const defaultAiModel = 'deepseek/deepseek-v4-flash-0731';
+// The local instruction model, downloaded by `neorecall setup` alongside the
+// speech models and run in-process through llama.cpp. Chosen so an always-on
+// recorder needs no account, no key and no outbound request: the on-device tier
+// of Gemma 4, quantization-aware trained at q4_0, is about 5.2 GB on disk, fits
+// in the RAM of an ordinary desktop, and runs on the CPU when there is no GPU to
+// offload to. QAT means the 4-bit weights were trained as 4-bit rather than
+// rounded afterwards, so the quality cost of running quantized is small.
+// Overridable with LLM_MODEL_FILE or LLM_MODEL_PATH; nothing in the pipeline
+// depends on this particular model.
+const defaultLlmModelFile = 'llm/gemma-4-E4B_q4_0-it.gguf';
+
+/// Context kept aside from every request for the chat template and for the gap
+/// between a character-based estimate of the prompt and the real tokenizer.
+/// Exported so the input budget and the configuration check that guards it use
+/// the same number.
+const LLM_PROMPT_RESERVE_TOKENS = 512;
 
 function getConfig() {
   const chunkMinMs = integer('NEORECALL_CHUNK_MIN_MS', 15_000, { min: 1_000 });
@@ -127,11 +139,14 @@ function getConfig() {
     // Live preview of a conversation that is still being recorded. The first
     // preview needs this much transcript, every refresh needs this much growth
     // on top of the previewed text, and two previews of one conversation stay at
-    // least this far apart. Together they bound preview cost on a stream that
-    // never stops.
-    conversationPreviewMinCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS', 800, { min: 1 }),
-    conversationPreviewRefreshCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS', 1_500, { min: 1 }),
-    conversationPreviewMinIntervalMs: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS', 300_000, { min: 0 }),
+    // least this far apart. Together they keep the machine's own work
+    // proportional to new speech rather than to elapsed time. They are set close
+    // to the scheduler tick because a local model is paid for in seconds of CPU,
+    // not per request, so a description that is a minute old is the thing worth
+    // avoiding.
+    conversationPreviewMinCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS', 300, { min: 1 }),
+    conversationPreviewRefreshCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS', 600, { min: 1 }),
+    conversationPreviewMinIntervalMs: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS', 60_000, { min: 0 }),
     // Up to this size a refresh re-reads the whole transcript, which is exact.
     // Beyond it a refresh sends the previous summary plus only the new speech,
     // so an all-day conversation costs a constant amount per refresh instead of
@@ -149,56 +164,90 @@ function getConfig() {
       importance: importanceWeight / searchWeightTotal,
     },
     searchHalfLifeDays: number('NEORECALL_SEARCH_HALF_LIFE_DAYS', 30, { min: 0.01 }),
-    aiProvider: process.env.AI_PROVIDER || 'openrouter',
-    aiDefaultModel: process.env.AI_DEFAULT_MODEL || defaultAiModel,
-    // Live conversation previews run far more often than consolidation and only
-    // produce a title, a summary and topics, so they default to the same cheap
-    // model but can be pointed somewhere else without touching consolidation.
-    aiPreviewModel: process.env.AI_PREVIEW_MODEL || process.env.AI_DEFAULT_MODEL || defaultAiModel,
-    aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 120_000, { min: 1_000 }),
+    // `llama` runs the model in this process through llama.cpp and never leaves
+    // the machine. `openai_compatible` points the same requests at an endpoint
+    // the operator runs or trusts — another host on the LAN with a GPU, Ollama,
+    // llama-server, or a hosted service. There is no built-in provider that
+    // requires an account.
+    aiProvider: process.env.AI_PROVIDER || 'llama',
+    // Where the GGUF weights live. LLM_MODEL_FILE is resolved inside the managed
+    // models directory that `neorecall setup` fills; LLM_MODEL_PATH overrides it
+    // with an absolute path for a model the operator manages themselves.
+    llmModelFile: process.env.LLM_MODEL_FILE || defaultLlmModelFile,
+    llmModelPath: process.env.LLM_MODEL_PATH || null,
+    // How much of the conversation the model may hold at once, in tokens. This
+    // is the single number that decides how much RAM the model needs beyond its
+    // weights, and consolidation windows its input to fit it, so raising it buys
+    // fewer, wider passes and lowering it buys narrower ones. 16 384 keeps the
+    // key-value cache of a 4B model well under a gigabyte.
+    llmContextSize: integer('LLM_CONTEXT_SIZE', 16_384, { min: 2_048, max: 262_144 }),
+    // Layers to offload to the GPU. 'auto' offloads as many as the detected
+    // Metal, CUDA or Vulkan device has memory for and silently runs on the CPU
+    // when there is none, which is what makes one default work everywhere.
+    llmGpuLayers: process.env.LLM_GPU_LAYERS || 'auto',
+    // 0 lets llama.cpp pick a thread count from the machine.
+    llmThreads: integer('LLM_THREADS', 0, { min: 0, max: 256 }),
+    // Structured extraction, not prose: near-greedy decoding keeps the model on
+    // the evidence instead of inventing plausible-sounding detail.
+    llmTemperature: number('LLM_TEMPERATURE', 0.2, { min: 0, max: 2 }),
+    // How long the weights stay resident after the last request. Loading a model
+    // this size costs seconds, and the scheduler produces work in bursts, so
+    // holding it briefly turns a burst into one load instead of one per job —
+    // while an idle recorder still gives the memory back.
+    llmIdleUnloadMs: integer('LLM_IDLE_UNLOAD_MS', 600_000, { min: 0 }),
+    // Only used by the openai_compatible provider.
+    aiApiBaseUrl: (process.env.AI_API_BASE_URL || '').replace(/\/$/, '') || null,
+    aiApiKey: process.env.AI_API_KEY || null,
+    aiApiModel: process.env.AI_API_MODEL || null,
+    aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 600_000, { min: 1_000 }),
     aiMaxRetries: integer('AI_MAX_RETRIES', 2, { min: 0, max: 10 }),
-    // Has to cover the sections, memories and mini-memories a full-size input
+    // Has to cover the sections, memories and mini-memories one window of input
     // can justify; a completion cut off mid-JSON reads as a validation failure.
+    // It shares the context budget with the prompt, so it cannot be raised
+    // without raising LLM_CONTEXT_SIZE too.
+    aiConsolidationMaxOutputTokens: integer('AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 6_000, { min: 512, max: 200_000 }),
+    // How much transcript one consolidation request may read, in characters.
     //
-    // Sized from measurement, and the measurement had a surprise in it. Three
-    // hours of real council audio produced 24 315 completion tokens — but on a
-    // reasoning model most of that is not the answer. One observed call spent
-    // 12 307 of 15 979 completion tokens thinking before writing any JSON, and
-    // an earlier attempt at the same input truncated mid-answer. The budget has
-    // to cover reasoning *and* the answer, and reasoning length varies from call
-    // to call, so the ceiling needs real headroom rather than a tight fit.
-    // Nothing is charged for headroom that goes unused.
-    aiConsolidationMaxOutputTokens: integer('AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 64_000, { min: 512, max: 200_000 }),
-    // The preview's *answer* is tiny — a title, a summary, topics — but on a
-    // reasoning model the internal tokens bill against the same limit, and one
-    // observed call spent over 12 000 tokens thinking before any JSON. A budget
-    // sized to the answer alone would truncate every preview. Unused headroom
-    // costs nothing.
-    aiPreviewMaxOutputTokens: integer('AI_PREVIEW_MAX_OUTPUT_TOKENS', 24_000, { min: 256, max: 200_000 }),
-    openRouterApiKey: process.env.OPENROUTER_API_KEY || null,
-    openRouterBaseUrl: (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
-    minConsolidationIntervalMs: integer('NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS', 300_000, { min: 0 }),
+    // Sized against the *answer*, not against the context. What a window can
+    // hold and what its answer costs are different quantities, and the answer is
+    // the one that fails: a full contract for dense speech runs to roughly one
+    // output token per five input characters, so a window sized to fill a 16 384
+    // token context — nearly thirty thousand characters — asks for an answer
+    // several times larger than AI_CONSOLIDATION_MAX_OUTPUT_TOKENS allows, and
+    // arrives truncated. Measured: 29 600 characters of continuous lecture
+    // overran a 6 000 token budget outright.
+    //
+    // Eight thousand characters is five to eight minutes of speech and leaves
+    // the answer roughly a fourfold margin. Raising it lets the model see more
+    // of an occasion at once; lowering it is the first thing to try if
+    // AI_OUTPUT_TRUNCATED appears. It is also clamped to whatever the context
+    // can actually hold.
+    consolidationWindowCharacters: integer('NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS', 8_000, { min: 1_000 }),
+    // A preview answer is a title, a summary and topics, and the model that
+    // writes it does not spend tokens thinking first.
+    aiPreviewMaxOutputTokens: integer('AI_PREVIEW_MAX_OUTPUT_TOKENS', 1_500, { min: 256, max: 200_000 }),
+    minConsolidationIntervalMs: integer('NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS', 0, { min: 0 }),
     // How long finished material may wait for the character threshold before it
-    // is consolidated anyway. Without it, a short conversation at the end of a
-    // day would stay a transcript with no memory until unrelated speech arrives.
-    maxConsolidationLatencyMs: integer('NEORECALL_MAX_CONSOLIDATION_LATENCY_MS', 900_000, { min: 0 }),
+    // is consolidated anyway. Zero means it never waits: with the model running
+    // on this machine there is nothing to save by batching short conversations
+    // together, and a conversation that just ended is exactly the one a user is
+    // about to look for.
+    maxConsolidationLatencyMs: integer('NEORECALL_MAX_CONSOLIDATION_LATENCY_MS', 0, { min: 0 }),
     // Consecutive AI validation failures a conversation may cause before it is
     // quarantined. Candidates are always built oldest-first, so one conversation
     // the model cannot partition would otherwise poison every later run and stop
     // memory generation permanently.
     consolidationMaxFailures: integer('NEORECALL_CONSOLIDATION_MAX_FAILURES', 3, { min: 1, max: 100 }),
-    // The least audio that may cause an outbound LLM request at all.
+    // The least audio and text that may cause a model request at all.
     //
-    // A hard floor, not a heuristic: a one-minute recording never reaches a
-    // model, whatever else would have made it eligible. Character thresholds
-    // alone cannot promise that — a fast speaker clears them in forty seconds,
-    // and the latency sweep deliberately consolidates material that never does.
-    //
-    // Cost is per request, not per conversation, so this gates what may *start*
-    // a request. A short conversation still rides along in a request that longer
-    // material already justified, where including it costs nothing extra.
-    minAiAudioMs: integer('NEORECALL_MIN_AI_AUDIO_MS', 60_000, { min: 0 }),
-    minNewMaterialChars: integer('NEORECALL_MIN_NEW_MATERIAL_CHARS', 1500, { min: 1 }),
+    // Both existed to keep a per-request bill off trivial material. The model
+    // now runs on this machine, so a thirty-second exchange is worth describing
+    // as soon as it ends; the floors that decide what becomes a *memory* are
+    // separate and unchanged, and still keep short speech off the timeline as a
+    // memory card. Raise these if the machine cannot keep up with its own
+    // recordings.
+    minAiAudioMs: integer('NEORECALL_MIN_AI_AUDIO_MS', 0, { min: 0 }),
+    minNewMaterialChars: integer('NEORECALL_MIN_NEW_MATERIAL_CHARS', 1, { min: 1 }),
     // How substantial a conversation section must be before it may become an
     // episodic memory card. Below either floor the section still gets a title
     // and summary on the timeline; durable one-liners belong in mini-memories
@@ -208,15 +257,18 @@ function getConfig() {
     minMemoryEvidenceMs: integer('NEORECALL_MIN_MEMORY_EVIDENCE_MS', 120_000, { min: 0 }),
     minMemoryEvidenceChars: integer('NEORECALL_MIN_MEMORY_EVIDENCE_CHARS', 400, { min: 0 }),
     maxConsolidationInputChars: integer('NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS', 250_000, { min: 1000 }),
-    // The character limit alone does not bound the *output*: many short
-    // conversations produce a section and a memory each, and a completion that
-    // runs past AI_CONSOLIDATION_MAX_OUTPUT_TOKENS arrives as truncated JSON,
-    // which is indistinguishable from a model that cannot follow the contract.
-    // A backlog draining after a long offline stretch is exactly when that
-    // happens, so the batch is bounded by count as well.
-    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 12, { min: 1, max: 200 }),
-    askMaxPerHour: integer('NEORECALL_ASK_MAX_PER_HOUR', 20, { min: 0 }),
-    askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 5, { min: 0 }),
+    // How many conversations one run may carry. Batching several into a single
+    // request used to amortize a per-request price; it also asked the model to
+    // hold several unrelated occasions in mind at once, which is the harder job
+    // and the one it does worse. One conversation per run is the accurate unit —
+    // it is what a memory is anchored to — and the scheduler starts the next run
+    // on its next tick, so a backlog still drains continuously.
+    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 1, { min: 1, max: 200 }),
+    // Ask is answered by the same local model. These limits no longer protect a
+    // bill — they keep one client from queueing more generation than the machine
+    // can work through while recordings are still arriving.
+    askMaxPerHour: integer('NEORECALL_ASK_MAX_PER_HOUR', 240, { min: 0 }),
+    askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 20, { min: 0 }),
     // How often the worker looks for conversations to preview, boundaries to
     // redetect and material to consolidate. It bounds how long after crossing a
     // threshold a result appears, so it is the coarsest term in the latency a
@@ -252,7 +304,16 @@ function getConfig() {
   if (config.conversationPreviewMinCharacters > config.conversationMaximumCharacters) {
     throw new Error('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS must not exceed NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS.');
   }
+  // An output budget the context cannot also hold a prompt beside would leave
+  // nothing to send. Caught at startup, where it is a one-line fix, rather than
+  // as a scheduler exception on the first conversation of the day.
+  for (const name of ['AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 'AI_PREVIEW_MAX_OUTPUT_TOKENS']) {
+    const budget = name === 'AI_CONSOLIDATION_MAX_OUTPUT_TOKENS' ? config.aiConsolidationMaxOutputTokens : config.aiPreviewMaxOutputTokens;
+    if (budget + LLM_PROMPT_RESERVE_TOKENS >= config.llmContextSize) {
+      throw new Error(`${name} (${budget}) leaves no room for input inside LLM_CONTEXT_SIZE (${config.llmContextSize}).`);
+    }
+  }
   return Object.freeze(config);
 }
 
-module.exports = { getConfig, integer, number, boolean };
+module.exports = { getConfig, integer, number, boolean, LLM_PROMPT_RESERVE_TOKENS };

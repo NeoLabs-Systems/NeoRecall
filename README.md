@@ -9,8 +9,8 @@
 <p align="center">
   NeoRecall runs as a service on your own machine. It transcribes and diarizes
   audio from web, desktop, and wearable clients entirely on-device, builds
-  searchable local memory, and only calls an LLM for rare, budgeted
-  consolidation and Ask queries.
+  searchable local memory, and writes that memory with a language model that
+  runs on the same machine. No account, no API key, nothing leaves the host.
 </p>
 
 <p align="center">
@@ -44,8 +44,8 @@ Read the [installation guide](docs/docs/installation.md) before exposing the ser
 ## ✨ What makes it different
 
 - **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
-- **Transcription and search are local.** CPU inference, multilingual embeddings, FTS5, and sqlite-vec keep the continuous path free of paid tokens.
-- **LLMs are rare and budgeted.** OpenRouter is called only for eligible memory consolidations, live conversation previews, and explicit Ask searches, with durable rate gates.
+- **Everything runs on your machine.** Speech recognition, diarization, multilingual embeddings, FTS5, sqlite-vec — and the language model that writes your memories. `neorecall setup` downloads all of it; a machine with 16 GB of RAM can run the lot, and any GPU it has is used automatically.
+- **Nothing is rationed.** Because generation costs seconds of your own CPU rather than a bill, memories are written as soon as a conversation ends, live previews refresh every minute, and one conversation is read at a time instead of a dozen at once. A transcript longer than the model's context is read in windows and folded back into one memory.
 - **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.
 - **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
 - **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) to search memories and transcript evidence through read-only, token-free retrieval tools.

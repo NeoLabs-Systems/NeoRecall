@@ -7,9 +7,9 @@ sidebar_label: Overview
 # NeoRecall documentation
 
 NeoRecall is a self-hosted audio memory service. It records from web, desktop,
-and wearable clients, transcribes and diarizes speech locally, and builds
-searchable memory without sending the continuous audio path through a paid
-model.
+and wearable clients, and transcribes, diarizes, indexes and summarizes speech
+entirely on the machine you install it on. No account, no API key, and nothing
+sent anywhere unless you deliberately configure it that way.
 
 NeoRecall is beta software. Install it on a machine you administer and read
 the privacy guide before recording anyone else.

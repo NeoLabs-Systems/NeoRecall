@@ -12,9 +12,14 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
+      # The language model runs inside the container by default and needs no
+      # key. Set AI_PROVIDER=openai_compatible with AI_API_BASE_URL and
+      # AI_API_MODEL to send generation to an endpoint you run instead.
+      AI_PROVIDER: ${AI_PROVIDER:-llama}
+      LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE:-16384}
+      AI_API_BASE_URL: ${AI_API_BASE_URL:-}
+      AI_API_MODEL: ${AI_API_MODEL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
     volumes:
       - neorecall-data:/root/.neorecall
     healthcheck:
