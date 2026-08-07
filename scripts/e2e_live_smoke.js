@@ -59,6 +59,12 @@ async function main() {
       // whether this run reaches a model.
       NEORECALL_MIN_AI_AUDIO_MS: '0',
       NEORECALL_MIN_NEW_MATERIAL_CHARS: '1',
+      // The fixture is eighteen seconds of speech, and the evidence floors exist
+      // to keep exactly that off the timeline as its own memory card. Lowering
+      // them is what lets this run reach the memory path at all; what the floors
+      // themselves do is covered by test/unit/memory_worthiness_floors.test.js.
+      NEORECALL_MIN_MEMORY_EVIDENCE_MS: '0',
+      NEORECALL_MIN_MEMORY_EVIDENCE_CHARS: '0',
       NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS: '0',
       // Long enough that the recording is still live while the chunks upload,
       // short enough that the run does not have to wait five real minutes for

@@ -199,13 +199,24 @@ function getConfig() {
     aiApiBaseUrl: (process.env.AI_API_BASE_URL || '').replace(/\/$/, '') || null,
     aiApiKey: process.env.AI_API_KEY || null,
     aiApiModel: process.env.AI_API_MODEL || null,
-    aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 600_000, { min: 1_000 }),
+    // A local model is not a network call: this is how long the machine may
+    // spend *generating*, and a bounded consolidation answer on a CPU-only host
+    // is minutes of work, not seconds. Sized so the slowest legitimate answer
+    // finishes rather than being aborted and retried at the same cost.
+    aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     aiMaxRetries: integer('AI_MAX_RETRIES', 2, { min: 0, max: 10 }),
     // Has to cover the sections, memories and mini-memories one window of input
     // can justify; a completion cut off mid-JSON reads as a validation failure.
     // It shares the context budget with the prompt, so it cannot be raised
     // without raising LLM_CONTEXT_SIZE too.
-    aiConsolidationMaxOutputTokens: integer('AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 6_000, { min: 512, max: 200_000 }),
+    //
+    // Now that the contract caps how many items one pass may return, the worst
+    // case is arithmetic rather than a guess: three memories with eight
+    // mini-memories each, sixteen entities and the sections around them come to
+    // roughly five and a half thousand tokens of pretty-printed JSON. Eight
+    // thousand covers that with margin. Measured runs of a dense eight-thousand
+    // character window landed between 2 400 and 3 900.
+    aiConsolidationMaxOutputTokens: integer('AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 8_000, { min: 512, max: 200_000 }),
     // How much transcript one consolidation request may read, in characters.
     //
     // Sized against the *answer*, not against the context. What a window can
@@ -274,7 +285,12 @@ function getConfig() {
     // threshold a result appears, so it is the coarsest term in the latency a
     // user perceives.
     schedulerIntervalMs: integer('NEORECALL_SCHEDULER_INTERVAL_MS', 60_000, { min: 1_000 }),
-    jobLeaseMs: integer('NEORECALL_JOB_LEASE_MS', 300_000, { min: 10_000 }),
+    // How long a worker may hold a job before another may assume it died. It has
+    // to exceed the slowest job the machine actually runs, and with generation
+    // happening on this host a single consolidation is minutes of work — a lease
+    // shorter than that would let a second worker start the same run while the
+    // first is still writing the answer.
+    jobLeaseMs: integer('NEORECALL_JOB_LEASE_MS', 1_800_000, { min: 10_000 }),
     jobMaxAttempts: integer('NEORECALL_JOB_MAX_ATTEMPTS', 5, { min: 1, max: 100 }),
     // Live meeting bot (Playwright joins Meet / Zoom / Teams as a notetaker).
     // Per-user account sign-in is stored as a browser profile; no admin OAuth

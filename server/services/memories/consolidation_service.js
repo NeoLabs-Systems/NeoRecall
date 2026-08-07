@@ -342,10 +342,13 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
       searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: memory.titleEn, body: memory.summaryEn, occurredAt: memory.startedAt, importance: memory.importance }, db);
     }
     if (output.dailySummary) {
-      if (output.dailySummary.timezone !== userSettings.timezone) throw Object.assign(new Error('Daily summary timezone differs from the user setting.'), { code: 'AI_REFERENCE_INVALID' });
+      // Which day this covers, and in which timezone, are derived from the
+      // evidence rather than read back from the model. The server already knows
+      // both from the conversations it selected, so asking a model to restate
+      // them only created a way for the answer to disagree with the input — and
+      // that disagreement used to fail an otherwise correct consolidation.
       const newestWorthyConversation = worthyConversations.reduce((latest, conversation) => !latest || Date.parse(conversation.endedAt) > Date.parse(latest.endedAt) ? conversation : latest, null);
       const expectedDate = localDate(newestWorthyConversation.endedAt, userSettings.timezone);
-      if (output.dailySummary.localDate !== expectedDate) throw Object.assign(new Error('Daily summary local date is inconsistent with its coverage.'), { code: 'AI_REFERENCE_INVALID' });
       const existing = db.prepare('SELECT * FROM daily_summaries WHERE user_id=? AND local_date=? AND timezone=?').get(userId, expectedDate, userSettings.timezone);
       const currentDayConversations = worthyConversations.filter((conversation) => localDate(conversation.endedAt, userSettings.timezone) === expectedDate);
       const coverageStartedAt = [existing?.coverage_started_at, ...currentDayConversations.map((conversation) => conversation.startedAt)]

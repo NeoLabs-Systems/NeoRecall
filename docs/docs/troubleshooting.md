@@ -11,6 +11,8 @@ Run `neorecall setup` and inspect `neorecall logs`. Setup verifies every downloa
 
 The response separates them: `models` covers the speech pipeline and `languageModel` the model that writes memories, previews and Ask answers. Both gate readiness, because a server that transcribes but cannot write a memory looks healthy while producing nothing you installed it for. If `languageModel` is false with `AI_PROVIDER=openai_compatible`, it means `AI_API_BASE_URL` or `AI_API_MODEL` is unset — it does not test whether the endpoint answers.
 
+Readiness compares each installed file against the size the manifest pins, not merely that a file of that name exists. That distinction matters when the pinned model changes between versions: a directory left behind by the previous generation has all the right filenames, and treating it as ready produces a server that reports healthy and then fails every job. `neorecall setup` after an update is what resolves it; `npm run verify:models` reports the same thing with a full SHA-256 check.
+
 ## Memory generation is slow or falls behind
 
 Generation runs on this machine, so it costs CPU or GPU time. Check the admin dashboard for queue depth. `LLM_GPU_LAYERS=auto` already offloads what a detected GPU can hold; on a CPU-only host the fastest fixes are a smaller quantization or a smaller model through `LLM_MODEL_FILE`, and then raising `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` and `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` so the machine is asked for less. `NEORECALL_MIN_AI_AUDIO_MS` keeps short recordings away from the model entirely.

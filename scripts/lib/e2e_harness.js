@@ -138,8 +138,12 @@ function defaultConsolidation(input) {
       miniMemories: [{ kind: 'task', textEn: 'Follow up on the discussed project work.', importance: 7, confidence: 0.8,
         dueAt: null, occurredAt: null, status: 'open', sourceSegmentIds: [segment.id], entities: [] }],
     }],
-    dailySummary: { localDate: conversation.recorded.localStartedAt.slice(0, 10), timezone: input.timezone, summaryEn: 'A bilingual project discussion produced follow-up work.' },
+    dailySummary: null,
   };
+}
+
+function defaultDailySummary() {
+  return { summaryEn: 'A bilingual project discussion produced follow-up work.' };
 }
 
 function defaultPreview() {
@@ -161,9 +165,10 @@ function modelEndpointMock(handlers = {}) {
     const system = payload.messages[0].content;
     const input = JSON.parse(payload.messages[1].content);
     const purpose = system.includes('consolidate personal transcripts') ? 'consolidation'
-      : system.includes('still being recorded') ? 'preview' : 'ask';
+      : system.includes('running summary of one day') ? 'daily_summary'
+        : system.includes('still being recorded') ? 'preview' : 'ask';
     requests.push({ purpose, input, payload, system });
-    const handler = handlers[purpose] || { consolidation: defaultConsolidation, preview: defaultPreview, ask: defaultAsk }[purpose];
+    const handler = handlers[purpose] || { consolidation: defaultConsolidation, daily_summary: defaultDailySummary, preview: defaultPreview, ask: defaultAsk }[purpose];
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
       id: `mock-${requests.length}`,

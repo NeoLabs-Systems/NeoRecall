@@ -23,19 +23,28 @@ const app = createApp();
 let server;
 test.after(() => { server?.close(); closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true }); });
 
-test('one outbound request creates English memories and a durable interval gate', async () => {
+test('one consolidation pass creates English memories and a durable interval gate', async () => {
   let outbound = 0; let outboundBody;
   const segmentPublicId = crypto.randomUUID();
   const secondSegmentPublicId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
   server = http.createServer((req, res) => {
-    outbound += 1;
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
-      outboundBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ id: 'generation-test', usage: { prompt_tokens: 100, completion_tokens: 50, cost: 0.001 }, choices: [{ message: { content: JSON.stringify({
+      // The day's summary is its own small request, made once after the
+      // transcript has been read; the transcript pass is the one under test.
+      if (body.messages[0].content.includes('running summary of one day')) {
+        res.end(JSON.stringify({ id: 'daily-summary-test', usage: {}, choices: [{ message: { content: JSON.stringify({
+          summaryEn: 'The release plan was discussed and assigned to Alex.',
+        }) } }] }));
+        return;
+      }
+      outbound += 1;
+      outboundBody = body;
+      res.end(JSON.stringify({ id: 'generation-test', usage: { prompt_tokens: 100, completion_tokens: 50 }, choices: [{ message: { content: JSON.stringify({
       conversationSections: [
         { titleEn: 'Release planning', summaryEn: 'Alex accepted responsibility for the release plan.', memoryWorthy: true,
           topics: ['Release planning'], sourceSegmentIds: ['s1'] },
@@ -47,7 +56,7 @@ test('one outbound request creates English memories and a durable interval gate'
         sourceSegmentIds: ['s1'],
         topics: ['Release planning'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [{ kind: 'promise', textEn: 'Alex promised to prepare the release plan.',
           importance: 8, confidence: 0.95, dueAt: null, occurredAt: '2026-07-13T10:04:00.000Z', status: 'open', sourceSegmentIds: ['s1'], entities: [{ ref: 'person-1', role: 'promisor' }] }] }],
-      dailySummary: { localDate: '2026-07-13', timezone: 'UTC', summaryEn: 'The release plan was discussed and assigned to Alex.' },
+      dailySummary: null,
       }) } }] }));
     });
   });
@@ -111,13 +120,20 @@ test('a self-introduction identified during consolidation names the voiceprint a
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ id: 'generation-identity-test', usage: { prompt_tokens: 50, completion_tokens: 25, cost: 0.0005 }, choices: [{ message: { content: JSON.stringify({
+      if (body.messages[0].content.includes('running summary of one day')) {
+        res.end(JSON.stringify({ id: 'daily-summary-identity', usage: {}, choices: [{ message: { content: JSON.stringify({
+          summaryEn: 'Alex introduced himself.',
+        }) } }] }));
+        return;
+      }
+      res.end(JSON.stringify({ id: 'generation-identity-test', usage: { prompt_tokens: 50, completion_tokens: 25 }, choices: [{ message: { content: JSON.stringify({
         conversationSections: [{ titleEn: 'Introduction', summaryEn: 'Alex introduced himself.', memoryWorthy: true, topics: ['Introduction'], sourceSegmentIds: ['s1'] }],
         entities: [{ ref: 'person-1', kind: 'person', canonicalNameEn: 'Alex', displayName: 'Alex', aliases: [], speakerAlias: 'speaker1' }],
         memories: [{ type: 'introduction', titleEn: 'Alex introduces himself', summaryEn: 'Alex said his name is Alex.', emoji: '👋', importance: 3,
           sourceSegmentIds: ['s1'], topics: ['Introduction'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [] }],
-        dailySummary: { localDate: '2026-07-15', timezone: 'UTC', summaryEn: 'Alex introduced himself.' },
+        dailySummary: null,
       }) } }] }));
     });
   });

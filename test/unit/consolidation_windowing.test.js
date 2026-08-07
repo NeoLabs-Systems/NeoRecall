@@ -105,7 +105,7 @@ test('a section a window says it is continuing is folded into the previous one, 
     memories: [{ type: 'lesson', continuesPrevious: true, titleEn: 'Lecture', summaryEn: 'The whole lecture.', emoji: '📚', importance: 8,
       sourceSegmentIds: ['s3', 's4'], topics: ['Physics', 'Optics'], entities: [{ ref: 'p1', role: 'teacher' }],
       miniMemories: [{ kind: 'fact', textEn: 'Optics is covered after the break.', importance: 4, confidence: 0.8, sourceSegmentIds: ['s4'], entities: [] }] }],
-    dailySummary: { localDate: '2026-08-05', timezone: 'UTC', summaryEn: 'A physics lecture.' },
+    dailySummary: null,
   }));
 
   assert.equal(merged.conversationSections.length, 1, 'One occasion stays one section across windows.');
@@ -116,7 +116,7 @@ test('a section a window says it is continuing is folded into the previous one, 
   assert.equal(merged.memories.length, 1, 'One occasion stays one memory across windows.');
   assert.deepEqual(merged.memories[0].sourceSegmentIds, ['s1', 's2', 's3', 's4']);
   assert.equal(merged.memories[0].miniMemories.length, 2, 'Evidence from both windows is kept.');
-  assert.equal(merged.dailySummary.summaryEn, 'A physics lecture.');
+  assert.equal(merged.dailySummary, null, 'No window writes the day; a separate request does, once.');
 
   // Entity refs are response-local, so two windows can both call their first
   // entity "p1" while meaning different people. Namespacing keeps every citation
@@ -155,4 +155,44 @@ test('only the first section of a window may claim to continue the previous one'
     entities: [], memories: [], dailySummary: null,
   }));
   assert.deepEqual(merged.conversationSections.map((section) => section.sourceSegmentIds), [['s1'], ['s2'], ['s3']]);
+});
+
+test('segments a window left uncited join the section they adjoin instead of failing the run', () => {
+  // Measured against a real transcript on a small local model: a window of
+  // thirty-five segments came back with fifteen cited and the rest missing.
+  // Validation rejects a partition with a hole, so without this the whole
+  // consolidation is discarded and the conversation eventually quarantined.
+  const { completeCoverage } = require('../../server/ai/ai_engine');
+  const sections = [
+    { titleEn: 'Opening', sourceSegmentIds: ['s1', 's2'] },
+    { titleEn: 'Decisions', sourceSegmentIds: ['s5'] },
+  ];
+  const repaired = completeCoverage(sections, ['s1', 's2', 's3', 's4', 's5', 's6', 's7']);
+  assert.deepEqual(repaired.map((section) => section.sourceSegmentIds), [
+    ['s1', 's2', 's3', 's4'],
+    ['s5', 's6', 's7'],
+  ], 'An unclaimed segment joins the section that owns the segment before it.');
+});
+
+test('coverage completion keeps every segment exactly once and in recording order', () => {
+  const { completeCoverage } = require('../../server/ai/ai_engine');
+  const segmentIds = ['s1', 's2', 's3', 's4'];
+  const repaired = completeCoverage([
+    // Reordered, duplicated across sections, and missing s3 — every way the
+    // partition contract can be broken at once.
+    { titleEn: 'B', sourceSegmentIds: ['s4', 's2'] },
+    { titleEn: 'A', sourceSegmentIds: ['s2', 's1'] },
+  ], segmentIds);
+  const covered = repaired.flatMap((section) => section.sourceSegmentIds);
+  assert.deepEqual([...covered].sort(), segmentIds, 'Nothing is dropped and nothing is duplicated.');
+  for (const section of repaired) {
+    const positions = section.sourceSegmentIds.map((id) => segmentIds.indexOf(id));
+    assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'Each section stays in recording order.');
+  }
+});
+
+test('a window whose sections cite nothing recognizable still covers the window', () => {
+  const { completeCoverage } = require('../../server/ai/ai_engine');
+  const repaired = completeCoverage([{ titleEn: 'Only section', sourceSegmentIds: ['not-in-this-window'] }], ['s1', 's2']);
+  assert.deepEqual(repaired.map((section) => section.sourceSegmentIds), [['s1', 's2']]);
 });

@@ -13,6 +13,10 @@ process.env.AI_PROVIDER = 'openai_compatible';
 process.env.AI_API_MODEL = 'test/model';
 process.env.NEORECALL_MIN_NEW_MATERIAL_CHARS = '1';
 process.env.NEORECALL_MIN_AI_AUDIO_MS = '0';
+// The fixture is two short segments; the evidence floors would demote its
+// section and drop the memory whose dangling relation is the point of the test.
+process.env.NEORECALL_MIN_MEMORY_EVIDENCE_MS = '0';
+process.env.NEORECALL_MIN_MEMORY_EVIDENCE_CHARS = '0';
 
 const { migrate } = require('../../server/db/migrate');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
@@ -55,20 +59,30 @@ test('a validation failure keeps its specific reason, not just its code', async 
   db.prepare(`INSERT INTO jobs (id,user_id,resource_type,resource_id,type,status,priority,max_attempts,payload_json)
     VALUES (?,?,?,?,'consolidate_memories','queued',80,1,?)`).run(crypto.randomUUID(), userId, 'consolidation_run', runId, JSON.stringify({ runId, conversationIds: [conversationId] }));
 
-  // A response that covers only the first of the two real segments: schema-valid
-  // (at least one section, real segment IDs), but triggers the refinement
-  // service's specific, pre-existing "omitted transcript segments" message.
+  // A response that is schema-valid — real segment IDs, a section, a memory —
+  // and still cites an entity it never defined. Nothing downstream can repair
+  // that: the relation has no referent. It is the kind of contract violation
+  // whose stored reason has to survive, because diagnosing it from the code
+  // alone would mean spending the same minutes of generation again to see the
+  // answer.
   server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      const input = JSON.parse(payload.messages[1].content);
-      const firstAlias = input.conversations[0].segments[0].id;
       res.setHeader('Content-Type', 'application/json');
+      if (payload.messages[0].content.includes('running summary of one day')) {
+        res.end(JSON.stringify({ id: 'r-daily', usage: {}, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summaryEn: 'A day.' }) } }] }));
+        return;
+      }
+      const input = JSON.parse(payload.messages[1].content);
+      const aliases = input.conversations[0].segments.map((segment) => segment.id);
       res.end(JSON.stringify({ id: 'r1', usage: {}, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
-        conversationSections: [{ titleEn: 'Partial', summaryEn: 'Only the first segment.', memoryWorthy: false, topics: [], sourceSegmentIds: [firstAlias] }],
-        entities: [], memories: [], dailySummary: null,
+        conversationSections: [{ titleEn: 'Whole', summaryEn: 'Both segments.', memoryWorthy: true, topics: [], sourceSegmentIds: aliases }],
+        entities: [],
+        memories: [{ type: 'conversation', titleEn: 'A memory', summaryEn: 'With a dangling relation.', emoji: '💬', importance: 5,
+          sourceSegmentIds: aliases, topics: [], entities: [{ ref: 'never-defined', role: 'participant' }], miniMemories: [] }],
+        dailySummary: null,
       }) } }] }));
     });
   });
@@ -80,7 +94,7 @@ test('a validation failure keeps its specific reason, not just its code', async 
   const run = db.prepare('SELECT state,error_code,error_message FROM consolidation_runs WHERE id=?').get(runId);
   assert.equal(run.state, 'failed');
   assert.equal(run.error_code, 'AI_REFERENCE_INVALID');
-  assert.equal(run.error_message, 'Conversation sections omitted transcript segments.');
+  assert.equal(run.error_message, 'A memory cited an undefined entity.');
 
   // The same detail is what an operator sees through the ordinary API surface.
   const { run: latest } = consolidation.latest(userId);

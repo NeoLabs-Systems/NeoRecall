@@ -1,6 +1,9 @@
 'use strict';
 
-const { MEMORY_TYPES, MINI_MEMORY_KINDS, ENTITY_KINDS } = require('../schemas/consolidation_schema');
+const {
+  MEMORY_TYPES, MINI_MEMORY_KINDS, ENTITY_KINDS,
+  MEMORY_MAX_COUNT, MINI_MEMORY_MAX_COUNT, ENTITY_MAX_COUNT,
+} = require('../schemas/consolidation_schema');
 
 function alternatives(values) {
   return values.join('|');
@@ -152,11 +155,9 @@ function carryOverFor(merged) {
 const WINDOW_INSTRUCTIONS = `This request is one window of a transcript that was too long to read at once. The window before it has already been described, and its description is supplied as carryOver. The occasion it describes may still be running in this window.
 Set continuesPrevious to true on your FIRST conversation section when this window opens in the middle of the occasion carryOver.section describes, and on the memory built from that section when it continues carryOver.memory. In that case write the title and summary of the WHOLE occasion — everything carryOver already says plus what this window adds — because NeoRecall replaces the earlier text with yours. Never refer to a previous window, never say the transcript is partial, and never repeat carryOver's segment IDs: cite only segment IDs from this window.
 Set continuesPrevious to false on every other section and memory, including when this window opens a new occasion. Only the first section of the window may set it to true.
-Return dailySummary as null: the last window of the transcript writes it.`;
+`;
 
-const FINAL_WINDOW_INSTRUCTIONS = 'This is the last window of the transcript, so it writes dailySummary.';
-
-function consolidationMessages({ conversations, previousDailySummary, timezone, carryOver = null, finalWindow = true }, preparedReferences = null) {
+function consolidationMessages({ conversations, previousDailySummary, timezone, carryOver = null }, preparedReferences = null) {
   const references = preparedReferences || compactInput(conversations, timezone);
   const compactPreviousSummary = previousDailySummary ? {
     localDate: previousDailySummary.local_date,
@@ -183,10 +184,11 @@ When one input conversation contains unrelated topics, create separate sections 
 Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. NeoRecall derives all output time ranges from cited segment IDs, so do not produce redundant timestamps. Do not state calendar dates in titles, summaries, or mini-memory text unless the date is spoken in the transcript itself: recording metadata can carry a wrong device clock, and a date written into prose cannot be corrected afterwards.
 For mini-memory dueAt and occurredAt, NEVER calculate UTC. Return null or an object containing the exact local wall-clock value without an offset plus the applicable IANA timezone. Use the supplied user timezone for unqualified times. For a date-only deadline use 23:59:59 local time; for a date-only event use 00:00:00 local time. When the source gives only a vague part of day, retain that wording in text and return null rather than inventing an exact clock time. NeoRecall converts the object to UTC deterministically. Use null when the evidence does not support a date.
 Use dueAt for task or promise deadlines. Use occurredAt for events and past occurrences. Status is only for tasks and promises; use null for other kinds.
-Daily summary text covers memory-worthy material only. Exclude sections marked not memory-worthy. If there is no memory-worthy material and no previous daily summary, return dailySummary as null.
+Always return dailySummary as null. The day is summarised by a separate request once every part of the transcript has been read; this one only describes what it was given.
 Across conversationSections, include EVERY input segment ID exactly once. Each section must contain a non-empty, chronologically contiguous range from one stream. Preserve segment order. Never omit, duplicate, reorder, or invent segment IDs.
 Use only segment IDs present in the input. Never invent facts or IDs. Importance is 1–10. Confidence reflects evidential certainty. Return no prose outside JSON.
-${carryOver ? WINDOW_INSTRUCTIONS : FINAL_WINDOW_INSTRUCTIONS}`,
+This request is one bounded pass: return at most ${MEMORY_MAX_COUNT} memories, at most ${MINI_MEMORY_MAX_COUNT} mini-memories per memory, and at most ${ENTITY_MAX_COUNT} entities. These are budgets to spend well, not quotas to fill. When the transcript offers more than fits, keep the items a person would actually search for later — decisions, commitments with an owner, deadlines, numbers, named people — and drop restatements, pleasantries and anything already implied by the memory summary. Conversation sections are not limited: partition the whole input however many sections it takes.
+${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
     },
     {
       role: 'user',
@@ -213,7 +215,7 @@ ${carryOver ? WINDOW_INSTRUCTIONS : FINAL_WINDOW_INSTRUCTIONS}`,
               textEn: 'English atomic statement', importance: 1, confidence: 0.5,
               dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: null,
               sourceSegmentIds: ['input segment ID'], entities: [] }] }],
-          dailySummary: finalWindow ? { localDate: 'YYYY-MM-DD', timezone, summaryEn: 'English cumulative summary' } : null,
+          dailySummary: null,
         },
       }),
     },
@@ -235,11 +237,7 @@ function prepareConsolidationRequest(input, budgetCharacters = Infinity) {
     windows: windows.map((compactConversations, index) => ({
       compactConversations,
       segmentIds: compactConversations.flatMap((conversation) => conversation.segments.map((segment) => segment.id)),
-      messages: (carryOver) => consolidationMessages({
-        ...input,
-        carryOver,
-        finalWindow: index === windows.length - 1,
-      }, { ...references, compactConversations }),
+      messages: (carryOver) => consolidationMessages({ ...input, carryOver }, { ...references, compactConversations }),
     })),
   };
 }

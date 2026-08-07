@@ -2,11 +2,33 @@
 
 const { z } = require('zod');
 const { localDateTimeToUtc } = require('../../utils/time');
+const { dailySummarySchema, dailySummaryJsonSchema } = require('./daily_summary_schema');
 
 const TITLE_MAX_LENGTH = 160;
 const SUMMARY_MAX_LENGTH = 2_000;
 const TOPIC_MAX_LENGTH = 100;
 const TOPIC_MAX_COUNT = 12;
+// How much one consolidation request may return.
+//
+// These are grammar-enforced, which makes them the only thing standing between a
+// small local model and an answer that never ends: the contract otherwise allows
+// an unbounded array, and a model handed a dense transcript will emit one
+// mini-memory per utterance until it runs out of budget — which arrives as a
+// truncated completion, the failure that narrows and eventually quarantines. On
+// a machine generating a few tokens per second, an unbounded answer is also an
+// unbounded wait.
+//
+// They bound a *window*, not an occasion. A long conversation is read in several
+// windows and their results are merged, so a three-hour lecture still accumulates
+// as many mini-memories as it deserves while no single request grows without
+// limit. Sized for a window of a few thousand characters: an eight-minute stretch
+// of speech rarely holds more than a couple of distinct occasions, and asking the
+// model to pick its eight best atomic facts is a better instruction than letting
+// it list forty.
+const MEMORY_MAX_COUNT = 3;
+const MINI_MEMORY_MAX_COUNT = 8;
+const ENTITY_MAX_COUNT = 16;
+const ENTITY_REFERENCE_MAX_COUNT = 8;
 // A single consumer-facing emoji (may be multi-codepoint, e.g. 👨‍👩‍👧‍👦).
 const EMOJI_MAX_LENGTH = 16;
 const DEFAULT_MEMORY_EMOJI = Object.freeze({
@@ -109,11 +131,9 @@ const consolidationSchema = z.object({
   conversationSections: z.array(conversationSection).min(1),
   entities: z.array(entity).default([]),
   memories: z.array(memory).default([]),
-  dailySummary: z.object({
-    localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    timezone: z.string().min(1),
-    summaryEn: z.string().min(1),
-  }).nullable(),
+  // Written by its own request after the windows are merged, because no single
+  // window sees the day. A window always returns null here.
+  dailySummary: dailySummarySchema.nullable(),
 });
 
 const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
@@ -128,6 +148,7 @@ const entityReferenceJsonSchema = {
   type: 'object', additionalProperties: false, required: ['ref', 'role'],
   properties: { ref: { type: 'string', minLength: 1 }, role: { type: 'string', minLength: 1 } },
 };
+const entityReferencesJsonSchema = { type: 'array', maxItems: ENTITY_REFERENCE_MAX_COUNT, items: entityReferenceJsonSchema };
 const sourceIdsJsonSchema = { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } };
 const topicsJsonSchema = {
   type: 'array', maxItems: TOPIC_MAX_COUNT,
@@ -164,7 +185,7 @@ const consolidationJsonSchema = {
       },
     },
     entities: {
-      type: 'array',
+      type: 'array', maxItems: ENTITY_MAX_COUNT,
       items: {
         type: 'object', additionalProperties: false,
         required: ['ref', 'kind', 'canonicalNameEn', 'displayName', 'aliases', 'speakerAlias'],
@@ -173,7 +194,7 @@ const consolidationJsonSchema = {
           kind: { type: 'string', enum: [...ENTITY_KINDS] },
           canonicalNameEn: { type: 'string', minLength: 1 }, displayName: nullableString,
           aliases: {
-            type: 'array',
+            type: 'array', maxItems: ENTITY_REFERENCE_MAX_COUNT,
             items: {
               type: 'object', additionalProperties: false, required: ['value', 'language'],
               properties: { value: { type: 'string', minLength: 1 }, language: nullableString },
@@ -184,7 +205,7 @@ const consolidationJsonSchema = {
       },
     },
     memories: {
-      type: 'array',
+      type: 'array', maxItems: MEMORY_MAX_COUNT,
       items: {
         type: 'object', additionalProperties: false,
         required: ['type', 'continuesPrevious', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
@@ -197,9 +218,9 @@ const consolidationJsonSchema = {
           importance: importanceJsonSchema,
           sourceSegmentIds: sourceIdsJsonSchema,
           topics: topicsJsonSchema,
-          entities: { type: 'array', items: entityReferenceJsonSchema },
+          entities: entityReferencesJsonSchema,
           miniMemories: {
-            type: 'array',
+            type: 'array', maxItems: MINI_MEMORY_MAX_COUNT,
             items: {
               type: 'object', additionalProperties: false,
               required: ['kind', 'textEn', 'importance', 'confidence', 'dueAt', 'occurredAt', 'status', 'sourceSegmentIds', 'entities'],
@@ -208,24 +229,14 @@ const consolidationJsonSchema = {
                 textEn: { type: 'string', minLength: 1 }, importance: importanceJsonSchema,
                 confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema, occurredAt: temporalReferenceJsonSchema,
                 status: { anyOf: [{ type: 'string', enum: ['open', 'completed', 'cancelled'] }, { type: 'null' }] },
-                sourceSegmentIds: sourceIdsJsonSchema, entities: { type: 'array', items: entityReferenceJsonSchema },
+                sourceSegmentIds: sourceIdsJsonSchema, entities: entityReferencesJsonSchema,
               },
             },
           },
         },
       },
     },
-    dailySummary: {
-      anyOf: [{ type: 'null' }, {
-        type: 'object', additionalProperties: false,
-        required: ['localDate', 'timezone', 'summaryEn'],
-        properties: {
-          localDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-          timezone: { type: 'string', minLength: 1 },
-          summaryEn: { type: 'string', minLength: 1 },
-        },
-      }],
-    },
+    dailySummary: { anyOf: [{ type: 'null' }, dailySummaryJsonSchema] },
   },
 };
 
@@ -271,4 +282,7 @@ module.exports = {
   TITLE_MAX_LENGTH,
   SUMMARY_MAX_LENGTH,
   EMOJI_MAX_LENGTH,
+  MEMORY_MAX_COUNT,
+  MINI_MEMORY_MAX_COUNT,
+  ENTITY_MAX_COUNT,
 };

@@ -51,6 +51,12 @@ Because generation costs seconds of your own machine rather than money, the gate
 
 A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter; those limits no longer protect a bill, they keep one client from queueing more generation than the machine can work through while recordings are still arriving.
 
+### The day's summary
+
+The daily summary is written by its own small request once the transcript has been read, not by the pass that reads it. With windowing no single pass sees the day, so asking one to summarise it asks it to write about material it was never shown. The separate request reads only the titles and summaries of the memory-worthy sections the run produced.
+
+Which local date that summary covers, and in which timezone, are derived from the conversations the run selected rather than read back from the model. The server already knows both, so asking the model to restate them only created a way for the answer to disagree with the evidence — and that disagreement used to fail an otherwise correct consolidation.
+
 ### Windowing a long transcript
 
 A four-hour lecture does not fit in any local context, and it must still become one memory. Consolidation therefore splits the transcript into windows that each fit `LLM_CONTEXT_SIZE`, cut on segment boundaries and processed in order. Each window after the first is told what the occasion looked like when the previous window stopped and marks the section — and the memory built from it — that carries on, so the two are folded back into one. A transcript that fits is exactly one request and behaves as it always did.
@@ -58,6 +64,20 @@ A four-hour lecture does not fit in any local context, and it must still become 
 `NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS` is how much transcript one window carries, and it is sized against the *answer* rather than against the context. Those are different quantities, and the answer is the one that fails: a full contract for dense speech runs to roughly one output token per five input characters, so a window sized to fill a 16 384-token context — nearly thirty thousand characters — asks for several times more answer than `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` allows and arrives truncated. The default of 8 000 characters is five to eight minutes of speech and leaves the answer a fourfold margin. Raising it lets the model see more of an occasion at once; lowering it is the first thing to try if `AI_OUTPUT_TRUNCATED` appears. It is clamped to whatever the context can hold, so it can never exceed `LLM_CONTEXT_SIZE` minus the output budget.
 
 `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` bounds the answer for one window and shares the context budget with the prompt, so it cannot be raised without raising `LLM_CONTEXT_SIZE` too. `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS` still bounds what one *run* may carry before windowing splits it.
+
+### What one request may return
+
+The contract caps a single pass at three memories, eight mini-memories per memory and sixteen entities, and the local provider enforces those caps in the sampling grammar rather than checking them afterwards. Without them a small model handed a dense transcript emits one mini-memory per utterance until it exhausts its token budget, which arrives as a truncated completion — and on a machine generating a few tokens per second, an unbounded answer is also an unbounded wait.
+
+The caps bound a *window*, not an occasion. A three-hour lecture is read in many windows whose results merge, so it still accumulates as many mini-memories as it deserves while no single request grows without limit. Conversation sections are deliberately uncapped: they have to partition the whole input.
+
+Because the caps make the largest possible answer arithmetic rather than a guess — three memories with eight mini-memories each, sixteen entities and the sections around them come to roughly five and a half thousand tokens — `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` can be sized to cover it. Its default of 8 000 does, with margin; measured runs of a dense 8 000-character window landed between 2 400 and 3 900.
+
+### Throughput
+
+A rough figure to plan with: a 4B model at 4-bit on a laptop GPU generates something like fifteen tokens per second, and roughly half that while a schema grammar constrains every token. A consolidation answer of two to four thousand tokens is therefore several minutes of work per window, and a long conversation is several windows. That is why `AI_REQUEST_TIMEOUT_MS` defaults to thirty minutes and `NEORECALL_JOB_LEASE_MS` matches it: the timeout has to outlast the slowest legitimate answer, and a lease shorter than the job would let a second worker start the same run while the first is still writing.
+
+All of it is background work — nothing waits on it — but it is why the preview intervals and the per-run conversation count matter, and why a machine that records all day may want them raised.
 
 ### When an answer does not fit the contract
 

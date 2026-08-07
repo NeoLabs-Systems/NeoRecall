@@ -6,6 +6,7 @@ const path = require('node:path');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { paths } = require('../../../runtime/paths');
+const { installedMatchesManifest } = require('../../../lib/model_downloader');
 
 /// The model runs inside this process through llama.cpp, so nothing about a
 /// request leaves the machine and nothing about it is billed. Two consequences
@@ -34,8 +35,17 @@ function modelLabel() {
   return path.basename(modelPath(), '.gguf');
 }
 
+/// Whether the weights this build expects are installed.
+///
+/// Checked against the manifest, not merely for existence, for the same reason
+/// the speech models are: a file left behind by an earlier pinned model has the
+/// right name and the wrong contents, and answering "ready" to that produces a
+/// server that looks healthy and generates nothing. A path the operator supplied
+/// themselves is not in the manifest and is accepted on existence alone.
 function ready() {
-  return fs.existsSync(modelPath());
+  const config = getConfig();
+  if (config.llmModelPath) return fs.existsSync(config.llmModelPath);
+  return installedMatchesManifest(config.llmModelFile, modelPath());
 }
 
 /// Rewrites a contract expressed as JSON Schema into the subset llama.cpp can
@@ -82,8 +92,8 @@ function cancelUnload() {
 async function load() {
   const config = getConfig();
   const filename = modelPath();
-  if (!fs.existsSync(filename)) {
-    throw Object.assign(new Error(`The local language model is missing at ${filename}. Run \`neorecall setup\`.`), { code: 'AI_MODEL_MISSING' });
+  if (!ready()) {
+    throw Object.assign(new Error(`The local language model at ${filename} is missing or is not the one this version pins. Run \`neorecall setup\`.`), { code: 'AI_MODEL_MISSING' });
   }
   let llamaModule;
   try {
@@ -150,6 +160,28 @@ function serialize(work) {
   const result = queue.then(work, work);
   queue = result.then(() => {}, () => {});
   return result;
+}
+
+/// Attaches the failure code and the request id the rest of the pipeline routes
+/// on, without assuming the thrown value can carry them.
+///
+/// Errors that cross the native boundary are not always ordinary Error objects:
+/// some define `code` as a getter, and assigning to one of those throws from
+/// inside the catch block — replacing a real, diagnosable failure with
+/// "Cannot set property code", which points at nothing. Where the original
+/// cannot be tagged it is wrapped, so its message and stack survive as `cause`.
+function tagged(error, code, requestId) {
+  if (error && typeof error === 'object') {
+    try {
+      error.code = code;
+      error.aiRequestId = requestId;
+      return error;
+    } catch { /* read-only: fall through to a wrapper */ }
+  }
+  const wrapped = new Error(error?.message || String(error), { cause: error });
+  wrapped.code = code;
+  wrapped.aiRequestId = requestId;
+  return wrapped;
 }
 
 function extractSchema(responseFormat) {
@@ -219,17 +251,15 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
     scheduleUnload();
     return { value: result.value, requestId: id };
   } catch (error) {
-    const code = error.name === 'AbortError' ? 'AI_TIMEOUT' : error.code || 'AI_REQUEST_FAILED';
+    const code = error?.name === 'AbortError' ? 'AI_TIMEOUT' : error?.code || 'AI_REQUEST_FAILED';
     db.prepare(`UPDATE ai_requests SET state='failed',error_code=?,completed_at=? WHERE id=?`)
       .run(code, new Date().toISOString(), id);
-    error.code = code;
-    error.aiRequestId = id;
     // A generation that was cut short left the sequence in an unknown state and
     // the weights may be the reason it failed; the next request reloads rather
     // than inheriting whatever remains.
     if (code === 'AI_TIMEOUT' || code === 'AI_REQUEST_FAILED') await unload();
     else scheduleUnload();
-    throw error;
+    throw tagged(error, code, id);
   }
 }
 

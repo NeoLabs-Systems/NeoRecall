@@ -5,8 +5,10 @@ const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationT
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
 const { answerSchema } = require('./schemas/answer_schema');
 const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
+const { dailySummarySchema, dailySummaryJsonSchema } = require('./schemas/daily_summary_schema');
 const { prepareConsolidationRequest, restoreReferenceIds, carryOverFor } = require('./prompts/consolidate_memories');
 const { conversationPreviewMessages } = require('./prompts/preview_conversation');
+const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
 const { inputBudgetCharacters } = require('./context_budget');
@@ -81,7 +83,45 @@ async function consolidateWindowOnce(userId, window, carryOver) {
 /// Only the trailing section may be continued, so a claim anywhere else is
 /// ignored and becomes a new section. That keeps section coverage contiguous no
 /// matter what the model returns.
-function mergeWindow(merged, output) {
+/// Makes a window's sections cover the window, exactly once, in order.
+///
+/// The contract asks the model to partition every segment it was given into
+/// contiguous sections, and validation rejects a consolidation that omits,
+/// duplicates or reorders one. A small local model does not always comply:
+/// measured against a real transcript, one window of thirty-five segments came
+/// back with fifteen of them cited and the rest simply missing, which would have
+/// thrown the whole run away.
+///
+/// So the model's partition is honoured where it made one, and completed where
+/// it did not. A segment nobody claimed joins the section that owns the segment
+/// before it — the conversation it actually adjoins — and a segment two sections
+/// both claimed stays with the first. Nothing is invented and no evidence is
+/// dropped: every segment ends up in exactly one section, in recording order,
+/// which is what makes the result addressable at all. The affected section's
+/// summary may not mention the segments that joined it; that is a smaller loss
+/// than discarding a correct answer and eventually quarantining the
+/// conversation.
+function completeCoverage(sections, segmentIds) {
+  const owner = new Map();
+  sections.forEach((section, index) => {
+    for (const id of section.sourceSegmentIds) if (!owner.has(id)) owner.set(id, index);
+  });
+  let running = null;
+  const assigned = segmentIds.map((id) => {
+    if (owner.has(id)) running = owner.get(id);
+    return running;
+  });
+  // Segments before the first one anybody claimed have no predecessor to join,
+  // so they join the earliest section that claimed anything.
+  const firstOwner = assigned.find((value) => value !== null) ?? 0;
+  const resolved = assigned.map((value) => (value === null ? firstOwner : value));
+  sections.forEach((section, index) => {
+    section.sourceSegmentIds = segmentIds.filter((_, position) => resolved[position] === index);
+  });
+  return sections.filter((section) => section.sourceSegmentIds.length > 0);
+}
+
+function mergeWindow(merged, output, segmentIds = null) {
   const prefix = `w${merged.windowCount + 1}/`;
   const entityRef = (ref) => `${prefix}${ref}`;
   merged.entities.push(...output.entities.map((entity) => ({ ...entity, ref: entityRef(entity.ref) })));
@@ -94,7 +134,8 @@ function mergeWindow(merged, output) {
     })),
   }));
 
-  output.conversationSections.forEach((section, index) => {
+  const sections = segmentIds ? completeCoverage(output.conversationSections, segmentIds) : output.conversationSections;
+  sections.forEach((section, index) => {
     const previous = merged.conversationSections.at(-1);
     if (index === 0 && section.continuesPrevious && previous) {
       previous.titleEn = section.titleEn;
@@ -124,9 +165,35 @@ function mergeWindow(merged, output) {
     merged.memories.push({ ...memory, sourceSegmentIds: [...memory.sourceSegmentIds] });
   });
 
-  if (output.dailySummary) merged.dailySummary = output.dailySummary;
   merged.windowCount += 1;
   return merged;
+}
+
+/// Writes the day's summary from the finished picture.
+///
+/// Deliberately its own request. A window only ever sees its own slice, so
+/// asking the last one to summarise the day asks it to write about material it
+/// was never shown — and when it declined, the missing summary failed the whole
+/// run. This reads the memory-worthy sections the run actually produced, which
+/// is short input and a short answer.
+async function writeDailySummary(userId, { sections, previousDailySummary, timezone }) {
+  const config = getConfig();
+  return withRetries(async () => {
+    const response = await provider().chatJSON({
+      userId, purpose: 'consolidation',
+      messages: dailySummaryMessages({ sections, previousDailySummary, timezone }),
+      maxTokens: config.aiPreviewMaxOutputTokens,
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
+    });
+    const parsed = dailySummarySchema.safeParse(response.value);
+    if (!parsed.success) {
+      markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+      throw Object.assign(new Error('Daily summary output did not match the required schema.'), {
+        code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
+      });
+    }
+    return parsed.data;
+  });
 }
 
 /// Reads one candidate set, in as many passes as the model's context requires.
@@ -151,8 +218,12 @@ async function consolidate(userId, input) {
     const carryOver = merged.windowCount ? carryOverFor(merged) : null;
     const response = await withRetries(() => consolidateWindowOnce(userId, window, carryOver));
     requestId = response.requestId;
-    mergeWindow(merged, response.value);
+    mergeWindow(merged, response.value, window.segmentIds);
   }
+  const worthySections = merged.conversationSections.filter((section) => section.memoryWorthy);
+  merged.dailySummary = worthySections.length
+    ? await writeDailySummary(userId, { sections: worthySections, previousDailySummary: input.previousDailySummary, timezone: input.timezone })
+    : null;
   const { windowCount, ...value } = merged;
   return {
     value: restoreReferenceIds(value, prepared.references),
@@ -230,5 +301,5 @@ async function rewriteMergedMemory(userId, memories) {
 }
 
 module.exports = {
-  consolidate, previewConversation, answer, rewriteMergedMemory, mergeWindow, TRANSIENT_AI_CODES,
+  consolidate, previewConversation, answer, rewriteMergedMemory, writeDailySummary, mergeWindow, completeCoverage, TRANSIENT_AI_CODES,
 };

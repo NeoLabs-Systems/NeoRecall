@@ -1,9 +1,9 @@
 'use strict';
 
-const fs = require('node:fs');
 const path = require('node:path');
 const { TranscriptionProvider } = require('../transcription_provider');
 const { paths } = require('../../../runtime/paths');
+const { installedMatchesManifest } = require('../../../lib/model_downloader');
 const { getConfig } = require('../../config');
 const vad = require('../vad');
 const diarization = require('../diarization');
@@ -40,21 +40,33 @@ function windowForWhisper(span) {
 
 class SherpaProvider extends TranscriptionProvider {
   constructor() { super(); this.recognizer = null; }
-  requiredFiles() {
+  /// The model files this provider needs, as manifest-relative paths.
+  ///
+  /// Relative rather than absolute so each one can be checked against what the
+  /// manifest pins, not merely for existence. A directory left behind by an
+  /// earlier model generation has all the right filenames and none of the right
+  /// contents, and that has to read as "not ready" rather than as ready.
+  requiredPaths() {
     const files = [
-      ...['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'].map((name) => path.join(paths().models, 'asr', name)),
-      path.join(paths().models, 'vad', 'silero_vad.onnx'),
+      ...['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'].map((name) => `asr/${name}`),
+      'vad/silero_vad.onnx',
     ];
     if (getConfig().diarizationEnabled) files.push(
-      path.join(paths().models, 'diarization', 'pyannote-segmentation-3.0.int8.onnx'),
-      path.join(paths().models, 'diarization', 'wespeaker_en_voxceleb_CAM++_LM.onnx'),
+      'diarization/pyannote-segmentation-3.0.int8.onnx',
+      'diarization/wespeaker_en_voxceleb_CAM++_LM.onnx',
     );
     return files;
   }
-  async ready() { return this.requiredFiles().every((filename) => fs.existsSync(filename)); }
+  requiredFiles() { return this.requiredPaths().map((relative) => path.join(paths().models, relative)); }
+  installed() {
+    return this.requiredPaths().every((relative) => installedMatchesManifest(relative, path.join(paths().models, relative)));
+  }
+  async ready() { return this.installed(); }
   getRecognizer() {
+    if (!this.installed()) {
+      throw Object.assign(new Error('The local speech models are missing or are not the ones this version pins. Run `neorecall setup`.'), { code: 'TRANSCRIPTION_MODELS_MISSING' });
+    }
     if (!this.recognizer) {
-      if (!this.requiredFiles().every((filename) => fs.existsSync(filename))) throw Object.assign(new Error('Local speech models are missing. Run `neorecall setup`.'), { code: 'TRANSCRIPTION_MODELS_MISSING' });
       const { OfflineRecognizer } = require('sherpa-onnx-node');
       const directory = path.join(paths().models, 'asr');
       // featureDim is read from the encoder's own ONNX metadata (128 mel bins for

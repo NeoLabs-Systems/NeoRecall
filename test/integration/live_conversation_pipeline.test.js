@@ -25,10 +25,10 @@ const processingSettings = require('../../server/services/settings/processing_se
 const { getConfig } = require('../../server/config');
 
 const app = createApp();
-let openRouter;
+let modelEndpoint;
 
 test.after(() => {
-  openRouter?.close();
+  modelEndpoint?.close();
   closeDatabase();
   fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true });
 });
@@ -86,7 +86,7 @@ test('an open conversation keeps its identity and its live insight while recordi
   assert.equal(first.state, 'open');
 
   // A preview writes a provisional insight for the conversation as it stands.
-  openRouter = http.createServer((req, res) => {
+  modelEndpoint = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
@@ -99,8 +99,8 @@ test('an open conversation keeps its identity and its live insight while recordi
       }) } }] }));
     });
   });
-  await new Promise((resolve) => openRouter.listen(0, '127.0.0.1', resolve));
-  process.env.AI_API_BASE_URL = `http://127.0.0.1:${openRouter.address().port}`;
+  await new Promise((resolve) => modelEndpoint.listen(0, '127.0.0.1', resolve));
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${modelEndpoint.address().port}`;
 
   const previewed = await insights.execute(recording.userId, first.id);
   assert.equal(previewed.superseded, false);
