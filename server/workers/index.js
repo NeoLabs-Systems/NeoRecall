@@ -14,15 +14,20 @@ migrate();
 
 let child;
 const pending = new Map();
+let inferenceReady = false;
 const INFERENCE_RESTART_BASE_MS = 1_000;
 const INFERENCE_RESTART_MAX_MS = 30_000;
 const INFERENCE_HEALTHY_UPTIME_MS = 60_000;
 let inferenceBackoffMs = INFERENCE_RESTART_BASE_MS;
 function spawnInferenceHost() {
   const startedAt = Date.now();
+  inferenceReady = false;
   child = fork(path.join(__dirname, 'inference_host.js'), [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   child.on('message', (message) => {
-    if (message.type === 'ready') logger.info('Inference host readiness', { ready: message.ready, error: message.error });
+    if (message.type === 'ready') {
+      inferenceReady = message.ready === true;
+      logger.info('Inference host readiness', { ready: message.ready, error: message.error });
+    }
     const entry = pending.get(message.requestId);
     if (!entry) return;
     pending.delete(message.requestId);
@@ -30,6 +35,7 @@ function spawnInferenceHost() {
     else entry.reject(Object.assign(new Error(message.error.message), message.error));
   });
   child.on('exit', (code, signal) => {
+    inferenceReady = false;
     for (const entry of pending.values()) entry.reject(Object.assign(new Error('Inference host exited.'), { code: 'INFERENCE_HOST_EXITED' }));
     pending.clear();
     if (controller.signal.aborted) return;
@@ -61,4 +67,5 @@ const controller = new AbortController();
 spawnInferenceHost();
 scheduler.start();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { controller.abort(); scheduler.stop(); child?.kill('SIGTERM'); });
-runner.run({ inference, signal: controller.signal }).catch((error) => { logger.error('Worker stopped unexpectedly', { error }); process.exitCode = 1; });
+runner.run({ inference, isInferenceReady: () => inferenceReady, signal: controller.signal })
+  .catch((error) => { logger.error('Worker stopped unexpectedly', { error }); process.exitCode = 1; });

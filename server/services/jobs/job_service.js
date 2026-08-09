@@ -20,7 +20,7 @@ function enqueue({ userId = null, resourceType = null, resourceId = null, type, 
   }
 }
 
-function claimNext(workerId, leaseMs = getConfig().jobLeaseMs) {
+function claimNext(workerId, leaseMs = getConfig().jobLeaseMs, canTranscribe = true) {
   const db = getDatabase();
   const now = new Date().toISOString();
   const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
@@ -28,6 +28,7 @@ function claimNext(workerId, leaseMs = getConfig().jobLeaseMs) {
     db.prepare(`UPDATE jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL,
       next_attempt_at=?, updated_at=? WHERE status='leased' AND lease_expires_at < ?`).run(now, now, now);
     const job = db.prepare(`SELECT j.* FROM jobs j WHERE j.status='queued' AND j.next_attempt_at <= ?
+      AND (? OR j.type != 'transcribe_chunk')
       AND (j.type != 'transcribe_chunk' OR EXISTS (
         SELECT 1 FROM audio_chunks current_chunk WHERE current_chunk.id=j.resource_id
         AND (current_chunk.state='persisted_cleanup_pending' OR current_chunk.sequence=0 OR EXISTS (
@@ -41,7 +42,7 @@ function claimNext(workerId, leaseMs = getConfig().jobLeaseMs) {
             AND current_chunk.sequence-1 BETWEEN gap.start_sequence AND gap.end_sequence
         ))
       ))
-      ORDER BY j.priority DESC, j.created_at ASC LIMIT 1`).get(now);
+      ORDER BY j.priority DESC, j.created_at ASC LIMIT 1`).get(now, Number(canTranscribe));
     if (!job) return null;
     const changed = db.prepare(`UPDATE jobs SET status='leased',lease_owner=?,lease_expires_at=?,
       attempts=attempts+1,started_at=COALESCE(started_at,?),updated_at=? WHERE id=? AND status='queued'`)

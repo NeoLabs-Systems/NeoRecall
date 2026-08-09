@@ -28,7 +28,8 @@ function createApp() {
     try {
       getDatabase().prepare('SELECT 1').get();
       const worker = getDatabase().prepare('SELECT * FROM worker_heartbeats ORDER BY heartbeat_at DESC LIMIT 1').get();
-      const workerReady = Boolean(worker && Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
+      const workerReady = Boolean(worker && worker.model_state === 'ready' &&
+        Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
       const modelReady = await require('./transcription/provider_registry').getProvider().ready();
       // Reported and gated on, because a server that transcribes but cannot
       // write a memory looks healthy while quietly producing nothing a user
