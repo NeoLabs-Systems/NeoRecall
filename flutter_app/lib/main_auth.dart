@@ -47,6 +47,18 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     super.dispose();
   }
 
+  Future<void> _signInWithSecurityKey() async {
+    final account = _username.text.trim();
+    final ok = await widget.controller.signInWithSecurityKey(
+      account: account.isEmpty ? null : account,
+    );
+    if (!ok &&
+        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
+        mounted) {
+      setState(() => awaitingTwoFactor = true);
+    }
+  }
+
   Future<void> _submit() async {
     if (awaitingTwoFactor) {
       final ok = await widget.controller.completeTwoFactor(
@@ -200,6 +212,18 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                               : 'Sign in',
                         ),
                 ),
+                if (!registerMode &&
+                    !awaitingTwoFactor &&
+                    controller.supportsSecurityKeys) ...<Widget>[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: controller.loading
+                        ? null
+                        : _signInWithSecurityKey,
+                    icon: const Icon(Icons.key_rounded),
+                    label: const Text('Sign in with a security key'),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Wrap(
                   alignment: WrapAlignment.spaceBetween,

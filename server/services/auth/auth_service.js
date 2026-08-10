@@ -209,6 +209,6 @@ async function deleteAccount(userId, password, code) {
 }
 
 module.exports = {
-  publicUser, register, login, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
+  publicUser, register, login, createSession, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
   beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, verifySecondFactor, getTwoFactorStatus, regenerateRecoveryCodes,
 };

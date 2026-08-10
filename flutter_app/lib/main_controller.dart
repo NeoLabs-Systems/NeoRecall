@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'src/api_client.dart';
+import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
@@ -143,6 +144,7 @@ class NeoRecallController extends ChangeNotifier {
   final RecallRecorder recorder;
   late final AudioDeviceAdapterRegistry audioDeviceRegistry;
   late final DeviceSessionController audioDeviceSessions;
+  final WebAuthnClient _webAuthn = createWebAuthnClient();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final Uuid _uuid = const Uuid();
   final AudioLevelScale _audioLevelScale = const AudioLevelScale();
@@ -182,6 +184,7 @@ class NeoRecallController extends ChangeNotifier {
   String? warning;
   bool isConfiguringTwoFactor = false;
   Map<String, dynamic> accountTwoFactor = const <String, dynamic>{};
+  List<Map<String, dynamic>> securityKeys = const <Map<String, dynamic>>[];
   RecallPage page = RecallPage.record;
   List<RecordingSession> recordings = <RecordingSession>[];
   List<TranscriptSegment> transcript = <TranscriptSegment>[];
@@ -251,6 +254,8 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> _partialWrite = Future<void>.value();
   String? _pendingAccount;
   String? _pendingPassword;
+  bool _pendingSecurityKeyLogin = false;
+  bool _securityKeyDismissed = false;
   bool _initializing = false;
   bool _syncInitialized = false;
   bool _deviceRuntimeInitialized = false;
@@ -619,12 +624,138 @@ class NeoRecallController extends ChangeNotifier {
       onTwoFactor: () {
         _pendingAccount = account;
         _pendingPassword = password;
+        _pendingSecurityKeyLogin = false;
       },
     );
   }
 
-  Future<bool> completeTwoFactor(String code) =>
-      login(_pendingAccount ?? '', _pendingPassword ?? '', twoFactorCode: code);
+  bool get supportsSecurityKeys => _webAuthn.isSupported;
+
+  /// Signs in with a security key. A key that verifies the user with a PIN or a
+  /// fingerprint covers the second factor too, so no code is asked for; a
+  /// presence-only key falls back to the two-factor step.
+  Future<bool> signInWithSecurityKey({
+    String? account,
+    String? twoFactorCode,
+  }) async {
+    final signedIn = await _run(
+      () async {
+        final start =
+            await api.request(
+                  'POST',
+                  '/api/v1/auth/webauthn/options',
+                  body: <String, dynamic>{'account': ?account},
+                )
+                as Map;
+        final assertion = await _webAuthn.getAssertion(
+          Map<String, dynamic>.from(start['options'] as Map),
+        );
+        final payload =
+            await api.request(
+                  'POST',
+                  '/api/v1/auth/webauthn/verify',
+                  body: <String, dynamic>{
+                    'challengeId': start['challengeId'],
+                    'response': assertion,
+                    'twoFactorCode': ?twoFactorCode,
+                  },
+                )
+                as Map;
+        await _acceptSession(payload);
+        _pendingAccount = null;
+        _pendingSecurityKeyLogin = false;
+        await refreshAll(silent: true);
+      },
+      onTwoFactor: () {
+        _pendingAccount = account;
+        _pendingPassword = null;
+        _pendingSecurityKeyLogin = true;
+      },
+    );
+    // Dismissing the browser prompt is a deliberate choice, not a failure worth
+    // reporting back on the sign-in card.
+    if (!signedIn && _securityKeyDismissed) {
+      _securityKeyDismissed = false;
+      error = null;
+      notifyListeners();
+    }
+    return signedIn;
+  }
+
+  Future<void> fetchSecurityKeys() async {
+    isConfiguringTwoFactor = true;
+    notifyListeners();
+    try {
+      final response =
+          await api.request('GET', '/api/v1/settings/security-keys') as Map;
+      securityKeys = _securityKeyList(response);
+    } catch (_) {
+    } finally {
+      isConfiguringTwoFactor = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> registerSecurityKey(String label) async {
+    final registered = await _run(() async {
+      final start =
+          await api.request('POST', '/api/v1/settings/security-keys/options')
+              as Map;
+      final attestation = await _webAuthn.createCredential(
+        Map<String, dynamic>.from(start['options'] as Map),
+      );
+      final response =
+          await api.request(
+                'POST',
+                '/api/v1/settings/security-keys',
+                body: <String, dynamic>{
+                  'challengeId': start['challengeId'],
+                  'response': attestation,
+                  'label': label,
+                },
+              )
+              as Map;
+      securityKeys = _securityKeyList(response);
+      notice = 'Security key added.';
+    });
+    if (!registered && _securityKeyDismissed) {
+      _securityKeyDismissed = false;
+      error = null;
+      notifyListeners();
+    }
+    return registered;
+  }
+
+  Future<bool> renameSecurityKey(String id, String label) => _run(() async {
+    final response =
+        await api.request(
+              'PUT',
+              '/api/v1/settings/security-keys/$id',
+              body: <String, dynamic>{'label': label},
+            )
+            as Map;
+    securityKeys = _securityKeyList(response);
+  });
+
+  Future<bool> removeSecurityKey(String id) => _run(() async {
+    final response =
+        await api.request('DELETE', '/api/v1/settings/security-keys/$id')
+            as Map;
+    securityKeys = _securityKeyList(response);
+  });
+
+  List<Map<String, dynamic>> _securityKeyList(Map response) {
+    final rows = response['credentials'];
+    if (rows is! List) return const <Map<String, dynamic>>[];
+    return rows
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  Future<bool> completeTwoFactor(String code) => _pendingSecurityKeyLogin
+      ? signInWithSecurityKey(account: _pendingAccount, twoFactorCode: code)
+      : login(_pendingAccount ?? '', _pendingPassword ?? '', twoFactorCode: code);
   Future<bool> register(String usernameValue, String? email, String password) =>
       _run(() async {
         final payload =
@@ -683,6 +814,7 @@ class NeoRecallController extends ChangeNotifier {
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
     accountTwoFactor = const <String, dynamic>{};
+    securityKeys = const <Map<String, dynamic>>[];
     notifyListeners();
   }
 
@@ -839,6 +971,10 @@ class NeoRecallController extends ChangeNotifier {
       return true;
     } on ApiException catch (exception) {
       if (exception.code == 'TWO_FACTOR_REQUIRED') onTwoFactor?.call();
+      error = exception.message;
+      return false;
+    } on WebAuthnException catch (exception) {
+      _securityKeyDismissed = exception.cancelled;
       error = exception.message;
       return false;
     } catch (exception) {

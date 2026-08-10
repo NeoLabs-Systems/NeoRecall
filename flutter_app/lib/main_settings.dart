@@ -40,7 +40,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // after this frame avoids "setState during build" when the screen is first
     // inflated in response to a navigation rebuild.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.controller.fetchTwoFactorStatus();
+      if (!mounted) return;
+      widget.controller.fetchTwoFactorStatus();
+      widget.controller.fetchSecurityKeys();
     });
   }
 
@@ -252,7 +254,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+      SectionCard(
+        eyebrow: 'SECURITY KEYS',
+        child: _securityKeysCard(palette, ctrl),
+      ),
     ]);
+  }
+
+  Widget _securityKeysCard(NeoRecallPalette palette, NeoRecallController ctrl) {
+    final keys = ctrl.securityKeys;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Security keys', style: TextStyle(color: palette.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 6),
+        Text(
+          'Sign in with a hardware key or passkey instead of your password. A key that asks for a PIN or a fingerprint also replaces your two-factor code.',
+          style: TextStyle(color: palette.textSecondary, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        if (keys.isEmpty)
+          Text('No security keys registered.', style: TextStyle(color: palette.textSecondary))
+        else
+          ...keys.map((key) => _securityKeyRow(palette, ctrl, key)),
+        const SizedBox(height: 16),
+        // Keys registered elsewhere stay manageable here; only adding one needs
+        // an authenticator this device can actually talk to.
+        if (ctrl.supportsSecurityKeys)
+          FilledButton.icon(
+            onPressed: ctrl.loading ? null : () => _addSecurityKey(ctrl),
+            icon: const Icon(Icons.key_rounded),
+            label: const Text('Add security key'),
+          )
+        else
+          Text(
+            'This device cannot register security keys. Open NeoRecall in a browser over HTTPS to add one.',
+            style: TextStyle(color: palette.textSecondary, height: 1.45),
+          ),
+      ],
+    );
+  }
+
+  Widget _securityKeyRow(NeoRecallPalette palette, NeoRecallController ctrl, Map<String, dynamic> key) {
+    final lastUsedAt = key['lastUsedAt'] as String?;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.key_rounded, size: 20, color: palette.textSecondary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(key['label'] as String? ?? 'Security key', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
+                Text(
+                  lastUsedAt == null ? 'Never used' : 'Last used ${lastUsedAt.split('T').first}',
+                  style: TextStyle(color: palette.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            enabled: !ctrl.loading,
+            icon: Icon(Icons.more_horiz_rounded, color: palette.textSecondary),
+            onSelected: (action) => action == 'rename'
+                ? _renameSecurityKey(ctrl, key)
+                : ctrl.removeSecurityKey(key['id'] as String),
+            itemBuilder: (context) => const <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(value: 'rename', child: Text('Rename')),
+              PopupMenuItem<String>(value: 'remove', child: Text('Remove')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addSecurityKey(NeoRecallController ctrl) async {
+    final label = await _promptDialog('Name this key', 'Give the key a name you will recognise, for example "YubiKey".');
+    if (label == null) return;
+    final name = label.trim().isEmpty ? 'Security key ${ctrl.securityKeys.length + 1}' : label.trim();
+    await ctrl.registerSecurityKey(name);
+    if (ctrl.error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+    }
+  }
+
+  Future<void> _renameSecurityKey(NeoRecallController ctrl, Map<String, dynamic> key) async {
+    final label = await _promptDialog('Rename security key', 'Enter a new name for "${key['label']}".');
+    if (label == null || label.trim().isEmpty) return;
+    await ctrl.renameSecurityKey(key['id'] as String, label.trim());
+    if (ctrl.error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+    }
   }
 
   Future<void> _disableTwoFactor(NeoRecallController ctrl) async {
