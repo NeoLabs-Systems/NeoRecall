@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_name">NeoRecall recorder</string>
+    <string name="widget_description">Start persistent phone recording from the home screen</string>
+    <string name="widget_brand">NEORECALL</string>
+    <string name="widget_status_ready">READY</string>
+    <string name="widget_status_starting">STARTING</string>
+    <string name="widget_status_live">LIVE</string>
+    <string name="widget_title_ready">Record with phone</string>
+    <string name="widget_title_starting">Preparing capture…</string>
+    <string name="widget_title_recording">Phone recording is active</string>
+    <string name="widget_compact_title_ready">Record</string>
+    <string name="widget_compact_title_starting">Starting…</string>
+    <string name="widget_compact_title_recording">Recording</string>
+    <string name="widget_subtitle_ready">One tap · persistent · private</string>
+    <string name="widget_subtitle_starting">Opening NeoRecall securely</string>
+    <string name="widget_subtitle_recording">Persistent capture · tap to open</string>
+    <string name="widget_action_description">Open NeoRecall and start phone recording</string>
+    <string name="widget_description_ready">NeoRecall is ready. Tap to open and start persistent phone recording.</string>
+    <string name="widget_description_recording">NeoRecall is recording from the phone microphone. Tap to open.</string>
+</resources>

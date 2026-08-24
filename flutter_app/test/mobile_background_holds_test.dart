@@ -39,7 +39,9 @@ class _FakeAdapter implements AudioDeviceAdapter {
   @override
   Future<void> initialize() async {}
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {}
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
   @override
   Future<void> stopScan() async {}
   @override
@@ -83,8 +85,11 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
   @override
   bool get isRunning => _active.isNotEmpty;
   @override
-  BackgroundRuntimeState get state =>
-      BackgroundRuntimeState(running: isRunning, holds: _active.holds, foreground: true);
+  BackgroundRuntimeState get state => BackgroundRuntimeState(
+    running: isRunning,
+    holds: _active.holds,
+    foreground: true,
+  );
   @override
   Stream<BackgroundCaptureEvent> get events => _events.stream;
 
@@ -92,6 +97,9 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
   Future<void> initialize() async {}
   @override
   Future<BackgroundRuntimeState> refreshState() async => state;
+
+  @override
+  Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
@@ -152,22 +160,25 @@ void _mockPreferredDevice() {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('a paired wearable keeps the host alive with nothing recording', () async {
-    _mockPreferredDevice();
-    final adapter = _FakeAdapter();
-    final background = _RecordingBackgroundService();
-    final recorder = _buildRecorder(adapter, background);
+  test(
+    'a paired wearable keeps the host alive with nothing recording',
+    () async {
+      _mockPreferredDevice();
+      final adapter = _FakeAdapter();
+      final background = _RecordingBackgroundService();
+      final recorder = _buildRecorder(adapter, background);
 
-    await recorder.initialize(accountId: 'account-1');
+      await recorder.initialize(accountId: 'account-1');
 
-    expect(
-      background.active.holds,
-      <BackgroundHold>{BackgroundHold.wearableLink},
-      reason: 'sync and reconnect must survive the UI being swiped away',
-    );
-    expect(background.active.deviceLabel, 'Fake wearable');
-    await recorder.dispose();
-  });
+      expect(
+        background.active.holds,
+        <BackgroundHold>{BackgroundHold.wearableLink},
+        reason: 'sync and reconnect must survive the UI being swiped away',
+      );
+      expect(background.active.deviceLabel, 'Fake wearable');
+      await recorder.dispose();
+    },
+  );
 
   test('no hold is taken when no wearable is paired', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -218,45 +229,53 @@ void main() {
     await recorder.dispose();
   });
 
-  test('an in-flight device transfer keeps the CPU awake, idle polling does not',
-      () async {
-    _mockPreferredDevice();
-    final adapter = _FakeAdapter();
-    final background = _RecordingBackgroundService();
-    final recorder = _buildRecorder(adapter, background);
-    await recorder.initialize(accountId: 'account-1');
+  test(
+    'an in-flight device transfer keeps the CPU awake, idle polling does not',
+    () async {
+      _mockPreferredDevice();
+      final adapter = _FakeAdapter();
+      final background = _RecordingBackgroundService();
+      final recorder = _buildRecorder(adapter, background);
+      await recorder.initialize(accountId: 'account-1');
 
-    expect(background.active.needsWakeLock, isFalse);
+      expect(background.active.needsWakeLock, isFalse);
 
-    await recorder.setDeviceSyncActive(true);
-    expect(background.active.holds, contains(BackgroundHold.wearableSync));
-    expect(background.active.needsWakeLock, isTrue);
+      await recorder.setDeviceSyncActive(true);
+      expect(background.active.holds, contains(BackgroundHold.wearableSync));
+      expect(background.active.needsWakeLock, isTrue);
 
-    await recorder.setDeviceSyncActive(false);
-    expect(background.active.holds, <BackgroundHold>{BackgroundHold.wearableLink});
-    expect(background.active.needsWakeLock, isFalse);
-    await recorder.dispose();
-  });
+      await recorder.setDeviceSyncActive(false);
+      expect(background.active.holds, <BackgroundHold>{
+        BackgroundHold.wearableLink,
+      });
+      expect(background.active.needsWakeLock, isFalse);
+      await recorder.dispose();
+    },
+  );
 
-  test('the notification Stop releases every hold until the app is opened',
-      () async {
-    _mockPreferredDevice();
-    final adapter = _FakeAdapter();
-    final background = _RecordingBackgroundService();
-    final recorder = _buildRecorder(adapter, background);
-    await recorder.initialize(accountId: 'account-1');
+  test(
+    'the notification Stop releases every hold until the app is opened',
+    () async {
+      _mockPreferredDevice();
+      final adapter = _FakeAdapter();
+      final background = _RecordingBackgroundService();
+      final recorder = _buildRecorder(adapter, background);
+      await recorder.initialize(accountId: 'account-1');
 
-    await recorder.pauseBackgroundRuntime();
-    expect(recorder.backgroundPaused, isTrue);
-    expect(background.isRunning, isFalse);
-    expect(recorder.devices.autoReconnect, isFalse);
+      await recorder.pauseBackgroundRuntime();
+      expect(recorder.backgroundPaused, isTrue);
+      expect(background.isRunning, isFalse);
+      expect(recorder.devices.autoReconnect, isFalse);
 
-    await recorder.resumeBackgroundRuntime();
-    expect(recorder.backgroundPaused, isFalse);
-    expect(recorder.devices.autoReconnect, isTrue);
-    expect(background.active.holds, <BackgroundHold>{BackgroundHold.wearableLink});
-    await recorder.dispose();
-  });
+      await recorder.resumeBackgroundRuntime();
+      expect(recorder.backgroundPaused, isFalse);
+      expect(recorder.devices.autoReconnect, isTrue);
+      expect(background.active.holds, <BackgroundHold>{
+        BackgroundHold.wearableLink,
+      });
+      await recorder.dispose();
+    },
+  );
 
   test('holds follow the sources that are actually streaming', () {
     expect(

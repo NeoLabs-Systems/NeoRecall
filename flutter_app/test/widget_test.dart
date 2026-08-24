@@ -167,6 +167,35 @@ void main() {
     expect(find.text('Client'), findsNothing);
   });
 
+  testWidgets('shared shell keeps the canonical web section structure', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1180, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = NeoRecallController()..username = 'Neo';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: NeoRecallShell(controller: controller),
+      ),
+    );
+
+    for (final label in <String>[
+      'Record',
+      'Timeline',
+      'Memories',
+      'Search',
+      'Speakers',
+      'Sources',
+    ]) {
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(find.text('New recording'), findsNothing);
+  });
+
   testWidgets(
     'timeline compacts and expands interleaved conversation segments',
     (tester) async {

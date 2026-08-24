@@ -13,12 +13,18 @@ class MicrophoneCaptureSource implements CaptureSource {
 
   final AudioRecorder _recorder;
   StreamSubscription<Uint8List>? _subscription;
-  final StreamController<Uint8List> _pcm =
-      StreamController<Uint8List>.broadcast();
+  // PCM has exactly one pipeline consumer. A single-subscription controller
+  // queues frames produced during the small window between native startup and
+  // the pipeline attaching, instead of dropping those first samples.
+  final StreamController<Uint8List> _pcm = StreamController<Uint8List>(
+    sync: true,
+  );
   final StreamController<double> _levels = StreamController<double>.broadcast();
   final StreamController<String> _warnings =
       StreamController<String>.broadcast();
   bool _active = false;
+  bool _started = false;
+  bool _stopping = false;
 
   @override
   String get id => 'microphone';
@@ -58,9 +64,22 @@ class MicrophoneCaptureSource implements CaptureSource {
         _emitLevel(data);
       },
       onError: (Object error) {
+        _active = false;
         _warnings.add('Microphone capture interrupted: $error');
+        if (!_stopping && !_pcm.isClosed) _pcm.addError(error);
+      },
+      onDone: () {
+        _active = false;
+        if (!_stopping && !_pcm.isClosed) {
+          final error = StateError(
+            'Microphone audio stream ended unexpectedly.',
+          );
+          _warnings.add(error.message);
+          _pcm.addError(error);
+        }
       },
     );
+    _started = true;
     _active = true;
   }
 
@@ -81,16 +100,23 @@ class MicrophoneCaptureSource implements CaptureSource {
 
   @override
   Future<void> stop() async {
-    await _subscription?.cancel();
-    _subscription = null;
-    if (_active) {
+    _stopping = true;
+    final subscription = _subscription;
+    if (_started) {
       try {
+        // Keep the stream subscription attached until the native recorder has
+        // stopped so PCM already read by Android can still reach the pipeline.
         await _recorder.stop();
       } catch (error) {
         _warnings.add('Microphone stop failed: $error');
       }
     }
+    await Future<void>.delayed(Duration.zero);
+    await subscription?.cancel();
+    _subscription = null;
+    _started = false;
     _active = false;
+    _stopping = false;
   }
 
   @override

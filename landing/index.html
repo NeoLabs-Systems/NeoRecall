@@ -3,36 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NeoRecall — Your day, remembered privately</title>
-  <meta name="description" content="Private, self-hosted audio memory with local transcription, hybrid search, and receipt-gated audio release.">
+  <title>NeoRecall — your day, remembered privately</title>
+  <meta name="description" content="NeoRecall is private, self-hosted audio memory: capture anywhere, transcribe locally, find any moment, and delete audio only after persistence is proven.">
   <meta name="theme-color" content="#0e1511" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#f4f1e8" media="(prefers-color-scheme: light)">
+  <meta property="og:title" content="NeoRecall — your day, remembered privately">
+  <meta property="og:description" content="Private, self-hosted audio memory with local transcription, natural recall, and receipt-proven audio deletion.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@450;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,420;0,9..144,560;0,9..144,640;1,9..144,420&amp;family=IBM+Plex+Mono:wght@450;500;600&amp;family=Inter:wght@440;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <div class="progress-bar" aria-hidden="true"></div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="nb-tile" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#705331"></stop>
+        <stop offset="100%" stop-color="#22564c"></stop>
+      </linearGradient>
+      <radialGradient id="nb-shine" cx="26%" cy="14%" r="72%">
+        <stop offset="0%" stop-color="#fff" stop-opacity="0.22"></stop>
+        <stop offset="100%" stop-color="#fff" stop-opacity="0"></stop>
+      </radialGradient>
+      <radialGradient id="nb-core" cx="38%" cy="32%" r="75%">
+        <stop offset="0%" stop-color="#fffdf6"></stop>
+        <stop offset="48%" stop-color="#eee3cc"></stop>
+        <stop offset="100%" stop-color="#b5a888"></stop>
+      </radialGradient>
+      <radialGradient id="nb-node" cx="36%" cy="30%" r="80%">
+        <stop offset="0%" stop-color="#f8dca8"></stop>
+        <stop offset="52%" stop-color="#d3a85f"></stop>
+        <stop offset="100%" stop-color="#9b6f2f"></stop>
+      </radialGradient>
+      <linearGradient id="nb-tube" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#fffaf0"></stop>
+        <stop offset="52%" stop-color="#efe7d6"></stop>
+        <stop offset="100%" stop-color="#cabf9f"></stop>
+      </linearGradient>
+    </defs>
+  </svg>
+
   <header class="nav" data-nav>
     <div class="nav-inner">
       <a class="brand" href="#top" aria-label="NeoRecall home">
-        <span class="brand-mark" aria-hidden="true">
-          <img src="assets/logo.svg" alt="">
-        </span>
+        <span class="brand-mark" aria-hidden="true"><img src="assets/logo.svg" alt=""></span>
         NeoRecall
       </a>
+
       <nav class="nav-links" aria-label="Primary">
-        <a href="#workflow">Workflow</a>
-        <a href="#privacy">Privacy</a>
-        <a href="#install">Install</a>
+        <a href="#surface">How it works</a>
+        <a href="#sources">Sources</a>
+        <a href="#selfhost">Self-host</a>
         <a href="https://neolabs-systems.github.io/NeoRecall/docs/">Docs</a>
-        <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
       </nav>
+
       <div class="nav-actions">
         <a class="btn btn-ghost signin" href="/app/">Sign in</a>
-        <a class="btn btn-secondary" href="#workflow">Explore</a>
+        <a class="btn btn-primary" href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
         <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"></path>
@@ -40,10 +70,11 @@
         </button>
       </div>
     </div>
+
     <div class="mobile-menu" data-mobile-menu>
-      <a href="#workflow">Workflow</a>
-      <a href="#privacy">Privacy</a>
-      <a href="#install">Install</a>
+      <a href="#surface">How it works</a>
+      <a href="#sources">Sources</a>
+      <a href="#selfhost">Self-host</a>
       <a href="https://neolabs-systems.github.io/NeoRecall/docs/">Docs</a>
       <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
       <a class="btn btn-primary signin" href="/app/">Sign in</a>
@@ -51,127 +82,182 @@
   </header>
 
   <main id="top">
-    <section class="hero">
-      <div class="wrap hero-grid">
-        <div class="hero-copy reveal">
-          <div class="pill">
-            <span class="tag">Beta</span>
-            <span>Self-hosted · Offline first · Local speech AI</span>
-          </div>
-          <h1>Your day, remembered <span class="accent">privately</span>.</h1>
-          <p class="lede">
-            Record microphone and device audio, keep working offline, and turn the day into searchable
-            transcripts and useful memories. Audio is removed after local transcription.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary btn-lg" href="/app/">Open control surface</a>
-            <a class="btn btn-secondary btn-lg" href="#install">Install NeoRecall</a>
-          </div>
-          <div class="hero-meta">
-            <span class="micro-chip"><span class="dot"></span> Receipt-gated audio release</span>
-            <span class="sep" aria-hidden="true"></span>
-            <span class="hero-note">Web · macOS 13+ · Windows 10/11 x64</span>
-          </div>
-        </div>
 
-        <div class="product-stage reveal" data-d="1">
-          <div class="float-card a glass">
-            <div class="label"><span>Capture</span><span class="status"><i></i>Live</span></div>
-            <strong>30 s durable chunks</strong>
-            <p>Independently decodable offline blocks with idempotent upload.</p>
-          </div>
-          <div class="product-frame">
-            <div class="frame-chrome">
-              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
-              <div class="url"><span class="live"></span>control surface · /app</div>
+    <!-- ============================== HERO ============================== -->
+    <section class="hero">
+      <div class="wrap">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="hero-kicker reveal"><span class="live-dot" aria-hidden="true"></span>Open source · self-hosted · local AI</p>
+            <h1 class="reveal" data-d="1">Your day,<br>still there <em>when you need it.</em></h1>
+            <p class="lede reveal" data-d="2">NeoRecall captures from the devices you already use, transcribes locally, and turns conversations into searchable memory. The audio disappears only after the system proves the transcript is safe.</p>
+            <div class="hero-actions reveal" data-d="3">
+              <a class="btn btn-primary btn-lg" href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest">
+                Get NeoRecall
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </a>
+              <a class="btn btn-secondary btn-lg" href="#surface">See how it works</a>
             </div>
-            <div class="frame-body">
-              <div class="mock-sidebar">
-                <div class="mock-brand">NeoRecall</div>
-                <div class="mock-nav active">Record</div>
-                <div class="mock-nav">Timeline</div>
-                <div class="mock-nav">Memories</div>
-                <div class="mock-nav">Search</div>
-                <div class="mock-nav">Settings</div>
-              </div>
-              <div class="mock-main">
-                <div class="mock-eyebrow">CONTROL SURFACE</div>
-                <h3>Recording your day</h3>
-                <div class="mock-meter"><span></span></div>
-                <div class="mock-rows">
-                  <div><b>Local ASR</b><span>Ready</span></div>
-                  <div><b>Upload queue</b><span>3 pending</span></div>
-                  <div><b>Last receipt</b><span>Terminal</span></div>
+            <p class="hero-note reveal" data-d="4">Web · macOS · Windows · wearable sources</p>
+          </div>
+
+          <!-- Live replica of the actual control surface -->
+          <div class="hero-demo reveal" data-d="2">
+            <div class="surface-app" data-tilt data-chat-demo aria-label="Interactive preview of the NeoRecall search surface">
+              <aside class="sa-side" aria-hidden="true">
+                <div class="sa-brand">
+                  <span class="sa-logo"><img src="assets/logo.svg" alt=""></span>
+                  <span class="sa-brand-text">NeoRecall<small>control surface</small></span>
+                </div>
+                <div class="sa-nav">
+                  <span class="sa-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="2" fill="currentColor"></circle></svg>Record</span>
+                  <span class="sa-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 4 5-8 4 6" stroke-linecap="round" stroke-linejoin="round"></path></svg>Timeline</span>
+                  <span class="sa-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 1.7 4.5L18 9l-4.3 1.5L12 15l-1.7-4.5L6 9l4.3-1.5L12 3Z" stroke-linejoin="round"></path></svg>Memories</span>
+                  <span class="sa-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 4 4" stroke-linecap="round"></path></svg>Search</span>
+                </div>
+                <div class="sa-user"><span class="sa-avatar">N</span>Neo</div>
+              </aside>
+
+              <div class="sa-main">
+                <div class="sa-topbar">
+                  <span class="sa-crumb"><strong>Search</strong><span class="sep">/</span>Memory</span>
+                  <span class="sa-status" data-demo-status><i></i>ready</span>
+                </div>
+                <div class="sa-thread" data-demo-thread aria-live="polite"></div>
+                <div class="sa-composer">
+                  <svg class="clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L16 7" stroke-linecap="round"></path></svg>
+                  <span class="sa-input" data-demo-input><span class="sa-placeholder">Ask what happened…</span><span class="caret" aria-hidden="true"></span></span>
+                  <span class="sa-btn call" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke-linejoin="round"></path></svg></span>
+                  <span class="sa-btn send" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 18 18 6M9 6h9v9" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
                 </div>
               </div>
             </div>
+
+            <div class="demo-picker" role="group" aria-label="Try another memory">
+              <span class="demo-picker-label">Try one:</span>
+              <button type="button" class="demo-chip is-active" data-scenario="0">A promise</button>
+              <button type="button" class="demo-chip" data-scenario="1">A name</button>
+              <button type="button" class="demo-chip" data-scenario="2">A decision</button>
+            </div>
           </div>
-          <div class="float-card b glass">
-            <div class="label"><span>Privacy</span><span class="status gold"><i></i>Proven</span></div>
-            <strong>Audio is gone</strong>
-            <p>Transcript persistence + unlink receipt before client release.</p>
+        </div>
+      </div>
+      <div class="hero-fade" aria-hidden="true"></div>
+    </section>
+
+    <!-- ============================== MANIFESTO ============================== -->
+    <section class="section manifesto" id="why">
+      <div class="wrap"><div class="manifesto-inner">
+        <p class="big-line reveal">Most of a day vanishes because nobody had time to write it down. <span class="dim">NeoRecall is built the other way around:</span> it listens with consent, understands locally, and keeps the useful parts — not the recording.</p>
+        <div class="manifesto-row">
+          <div class="m-item reveal"><span class="m-num">01</span><h3>It keeps up</h3><p>Durable chunks survive weak connections and interrupted days. Every source can record offline and resume safely when the server returns.</p></div>
+          <div class="m-item reveal" data-d="1"><span class="m-num">02</span><h3>It understands</h3><p>Local speech recognition, speaker separation, search, and memory writing turn raw conversation into names, decisions, promises, and moments.</p></div>
+          <div class="m-item reveal" data-d="2"><span class="m-num">03</span><h3>It lets go</h3><p>A terminal receipt proves the transcript is durable and the server copy is deleted before any client is allowed to release its audio.</p></div>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ============================== SCROLLYTELLING ============================== -->
+    <section class="story-section" id="surface">
+      <div class="wrap">
+        <div class="section-head reveal"><span class="eyebrow">From sound to recall</span><h2>Scroll. Your day is becoming searchable.</h2></div>
+        <div class="story" data-story>
+          <div class="story-stage-wrap"><div class="story-stage" data-tilt>
+            <div class="story-panel is-active" data-panel="0">
+              <div class="panel-chrome"><span class="pc-dot"></span><span class="pc-title">Capture · live transcript</span><span class="pc-steps" aria-hidden="true"><i class="on"></i><i></i><i></i></span></div>
+              <div class="panel-body chat-panel">
+                <div class="pb-meta">10:14 · desktop microphone</div>
+                <div class="pb-msg user">Let’s use the smaller enclosure. I’ll send the revised dimensions after lunch.</div>
+                <div class="pb-tools">
+                  <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path></svg>Capture</span>
+                  <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2l2-6 4 12 3-8 2 2h3"></path></svg>Local ASR</span>
+                  <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="10" r="2"></circle><path d="M3 20c0-4 2-6 6-6s6 2 6 6"></path></svg>Speakers</span>
+                </div>
+                <div class="pb-msg agent"><strong>Promise detected</strong> · Revised enclosure dimensions will be sent after lunch. Linked to the hardware planning conversation.</div>
+                <div class="pb-foot"><i></i>Streaming locally · audio retained until terminal receipt</div>
+              </div>
+            </div>
+            <div class="story-panel" data-panel="1">
+              <div class="panel-chrome"><span class="pc-dot gold"></span><span class="pc-title">Memory · connected context</span><span class="pc-steps" aria-hidden="true"><i></i><i class="on"></i><i></i></span></div>
+              <div class="panel-body memory-panel">
+                <svg class="mem-graph" viewBox="0 0 460 250" data-mem-graph role="img" aria-label="Animated graph of connected NeoRecall memories"><g class="mem-links" stroke-linecap="round"></g><g class="mem-nodes"></g></svg>
+                <div class="mem-fact" data-mem-fact><div class="mf-chips"><span class="mf-chip kind">episodic</span><span class="mf-chip">Imp 8</span><span class="mf-chip ok">94%</span></div><p data-mem-fact-text>The smaller enclosure was chosen; revised dimensions are due after lunch.</p></div>
+              </div>
+            </div>
+            <div class="story-panel" data-panel="2">
+              <div class="panel-chrome"><span class="pc-dot sage"></span><span class="pc-title">Privacy · terminal receipt</span><span class="pc-steps" aria-hidden="true"><i></i><i></i><i class="on"></i></span></div>
+              <div class="panel-body run-panel">
+                <div class="run-head"><div><h4>Chunk 10:14:30</h4><span class="when">SHA-256 verified · idempotent upload</span></div><span class="run-live"><i></i>Finalizing</span></div>
+                <div class="run-steps" data-run-steps>
+                  <div class="run-step"><span class="rs-chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 13 4 4L19 7"></path></svg></span>Transcript persisted durably</div>
+                  <div class="run-step"><span class="rs-chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 13 4 4L19 7"></path></svg></span>Speaker evidence saved</div>
+                  <div class="run-step"><span class="rs-chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 13 4 4L19 7"></path></svg></span>Server audio unlinked</div>
+                  <div class="run-step"><span class="rs-chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 13 4 4L19 7"></path></svg></span>Client release authorized</div>
+                </div>
+                <div class="run-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2Zm0 6v4l3 3"></path></svg>The transcript stays. The original audio does not.</div>
+              </div>
+            </div>
+          </div></div>
+          <div class="story-steps">
+            <div class="story-step" data-step="0"><span class="eyebrow">Capture</span><h3>Keep living. NeoRecall keeps up.</h3><p>Record from web, desktop, imports, or a wearable. Independently decodable chunks queue locally, upload idempotently, and survive the ordinary failures of an ordinary day.</p></div>
+            <div class="story-step" data-step="1"><span class="eyebrow">Understand</span><h3>One conversation becomes one useful memory.</h3><p>Speech recognition, diarization, multilingual retrieval, and local memory writing work together on your machine. Search exact words or ask naturally across people, facts, tasks, and decisions.</p></div>
+            <div class="story-step" data-step="2"><span class="eyebrow">Release</span><h3>Deletion is a protocol, not a promise.</h3><p>The client holds every audio chunk until a terminal receipt proves transcript persistence and server-side deletion. Only then can it release its own copy.</p></div>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="workflow" class="section">
-      <div class="wrap">
-        <div class="section-head reveal">
-          <span class="eyebrow">From sound to recall</span>
-          <h2>A reliable path through every stage.</h2>
+    <!-- ============================== SOURCES ============================== -->
+    <section class="section" id="sources">
+      <div class="wrap"><div class="split">
+        <div class="device-visual reveal" data-tilt>
+          <div class="dv-chrome"><span class="dv-traffic" aria-hidden="true"><i></i><i></i><i></i></span><span class="dv-url"><span class="live-dot" aria-hidden="true"></span>today · recording</span></div>
+          <div class="shot-pair recall-shots"><div class="recall-shot lm"><div class="recall-shell"><aside class="recall-side"><div class="recall-wordmark">NeoRecall</div><div class="recall-nav"><span class="active">Record</span><span>Timeline</span><span>Memories</span><span>Search</span><span>Sources</span></div></aside><div class="recall-content"><div class="recall-overline">Control surface</div><h4>Recording your day</h4><div class="recall-date">Desktop microphone · connected</div><div class="recall-wave"><i style="--h:22%"></i><i style="--h:34%"></i><i style="--h:18%"></i><i style="--h:46%"></i><i style="--h:58%"></i><i style="--h:27%"></i><i style="--h:39%"></i><i style="--h:61%"></i><i style="--h:31%"></i><i style="--h:49%"></i><i style="--h:24%"></i><i style="--h:55%"></i><i style="--h:68%"></i><i style="--h:35%"></i><i style="--h:45%"></i><i style="--h:28%"></i><i style="--h:59%"></i><i style="--h:38%"></i><i style="--h:51%"></i><i style="--h:25%"></i><i style="--h:43%"></i><i style="--h:64%"></i><i style="--h:32%"></i><i style="--h:48%"></i><i style="--h:20%"></i><i style="--h:39%"></i><i style="--h:57%"></i><i style="--h:30%"></i><i style="--h:44%"></i><i style="--h:25%"></i><i style="--h:52%"></i><i style="--h:36%"></i></div><div class="recall-cards"><div class="recall-card"><small>Live transcript</small><strong>“I’ll send the revised dimensions after lunch.”</strong><p>Speaker recognized · English</p></div><div class="recall-card"><small>Last chunk</small><strong>Transcript persisted</strong><span class="receipt-badge"><i></i>terminal receipt</span></div></div></div></div></div><div class="recall-shot dm"><div class="recall-shell"><aside class="recall-side"><div class="recall-wordmark">NeoRecall</div><div class="recall-nav"><span class="active">Record</span><span>Timeline</span><span>Memories</span><span>Search</span><span>Sources</span></div></aside><div class="recall-content"><div class="recall-overline">Control surface</div><h4>Recording your day</h4><div class="recall-date">Desktop microphone · connected</div><div class="recall-wave"><i style="--h:22%"></i><i style="--h:34%"></i><i style="--h:18%"></i><i style="--h:46%"></i><i style="--h:58%"></i><i style="--h:27%"></i><i style="--h:39%"></i><i style="--h:61%"></i><i style="--h:31%"></i><i style="--h:49%"></i><i style="--h:24%"></i><i style="--h:55%"></i><i style="--h:68%"></i><i style="--h:35%"></i><i style="--h:45%"></i><i style="--h:28%"></i><i style="--h:59%"></i><i style="--h:38%"></i><i style="--h:51%"></i><i style="--h:25%"></i><i style="--h:43%"></i><i style="--h:64%"></i><i style="--h:32%"></i><i style="--h:48%"></i><i style="--h:20%"></i><i style="--h:39%"></i><i style="--h:57%"></i><i style="--h:30%"></i><i style="--h:44%"></i><i style="--h:25%"></i><i style="--h:52%"></i><i style="--h:36%"></i></div><div class="recall-cards"><div class="recall-card"><small>Live transcript</small><strong>“I’ll send the revised dimensions after lunch.”</strong><p>Speaker recognized · English</p></div><div class="recall-card"><small>Last chunk</small><strong>Transcript persisted</strong><span class="receipt-badge"><i></i>terminal receipt</span></div></div></div></div></div></div>
+          <div class="dv-cursor" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6.5 1.5L9 19 5 3z" fill="currentColor"></path></svg></div>
         </div>
-        <div class="feature-grid">
-          <article class="feature-card reveal"><b>01</b><h3>Capture anywhere</h3><p>Web, macOS, and Windows record microphone audio, optional system audio, or imported files. Desktop is the uninterrupted-recording reference client.</p></article>
-          <article class="feature-card reveal"><b>02</b><h3>Transcribe locally</h3><p>CPU-only speech recognition, VAD, diarization, and multilingual embeddings run without paid speech services.</p></article>
-          <article class="feature-card reveal"><b>03</b><h3>Recall naturally</h3><p>Search transcripts and memories instantly with FTS5 and semantic vectors, or ask a question and get an answer written over cited local context.</p></article>
-        </div>
-      </div>
+        <div class="split-copy reveal" data-d="1"><span class="eyebrow">One memory, many sources</span><h2>Record where the day actually happens.</h2><p>Start on the web, keep going on a desktop, import an old recording, or connect a wearable. Every client follows the same durable capture contract, so changing devices does not create a hole in your day.</p><ul class="plainlist"><li>Web, macOS, Windows, and wearable capture</li><li>Microphone, optional system audio, and file imports</li><li>Offline queues with automatic, idempotent resume</li></ul></div>
+      </div></div>
     </section>
 
-    <section id="privacy" class="section section-alt">
-      <div class="wrap split">
-        <div class="reveal">
-          <span class="eyebrow">Privacy by lifecycle</span>
-          <h2>The receipt proves the audio is gone.</h2>
-          <p class="lede">The client retains each chunk until transcript data is durably committed and the server confirms its temporary file was deleted. NeoRecall keeps transcripts, memory data, and an explicit 5–10 second speaker-only preview per recognized voice—not the original recordings.</p>
-        </div>
-        <ol class="lifecycle reveal">
-          <li><span>1</span>Capture into a durable local queue</li>
-          <li><span>2</span>Upload idempotently with SHA-256</li>
-          <li><span>3</span>Persist transcript with full SQLite durability</li>
-          <li><span>4</span>Delete server audio, issue receipt, release client copy</li>
-        </ol>
-      </div>
+    <!-- ============================== SOURCES LIST ============================== -->
+    <section class="section-tight channels" id="channels">
+      <div class="wrap"><div class="channels-inner reveal">
+        <p class="channels-lede">One private memory, wherever the sound comes from —</p>
+        <div class="channel-grid" data-stagger><span class="channel-chip">Microphone</span><span class="channel-chip">System audio</span><span class="channel-chip">Audio imports</span><span class="channel-chip">Web</span><span class="channel-chip">macOS</span><span class="channel-chip">Windows</span><span class="channel-chip">Wearables</span><span class="channel-chip">Discord</span><span class="channel-chip">Meeting bot</span><span class="channel-chip">Smart panel</span></div>
+        <p class="channels-note">— normalized into one timeline, one set of speakers, and one place to ask what happened.</p>
+      </div></div>
     </section>
 
-    <section class="section">
-      <div class="wrap">
-        <div class="section-head reveal">
-          <span class="eyebrow">Built for real days</span>
-          <h2>Useful detail without constant token use.</h2>
+    <!-- ============================== SELF-HOST ============================== -->
+    <section class="section" id="selfhost">
+      <div class="wrap"><div class="split rev">
+        <div class="split-copy reveal">
+          <span class="eyebrow">Yours, actually</span><h2>Your memory should live on your machine.</h2>
+          <p>NeoRecall runs speech recognition, diarization, multilingual embeddings, search, and memory writing on your hardware. There is no account to create, no API key to add, and no recording sent away to be understood.</p>
+          <ul class="plainlist"><li>Open source, AGPL-3.0 — inspect every layer</li><li>Local models with automatic GPU use when available</li><li>SQLite memory that you can search, back up, or erase</li></ul>
         </div>
-        <div class="feature-grid">
-          <article class="feature-card reveal"><h3>Memories and mini-memories</h3><p>Meetings and important conversations become episodic memories. Facts, people, tasks, promises, events, and relationships remain atomic and easy to act on.</p></article>
-          <article class="feature-card reveal"><h3>English memory layer</h3><p>Original-language transcripts stay intact while consolidated memory text is normalized to English for consistent recall across German and English days.</p></article>
-          <article class="feature-card reveal"><h3>Visible, consent-aware recording</h3><p>First-run consent guidance, persistent indicators, and immediate pause controls keep capture explicit. NeoRecall does not include a covert mode.</p></article>
+        <div class="term reveal" data-d="1" data-term>
+          <div class="term-chrome"><span class="dv-traffic" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">neo@home-server — zsh</span></div>
+          <div class="term-body" aria-label="Terminal showing NeoRecall installation">
+            <div class="term-line"><span class="prompt">$</span> <span data-term-cmd="npm i -g github:NeoLabs-Systems/NeoRecall"></span></div>
+            <div class="term-out" data-term-out><div class="ok">✓ NeoRecall CLI installed</div><div class="dim-line">$ neorecall install</div><div class="ok">✓ user service configured</div><div class="dim-line">$ neorecall setup</div><div class="ok">✓ local models verified</div><div class="ok">✓ control surface on http://localhost:4500/app/</div><div class="dim-line">NeoRecall is ready. Your data stays here.</div></div>
+          </div>
         </div>
-      </div>
+      </div></div>
     </section>
 
-    <section id="install" class="section install">
-      <div class="wrap split">
-        <div class="reveal">
-          <span class="eyebrow">Self-host in minutes</span>
-          <h2>One service. Your machine.</h2>
-          <p class="lede">Setup downloads pinned local models, verifies native inference and sqlite-vec, then installs a user service. Docker Compose is available as an alternative.</p>
+    <!-- ============================== CTA ============================== -->
+    <section class="section-tight" id="cta">
+      <div class="wrap"><div class="final reveal">
+        <h2>Remember the day.<br>Not the <em>recording.</em></h2>
+        <p>Install NeoRecall on your own machine, connect one source, and give yourself a memory you can actually search tomorrow.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest">Download NeoRecall<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+          <a class="btn btn-secondary btn-lg" href="https://neolabs-systems.github.io/NeoRecall/docs/">Read the docs</a>
         </div>
-        <pre class="reveal"><code>npm i -g neorecall
-neorecall install
-neorecall setup
-neorecall start</code></pre>
-      </div>
+      </div></div>
     </section>
+
   </main>
 
   <footer class="footer">
@@ -179,22 +265,22 @@ neorecall start</code></pre>
       <div class="footer-grid">
         <div class="footer-brand">
           <a class="brand" href="#top">
-            <span class="brand-mark" aria-hidden="true">
-              <img src="assets/logo.svg" alt="">
-            </span>
+            <span class="brand-mark" aria-hidden="true"><img src="assets/logo.svg" alt=""></span>
             NeoRecall
           </a>
-          <p>Private audio memory with local transcription and receipt-proven audio deletion.</p>
+          <p>Private, self-hosted audio memory — captured anywhere, understood locally, and recalled naturally.</p>
         </div>
+
         <div>
           <h4>Product</h4>
           <nav class="footer-links" aria-label="Product">
-            <a href="#workflow">Workflow</a>
-            <a href="#privacy">Privacy</a>
-            <a href="#install">Install</a>
+            <a href="#surface">How it works</a>
+            <a href="#sources">Sources</a>
+            <a href="#selfhost">Self-host</a>
             <a href="/app/" class="signin">Open app</a>
           </nav>
         </div>
+
         <div>
           <h4>Resources</h4>
           <nav class="footer-links" aria-label="Resources">
@@ -203,21 +289,24 @@ neorecall start</code></pre>
             <a href="https://github.com/NeoLabs-Systems/NeoRecall">GitHub</a>
           </nav>
         </div>
+
         <div>
           <h4>Trust</h4>
           <nav class="footer-links" aria-label="Trust">
-            <a href="#privacy">Privacy</a>
             <a href="https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/SECURITY.md">Security</a>
-            <a href="https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/LICENSE">License</a>
+            <a href="https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/LICENSE">AGPL-3.0 license</a>
+            <a href="https://discord.gg/f59rg2RwUT">Community</a>
           </nav>
         </div>
       </div>
+
       <div class="footer-bar">
         <span>© 2026 NeoRecall</span>
         <span class="ops"><span class="d"></span> Local-first and operational</span>
       </div>
     </div>
   </footer>
-  <script src="landing.js"></script>
+
+  <script src="js/main.js" defer></script>
 </body>
 </html>

@@ -5,6 +5,18 @@ import '../recording/audio_frame.dart';
 import '../recording/audio_mixer.dart';
 import 'capture_source.dart';
 
+class CapturePipelineInterruption {
+  const CapturePipelineInterruption({
+    required this.sourceId,
+    required this.sourceKind,
+    required this.reason,
+  });
+
+  final String sourceId;
+  final String sourceKind;
+  final String reason;
+}
+
 /// Multi-source capture pipeline with durable chunk emission.
 ///
 /// Sources can fail independently. When one source drops, remaining sources
@@ -30,12 +42,14 @@ class CapturePipeline {
   final Duration sourceStallTimeout;
 
   final StreamController<RecordedAudioChunk> chunks =
-      StreamController<RecordedAudioChunk>.broadcast();
+      StreamController<RecordedAudioChunk>.broadcast(sync: true);
   final StreamController<RecordedAudioChunk> partials =
-      StreamController<RecordedAudioChunk>.broadcast();
+      StreamController<RecordedAudioChunk>.broadcast(sync: true);
   final StreamController<String> warnings =
       StreamController<String>.broadcast();
   final StreamController<double> levels = StreamController<double>.broadcast();
+  final StreamController<CapturePipelineInterruption> interruptions =
+      StreamController<CapturePipelineInterruption>.broadcast();
 
   final Map<String, List<int>> _buffers = <String, List<int>>{};
   final List<StreamSubscription<dynamic>> _subscriptions =
@@ -44,11 +58,13 @@ class CapturePipeline {
   final Map<String, DateTime> _lastDataAt = <String, DateTime>{};
   final Set<String> _drainingSources = <String>{};
   final Set<String> _excludedSources = <String>{};
+  final Set<String> _reportedInterruptions = <String>{};
   Timer? _chunkTimer;
   Timer? _partialTimer;
   DateTime? _startedAt;
   int _offsetMs = 0;
   bool _running = false;
+  bool _stopping = false;
 
   bool get isRunning => _running;
   List<CaptureSource> get activeSources =>
@@ -100,13 +116,13 @@ class CapturePipeline {
             },
             onError: (Object error) {
               warnings.add('${source.kind} stream error: $error');
-              _drainingSources.add(source.id);
+              _markInterrupted(source, error.toString());
             },
             onDone: () {
               warnings.add(
                 '${source.kind} stream ended; continuing with remaining sources when possible.',
               );
-              _drainingSources.add(source.id);
+              _markInterrupted(source, 'audio stream ended');
             },
           ),
         );
@@ -169,7 +185,7 @@ class CapturePipeline {
   }
 
   void _checkSourceHealth() {
-    if (!_running || _participatingIds.length < 2) return;
+    if (!_running || _stopping) return;
     final now = DateTime.now();
     for (final source in _activeSources) {
       if (_excludedSources.contains(source.id) ||
@@ -179,11 +195,29 @@ class CapturePipeline {
       final lastDataAt = _lastDataAt[source.id];
       if (lastDataAt != null &&
           now.difference(lastDataAt) >= sourceStallTimeout) {
-        _drainingSources.add(source.id);
         warnings.add(
           '${source.kind} stopped delivering audio; its aligned tail will be finalized and remaining sources will continue.',
         );
+        _markInterrupted(source, 'audio stream stalled');
       }
+    }
+  }
+
+  void _markInterrupted(CaptureSource source, String reason) {
+    if (!_running || _stopping || _drainingSources.contains(source.id)) return;
+    _drainingSources.add(source.id);
+    final hasHealthySibling = _participatingIds.any(
+      (id) => id != source.id && !_drainingSources.contains(id),
+    );
+    if (hasHealthySibling || !_reportedInterruptions.add(source.id)) return;
+    if (!interruptions.isClosed) {
+      interruptions.add(
+        CapturePipelineInterruption(
+          sourceId: source.id,
+          sourceKind: source.kind,
+          reason: reason,
+        ),
+      );
     }
   }
 
@@ -288,17 +322,21 @@ class CapturePipeline {
 
   Future<void> stop() async {
     if (!_running) return;
+    _stopping = true;
     _chunkTimer?.cancel();
     _partialTimer?.cancel();
     _chunkTimer = null;
     _partialTimer = null;
+    // Stop producers before detaching consumers. Native audio APIs can deliver
+    // a final buffer while stopping, and cancelling first silently loses it.
+    for (final source in _activeSources) {
+      await source.stop();
+    }
+    await Future<void>.delayed(Duration.zero);
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
     _subscriptions.clear();
-    for (final source in _activeSources) {
-      await source.stop();
-    }
     _drainingSources.addAll(_participatingIds);
     while (_availableBytes > 0 && !chunks.isClosed) {
       final durationMs = _availableBytes ~/ _bytesPerMs;
@@ -312,7 +350,9 @@ class CapturePipeline {
     _lastDataAt.clear();
     _drainingSources.clear();
     _excludedSources.clear();
+    _reportedInterruptions.clear();
     _running = false;
+    _stopping = false;
   }
 
   Future<void> dispose() async {
@@ -324,5 +364,6 @@ class CapturePipeline {
     await partials.close();
     await warnings.close();
     await levels.close();
+    await interruptions.close();
   }
 }

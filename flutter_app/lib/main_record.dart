@@ -11,6 +11,7 @@ import 'main_device_diagnostics.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'src/capture/capture_defaults.dart';
 import 'src/devices/audio_device_adapter.dart';
 
 bool shouldRequestSystemAudio({
@@ -44,11 +45,14 @@ class _RecordScreenState extends State<RecordScreen> {
   @override
   void initState() {
     super.initState();
-    bluetoothPreferred = _isMobile && widget.controller.preferBluetoothCapture;
-    if (_isMobile) {
-      systemAudio = false;
-      microphone = !bluetoothPreferred;
-    }
+    final defaults = CaptureSourceSelection.forPlatform(
+      web: kIsWeb,
+      platform: defaultTargetPlatform,
+      preferBluetooth: widget.controller.preferBluetoothCapture,
+    );
+    microphone = defaults.microphone;
+    systemAudio = defaults.systemAudio;
+    bluetoothPreferred = defaults.bluetooth;
   }
 
   Future<bool> _consent() async {
@@ -207,7 +211,7 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
           if (controller.needsAttentionCount > 0)
             _NeedsAttentionBanner(controller: controller),
-          if (controller.preferredDeviceIsOfflineFirst)
+          if (bluetoothPreferred && controller.preferredDeviceIsOfflineFirst)
             _OfflineDeviceSyncCard(controller: controller),
         ];
 
@@ -501,11 +505,14 @@ class _RecordScreenState extends State<RecordScreen> {
       selected: bluetoothPreferred,
       onTap: locked
           ? null
-          : () => setState(() {
-              bluetoothPreferred = true;
-              microphone = false;
-              systemAudio = false;
-            }),
+          : () {
+              setState(() {
+                bluetoothPreferred = true;
+                microphone = false;
+                systemAudio = false;
+              });
+              unawaited(widget.controller.setPreferBluetoothCapture(true));
+            },
     ),
     _SourceOption(
       icon: Icons.mic_none_rounded,
@@ -514,11 +521,18 @@ class _RecordScreenState extends State<RecordScreen> {
       selected: !bluetoothPreferred,
       onTap: locked
           ? null
-          : () => setState(() {
-              bluetoothPreferred = false;
-              microphone = true;
-              systemAudio = false;
-            }),
+          : () {
+              setState(() {
+                bluetoothPreferred = false;
+                microphone = true;
+                systemAudio = false;
+              });
+              // Source selection is an immediate runtime preference, not just
+              // a choice deferred until Record is pressed. This stops an idle
+              // wearable reconnect (and its status UI) while phone capture is
+              // selected.
+              unawaited(widget.controller.setPreferBluetoothCapture(false));
+            },
     ),
   ];
 }
@@ -783,14 +797,13 @@ class _OrbPainter extends CustomPainter {
       center,
       outer,
       Paint()
-        ..shader =
-            RadialGradient(
-              colors: <Color>[
-                tint.withValues(alpha: (recording ? 0.20 : 0.09) + 0.20 * level),
-                tint.withValues(alpha: 0),
-              ],
-              stops: const <double>[0.30, 1],
-            ).createShader(Rect.fromCircle(center: center, radius: outer)),
+        ..shader = RadialGradient(
+          colors: <Color>[
+            tint.withValues(alpha: (recording ? 0.20 : 0.09) + 0.20 * level),
+            tint.withValues(alpha: 0),
+          ],
+          stops: const <double>[0.30, 1],
+        ).createShader(Rect.fromCircle(center: center, radius: outer)),
     );
 
     if (recording) {
@@ -838,13 +851,12 @@ class _OrbPainter extends CustomPainter {
       center,
       coreRadius,
       Paint()
-        ..shader =
-            RadialGradient(
-              colors: <Color>[
-                Color.lerp(core, tint, recording ? 0.18 : 0.07)!,
-                core,
-              ],
-            ).createShader(Rect.fromCircle(center: center, radius: coreRadius)),
+        ..shader = RadialGradient(
+          colors: <Color>[
+            Color.lerp(core, tint, recording ? 0.18 : 0.07)!,
+            core,
+          ],
+        ).createShader(Rect.fromCircle(center: center, radius: coreRadius)),
     );
     canvas.drawCircle(
       center,
@@ -908,7 +920,8 @@ class _StatusPill extends StatelessWidget {
               builder: (context, child) => Opacity(
                 opacity:
                     0.35 +
-                    0.65 * (0.5 + 0.5 * math.sin(animation.value * 2 * math.pi)),
+                    0.65 *
+                        (0.5 + 0.5 * math.sin(animation.value * 2 * math.pi)),
                 child: child,
               ),
               child: dot,
@@ -1588,7 +1601,9 @@ class DeviceSyncStatusView extends StatelessWidget {
     final syncing = controller.deviceStorageSyncing;
 
     // Nothing known and nothing running: stay out of the way entirely.
-    if (!syncing && pendingSeconds <= 0 && controller.deviceStorageSyncedCount == 0) {
+    if (!syncing &&
+        pendingSeconds <= 0 &&
+        controller.deviceStorageSyncedCount == 0) {
       return const SizedBox.shrink();
     }
 
@@ -1603,8 +1618,7 @@ class DeviceSyncStatusView extends StatelessWidget {
     } else if (pendingSeconds > 0) {
       headline = '${formatDuration(pendingSeconds)} waiting on the device';
     } else {
-      headline =
-          '${controller.deviceStorageSyncedCount} recording(s) synced';
+      headline = '${controller.deviceStorageSyncedCount} recording(s) synced';
     }
 
     return Column(

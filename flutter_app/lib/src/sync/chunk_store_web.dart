@@ -329,13 +329,17 @@ class WebChunkStore implements ChunkStore {
               .where(
                 (chunk) =>
                     sessionIds.contains(chunk.sessionId) &&
-                    !<LocalChunkState>{
-                      LocalChunkState.terminal,
-                      LocalChunkState.released,
-                    }.contains(chunk.state),
+                    chunk.state != LocalChunkState.released,
               )
               .toList()
-            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+            ..sort((a, b) {
+              final aTerminal = a.state == LocalChunkState.terminal ? 0 : 1;
+              final bTerminal = b.state == LocalChunkState.terminal ? 0 : 1;
+              final byState = aTerminal.compareTo(bTerminal);
+              return byState != 0
+                  ? byState
+                  : a.createdAt.compareTo(b.createdAt);
+            });
       return chunks.take(limit).toList();
     });
   }
@@ -362,6 +366,12 @@ class WebChunkStore implements ChunkStore {
     final value = await store.getObject(id);
     if (value == null) return;
     final chunk = AudioChunk.fromMap(Map<String, dynamic>.from(value as Map));
+    if (chunk.state != LocalChunkState.terminal ||
+        !provesSafeAudioRelease(chunk.receipt)) {
+      throw StateError(
+        'Local audio release requires a proven terminal server receipt.',
+      );
+    }
     await store.put(<String, dynamic>{
       ...chunk.copyWith(state: LocalChunkState.released).toMap(),
       'bytes': null,

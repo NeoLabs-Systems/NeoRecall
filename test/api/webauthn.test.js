@@ -40,6 +40,19 @@ async function signIn(authenticator, { account, userHandle, twoFactorCode } = {}
     .send({ challengeId: options.body.challengeId, response: assertion, twoFactorCode });
 }
 
+test('sign-in refuses immediately when nothing is registered', async () => {
+  // Runs before any key exists so the browser is never sent to a key prompt
+  // that cannot be satisfied.
+  const empty = await request(app).post('/api/v1/auth/webauthn/options')
+    .set('Origin', ORIGIN).send({}).expect(409);
+  assert.equal(empty.body.error.code, 'NO_CREDENTIALS_REGISTERED');
+
+  const user = await registerUser('first-key-owner');
+  await addSecurityKey(user, createVirtualAuthenticator(), 'First key');
+  await request(app).post('/api/v1/auth/webauthn/options')
+    .set('Origin', ORIGIN).send({}).expect(200);
+});
+
 test('a registered security key signs in without a password and can be managed', async () => {
   const user = await registerUser('key-owner');
   const authenticator = createVirtualAuthenticator();

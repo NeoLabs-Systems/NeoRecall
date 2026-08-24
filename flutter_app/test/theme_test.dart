@@ -4,23 +4,23 @@ import 'package:neorecall/main_theme.dart';
 
 void main() {
   test(
-    'NeoRecall palette preserves the family accent and product recording color',
+    'NeoRecall palette preserves the calm accent and visible recording color',
     () {
       expect(
         neoRecallPaletteFor(Brightness.dark).accent,
-        const Color(0xFFE1B052),
+        const Color(0xFF8FA0FF),
       );
       expect(
         neoRecallPaletteFor(Brightness.dark).secondary,
-        const Color(0xFFD98AA6),
+        const Color(0xFFFF786D),
       );
       expect(
         neoRecallPaletteFor(Brightness.light).accent,
-        const Color(0xFFB07D2B),
+        const Color(0xFF5E73E8),
       );
       expect(
         neoRecallPaletteFor(Brightness.light).secondary,
-        const Color(0xFFA8506E),
+        const Color(0xFFE5534B),
       );
     },
   );

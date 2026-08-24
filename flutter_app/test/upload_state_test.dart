@@ -126,6 +126,33 @@ LocalRecordingDeclaration _session() => LocalRecordingDeclaration(
 
 void main() {
   test(
+    'terminal proof validation rejects incomplete and malformed receipts',
+    () {
+      expect(provesSafeAudioRelease(null), isFalse);
+      expect(
+        provesSafeAudioRelease(<String, dynamic>{
+          'chunkId': 'server-chunk',
+          'state': 'transcribed',
+          'persistedAt': 'not-a-timestamp',
+          'serverAudioDeletedAt': '2026-07-13T10:00:01Z',
+          'transcriptSha256': 'hash',
+        }),
+        isFalse,
+      );
+      expect(
+        provesSafeAudioRelease(<String, dynamic>{
+          'chunkId': 'server-chunk',
+          'state': 'silent',
+          'persistedAt': '2026-07-13T10:00:00Z',
+          'serverAudioDeletedAt': '2026-07-13T10:00:01Z',
+          'transcriptSha256': 'hash',
+        }),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'client releases audio only after every terminal proof field exists',
     () async {
       final api = _Api();
@@ -172,6 +199,22 @@ void main() {
     },
   );
 
+  test('upload policy blocks all server work without touching audio', () async {
+    final api = _Api();
+    final store = _Store(_chunk());
+    final pump = UploadPump(
+      store: store,
+      api: api,
+      uploadAllowed: () async => false,
+    )..accountId = 'account';
+
+    await pump.pump();
+
+    expect(store.requestedAccounts, isEmpty);
+    expect(api.statusIds, isEmpty);
+    expect(store.audioDeleted, isFalse);
+  });
+
   test('chunks wait until their own session declaration succeeds', () async {
     final api = _Api()..failSessionSync = true;
     final store = _Store(_chunk())
@@ -180,6 +223,54 @@ void main() {
 
     await pump.pump();
     expect(api.statusIds, isEmpty);
+    expect(store.audioDeleted, isFalse);
+  });
+
+  test(
+    'a crash between terminal state and file release is recovered',
+    () async {
+      final receipt = <String, dynamic>{
+        'chunkId': 'server-chunk',
+        'state': 'transcribed',
+        'persistedAt': '2026-07-13T10:00:00Z',
+        'serverAudioDeletedAt': '2026-07-13T10:00:01Z',
+        'transcriptSha256': 'hash',
+      };
+      final api = _Api();
+      final store = _Store(
+        _chunk().copyWith(state: LocalChunkState.terminal, receipt: receipt),
+      );
+      final pump = UploadPump(store: store, api: api)..accountId = 'account';
+
+      await pump.pump();
+
+      expect(store.audioDeleted, isTrue);
+      expect(api.releasedIds, <String>['server-chunk']);
+    },
+  );
+
+  test('re-upload limits survive pump and process restarts', () async {
+    final api = _Api()
+      ..receipt = <String, dynamic>{
+        'chunkId': 'server-chunk',
+        'state': 'reupload_required',
+        'errorCode': 'DECODE_FAILED',
+      };
+    final store = _Store(_chunk());
+
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      final pump = UploadPump(store: store, api: api)..accountId = 'account';
+      await pump.pump();
+      if (attempt < 2) {
+        expect(store.chunk.state, LocalChunkState.ready);
+        // A successful idempotent PUT would return the chunk to uploaded before
+        // the next status poll. Preserve its durable receipt to simulate a full
+        // process restart between attempts.
+        store.chunk = store.chunk.copyWith(state: LocalChunkState.uploaded);
+      }
+    }
+
+    expect(store.chunk.state, LocalChunkState.needsAttention);
     expect(store.audioDeleted, isFalse);
   });
 }

@@ -5,10 +5,19 @@ import '../models/chunk.dart';
 import 'chunk_store.dart';
 
 class UploadPump {
-  UploadPump({required this.store, required this.api, this.onChanged});
+  UploadPump({
+    required this.store,
+    required this.api,
+    this.onChanged,
+    this.uploadAllowed,
+  });
   final ChunkStore store;
   final NeoRecallApiClient api;
   final void Function()? onChanged;
+
+  /// Re-evaluated for every pump cycle so an Android metered-capability change
+  /// is respected even when the network transport itself did not change.
+  Future<bool> Function()? uploadAllowed;
   bool _running = false;
   Timer? _timer;
   String? accountId;
@@ -17,9 +26,11 @@ class UploadPump {
   // failing (state reupload_required) before parking it as needsAttention.
   // Re-uploading identical bytes fails deterministically, so this bound stops an
   // otherwise-infinite upload/transcribe/fail loop that would never release the
-  // local audio. Counts are per-chunk and cleared on success or manual retry.
+  // local audio. Counts are stored with each local receipt so a process restart
+  // cannot reset the bound; terminal success or an explicit manual retry clears
+  // them.
   static const int _maxReuploadAttempts = 3;
-  final Map<String, int> _reuploadAttempts = <String, int>{};
+  static const String _reuploadAttemptKey = '_clientReuploadAttempts';
 
   /// How many chunks one pump cycle uploads at a time.
   static const int _uploadConcurrency = 3;
@@ -39,8 +50,17 @@ class UploadPump {
   Timer? _drainTimer;
   bool _backlogDraining = false;
 
-  /// Clears the per-chunk reupload counters so a manual retry starts fresh.
-  void forgetAttempts() => _reuploadAttempts.clear();
+  /// Re-queues a parked chunk and durably resets its re-upload budget.
+  Future<void> retry(AudioChunk chunk) async {
+    final receipt = <String, dynamic>{...?chunk.receipt}
+      ..remove(_reuploadAttemptKey);
+    await store.setState(
+      chunk.id,
+      LocalChunkState.ready,
+      receipt: receipt,
+      error: '',
+    );
+  }
 
   void start() {
     _timer ??= Timer.periodic(_idleInterval, (_) => pump());
@@ -68,6 +88,16 @@ class UploadPump {
     _running = true;
     _backlogDraining = false;
     try {
+      final allowed = uploadAllowed;
+      if (allowed != null) {
+        try {
+          if (!await allowed()) return;
+        } catch (_) {
+          // Uncertain network state is treated as ineligible. Local audio
+          // remains durable and the periodic pump will ask again later.
+          return;
+        }
+      }
       final sessions = await store.pendingSessions(pumpingAccountId);
       final blockedSessionIds = <String>{};
       for (final session in sessions) {
@@ -85,6 +115,16 @@ class UploadPump {
       }
       if (!_isCurrent(pumpingAccountId)) return;
       final chunks = await store.pending(pumpingAccountId, limit: 200);
+      // A crash can happen after the terminal proof is committed but before the
+      // local file is removed. Revisit that durable state on every pump cycle;
+      // release remains guarded by the proof validator in both layers.
+      final terminal = chunks
+          .where((chunk) => chunk.state == LocalChunkState.terminal)
+          .toList(growable: false);
+      for (final chunk in terminal) {
+        final receipt = chunk.receipt;
+        if (receipt != null) await _acceptReceipt(chunk, receipt);
+      }
       final uploaded = chunks
           .where(
             (chunk) =>
@@ -136,7 +176,7 @@ class UploadPump {
       );
       if (!_isCurrent(pumpingAccountId)) return false;
       final receipt = Map<String, dynamic>.from(response['receipt'] as Map);
-      await _acceptReceipt(chunk.id, receipt);
+      await _acceptReceipt(chunk, receipt);
       return true;
     } on ApiException catch (error) {
       if (error.status == 401) {
@@ -166,53 +206,71 @@ class UploadPump {
   Future<void> _poll(List<AudioChunk> chunks, String pumpingAccountId) async {
     if (!_isCurrent(pumpingAccountId)) return;
     try {
-      final serverToLocal = <String, String>{
+      final serverToLocal = <String, AudioChunk>{
         for (final chunk in chunks)
-          (chunk.receipt?['chunkId'] as String? ?? chunk.id): chunk.id,
+          (chunk.receipt?['chunkId'] as String? ?? chunk.id): chunk,
       };
       final receipts = await api.chunkStatuses(serverToLocal.keys.toList());
       if (!_isCurrent(pumpingAccountId)) return;
       for (final receipt in receipts) {
-        final localId = serverToLocal[receipt['chunkId'] as String?];
-        if (localId != null) await _acceptReceipt(localId, receipt);
+        final localChunk = serverToLocal[receipt['chunkId'] as String?];
+        if (localChunk != null) await _acceptReceipt(localChunk, receipt);
       }
     } catch (_) {
       /* Connectivity failures leave durable audio untouched. */
     }
   }
 
-  Future<void> _acceptReceipt(String id, Map<String, dynamic> receipt) async {
+  Future<void> _acceptReceipt(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+  ) async {
+    final id = chunk.id;
     final state = receipt['state'];
-    final terminal = state == 'transcribed' || state == 'silent';
-    if (terminal &&
-        receipt['persistedAt'] != null &&
-        receipt['serverAudioDeletedAt'] != null &&
-        receipt['transcriptSha256'] != null) {
-      _reuploadAttempts.remove(id);
-      await store.setState(id, LocalChunkState.terminal, receipt: receipt);
+    if (provesSafeAudioRelease(receipt)) {
+      if (chunk.state != LocalChunkState.terminal) {
+        await store.setState(id, LocalChunkState.terminal, receipt: receipt);
+      }
       await store.release(id);
       try {
         await api.releaseChunks(<String>[receipt['chunkId'] as String]);
       } catch (_) {}
     } else if (state == 'reupload_required') {
-      final attempts = (_reuploadAttempts[id] ?? 0) + 1;
+      final previousAttempts =
+          (chunk.receipt?[_reuploadAttemptKey] as num?)?.toInt() ?? 0;
+      final attempts = previousAttempts + 1;
+      final durableReceipt = <String, dynamic>{
+        ...receipt,
+        _reuploadAttemptKey: attempts,
+      };
       if (attempts >= _maxReuploadAttempts) {
-        _reuploadAttempts.remove(id);
         final code = receipt['errorCode'];
         await store.setState(
           id,
           LocalChunkState.needsAttention,
-          receipt: receipt,
+          receipt: durableReceipt,
           error:
               'The server could not transcribe this recording after repeated attempts'
               '${code == null ? '' : ' ($code)'}. Retry when ready.',
         );
       } else {
-        _reuploadAttempts[id] = attempts;
-        await store.setState(id, LocalChunkState.ready, receipt: receipt);
+        await store.setState(
+          id,
+          LocalChunkState.ready,
+          receipt: durableReceipt,
+        );
       }
     } else {
-      await store.setState(id, LocalChunkState.uploaded, receipt: receipt);
+      final previousAttempts =
+          (chunk.receipt?[_reuploadAttemptKey] as num?)?.toInt() ?? 0;
+      await store.setState(
+        id,
+        LocalChunkState.uploaded,
+        receipt: <String, dynamic>{
+          ...receipt,
+          if (previousAttempts > 0) _reuploadAttemptKey: previousAttempts,
+        },
+      );
     }
   }
 }

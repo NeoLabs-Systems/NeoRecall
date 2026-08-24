@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import 'src/api_client.dart';
 import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
+import 'src/capture/capture_pipeline.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
 import 'src/devices/audio_device_adapter.dart';
@@ -29,6 +30,7 @@ import 'src/recording/audio_frame.dart';
 import 'src/recording/audio_level_scale.dart';
 import 'src/recording/recorder.dart';
 import 'src/recording/recorder_mobile.dart';
+import 'src/recording/recording_schedule.dart';
 import 'src/sync/chunk_store.dart';
 import 'src/sync/sync_coordinator.dart';
 
@@ -84,6 +86,10 @@ class NeoRecallController extends ChangeNotifier {
     'chunkOverlapMs': 2000,
     'chunkMinMs': 15000,
     'chunkMaxMs': 120000,
+    'uploadOnlyOnUnmetered': true,
+    'recordingScheduleEnabled': false,
+    'recordingStartMinute': 0,
+    'recordingEndMinute': 0,
   };
 
   static String get _defaultBackendUrl {
@@ -157,10 +163,12 @@ class NeoRecallController extends ChangeNotifier {
   StreamSubscription<RecordedAudioChunk>? _partialSubscription;
   StreamSubscription<String>? _warningSubscription;
   StreamSubscription<double>? _levelSubscription;
-  StreamSubscription<bool>? _networkSubscription;
+  StreamSubscription<NetworkState>? _networkSubscription;
   StreamSubscription<dynamic>? _deviceStateSubscription;
   StreamSubscription<DeviceControlEvent>? _deviceControlSubscription;
   StreamSubscription<BackgroundCaptureEvent>? _backgroundSubscription;
+  StreamSubscription<CapturePipelineInterruption>?
+  _mobileInterruptionSubscription;
   SharedPreferences? _preferences;
   bool initialized = false;
   bool loading = false;
@@ -169,6 +177,13 @@ class NeoRecallController extends ChangeNotifier {
   bool _stoppingRecording = false;
   bool _resumingMobileCapture = false;
   bool _switchingMobileSource = false;
+  Future<bool>? _widgetPhoneRecordingOperation;
+  Timer? _mobileCaptureRecoveryTimer;
+  Timer? _recordingScheduleTimer;
+  int _mobileCaptureRecoveryAttempts = 0;
+  Map<String, dynamic> _cachedSettings = Map<String, dynamic>.from(
+    _fallbackSettings,
+  );
   bool cachedData = false;
   bool autostartEnabled = false;
   bool preferBluetoothCapture = true;
@@ -234,6 +249,7 @@ class NeoRecallController extends ChangeNotifier {
       // Advisory only; never surface a probe failure as a sync error.
     }
   }
+
   String? deviceStorageSyncError;
   static const int _deviceStorageMinBytes = 2048;
   // Automatic on-device recording sync. It runs on every platform (web
@@ -262,8 +278,62 @@ class NeoRecallController extends ChangeNotifier {
   bool _runtimeSubscriptionsReady = false;
   String? initializationError;
 
+  static const Duration _mobileCaptureRecoveryInitialDelay = Duration(
+    seconds: 2,
+  );
+  static const Duration _mobileCaptureRecoveryMaximumDelay = Duration(
+    minutes: 2,
+  );
+
   bool get authenticated => api.token != null && accountId != null;
   bool get isRecording => recorder.isRecording;
+
+  RecordingSchedule get _recordingSchedule => RecordingSchedule(
+    enabled: _cachedSettings['recordingScheduleEnabled'] as bool? ?? false,
+    startMinute:
+        _cachedSettings['recordingStartMinute'] as int? ??
+        _fallbackSettings['recordingStartMinute']! as int,
+    endMinute:
+        _cachedSettings['recordingEndMinute'] as int? ??
+        _fallbackSettings['recordingEndMinute']! as int,
+  );
+
+  Future<bool> _uploadsAllowed() async {
+    if (!(_cachedSettings['uploadOnlyOnUnmetered'] as bool? ?? true)) {
+      return true;
+    }
+    final state = await currentNetworkState();
+    return state.connected && state.unmetered;
+  }
+
+  String _settingsCacheKey(String ownerAccountId) =>
+      'userSettings:$ownerAccountId';
+
+  Future<void> _loadCachedSettings(String? ownerAccountId) async {
+    _cachedSettings = Map<String, dynamic>.from(_fallbackSettings);
+    if (ownerAccountId == null || _preferences == null) return;
+    final encoded = _preferences!.getString(_settingsCacheKey(ownerAccountId));
+    if (encoded == null) return;
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is Map) {
+        _cachedSettings.addAll(Map<String, dynamic>.from(decoded));
+      }
+    } catch (_) {
+      // Corrupt preferences must not block capture; server defaults remain.
+    }
+  }
+
+  Future<void> _cacheSettings(Map<String, dynamic> value) async {
+    _cachedSettings = <String, dynamic>{..._fallbackSettings, ...value};
+    final ownerAccountId = accountId;
+    if (ownerAccountId != null && _preferences != null) {
+      await _preferences!.setString(
+        _settingsCacheKey(ownerAccountId),
+        jsonEncode(_cachedSettings),
+      );
+    }
+  }
 
   // Devices that record on-device (button-triggered) rather than streaming live;
   // for these, pulling stored recordings is the primary action, not live capture.
@@ -302,6 +372,7 @@ class NeoRecallController extends ChangeNotifier {
             .offlineSyncConnector!
             .supportsConcurrentCapture;
   }
+
   String get backendUrl {
     if (api.baseUrl.isNotEmpty) return api.baseUrl;
     if (kIsWeb) return _sameOriginBackendUrl;
@@ -365,6 +436,8 @@ class NeoRecallController extends ChangeNotifier {
       }
       consentAccepted =
           _preferences!.getBool('recordingConsentAccepted') ?? false;
+      await _loadCachedSettings(accountId);
+      sync.pump.uploadAllowed = _uploadsAllowed;
       try {
         autostartEnabled = await startupEnabled();
       } catch (_) {
@@ -381,6 +454,7 @@ class NeoRecallController extends ChangeNotifier {
           final user = payload['user'] as Map;
           accountId = user['id'] as String;
           username = user['username'] as String;
+          await _loadCachedSettings(accountId);
           sync.pump.accountId = accountId;
           // Databases created before account ownership was added can only be
           // claimed by the still-authenticated session present during upgrade.
@@ -448,6 +522,9 @@ class NeoRecallController extends ChangeNotifier {
         );
         if (recorder is MobileRecallRecorder) {
           final mobile = recorder as MobileRecallRecorder;
+          _mobileInterruptionSubscription = mobile.interruptions.listen(
+            (event) => unawaited(_recoverInterruptedMobileCapture(event)),
+          );
           _backgroundSubscription = mobile.background.events.listen((event) {
             switch (event.type) {
               case BackgroundCaptureEventType.stopRequested:
@@ -461,6 +538,8 @@ class NeoRecallController extends ChangeNotifier {
               case BackgroundCaptureEventType.microphoneUnavailable:
                 warning = event.message;
                 notifyListeners();
+              case BackgroundCaptureEventType.phoneRecordingRequested:
+                unawaited(_startPhoneRecordingFromWidget());
               case BackgroundCaptureEventType.message:
                 break;
             }
@@ -481,9 +560,16 @@ class NeoRecallController extends ChangeNotifier {
       // Recover interrupted offline sessions/chunks before new capture starts.
       sync.pump.pump();
       await _refreshPending();
-      if (authenticated) await refreshAll(silent: true);
+      if (authenticated) {
+        await _settings();
+        sync.pump.pump();
+        await refreshAll(silent: true);
+      }
       if (_supportsDurableMobileResume) {
-        unawaited(_resumeMobileCaptureIfRequested());
+        // A widget tap is persisted natively before the Activity launches, so
+        // claiming it here also covers a cold Flutter engine whose event was
+        // emitted before this subscription existed.
+        unawaited(_resumeMobileCaptureAfterWidgetCheck());
       }
     } catch (exception) {
       initializationError =
@@ -537,9 +623,9 @@ class NeoRecallController extends ChangeNotifier {
       );
       notifyListeners();
     });
-    _networkSubscription = networkAvailability().listen((available) {
-      online = available;
-      if (available) sync.pump.pump();
+    _networkSubscription = networkAvailability().listen((state) {
+      online = state.connected;
+      if (state.connected) sync.pump.pump();
       notifyListeners();
     });
   }
@@ -755,7 +841,11 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<bool> completeTwoFactor(String code) => _pendingSecurityKeyLogin
       ? signInWithSecurityKey(account: _pendingAccount, twoFactorCode: code)
-      : login(_pendingAccount ?? '', _pendingPassword ?? '', twoFactorCode: code);
+      : login(
+          _pendingAccount ?? '',
+          _pendingPassword ?? '',
+          twoFactorCode: code,
+        );
   Future<bool> register(String usernameValue, String? email, String password) =>
       _run(() async {
         final payload =
@@ -778,6 +868,7 @@ class NeoRecallController extends ChangeNotifier {
     api.token = session['token'] as String;
     accountId = user['id'] as String;
     username = user['username'] as String;
+    await _loadCachedSettings(accountId);
     sync.pump.accountId = accountId;
     await audioDeviceSessions.bindAccount(accountId);
     await ClientDiagnosticLog.instance.bindAccount(accountId);
@@ -791,12 +882,20 @@ class NeoRecallController extends ChangeNotifier {
     await _secureStorage.write(key: 'sessionToken', value: api.token);
     await _preferences?.setString('accountId', accountId!);
     await _preferences?.setString('username', username!);
+    await _settings();
     sync.pump.start();
     await _refreshPending();
   }
 
   Future<void> logout() async {
+    final signingOutAccountId = accountId;
+    _cancelMobileCaptureRecovery();
+    _recordingScheduleTimer?.cancel();
+    _recordingScheduleTimer = null;
     if (isRecording) await stopRecording();
+    if (_supportsDurableMobileResume && signingOutAccountId != null) {
+      await _preferences?.remove(_mobileCaptureIntentKey(signingOutAccountId));
+    }
     await audioDeviceSessions.bindAccount(null);
     await ClientDiagnosticLog.instance.bindAccount(null);
     preferredDeviceLabel = null;
@@ -809,6 +908,7 @@ class NeoRecallController extends ChangeNotifier {
     api.token = null;
     accountId = null;
     username = null;
+    _cachedSettings = Map<String, dynamic>.from(_fallbackSettings);
     pendingAudioBytes = 0;
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
@@ -850,7 +950,11 @@ class NeoRecallController extends ChangeNotifier {
     isConfiguringTwoFactor = true;
     notifyListeners();
     try {
-      final response = await api.request('POST', '/api/v1/settings/2fa/enable', body: {'code': code});
+      final response = await api.request(
+        'POST',
+        '/api/v1/settings/2fa/enable',
+        body: {'code': code},
+      );
       await fetchTwoFactorStatus();
       final map = response as Map;
       if (map['recoveryCodes'] is List) {
@@ -866,11 +970,18 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
-  Future<void> disableTwoFactor({required String password, String? code}) async {
+  Future<void> disableTwoFactor({
+    required String password,
+    String? code,
+  }) async {
     isConfiguringTwoFactor = true;
     notifyListeners();
     try {
-      await api.request('DELETE', '/api/v1/settings/2fa', body: {'password': password, 'code': ?code});
+      await api.request(
+        'DELETE',
+        '/api/v1/settings/2fa',
+        body: {'password': password, 'code': ?code},
+      );
       await fetchTwoFactorStatus();
     } catch (e) {
       error = e.toString();
@@ -880,11 +991,18 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
-  Future<List<String>> regenerateTwoFactorCodes({required String password, required String code}) async {
+  Future<List<String>> regenerateTwoFactorCodes({
+    required String password,
+    required String code,
+  }) async {
     isConfiguringTwoFactor = true;
     notifyListeners();
     try {
-      final response = await api.request('POST', '/api/v1/settings/2fa/recovery-codes', body: {'password': password, 'code': code});
+      final response = await api.request(
+        'POST',
+        '/api/v1/settings/2fa/recovery-codes',
+        body: {'password': password, 'code': code},
+      );
       await fetchTwoFactorStatus();
       final map = response as Map;
       if (map['recoveryCodes'] is List) {
@@ -1189,6 +1307,17 @@ class NeoRecallController extends ChangeNotifier {
     var ledgerStored = false;
     try {
       final settings = await _settings();
+      final schedule = RecordingSchedule(
+        enabled: settings['recordingScheduleEnabled'] as bool? ?? false,
+        startMinute: settings['recordingStartMinute'] as int? ?? 0,
+        endMinute: settings['recordingEndMinute'] as int? ?? 0,
+      );
+      if (!schedule.allows(DateTime.now())) {
+        _armRecordingSchedule();
+        throw StateError(
+          'Recording is outside the configured daily recording window.',
+        );
+      }
       final recordingAccountId = accountId;
       if (recordingAccountId == null) {
         throw StateError('Sign in before starting a recording.');
@@ -1267,6 +1396,7 @@ class NeoRecallController extends ChangeNotifier {
         );
       }
       sync.pump.pump();
+      _armRecordingSchedule();
     } catch (exception) {
       error = exception.toString();
       // Capture never took the device, so release the claim — otherwise a failed
@@ -1295,7 +1425,7 @@ class NeoRecallController extends ChangeNotifier {
       _activeSession = null;
       recordingStartedAt = null;
       audioLevel = 0;
-      if (recorder is MobileRecallRecorder) {
+      if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
         await (recorder as MobileRecallRecorder).finishBackgroundHost();
       }
       rethrow;
@@ -1329,6 +1459,10 @@ class NeoRecallController extends ChangeNotifier {
     await _partialWrite;
     await store.put(chunk, recorded.bytes);
     _sequence = sequence + 1;
+    // Opening the audio API is not enough to prove recovery. A full scheduled
+    // chunk durably stored on disk is; a short final tail from another failure
+    // must not reset exponential retry delay.
+    if (!recorded.isFinal) _mobileCaptureRecoveryAttempts = 0;
     await store.clearPartial(session.sourceId);
     await _refreshPending();
     sync.pump.pump();
@@ -1358,7 +1492,10 @@ class NeoRecallController extends ChangeNotifier {
     await _refreshPending();
   }
 
-  Future<void> stopRecording() async {
+  Future<void> stopRecording({
+    bool interrupted = false,
+    bool preserveMobileIntent = false,
+  }) async {
     if (_stoppingRecording) return;
     _stoppingRecording = true;
     // The wearable is free again; automatic sweeps may resume.
@@ -1373,12 +1510,16 @@ class NeoRecallController extends ChangeNotifier {
         _activeSession = session.copyWith(
           endedAt: DateTime.now().toUtc(),
           finalSequence: _sequence - 1,
+          interrupted: interrupted,
           synced: false,
         );
         await store.putSession(_activeSession!);
       }
       final stoppingAccountId = session?.accountId ?? accountId;
-      if (_supportsDurableMobileResume && stoppingAccountId != null) {
+      if (_supportsDurableMobileResume &&
+          stoppingAccountId != null &&
+          !_switchingMobileSource &&
+          !preserveMobileIntent) {
         await _preferences!.remove(_mobileCaptureIntentKey(stoppingAccountId));
       }
       _activeSession = null;
@@ -1387,17 +1528,131 @@ class NeoRecallController extends ChangeNotifier {
       // The background battery warning is only meaningful during active capture.
       backgroundCaptureAtRisk = false;
       sync.pump.pump();
-      if (recorder is MobileRecallRecorder) {
+      if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
         await (recorder as MobileRecallRecorder).finishBackgroundHost();
       }
+      _armRecordingSchedule();
       notifyListeners();
     } finally {
       _stoppingRecording = false;
     }
   }
 
+  void _applyRecordingSchedule() {
+    final schedule = _recordingSchedule;
+    if (isRecording && !schedule.allows(DateTime.now())) {
+      unawaited(_pauseRecordingForSchedule());
+      return;
+    }
+    _armRecordingSchedule();
+  }
+
+  void _armRecordingSchedule() {
+    _recordingScheduleTimer?.cancel();
+    _recordingScheduleTimer = null;
+    final schedule = _recordingSchedule;
+    if (!schedule.enabled || schedule.startMinute == schedule.endMinute) return;
+    final now = DateTime.now();
+    final boundary = schedule.nextBoundary(now);
+    final delay = boundary.difference(now);
+    _recordingScheduleTimer = Timer(delay, () {
+      _recordingScheduleTimer = null;
+      if (_recordingSchedule.allows(DateTime.now())) {
+        unawaited(_resumeMobileCaptureIfRequested());
+      } else if (isRecording) {
+        unawaited(_pauseRecordingForSchedule());
+      } else {
+        _armRecordingSchedule();
+      }
+    });
+  }
+
+  Future<void> _pauseRecordingForSchedule() async {
+    if (!isRecording || _recordingSchedule.allows(DateTime.now())) {
+      _armRecordingSchedule();
+      return;
+    }
+    await stopRecording(preserveMobileIntent: _supportsDurableMobileResume);
+    warning =
+        'Recording paused at the end of its daily window. Android may require '
+        'NeoRecall to be opened before phone-microphone recording resumes.';
+    notifyListeners();
+  }
+
   String _mobileCaptureIntentKey(String ownerAccountId) =>
       'mobileCaptureIntent:$ownerAccountId';
+
+  Future<void> _resumeMobileCaptureAfterWidgetCheck() async {
+    if (!await _startPhoneRecordingFromWidget()) {
+      await _resumeMobileCaptureIfRequested();
+    }
+  }
+
+  Future<bool> _startPhoneRecordingFromWidget() {
+    final current = _widgetPhoneRecordingOperation;
+    if (current != null) return current;
+    final operation = _consumeWidgetPhoneRecordingRequest();
+    _widgetPhoneRecordingOperation = operation;
+    return operation.whenComplete(() {
+      if (identical(_widgetPhoneRecordingOperation, operation)) {
+        _widgetPhoneRecordingOperation = null;
+      }
+    });
+  }
+
+  Future<bool> _consumeWidgetPhoneRecordingRequest() async {
+    if (recorder is! MobileRecallRecorder) return false;
+    final mobile = recorder as MobileRecallRecorder;
+    if (!await mobile.background.takePendingWidgetPhoneRecordingRequest()) {
+      return false;
+    }
+    final wasAlreadyRecording = isRecording;
+    try {
+      if (!authenticated) {
+        warning =
+            'Sign in before starting recording from the home-screen widget.';
+        notifyListeners();
+        return true;
+      }
+      if (!consentAccepted) {
+        warning =
+            'Accept the recording consent notice before using the home-screen widget.';
+        notifyListeners();
+        return true;
+      }
+
+      await setPreferBluetoothCapture(false);
+      if (isRecording) {
+        if (capability?.sourceKind != 'microphone') {
+          await _restartMobileCapture(useBluetooth: false);
+        }
+      } else {
+        await startRecording(
+          microphone: true,
+          systemAudio: false,
+          bluetooth: false,
+        );
+      }
+      notice = 'Phone recording started from the home-screen widget.';
+      ClientDiagnosticLog.instance.record(
+        'widget_capture',
+        'phone_recording_started',
+        details: <String, Object?>{'alreadyRecording': wasAlreadyRecording},
+      );
+      notifyListeners();
+      return true;
+    } catch (exception) {
+      warning = 'The home-screen widget could not start recording: $exception';
+      ClientDiagnosticLog.instance.record(
+        'widget_capture',
+        'phone_recording_failed',
+        level: 'warning',
+        details: <String, Object?>{'error': exception.toString()},
+      );
+      notifyListeners();
+      return true;
+    }
+  }
 
   /// Whether linking a known wearable should start live capture by itself, so
   /// the user does not have to open the app and press record on every reconnect.
@@ -1436,7 +1691,11 @@ class NeoRecallController extends ChangeNotifier {
     if (!shouldAutoStartLiveCapture) return;
     _autoStartingLiveCapture = true;
     try {
-      await startRecording(microphone: false, systemAudio: false, bluetooth: true);
+      await startRecording(
+        microphone: false,
+        systemAudio: false,
+        bluetooth: true,
+      );
       ClientDiagnosticLog.instance.record(
         'device_capture',
         'live_autostarted_on_link',
@@ -1469,6 +1728,12 @@ class NeoRecallController extends ChangeNotifier {
       _mobileCaptureIntentKey(ownerAccountId),
     );
     if (mode == null) return;
+    if (!_recordingSchedule.allows(DateTime.now())) {
+      warning = 'Recording is waiting for the next configured daily window.';
+      _armRecordingSchedule();
+      notifyListeners();
+      return;
+    }
     _resumingMobileCapture = true;
     try {
       if (mode == 'bluetooth' && !hasPreferredBluetoothDevice) {
@@ -1611,9 +1876,113 @@ class NeoRecallController extends ChangeNotifier {
     } catch (exception) {
       warning = 'Audio source recovery failed: $exception';
       notifyListeners();
+      _scheduleMobileCaptureRecovery(
+        useBluetooth: useBluetooth,
+        reason: exception.toString(),
+      );
     } finally {
-      _switchingMobileSource = false;
+      if (_mobileCaptureRecoveryTimer == null) {
+        _switchingMobileSource = false;
+      }
     }
+  }
+
+  Future<void> _recoverInterruptedMobileCapture(
+    CapturePipelineInterruption interruption,
+  ) async {
+    if (_switchingMobileSource || _stoppingRecording || !isRecording) return;
+    final useBluetooth = capability?.sourceKind == 'wearable';
+    _switchingMobileSource = true;
+    try {
+      // Finalize the already-buffered tail before retrying. While switching,
+      // stopRecording deliberately preserves both the durable capture intent
+      // and the foreground-service hold across the retry delay.
+      await stopRecording(interrupted: true);
+      _scheduleMobileCaptureRecovery(
+        useBluetooth: useBluetooth,
+        reason: interruption.reason,
+      );
+    } catch (exception) {
+      _switchingMobileSource = false;
+      warning =
+          'Interrupted recording could not be finalized safely: $exception';
+      notifyListeners();
+    }
+  }
+
+  void _scheduleMobileCaptureRecovery({
+    required bool useBluetooth,
+    required String reason,
+  }) {
+    _mobileCaptureRecoveryTimer?.cancel();
+    final mobile = recorder is MobileRecallRecorder
+        ? recorder as MobileRecallRecorder
+        : null;
+    if (!authenticated ||
+        !consentAccepted ||
+        mobile == null ||
+        mobile.backgroundPaused) {
+      _switchingMobileSource = false;
+      return;
+    }
+    final ownerAccountId = accountId!;
+    final intent = _preferences?.getString(
+      _mobileCaptureIntentKey(ownerAccountId),
+    );
+    if (intent == null) {
+      _switchingMobileSource = false;
+      return;
+    }
+
+    var delayMs = _mobileCaptureRecoveryInitialDelay.inMilliseconds;
+    for (
+      var step = 0;
+      step < _mobileCaptureRecoveryAttempts &&
+          delayMs < _mobileCaptureRecoveryMaximumDelay.inMilliseconds;
+      step += 1
+    ) {
+      delayMs = (delayMs * 2).clamp(
+        _mobileCaptureRecoveryInitialDelay.inMilliseconds,
+        _mobileCaptureRecoveryMaximumDelay.inMilliseconds,
+      );
+    }
+    _mobileCaptureRecoveryAttempts += 1;
+    final delay = Duration(milliseconds: delayMs);
+    warning =
+        'Audio capture was interrupted ($reason). The durable tail was saved; '
+        'capture will retry in ${delay.inSeconds} seconds.';
+    notifyListeners();
+    _mobileCaptureRecoveryTimer = Timer(delay, () async {
+      _mobileCaptureRecoveryTimer = null;
+      if (!authenticated ||
+          accountId != ownerAccountId ||
+          mobile.backgroundPaused) {
+        _switchingMobileSource = false;
+        return;
+      }
+      try {
+        await startRecording(
+          microphone: !useBluetooth,
+          systemAudio: false,
+          bluetooth: useBluetooth,
+        );
+        _switchingMobileSource = false;
+        notice = 'Audio capture recovered after an interruption.';
+        notifyListeners();
+      } catch (exception) {
+        _scheduleMobileCaptureRecovery(
+          useBluetooth: useBluetooth,
+          reason: exception.toString(),
+        );
+      }
+    });
+  }
+
+  void _cancelMobileCaptureRecovery() {
+    _mobileCaptureRecoveryTimer?.cancel();
+    _mobileCaptureRecoveryTimer = null;
+    _mobileCaptureRecoveryAttempts = 0;
+    _switchingMobileSource = false;
   }
 
   Future<void> _startFromDeviceControl() async {
@@ -1629,13 +1998,15 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<Map<String, dynamic>> _settings() async {
     if (!authenticated || !online) {
-      return Map<String, dynamic>.from(_fallbackSettings);
+      return Map<String, dynamic>.from(_cachedSettings);
     }
     try {
       final payload = await api.request('GET', '/api/v1/settings') as Map;
-      return Map<String, dynamic>.from(payload['settings'] as Map);
+      final value = Map<String, dynamic>.from(payload['settings'] as Map);
+      await _cacheSettings(value);
+      return Map<String, dynamic>.from(_cachedSettings);
     } catch (_) {
-      return Map<String, dynamic>.from(_fallbackSettings);
+      return Map<String, dynamic>.from(_cachedSettings);
     }
   }
 
@@ -1672,9 +2043,8 @@ class NeoRecallController extends ChangeNotifier {
     for (final chunk in chunks.where(
       (chunk) => chunk.state == LocalChunkState.needsAttention,
     )) {
-      await store.setState(chunk.id, LocalChunkState.ready);
+      await sync.pump.retry(chunk);
     }
-    sync.pump.forgetAttempts();
     await _refreshPending();
     sync.pump.pump();
   }
@@ -1709,6 +2079,7 @@ class NeoRecallController extends ChangeNotifier {
   /// Releases every background hold after the user tapped Stop on the
   /// notification: capture ends, the wearable is unlinked, and the host stops.
   Future<void> _releaseBackgroundRuntime(MobileRecallRecorder mobile) async {
+    _cancelMobileCaptureRecovery();
     if (isRecording) await stopRecording();
     await mobile.pauseBackgroundRuntime();
     notice =
@@ -1972,8 +2343,8 @@ class NeoRecallController extends ChangeNotifier {
     if (adapter is! StorageSyncCapableAdapter) return true;
     final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
     if (storage == null) return true;
-    final deviceName = audioDeviceSessions.preferredDevice?.displayName ??
-        'the device';
+    final deviceName =
+        audioDeviceSessions.preferredDevice?.displayName ?? 'the device';
 
     // An automatic sweep stays invisible until it actually transfers something.
     // Showing a spinner on every poll would report activity, not progress.
@@ -2008,20 +2379,17 @@ class NeoRecallController extends ChangeNotifier {
       // ring-buffer drain, or flash-page batch) and hands back complete
       // recordings; each is ingested through the durable import pipeline before
       // the connector removes it from the device.
-      await storage.drainStoredAudio(
-        (recording) async {
-          // The first transferred recording makes an automatic sweep visible:
-          // now there is real progress to report. It also tells the background
-          // host to keep the CPU awake until the transfer finishes.
-          deviceStorageSyncing = true;
-          await _setBackgroundSyncActive(true);
-          notifyListeners();
-          await _ingestDeviceRecording(recording);
-          deviceStorageSyncedCount += 1;
-          notifyListeners();
-        },
-        minBytes: _deviceStorageMinBytes,
-      );
+      await storage.drainStoredAudio((recording) async {
+        // The first transferred recording makes an automatic sweep visible:
+        // now there is real progress to report. It also tells the background
+        // host to keep the CPU awake until the transfer finishes.
+        deviceStorageSyncing = true;
+        await _setBackgroundSyncActive(true);
+        notifyListeners();
+        await _ingestDeviceRecording(recording);
+        deviceStorageSyncedCount += 1;
+        notifyListeners();
+      }, minBytes: _deviceStorageMinBytes);
       succeeded = true;
       if (deviceStorageSyncedCount > 0) {
         notice =
@@ -2203,10 +2571,7 @@ class NeoRecallController extends ChangeNotifier {
   }
 
   Future<void> deleteSpeaker(String id) async {
-    await api.request(
-      'DELETE',
-      '/api/v1/speakers/$id',
-    );
+    await api.request('DELETE', '/api/v1/speakers/$id');
     await refreshAll(silent: true);
   }
 
@@ -2221,7 +2586,11 @@ class NeoRecallController extends ChangeNotifier {
 
   Future<Map<String, dynamic>> loadSettings() => _settings();
   Future<void> updateSettings(Map<String, dynamic> changes) async {
-    await api.request('PUT', '/api/v1/settings', body: changes);
+    final payload =
+        await api.request('PUT', '/api/v1/settings', body: changes) as Map;
+    await _cacheSettings(Map<String, dynamic>.from(payload['settings'] as Map));
+    sync.pump.pump();
+    _applyRecordingSchedule();
     notice = 'Settings saved.';
     notifyListeners();
   }
@@ -2249,13 +2618,15 @@ class NeoRecallController extends ChangeNotifier {
   /// Full memory detail including linked transcript segments and mini-memories.
   Future<Map<String, dynamic>> loadMemoryDetail(String id) async {
     final payload =
-        await api.request('GET', '/api/v1/memories/$id') as Map<dynamic, dynamic>;
+        await api.request('GET', '/api/v1/memories/$id')
+            as Map<dynamic, dynamic>;
     return Map<String, dynamic>.from(payload);
   }
 
   Future<Map<String, dynamic>> loadMiniMemoryDetail(String id) async {
-    final payload = await api.request('GET', '/api/v1/mini-memories/$id')
-        as Map<dynamic, dynamic>;
+    final payload =
+        await api.request('GET', '/api/v1/mini-memories/$id')
+            as Map<dynamic, dynamic>;
     return Map<String, dynamic>.from(payload);
   }
 
@@ -2268,11 +2639,7 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
-  Future<void> updateMemory(
-    String id, {
-    bool? pinned,
-    bool? archived,
-  }) async {
+  Future<void> updateMemory(String id, {bool? pinned, bool? archived}) async {
     final body = <String, dynamic>{};
     if (pinned != null) body['pinned'] = pinned;
     if (archived != null) body['archived'] = archived;
@@ -2303,11 +2670,13 @@ class NeoRecallController extends ChangeNotifier {
     if (ids.length < 2) {
       throw StateError('Select at least two memories to merge.');
     }
-    final payload = await api.request(
-      'POST',
-      '/api/v1/memories/merge',
-      body: <String, dynamic>{'ids': ids},
-    ) as Map<dynamic, dynamic>;
+    final payload =
+        await api.request(
+              'POST',
+              '/api/v1/memories/merge',
+              body: <String, dynamic>{'ids': ids},
+            )
+            as Map<dynamic, dynamic>;
     await refreshAll(silent: true);
     return Map<String, dynamic>.from(payload);
   }
@@ -2325,6 +2694,8 @@ class NeoRecallController extends ChangeNotifier {
   @override
   void dispose() {
     _stopForegroundRefresh();
+    _cancelMobileCaptureRecovery();
+    _recordingScheduleTimer?.cancel();
     _chunkSubscription?.cancel();
     _partialSubscription?.cancel();
     _warningSubscription?.cancel();
@@ -2333,6 +2704,7 @@ class NeoRecallController extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _deviceControlSubscription?.cancel();
     _backgroundSubscription?.cancel();
+    _mobileInterruptionSubscription?.cancel();
     _syncProgressSub?.cancel();
     deviceStorageSync.dispose();
     sync.close();

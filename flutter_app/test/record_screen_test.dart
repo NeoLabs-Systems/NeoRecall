@@ -7,6 +7,7 @@ import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/recording/audio_frame.dart';
 import 'package:neorecall/src/recording/recorder.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The record screen animates and samples audio levels only while recording, so
 /// the live state needs its own coverage: the idle screen must settle, the live
@@ -88,6 +89,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('phone microphone hides the offline wearable sync card', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController();
+    await controller.audioDeviceSessions.bindAccount('account-1');
+    controller.audioDeviceSessions.preferredDevice =
+        const AudioDeviceDescriptor(
+          adapterId: 'omi_family',
+          deviceKey: 'pocket-1',
+          displayName: 'Pocket recorder',
+          transport: 'bluetooth_le',
+          metadata: <String, Object?>{'type': 'heyPocket'},
+        );
+    controller.preferBluetoothCapture = true;
+    controller.preferredDeviceLabel = 'Pocket recorder';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    expect(find.text('Pocket recorder records on its own'), findsOneWidget);
+
+    final phoneMicrophone = find.text('Phone microphone');
+    await tester.ensureVisible(phoneMicrophone);
+    await tester.tap(phoneMicrophone);
+    await tester.pumpAndSettle();
+    expect(find.text('Pocket recorder records on its own'), findsNothing);
+    expect(controller.preferBluetoothCapture, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   // flutter_test reports Android by default, so every other test here exercises
   // the two-option mobile picker. Desktop gets a third source and, once wide
   // enough, a two-column layout — neither of which mobile ever renders.
@@ -107,6 +139,11 @@ void main() {
       expect(find.text('Bluetooth device'), findsOneWidget);
       expect(find.text('Phone microphone'), findsNothing);
       expect(find.text('CAPTURE SOURCES'), findsOneWidget);
+      expect(
+        find.byIcon(Icons.check_circle_rounded),
+        findsNWidgets(2),
+        reason: 'microphone and device audio should both start selected',
+      );
 
       // Bluetooth is not selected until asked for, and selecting it reveals the
       // device setup affordances.
@@ -153,7 +190,8 @@ void main() {
 /// Reports an active recording without touching any platform channel.
 class _FakeRecorder implements RecallRecorder {
   @override
-  Stream<RecordedAudioChunk> get chunks => const Stream<RecordedAudioChunk>.empty();
+  Stream<RecordedAudioChunk> get chunks =>
+      const Stream<RecordedAudioChunk>.empty();
   @override
   Stream<RecordedAudioChunk> get partials =>
       const Stream<RecordedAudioChunk>.empty();

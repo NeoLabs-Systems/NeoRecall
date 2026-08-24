@@ -16,6 +16,36 @@ import 'chunk_store.dart';
 
 ChunkStore createChunkStore() => IoChunkStore();
 
+class _RecoveredWav {
+  const _RecoveredWav(this.bytes, this.durationMs);
+
+  final Uint8List bytes;
+  final int durationMs;
+}
+
+_RecoveredWav? _recoverWavBytes(Uint8List bytes) {
+  if (bytes.length < 44) return null;
+  final header = ByteData.sublistView(bytes);
+  String text(int offset, int length) =>
+      String.fromCharCodes(bytes.sublist(offset, offset + length));
+  if (text(0, 4) != 'RIFF' || text(8, 4) != 'WAVE' || text(36, 4) != 'data') {
+    return null;
+  }
+  final sampleRate = header.getUint32(24, Endian.little);
+  final frameBytes = header.getUint16(32, Endian.little);
+  if (sampleRate <= 0 || frameBytes <= 0) return null;
+  final availableData = ((bytes.length - 44) ~/ frameBytes) * frameBytes;
+  if (availableData <= 0) return null;
+  final recovered = Uint8List.fromList(bytes.sublist(0, 44 + availableData));
+  final recoveredHeader = ByteData.sublistView(recovered);
+  recoveredHeader.setUint32(4, recovered.length - 8, Endian.little);
+  recoveredHeader.setUint32(40, availableData, Endian.little);
+  return _RecoveredWav(
+    recovered,
+    (availableData * 1000 / (sampleRate * frameBytes)).round(),
+  );
+}
+
 DatabaseFactory _desktopDatabaseFactory() {
   sqfliteFfiInit();
   return databaseFactoryFfi;
@@ -91,26 +121,28 @@ class IoChunkStore implements ChunkStore {
         whereArgs: <Object?>[LocalChunkState.capturing.name],
       );
       for (final row in capturing) {
-        final file = row['filePath'] == null
+        final finalFile = File(
+          p.join(_audioDirectory.path, '${row['id']}.${row['container']}'),
+        );
+        final declaredFile = row['filePath'] == null
             ? null
             : File(row['filePath'] as String);
-        if (file != null && file.existsSync() && file.lengthSync() >= 44) {
-          final bytes = await file.readAsBytes();
-          final channels = row['channelLayout'] == 'mono' ? 1 : 2;
-          final frameBytes = channels * 2;
-          final availableData =
-              ((bytes.length - 44) ~/ frameBytes) * frameBytes;
-          final recovered = Uint8List.sublistView(bytes, 0, 44 + availableData);
-          final header = ByteData.sublistView(recovered);
-          header.setUint32(4, recovered.length - 8, Endian.little);
-          header.setUint32(40, availableData, Endian.little);
-          final finalFile = File(
-            p.join(_audioDirectory.path, '${row['id']}.wav'),
-          );
+        // put() renames before updating SQLite. If the process dies in that
+        // narrow window, the ledger still names `.partial` while the complete
+        // file is already at its canonical path.
+        final file = declaredFile?.existsSync() == true
+            ? declaredFile
+            : finalFile.existsSync()
+            ? finalFile
+            : null;
+        final recovered = file == null
+            ? null
+            : _recoverWavBytes(await file.readAsBytes());
+        if (file != null && recovered != null) {
           final handle = await file.open(mode: FileMode.writeOnly);
           try {
-            await handle.writeFrom(recovered);
-            await handle.truncate(recovered.length);
+            await handle.writeFrom(recovered.bytes);
+            await handle.truncate(recovered.bytes.length);
             await handle.flush();
           } finally {
             await handle.close();
@@ -121,9 +153,8 @@ class IoChunkStore implements ChunkStore {
             <String, Object?>{
               'state': LocalChunkState.ready.name,
               'filePath': finalFile.path,
-              'sha256': sha256.convert(recovered).toString(),
-              'durationMs': (availableData * 1000 / (16000 * frameBytes))
-                  .round(),
+              'sha256': sha256.convert(recovered.bytes).toString(),
+              'durationMs': recovered.durationMs,
               'isFinal': 1,
               'error': 'Recovered after an interrupted local write.',
             },
@@ -131,13 +162,13 @@ class IoChunkStore implements ChunkStore {
             whereArgs: <Object?>[row['id']],
           );
         } else {
-          if (file?.existsSync() ?? false) file!.deleteSync();
           await _database!.update(
             'chunks',
             <String, Object?>{
-              'state': LocalChunkState.failed.name,
+              'state': LocalChunkState.needsAttention.name,
+              if (file != null) 'filePath': file.path,
               'error':
-                  'Capture was interrupted before a recoverable WAV header was written.',
+                  'Capture was interrupted before the local WAV could be recovered automatically. The original file was retained.',
             },
             where: 'id=?',
             whereArgs: <Object?>[row['id']],
@@ -151,18 +182,12 @@ class IoChunkStore implements ChunkStore {
         final map = Map<String, dynamic>.from(
           jsonDecode(row['chunkJson'] as String) as Map,
         );
-        final bytes = await file.readAsBytes();
-        final channels = map['channelLayout'] == 'mono' ? 1 : 2;
-        final frameBytes = channels * 2;
-        final availableData = ((bytes.length - 44) ~/ frameBytes) * frameBytes;
-        final recovered = Uint8List.sublistView(bytes, 0, 44 + availableData);
-        final header = ByteData.sublistView(recovered);
-        header.setUint32(4, recovered.length - 8, Endian.little);
-        header.setUint32(40, availableData, Endian.little);
+        final recovered = _recoverWavBytes(await file.readAsBytes());
+        if (recovered == null) continue;
         final handle = await file.open(mode: FileMode.writeOnly);
         try {
-          await handle.writeFrom(recovered);
-          await handle.truncate(recovered.length);
+          await handle.writeFrom(recovered.bytes);
+          await handle.truncate(recovered.bytes.length);
           await handle.flush();
         } finally {
           await handle.close();
@@ -170,10 +195,10 @@ class IoChunkStore implements ChunkStore {
         map.addAll(<String, Object?>{
           'state': LocalChunkState.ready.name,
           'filePath': file.path,
-          'sha256': sha256.convert(recovered).toString(),
-          'durationMs': (availableData * 1000 / (16000 * frameBytes)).round(),
+          'sha256': sha256.convert(recovered.bytes).toString(),
+          'durationMs': recovered.durationMs,
           'isFinal': 1,
-          'error': 'Recovered from the desktop two-second capture ledger.',
+          'error': 'Recovered from the rolling capture ledger.',
         });
         final inserted = await _database!.insert(
           'chunks',
@@ -349,8 +374,9 @@ class IoChunkStore implements ChunkStore {
         // pump filters by state itself and never acts on needsAttention chunks.
         '''SELECT c.* FROM chunks c
        JOIN sessions s ON s.id=c.sessionId
-       WHERE s.accountId=? AND c.state IN (?,?,?,?,?,?)
-       ORDER BY c.createdAt,c.sourceId,c.sequence
+       WHERE s.accountId=? AND c.state IN (?,?,?,?,?,?,?)
+       ORDER BY CASE WHEN c.state=? THEN 0 ELSE 1 END,
+                c.createdAt,c.sourceId,c.sequence
        LIMIT ?''',
         <Object?>[
           accountId,
@@ -360,6 +386,8 @@ class IoChunkStore implements ChunkStore {
           LocalChunkState.failed.name,
           LocalChunkState.capturing.name,
           LocalChunkState.needsAttention.name,
+          LocalChunkState.terminal.name,
+          LocalChunkState.terminal.name,
           limit,
         ],
       )).map((row) => AudioChunk.fromMap(_map(row))).toList();
@@ -393,6 +421,17 @@ class IoChunkStore implements ChunkStore {
       limit: 1,
     );
     if (rows.isEmpty) return;
+    final state = LocalChunkState.values.byName(rows.first['state'] as String);
+    final receipt = rows.first['receipt'] == null
+        ? null
+        : Map<String, dynamic>.from(
+            jsonDecode(rows.first['receipt'] as String) as Map,
+          );
+    if (state != LocalChunkState.terminal || !provesSafeAudioRelease(receipt)) {
+      throw StateError(
+        'Local audio release requires a proven terminal server receipt.',
+      );
+    }
     final filePath = rows.first['filePath'] as String?;
     if (filePath != null) {
       final file = File(filePath);

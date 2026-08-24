@@ -45,6 +45,12 @@ abstract class BackgroundCaptureService {
   /// than the possibly stale [state].
   Future<BackgroundRuntimeState> refreshState();
 
+  /// Atomically claims a user tap from the Android home-screen widget.
+  ///
+  /// The native side persists the tap before launching the Activity, so this
+  /// remains true across cold-engine and Activity attachment races.
+  Future<bool> takePendingWidgetPhoneRecordingRequest();
+
   Stream<BackgroundCaptureEvent> get events;
 }
 
@@ -52,6 +58,7 @@ enum BackgroundCaptureEventType {
   message,
   stopRequested,
   batteryOptimizationActive,
+  phoneRecordingRequested,
 
   /// The host could not take a microphone hold because no UI is attached (a
   /// process the system started after a reboot or a crash). Wearable holds are
@@ -87,8 +94,11 @@ class PlatformManagedBackgroundCaptureService
   @override
   BackgroundRuntimeRequest get active => _active;
   @override
-  BackgroundRuntimeState get state =>
-      BackgroundRuntimeState(running: isRunning, holds: _active.holds, foreground: true);
+  BackgroundRuntimeState get state => BackgroundRuntimeState(
+    running: isRunning,
+    holds: _active.holds,
+    foreground: true,
+  );
   @override
   Stream<BackgroundCaptureEvent> get events => _events.stream;
 
@@ -97,6 +107,9 @@ class PlatformManagedBackgroundCaptureService
 
   @override
   Future<BackgroundRuntimeState> refreshState() async => state;
+
+  @override
+  Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
@@ -153,6 +166,12 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
           if (arguments is Map && arguments['message'] is String) {
             _message(arguments['message'] as String);
           }
+        case 'widgetPhoneRecordingRequested':
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.phoneRecordingRequested,
+            ),
+          );
       }
       return null;
     });
@@ -173,6 +192,18 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   }
 
   @override
+  Future<bool> takePendingWidgetPhoneRecordingRequest() async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'takePendingWidgetPhoneRecordingRequest',
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
     if (!_initialized) await initialize();
     if (request.isEmpty) {
@@ -189,11 +220,12 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
 
     if (!await _ensureHostPermissions(request)) return false;
     try {
-      await _channel.invokeMethod<bool>('applyBackgroundHolds', <String, Object?>{
-        'holds': request.wireHolds,
-        'title': request.notificationTitle,
-        'text': request.notificationText,
-      });
+      await _channel
+          .invokeMethod<bool>('applyBackgroundHolds', <String, Object?>{
+            'holds': request.wireHolds,
+            'title': request.notificationTitle,
+            'text': request.notificationText,
+          });
       _active = request;
       // The platform starts the host asynchronously, so this read describes the
       // host as it was, not as it will be. Accepting the request is what the
@@ -215,14 +247,15 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
     final notification = await _resolvePermission(Permission.notification);
     if (!notification) {
       _message(
-        'Cannot run reliably in the background without notification permission.',
+        'Notification permission is off. Android will keep background capture visible in its active-apps controls, but the recording notice may not appear in the notification drawer.',
       );
-      return false;
     }
     if (request.needsMicrophone) {
       final microphone = await _resolvePermission(Permission.microphone);
       if (!microphone) {
-        _message('Cannot capture in the background without microphone permission.');
+        _message(
+          'Cannot capture in the background without microphone permission.',
+        );
         return false;
       }
     }

@@ -62,6 +62,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'diarizationEnabled': current['diarizationEnabled'],
       'chunkTargetMs': current['chunkTargetMs'],
       'chunkOverlapMs': current['chunkOverlapMs'],
+      'uploadOnlyOnUnmetered': current['uploadOnlyOnUnmetered'],
+      'recordingScheduleEnabled': current['recordingScheduleEnabled'],
+      'recordingStartMinute': current['recordingStartMinute'],
+      'recordingEndMinute': current['recordingEndMinute'],
     });
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -477,6 +481,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final maximum = (current['chunkMaxMs'] as int) / 1000;
     return _sectionList(<Widget>[
       SectionCard(
+        eyebrow: 'ALWAYS-ON CAPTURE',
+        child: Column(
+          children: <Widget>[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: current['uploadOnlyOnUnmetered'] as bool? ?? true,
+              onChanged: (value) => setState(
+                () => current['uploadOnlyOnUnmetered'] = value,
+              ),
+              title: const Text('Upload only on Wi-Fi / unmetered networks'),
+              subtitle: const Text(
+                'On by default. Recording continues to private app storage '
+                'while offline or on mobile data, then uploads when an '
+                'unmetered connection is available.',
+              ),
+            ),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: current['recordingScheduleEnabled'] as bool? ?? false,
+              onChanged: (value) => setState(
+                () => current['recordingScheduleEnabled'] = value,
+              ),
+              title: const Text('Daily recording window'),
+              subtitle: const Text(
+                'Uses this device’s local time. Off means 24/7; overnight '
+                'windows such as 22:00–06:00 are supported.',
+              ),
+            ),
+            if (current['recordingScheduleEnabled'] == true) ...<Widget>[
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _pickScheduleMinute(
+                        key: 'recordingStartMinute',
+                        fallback: 0,
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: Text(
+                        'Start ${_formatMinute(current['recordingStartMinute'] as int? ?? 0)}',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _pickScheduleMinute(
+                        key: 'recordingEndMinute',
+                        fallback: 0,
+                      ),
+                      icon: const Icon(Icons.stop_rounded),
+                      label: Text(
+                        'Stop ${_formatMinute(current['recordingEndMinute'] as int? ?? 0)}',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'At the end time, the current chunk is finalized to on-device '
+                'storage. Android may require opening NeoRecall before the '
+                'phone microphone can restart at the next start time.',
+                style: TextStyle(color: palette.textSecondary, height: 1.4),
+              ),
+            ],
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.multitrack_audio_outlined),
+              title: const Text('Silence handling'),
+              subtitle: const Text(
+                'Server-side voice activity detection marks silent chunks. '
+                'The phone keeps its copy until a terminal receipt proves '
+                'processing completed and server audio was deleted.',
+              ),
+            ),
+          ],
+        ),
+      ),
+      SectionCard(
         eyebrow: 'RECORDING',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -521,6 +608,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ]);
+  }
+
+  String _formatMinute(int minute) => TimeOfDay(
+    hour: minute ~/ 60,
+    minute: minute % 60,
+  ).format(context);
+
+  Future<void> _pickScheduleMinute({
+    required String key,
+    required int fallback,
+  }) async {
+    final currentMinute = settings?[key] as int? ?? fallback;
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: currentMinute ~/ 60,
+        minute: currentMinute % 60,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() => settings![key] = selected.hour * 60 + selected.minute);
   }
 
   Widget _memorySettings() {
@@ -623,7 +731,7 @@ class _SettingsNavigation extends StatelessWidget {
       section: SettingsSection.recording,
       icon: Icons.graphic_eq_outlined,
       label: 'Recording',
-      description: 'Chunks and overlap',
+      description: 'Schedule, network, chunks',
     ),
     _SettingsNavigationItem(
       section: SettingsSection.memory,

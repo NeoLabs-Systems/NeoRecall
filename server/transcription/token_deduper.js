@@ -13,6 +13,32 @@ function similarity(left, right) {
   return rows[a.length][b.length] / Math.max(a.length, b.length);
 }
 
+// Cross-device suppression is intentionally stricter than overlap cleanup
+// inside one recorder. Independent devices may hear unrelated audio at the
+// same time, so only a complete, exact multi-word utterance is proof enough to
+// discard the redundant transcript copy. Punctuation, casing and Unicode
+// presentation forms do not make spoken words different.
+function exactSameUtterance(left, right, minimumWords = 2) {
+  if (!Number.isInteger(minimumWords) || minimumWords < 2) {
+    throw new Error('Cross-stream dedupe requires at least two exact words.');
+  }
+  const a = tokens(left); const b = tokens(right);
+  return a.length >= minimumWords && a.length === b.length && a.every((word, index) => word === b[index]);
+}
+
+function dedupeExactCrossStream(segments, candidates, { timeToleranceMs, minimumWords = 2 }) {
+  if (!Number.isFinite(timeToleranceMs) || timeToleranceMs < 0) {
+    throw new Error('Cross-stream timestamp tolerance must come from validated configuration.');
+  }
+  return segments.filter((segment) => !candidates.some((candidate) => {
+    const overlaps = segment.startMs < candidate.endMs && candidate.startMs < segment.endMs;
+    return overlaps
+      && Math.abs(candidate.startMs - segment.startMs) <= timeToleranceMs
+      && Math.abs(candidate.endMs - segment.endMs) <= timeToleranceMs
+      && exactSameUtterance(candidate.text, segment.text, minimumWords);
+  }));
+}
+
 function dedupe(segments, previousSegments, { similarityThreshold, timeToleranceMs }) {
   if (!Number.isFinite(similarityThreshold) || !Number.isFinite(timeToleranceMs)) throw new Error('Dedupe thresholds must come from validated configuration.');
   const accepted = [];
@@ -26,4 +52,4 @@ function dedupe(segments, previousSegments, { similarityThreshold, timeTolerance
   return accepted;
 }
 
-module.exports = { tokens, similarity, dedupe };
+module.exports = { tokens, similarity, exactSameUtterance, dedupeExactCrossStream, dedupe };

@@ -41,12 +41,16 @@ class MobileRecallRecorder implements RecallRecorder {
   final List<StreamSubscription<dynamic>> _subs =
       <StreamSubscription<dynamic>>[];
   final StreamController<RecordedAudioChunk> _chunks =
-      StreamController<RecordedAudioChunk>.broadcast();
+      StreamController<RecordedAudioChunk>.broadcast(sync: true);
   final StreamController<RecordedAudioChunk> _partials =
-      StreamController<RecordedAudioChunk>.broadcast();
+      StreamController<RecordedAudioChunk>.broadcast(sync: true);
   final StreamController<String> _warnings =
       StreamController<String>.broadcast();
   final StreamController<double> _levels = StreamController<double>.broadcast();
+  final StreamController<CapturePipelineInterruption> _interruptions =
+      StreamController<CapturePipelineInterruption>.broadcast();
+  final List<StreamSubscription<dynamic>> _pipelineSubs =
+      <StreamSubscription<dynamic>>[];
   Set<BackgroundHold> _captureHolds = const <BackgroundHold>{};
   bool _backgroundPaused = false;
   bool _syncing = false;
@@ -60,6 +64,8 @@ class MobileRecallRecorder implements RecallRecorder {
   Stream<String> get warnings => _warnings.stream;
   @override
   Stream<double> get levels => _levels.stream;
+  Stream<CapturePipelineInterruption> get interruptions =>
+      _interruptions.stream;
   @override
   bool get isRecording => _pipeline?.isRunning ?? false;
 
@@ -268,8 +274,9 @@ class MobileRecallRecorder implements RecallRecorder {
       pipeline.partials.stream.listen(_partials.add),
       pipeline.warnings.stream.listen(_warnings.add),
       pipeline.levels.stream.listen(_levels.add),
+      pipeline.interruptions.stream.listen(_interruptions.add),
     ];
-    _subs.addAll(localSubs);
+    _pipelineSubs.addAll(localSubs);
 
     try {
       final capability = await pipeline.start();
@@ -296,7 +303,7 @@ class MobileRecallRecorder implements RecallRecorder {
     } catch (error) {
       for (final sub in localSubs) {
         await sub.cancel();
-        _subs.remove(sub);
+        _pipelineSubs.remove(sub);
       }
       await pipeline.dispose();
       _captureHolds = previousCaptureHolds;
@@ -311,6 +318,10 @@ class MobileRecallRecorder implements RecallRecorder {
     _pipeline = null;
     if (pipeline != null) {
       await pipeline.stop();
+      for (final sub in _pipelineSubs) {
+        await sub.cancel();
+      }
+      _pipelineSubs.clear();
       await pipeline.dispose();
     }
   }
@@ -338,5 +349,6 @@ class MobileRecallRecorder implements RecallRecorder {
     await _partials.close();
     await _warnings.close();
     await _levels.close();
+    await _interruptions.close();
   }
 }

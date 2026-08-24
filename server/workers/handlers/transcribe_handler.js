@@ -67,6 +67,24 @@ function previousSegments(database, chunk) {
     .all(chunk.source_id, chunk.sequence, Math.max(0, chunk.sequence - 2));
 }
 
+/// Already-persisted transcript segments from another physical client whose
+/// corrected time range could describe the same utterance. The exact-word
+/// predicate is applied separately; this query only bounds the candidate set.
+function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs) {
+  if (!segments.length) return [];
+  const earliest = Math.min(...segments.map((segment) => segment.startMs)) - timeToleranceMs;
+  const latest = Math.max(...segments.map((segment) => segment.endMs)) + timeToleranceMs;
+  return database.prepare(`SELECT t.text,
+    (julianday(t.started_at)-2440587.5)*86400000 startMs,
+    (julianday(t.ended_at)-2440587.5)*86400000 endMs
+    FROM transcript_segments t
+    JOIN audio_chunks c ON c.id=t.chunk_id
+    JOIN recording_sessions r ON r.id=c.session_id
+    WHERE t.user_id=? AND r.device_id<>? AND t.started_at<=? AND t.ended_at>=?
+    ORDER BY t.started_at`)
+    .all(chunk.user_id, session.device_id, new Date(latest).toISOString(), new Date(earliest).toISOString());
+}
+
 function updateContiguous(database, sourceId) {
   const rows = database.prepare('SELECT sequence,state FROM audio_chunks WHERE source_id=? ORDER BY sequence').all(sourceId);
   const gaps = database.prepare(`SELECT start_sequence,end_sequence FROM recording_gaps
@@ -91,12 +109,26 @@ function persistSegments(chunk, inferred) {
     endMs: Date.parse(absoluteIso(session.corrected_started_at, chunk.monotonic_offset_ms, segment.endMs)),
   }));
   const processingConfig = processingSettings.get();
-  const clean = deduper.dedupe(normalized, previousSegments(db, chunk), {
-    similarityThreshold: processingConfig.dedupeTokenSimilarity, timeToleranceMs: processingConfig.dedupeTimeToleranceMs,
-  });
-  const canonical = clean.map((segment) => ({ start: segment.startMs, end: segment.endMs, text: segment.text, language: segment.language || null }));
-  const checksum = sha256(JSON.stringify(canonical));
-  db.transaction(() => {
+  // Cross-device chunks have independent job ordering. Take the write lock
+  // before looking for a canonical transcript so two worker processes cannot
+  // both observe "no match" and persist the same speech simultaneously.
+  return db.transaction(() => {
+    const withinSource = deduper.dedupe(normalized, previousSegments(db, chunk), {
+      similarityThreshold: processingConfig.dedupeTokenSimilarity, timeToleranceMs: processingConfig.dedupeTimeToleranceMs,
+    });
+    const clean = deduper.dedupeExactCrossStream(
+      withinSource,
+      crossDeviceSegments(db, chunk, session, withinSource, processingConfig.dedupeTimeToleranceMs),
+      { timeToleranceMs: processingConfig.dedupeTimeToleranceMs, minimumWords: 2 },
+    );
+    if (clean.length !== withinSource.length) {
+      logger.info('Suppressed exact cross-device transcript duplicate', {
+        chunkId: chunk.id,
+        suppressedSegments: withinSource.length - clean.length,
+      });
+    }
+    const canonical = clean.map((segment) => ({ start: segment.startMs, end: segment.endMs, text: segment.text, language: segment.language || null }));
+    const checksum = sha256(JSON.stringify(canonical));
     db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
     const speakerCache = new Map();
     const continuity = boundaryContinuity(db, chunk);
@@ -144,8 +176,8 @@ function persistSegments(chunk, inferred) {
     db.prepare(`INSERT INTO event_outbox (user_id,event_type,resource_type,resource_id,payload_json,expires_at)
       VALUES (?,'chunk.persisted','audio_chunk',?,?,?)`).run(chunk.user_id, chunk.id,
       JSON.stringify({ chunkId: chunk.id, state: 'persisted_cleanup_pending', segmentCount: clean.length }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
-  })();
-  return clean.length;
+    return clean.length;
+  }).immediate();
 }
 
 function finishCleanup(chunk, segmentCount) {

@@ -3,6 +3,9 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
+const { Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
+const zlib = require('node:zlib');
 const { spawnSync } = require('node:child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { getDatabase } = require('../../db/database');
@@ -117,12 +120,50 @@ function metadataMatches(existing, input, actualHash, byteSize) {
     existing.monotonic_offset_ms === input.monotonicOffsetMs;
 }
 
+async function restoreUploadedAudio(uploadedFile, contentEncoding, maximumBytes) {
+  if (contentEncoding !== 'gzip') return;
+  const compressedPath = uploadedFile.path;
+  const restoredPath = `${compressedPath}.restored`;
+  let restoredBytes = 0;
+  const limiter = new Transform({
+    transform(chunk, _encoding, callback) {
+      restoredBytes += chunk.length;
+      if (restoredBytes > maximumBytes) {
+        callback(new Error('RESTORED_AUDIO_TOO_LARGE'));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  try {
+    await pipeline(
+      fs.createReadStream(compressedPath),
+      zlib.createGunzip(),
+      limiter,
+      fs.createWriteStream(restoredPath, { flags: 'wx' }),
+    );
+    fs.unlinkSync(compressedPath);
+    fs.renameSync(restoredPath, compressedPath);
+    uploadedFile.size = restoredBytes;
+  } catch (error) {
+    if (fs.existsSync(restoredPath)) fs.unlinkSync(restoredPath);
+    throw new HttpError(
+      error.message === 'RESTORED_AUDIO_TOO_LARGE' ? 413 : 400,
+      error.message === 'RESTORED_AUDIO_TOO_LARGE' ? 'AUDIO_TOO_LARGE' : 'INVALID_AUDIO_ENCODING',
+      error.message === 'RESTORED_AUDIO_TOO_LARGE'
+        ? 'The restored audio exceeds the upload limit.'
+        : 'The gzip audio payload is invalid.',
+    );
+  }
+}
+
 async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploadedFile) {
   if (!uploadedFile) throw new HttpError(400, 'AUDIO_REQUIRED', 'The audio field is required.');
   try {
     const source = ownedSource(userId, sessionId, sourceId);
     if (source.closed_at && source.final_sequence !== null && sequence > source.final_sequence) throw new HttpError(409, 'SOURCE_CLOSED', 'The sequence is beyond the closed source.');
     const config = getConfig();
+    await restoreUploadedAudio(uploadedFile, input.contentEncoding, config.maxUploadBytes);
     if (input.durationMs > config.chunkMaxMs || input.durationMs < (input.isFinal ? 1 : config.chunkMinMs)) throw new HttpError(400, 'INVALID_DURATION', 'Chunk duration is outside the configured range.');
     const actualHash = await fileSha256(uploadedFile.path);
     if (actualHash !== input.sha256) throw new HttpError(422, 'HASH_MISMATCH', 'The uploaded audio does not match X-Chunk-Sha256.');

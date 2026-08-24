@@ -93,32 +93,105 @@ void main() {
     await adapter.dispose();
   });
 
-  test('pairing while a reconnect is in flight succeeds on the first tap', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    final adapter = _SlowAdapter();
-    final registry = AudioDeviceAdapterRegistry()..register(adapter);
-    final sessions = DeviceSessionController(registry: registry);
-    await sessions.bindAccount('acct-1'); // prefer() persists the choice
-    const device = AudioDeviceDescriptor(
-      adapterId: 'fake',
-      deviceKey: 'dev-1',
-      displayName: 'Omi',
-      transport: 'bluetooth_le',
-    );
+  test(
+    'pairing while a reconnect is in flight succeeds on the first tap',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final adapter = _SlowAdapter();
+      final registry = AudioDeviceAdapterRegistry()..register(adapter);
+      final sessions = DeviceSessionController(registry: registry);
+      await sessions.bindAccount('acct-1'); // prefer() persists the choice
+      const device = AudioDeviceDescriptor(
+        adapterId: 'fake',
+        deviceKey: 'dev-1',
+        displayName: 'Omi',
+        transport: 'bluetooth_le',
+      );
 
-    // Simulate a background reconnect already running when the user taps Pair.
-    sessions.preferredDevice = device;
-    sessions.activeAdapter = adapter;
-    final backgroundAttempt = sessions.connectPreferred();
-    await Future<void>.delayed(Duration.zero);
+      // Simulate a background reconnect already running when the user taps Pair.
+      sessions.preferredDevice = device;
+      sessions.activeAdapter = adapter;
+      final backgroundAttempt = sessions.connectPreferred();
+      await Future<void>.delayed(Duration.zero);
 
-    // Previously this returned false immediately and prefer() reported
-    // "could not be connected", so the user had to tap a second time.
-    await expectLater(sessions.prefer(device), completes);
-    await backgroundAttempt;
-    expect(adapter.connectCalls, greaterThanOrEqualTo(1));
-    await sessions.disconnect();
-  });
+      // Previously this returned false immediately and prefer() reported
+      // "could not be connected", so the user had to tap a second time.
+      await expectLater(sessions.prefer(device), completes);
+      await backgroundAttempt;
+      expect(adapter.connectCalls, greaterThanOrEqualTo(1));
+      await sessions.disconnect();
+    },
+  );
+
+  test(
+    'connection timeouts are user-facing and phone mode stops reconnecting',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final adapter = _SlowAdapter()
+        ..connectError = TimeoutException('raw future timeout');
+      final registry = AudioDeviceAdapterRegistry()..register(adapter);
+      final sessions = DeviceSessionController(registry: registry);
+      await sessions.bindAccount('acct-1');
+      const device = AudioDeviceDescriptor(
+        adapterId: 'fake',
+        deviceKey: 'dev-1',
+        displayName: 'Pocket recorder',
+        transport: 'bluetooth_le',
+      );
+      sessions.preferredDevice = device;
+      sessions.activeAdapter = adapter;
+      final message = sessions.messages.first;
+
+      expect(
+        await sessions.connectPreferred(scheduleReconnect: false),
+        isFalse,
+      );
+      final displayed = await message;
+      expect(displayed, contains('Bluetooth connection timed out'));
+      expect(displayed, isNot(contains('TimeoutException')));
+      expect(displayed, isNot(contains('Future not completed')));
+
+      await sessions.setPreferBluetooth(false);
+      expect(sessions.preferBluetooth, isFalse);
+      expect(adapter.disconnectCalls, 1);
+      await sessions.dispose();
+    },
+  );
+
+  test(
+    'an in-flight failure cannot re-arm Bluetooth after phone selection',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final adapter = _SlowAdapter()
+        ..connectError = TimeoutException('connect completed after disconnect');
+      final registry = AudioDeviceAdapterRegistry()..register(adapter);
+      final sessions = DeviceSessionController(
+        registry: registry,
+        reconnectPolicy: const DeviceReconnectPolicy(
+          initialDelay: Duration(milliseconds: 10),
+          maximumDelay: Duration(milliseconds: 20),
+        ),
+      );
+      await sessions.bindAccount('acct-1');
+      sessions.preferredDevice = const AudioDeviceDescriptor(
+        adapterId: 'fake',
+        deviceKey: 'dev-1',
+        displayName: 'Pocket recorder',
+        transport: 'bluetooth_le',
+      );
+      sessions.activeAdapter = adapter;
+
+      final inFlight = sessions.connectPreferred();
+      await Future<void>.delayed(Duration.zero);
+      await sessions.setPreferBluetooth(false);
+      expect(await inFlight, isFalse);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(adapter.connectCalls, 1);
+      expect(sessions.preferBluetooth, isFalse);
+      await sessions.dispose();
+    },
+  );
 }
 
 class _RecordingGattTransport implements GattTransport {
@@ -222,6 +295,8 @@ class _RecordingGattTransport implements GattTransport {
 /// Adapter whose connect takes long enough for a second attempt to overlap it.
 class _SlowAdapter implements AudioDeviceAdapter {
   int connectCalls = 0;
+  int disconnectCalls = 0;
+  Object? connectError;
   final StreamController<DeviceTransportState> _states =
       StreamController<DeviceTransportState>.broadcast();
 
@@ -246,7 +321,9 @@ class _SlowAdapter implements AudioDeviceAdapter {
   @override
   Future<void> initialize() async {}
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {}
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
   @override
   Future<void> stopScan() async {}
 
@@ -254,11 +331,14 @@ class _SlowAdapter implements AudioDeviceAdapter {
   Future<void> connect(AudioDeviceDescriptor device) async {
     connectCalls += 1;
     await Future<void>.delayed(const Duration(milliseconds: 40));
+    final error = connectError;
+    if (error != null) throw error;
     _states.add(DeviceTransportState.connectedStandby);
   }
 
   @override
   Future<void> disconnect() async {
+    disconnectCalls += 1;
     _states.add(DeviceTransportState.disconnected);
   }
 

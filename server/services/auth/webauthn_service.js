@@ -176,6 +176,16 @@ async function completeRegistration({ userId, challengeId, response, label, rp }
 }
 
 async function beginAuthentication({ account, rp }) {
+  // With nothing registered anywhere the browser would sit on its key prompt
+  // until the ceremony times out. This count covers the whole relying party, so
+  // refusing early reveals nothing about any particular account.
+  const registered = getDatabase()
+    .prepare('SELECT COUNT(*) AS count FROM user_webauthn_credentials WHERE rp_id = ?')
+    .get(rp.rpId).count;
+  if (registered === 0) {
+    throw new HttpError(409, 'NO_CREDENTIALS_REGISTERED', 'No security keys are registered for this server yet. Add one under Settings first.');
+  }
+
   // Without an account hint the browser picks a discoverable credential itself,
   // so the allow-list stays empty and no account existence is revealed.
   let allowCredentials = [];

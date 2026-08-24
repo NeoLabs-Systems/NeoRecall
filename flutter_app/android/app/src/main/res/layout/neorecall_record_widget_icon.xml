@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="8dp">
+
+    <!-- These shared state views stay present for one RemoteViews update path. -->
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widget_subtitle"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/widget_action"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center"
+        android:background="@drawable/widget_action_ready"
+        android:clickable="true"
+        android:contentDescription="@string/widget_action_description"
+        android:focusable="true"
+        android:padding="14dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_widget_mic" />
+
+    <TextView
+        android:id="@+id/widget_live_dot"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:text="●"
+        android:textColor="#FFDF7D67"
+        android:textSize="9sp"
+        android:visibility="gone" />
+</FrameLayout>

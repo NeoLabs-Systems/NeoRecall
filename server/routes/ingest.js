@@ -64,8 +64,10 @@ router.put('/sessions/:id/sources/:sourceId/chunks/:sequence', upload.single('au
     overlapMs: Number(req.get('X-Chunk-Overlap-Ms') || 0), channelLayout: req.get('X-Channel-Layout') || 'mono',
     monotonicOffsetMs: Number(req.get('X-Monotonic-Offset-Ms')), deviceStartedAt: req.get('X-Device-Started-At'),
     container, codec: req.get('X-Audio-Codec') || 'pcm_s16le',
+    contentEncoding: req.get('X-Audio-Content-Encoding') || 'identity',
     isFinal: req.get('X-Final-Chunk') === 'true',
   };
+  if (!['identity', 'gzip'].includes(input.contentEncoding)) throw new HttpError(400, 'INVALID_AUDIO_ENCODING', 'Unsupported audio content encoding.');
   if (![input.durationMs, input.overlapMs, input.monotonicOffsetMs].every(Number.isInteger) || !input.deviceStartedAt) throw new HttpError(400, 'INVALID_CHUNK_METADATA', 'Chunk timing headers are invalid or incomplete.');
   const receipt = await service.acceptChunk(req.auth.userId, req.params.id, req.params.sourceId, sequence, input, req.file);
   res.status(receipt.state === 'uploaded' && !receipt.duplicate ? 202 : 200).json({ receipt });

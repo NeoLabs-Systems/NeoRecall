@@ -105,7 +105,10 @@ class BackgroundCaptureService : Service() {
       .putString(KEY_TITLE, title)
       .putString(KEY_TEXT, text)
       .putBoolean(KEY_MICROPHONE_UNAVAILABLE, microphoneUnavailable)
-      .apply()
+      // This is the recovery ledger for a process kill. Commit the tiny update
+      // before returning so an immediate reclaim cannot lose the active holds.
+      .commit()
+    RecordWidgetProvider.updateAll(this)
     if (microphoneUnavailable) {
       notifyHost(
         "Phone-microphone recording cannot resume without the app open. Bluetooth capture and sync are running.",
@@ -149,7 +152,8 @@ class BackgroundCaptureService : Service() {
       .putBoolean(KEY_RUNNING, false)
       .putStringSet(KEY_HOLDS, emptySet())
       .putBoolean(KEY_MICROPHONE_UNAVAILABLE, false)
-      .apply()
+      .commit()
+    RecordWidgetProvider.updateAll(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
   }
@@ -269,10 +273,15 @@ class BackgroundCaptureService : Service() {
         .putStringArrayListExtra(EXTRA_HOLDS, ArrayList(holds))
         .putExtra(EXTRA_TITLE, persisted().getString(KEY_TITLE, null))
         .putExtra(EXTRA_TEXT, persisted().getString(KEY_TEXT, null))
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        applicationContext.startForegroundService(restart)
-      } else {
-        applicationContext.startService(restart)
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          applicationContext.startForegroundService(restart)
+        } else {
+          applicationContext.startService(restart)
+        }
+      } catch (_: Throwable) {
+        // Android 12+ may reject a redundant background start. The currently
+        // running START_STICKY service and its persisted holds remain valid.
       }
     }
     super.onTaskRemoved(rootIntent)
@@ -361,7 +370,7 @@ class BackgroundCaptureService : Service() {
         prefs(context).edit()
           .putBoolean(KEY_RUNNING, false)
           .putBoolean(KEY_MICROPHONE_UNAVAILABLE, true)
-          .apply()
+          .commit()
         return
       }
       requestHolds(

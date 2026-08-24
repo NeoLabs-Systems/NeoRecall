@@ -14,6 +14,28 @@ temporarily late channel as silence. If a source actually stops, its aligned
 tail is finalized and the remaining source continues. Windows loopback audio is
 resampled from the active output-device format to 16 kHz mono before mixing.
 
+## Desktop quick capture
+
+After sign-in, the desktop client opens as a compact always-on-top recorder in
+the lower-right corner. Microphone and device audio are selected together by
+default in both quick capture and the full recorder. **Open notes library**
+expands it into the same Record, Timeline, Memories, Search, Speakers, Sources,
+and Settings structure used by the web app. Closing either view hides NeoRecall
+to the tray so upload recovery and meeting detection can keep running; **Quit**
+in the tray menu exits it completely.
+
+While the tray process is running, NeoRecall watches for newly launched meeting
+sessions from Zoom, Microsoft Teams, Webex, and FaceTime. A stable process
+transition surfaces the recorder; it never starts recording by itself. The user
+must acknowledge consent and press **Record meeting**, which captures microphone
+and device audio together. When the meeting process exits, an active recorder
+asks the user to finish instead of cutting audio off automatically.
+
+This detector reads process metadata only—it does not monitor idle audio or
+record in the background. Browser-only meeting tabs cannot be identified from
+the operating-system process list, so Google Meet and other browser calls still
+use **Quick capture** from the tray.
+
 ## Consent and indicators
 
 NeoRecall shows a first-run recording notice and a persistent recording state. It has no covert mode. Before recording, obtain the consent required in your jurisdiction and organization. Pause immediately when consent changes or sensitive material should not be retained.

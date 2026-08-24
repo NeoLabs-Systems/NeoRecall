@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 
 import 'diagnostics/client_diagnostic_log.dart';
 import 'models/chunk.dart';
+import 'sync/upload_compression.dart';
 import 'models/recording.dart';
 
 class ApiException implements Exception {
@@ -136,6 +137,7 @@ class NeoRecallApiClient {
     AudioChunk chunk,
     Uint8List bytes,
   ) async {
+    final upload = await prepareAudioUpload(bytes);
     final request = http.MultipartRequest(
       'PUT',
       _resolve(
@@ -153,12 +155,14 @@ class NeoRecallApiClient {
       'X-Device-Started-At': chunk.startedAt.toUtc().toIso8601String(),
       'X-Audio-Container': chunk.container,
       'X-Audio-Codec': chunk.codec,
+      if (upload.contentEncoding != null)
+        'X-Audio-Content-Encoding': upload.contentEncoding!,
       if (chunk.isFinal) 'X-Final-Chunk': 'true',
     });
     request.files.add(
       http.MultipartFile.fromBytes(
         'audio',
-        bytes,
+        upload.bytes,
         filename: '${chunk.id}.${chunk.container}',
       ),
     );

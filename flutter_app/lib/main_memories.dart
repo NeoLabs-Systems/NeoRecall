@@ -9,8 +9,18 @@ import 'src/models/memory.dart';
 
 String _formatDay(DateTime value) {
   const months = <String>[
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
   final local = value.toLocal();
   return '${months[local.month - 1]} ${local.day}, ${local.year}';
@@ -18,8 +28,18 @@ String _formatDay(DateTime value) {
 
 String _formatShortDate(DateTime value) {
   const months = <String>[
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   final local = value.toLocal();
   return '${months[local.month - 1]} ${local.day}';
@@ -154,8 +174,10 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
         break;
     }
     items.sort((a, b) {
-      final aAt = a.timelineAt ?? a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bAt = b.timelineAt ?? b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final aAt =
+          a.timelineAt ?? a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bAt =
+          b.timelineAt ?? b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
       return bAt.compareTo(aAt);
     });
     return items;
@@ -202,7 +224,9 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
         'unarchive' => 'Restored ${ids.length} memories',
         _ => 'Updated ${ids.length} memories',
       };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(label)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(label)));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -230,9 +254,9 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
       _exitSelect();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not rename: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not rename: $error')));
     }
   }
 
@@ -385,10 +409,8 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _MiniDetailSheet(
-        controller: controller,
-        mini: mini,
-      ),
+      builder: (context) =>
+          _MiniDetailSheet(controller: controller, mini: mini),
     );
   }
 
@@ -411,14 +433,9 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
             description:
                 'Your conversations, distilled into clear memories and highlights — automatically.',
             trailing: _selecting
-                ? TextButton(
-                    onPressed: _exitSelect,
-                    child: const Text('Done'),
-                  )
+                ? TextButton(onPressed: _exitSelect, child: const Text('Done'))
                 : TextButton.icon(
-                    onPressed: memories.isEmpty
-                        ? null
-                        : () => _enterSelect(),
+                    onPressed: memories.isEmpty ? null : () => _enterSelect(),
                     icon: const Icon(Icons.checklist_rounded, size: 18),
                     label: const Text('Select'),
                   ),
@@ -460,8 +477,9 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
                 ),
                 onRename: _selected.length == 1 ? _renameSelected : null,
                 onMerge: _selected.length >= 2 ? _mergeSelected : null,
-                archiveLabel:
-                    _filter == _MemoryFilter.archived ? 'Restore' : 'Archive',
+                archiveLabel: _filter == _MemoryFilter.archived
+                    ? 'Restore'
+                    : 'Archive',
               ),
               const SizedBox(height: 14),
             ],
@@ -554,7 +572,10 @@ class _SearchField extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadius.input),
           borderSide: BorderSide(color: palette.accent.withValues(alpha: 0.55)),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
       ),
     );
   }
@@ -649,12 +670,16 @@ class _TabChip extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? palette.textPrimary : palette.textMuted,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13.5,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? palette.textPrimary : palette.textMuted,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
                 ),
               ),
               const SizedBox(width: 6),
@@ -882,10 +907,7 @@ class _DailySummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            text,
-            style: TextStyle(color: palette.textSoft, height: 1.5),
-          ),
+          Text(text, style: TextStyle(color: palette.textSoft, height: 1.5)),
         ],
       ),
     );
@@ -1130,7 +1152,8 @@ class _MiniTimeline extends StatelessWidget {
     final groups = <String, List<MiniMemory>>{};
     final order = <String>[];
     for (final mini in items) {
-      final at = (mini.timelineAt ?? mini.createdAt ?? DateTime.now()).toLocal();
+      final at = (mini.timelineAt ?? mini.createdAt ?? DateTime.now())
+          .toLocal();
       final key = _formatDay(at);
       groups.putIfAbsent(key, () {
         order.add(key);
@@ -1158,9 +1181,7 @@ class _MiniTimeline extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: Divider(color: palette.border, height: 1),
-                  ),
+                  Expanded(child: Divider(color: palette.border, height: 1)),
                 ],
               ),
             ),
@@ -1196,9 +1217,7 @@ class _MiniTimelineRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final time = mini.timelineAt != null
-        ? _formatTime(mini.timelineAt!)
-        : '';
+    final time = mini.timelineAt != null ? _formatTime(mini.timelineAt!) : '';
     final completed = mini.isCompleted;
 
     return IntrinsicHeight(
@@ -1218,10 +1237,7 @@ class _MiniTimelineRow extends StatelessWidget {
                     color: completed
                         ? palette.success.withValues(alpha: 0.85)
                         : palette.accent.withValues(alpha: 0.85),
-                    border: Border.all(
-                      color: palette.bgCard,
-                      width: 2,
-                    ),
+                    border: Border.all(color: palette.bgCard, width: 2),
                   ),
                 ),
                 if (!isLast)
@@ -1246,7 +1262,10 @@ class _MiniTimelineRow extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(mini.kindEmoji, style: const TextStyle(fontSize: 18)),
+                      Text(
+                        mini.kindEmoji,
+                        style: const TextStyle(fontSize: 18),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -1266,7 +1285,8 @@ class _MiniTimelineRow extends StatelessWidget {
                                     ),
                                   ),
                                 ],
-                                if (mini.dueAt != null && mini.isOpen) ...<Widget>[
+                                if (mini.dueAt != null &&
+                                    mini.isOpen) ...<Widget>[
                                   const SizedBox(width: 8),
                                   Text(
                                     'Due ${_formatShortDate(mini.dueAt!)}',
@@ -1361,8 +1381,7 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
 
   Future<void> _load() async {
     try {
-      final detail =
-          await widget.controller.loadMemoryDetail(widget.memory.id);
+      final detail = await widget.controller.loadMemoryDetail(widget.memory.id);
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -1443,7 +1462,10 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: palette.border),
                   ),
-                  child: Text(memory.emoji, style: const TextStyle(fontSize: 28)),
+                  child: Text(
+                    memory.emoji,
+                    style: const TextStyle(fontSize: 28),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1527,10 +1549,7 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                       value: 'archive',
                       child: Text(memory.archived ? 'Restore' : 'Archive'),
                     ),
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Delete'),
-                    ),
+                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
                   ],
                 ),
               ],
@@ -1579,7 +1598,8 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                           spacing: 8,
                           runSpacing: 8,
                           children: _entities.map((entity) {
-                            final name = entity['display_name'] as String? ??
+                            final name =
+                                entity['display_name'] as String? ??
                                 entity['canonical_name_en'] as String? ??
                                 'Unknown';
                             final kind = entity['kind'] as String? ?? '';
@@ -1605,7 +1625,9 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: palette.bgSecondary.withValues(alpha: 0.7),
+                                color: palette.bgSecondary.withValues(
+                                  alpha: 0.7,
+                                ),
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: palette.border),
                               ),
@@ -1620,12 +1642,18 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                           ),
                       ],
                       const SizedBox(height: 22),
-                      Text('From the conversation', style: _sectionStyle(palette)),
+                      Text(
+                        'From the conversation',
+                        style: _sectionStyle(palette),
+                      ),
                       const SizedBox(height: 10),
                       if (_sources.isEmpty)
                         Text(
                           'No transcript excerpts are linked to this memory.',
-                          style: TextStyle(color: palette.textMuted, height: 1.4),
+                          style: TextStyle(
+                            color: palette.textMuted,
+                            height: 1.4,
+                          ),
                         )
                       else
                         for (final source in _sources)
@@ -1635,7 +1663,9 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: palette.bgSecondary.withValues(alpha: 0.55),
+                                color: palette.bgSecondary.withValues(
+                                  alpha: 0.55,
+                                ),
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: palette.border),
                               ),
@@ -1686,10 +1716,7 @@ class _MemoryDetailSheetState extends State<_MemoryDetailSheet> {
 }
 
 class _MiniDetailSheet extends StatefulWidget {
-  const _MiniDetailSheet({
-    required this.controller,
-    required this.mini,
-  });
+  const _MiniDetailSheet({required this.controller, required this.mini});
 
   final NeoRecallController controller;
   final MiniMemory mini;
@@ -1711,8 +1738,9 @@ class _MiniDetailSheetState extends State<_MiniDetailSheet> {
 
   Future<void> _load() async {
     try {
-      final detail =
-          await widget.controller.loadMiniMemoryDetail(widget.mini.id);
+      final detail = await widget.controller.loadMiniMemoryDetail(
+        widget.mini.id,
+      );
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -1878,7 +1906,9 @@ class _MiniDetailSheetState extends State<_MiniDetailSheet> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: palette.bgSecondary.withValues(alpha: 0.55),
+                                color: palette.bgSecondary.withValues(
+                                  alpha: 0.55,
+                                ),
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: palette.border),
                               ),

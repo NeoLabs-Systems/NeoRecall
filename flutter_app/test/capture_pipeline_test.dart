@@ -6,17 +6,18 @@ import 'package:neorecall/src/capture/capture_pipeline.dart';
 import 'package:neorecall/src/capture/capture_source.dart';
 
 class _FakeSource implements CaptureSource {
-  _FakeSource(this.id, this.kind);
+  _FakeSource(this.id, this.kind, {this.tailMsOnStop = 0});
   @override
   final String id;
   @override
   final String kind;
   final StreamController<Uint8List> _pcm =
-      StreamController<Uint8List>.broadcast();
+      StreamController<Uint8List>.broadcast(sync: true);
   final StreamController<double> _levels = StreamController<double>.broadcast();
   final StreamController<String> _warnings =
       StreamController<String>.broadcast();
   bool _active = false;
+  final int tailMsOnStop;
 
   @override
   bool get isActive => _active;
@@ -35,6 +36,7 @@ class _FakeSource implements CaptureSource {
 
   @override
   Future<void> stop() async {
+    if (tailMsOnStop > 0) pushSilenceMs(tailMsOnStop);
     _active = false;
   }
 
@@ -52,6 +54,8 @@ class _FakeSource implements CaptureSource {
   }
 
   Future<void> endPcm() => _pcm.close();
+
+  void failPcm(Object error) => _pcm.addError(error);
 }
 
 void main() {
@@ -147,6 +151,86 @@ void main() {
 
       expect(layouts, <String>['microphone_left_system_right', 'mono']);
       await pipeline.stop();
+      await sub.cancel();
+      await pipeline.dispose();
+    },
+  );
+
+  test(
+    'single-source stalls are reported instead of recording silence forever',
+    () async {
+      final mic = _FakeSource('mic', 'microphone');
+      final pipeline = CapturePipeline(
+        sources: <CaptureSource>[mic],
+        chunkMs: 100,
+        overlapMs: 0,
+        sampleRate: 16000,
+        flushInterval: const Duration(milliseconds: 10),
+        partialInterval: const Duration(seconds: 10),
+        sourceStallTimeout: const Duration(milliseconds: 30),
+      );
+      final interruptions = <CapturePipelineInterruption>[];
+      final sub = pipeline.interruptions.stream.listen(interruptions.add);
+
+      await pipeline.start();
+      await Future<void>.delayed(const Duration(milliseconds: 70));
+
+      expect(interruptions, hasLength(1));
+      expect(interruptions.single.sourceKind, 'microphone');
+      expect(interruptions.single.reason, contains('stalled'));
+      await pipeline.stop();
+      await sub.cancel();
+      await pipeline.dispose();
+    },
+  );
+
+  test('source errors produce one typed interruption', () async {
+    final mic = _FakeSource('mic', 'microphone');
+    final pipeline = CapturePipeline(
+      sources: <CaptureSource>[mic],
+      chunkMs: 100,
+      overlapMs: 0,
+      sampleRate: 16000,
+      flushInterval: const Duration(milliseconds: 10),
+      partialInterval: const Duration(seconds: 10),
+      sourceStallTimeout: const Duration(seconds: 1),
+    );
+    final interruptions = <CapturePipelineInterruption>[];
+    final sub = pipeline.interruptions.stream.listen(interruptions.add);
+    await pipeline.start();
+
+    mic.failPcm(StateError('recorder failed'));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(interruptions, hasLength(1));
+    expect(interruptions.single.reason, contains('recorder failed'));
+    await pipeline.stop();
+    await sub.cancel();
+    await pipeline.dispose();
+  });
+
+  test(
+    'PCM delivered while a source stops is included in the final chunk',
+    () async {
+      final mic = _FakeSource('mic', 'microphone', tailMsOnStop: 40);
+      final pipeline = CapturePipeline(
+        sources: <CaptureSource>[mic],
+        chunkMs: 100,
+        overlapMs: 0,
+        sampleRate: 16000,
+        flushInterval: const Duration(seconds: 10),
+        partialInterval: const Duration(seconds: 10),
+        sourceStallTimeout: const Duration(seconds: 1),
+      );
+      final durations = <int>[];
+      final sub = pipeline.chunks.stream.listen(
+        (chunk) => durations.add(chunk.durationMs),
+      );
+      await pipeline.start();
+
+      await pipeline.stop();
+
+      expect(durations, <int>[40]);
       await sub.cancel();
       await pipeline.dispose();
     },
