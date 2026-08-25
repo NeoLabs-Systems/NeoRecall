@@ -1,6 +1,6 @@
 {
   "name": "neorecall",
-  "version": "0.1.0-beta.35",
+  "version": "0.1.0-beta.36",
   "description": "Private, self-hosted audio memory for the NeoLabs Ecosystem",
   "license": "AGPL-3.0-only",
   "type": "commonjs",
