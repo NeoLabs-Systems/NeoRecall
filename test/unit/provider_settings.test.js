@@ -265,3 +265,60 @@ test('retrieved evidence is trimmed to what the model can read, worst matches fi
   // beats refusing to answer.
   assert.equal(contextWithinBudget([{ sourceId: 'a', text: 'y'.repeat(50_000) }], 1_000).length, 1);
 });
+
+test('an endpoint that cannot compile the schema still gets a usable answer', async () => {
+  // Exactly what a real installation hit: llama.cpp answering
+  // "Failed to initialize samplers: failed to parse grammar" to every request,
+  // sixteen consecutive failures, no memories for a day of recording. The
+  // message names no field, so there is nothing to correct — and guessing which
+  // keyword that build dislikes only works until the next server dislikes
+  // another one.
+  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
+  const originalFetch = global.fetch;
+  const asked = [];
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    asked.push(body.response_format?.type);
+    if (body.response_format?.type === 'json_schema') {
+      return new Response(JSON.stringify({ error: { message: 'Failed to initialize samplers: failed to parse grammar' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    const result = await provider.chatJSON({
+      userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
+      responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object', properties: { answer: { type: 'string' } } } } },
+    });
+    assert.deepEqual(result.value, { answer: 'ready' }, 'the caller gets its answer, not a failure');
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.deepEqual(asked, ['json_schema', 'json_object'],
+    'the schema is tried first and plain JSON is the fallback, never the other way round');
+});
+
+test('a refusal that is not about the schema is not papered over', async () => {
+  // The fallback must not turn a genuine problem — a bad key, a missing model —
+  // into a second wasted request and a confusing error.
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ error: { message: 'model "m" not found' } }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    await assert.rejects(() => provider.chatJSON({
+      userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
+      responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object' } } },
+    }));
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(attempts, 1, 'no pointless second attempt');
+});

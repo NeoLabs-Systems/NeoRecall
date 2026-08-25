@@ -134,6 +134,31 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 ],
               ),
             ),
+          // A long history does not fit in one page. The most recent
+          // recordings come first, and older days are one tap away rather
+          // than silently cut off.
+          if (controller.hasOlderTranscript) ...<Widget>[
+            const SizedBox(height: 18),
+            Center(
+              child: TextButton.icon(
+                onPressed: controller.isLoadingOlderTranscript
+                    ? null
+                    : () => controller.loadOlderTranscript(),
+                icon: controller.isLoadingOlderTranscript
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.history),
+                label: Text(
+                  controller.isLoadingOlderTranscript
+                      ? 'Loading earlier recordings'
+                      : 'Show earlier recordings',
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

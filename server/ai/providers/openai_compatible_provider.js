@@ -126,11 +126,37 @@ function thinkingAlreadyDisabled(extraBody) {
   return extraBody?.chat_template_kwargs?.enable_thinking === false;
 }
 
+/// Whether the endpoint refused the *shape* we asked for rather than the request.
+///
+/// Servers that enforce a JSON schema compile it into a sampling grammar, and
+/// their converters do not all cover the same keywords. One rejected a schema
+/// with "Failed to initialize samplers: failed to parse grammar" — a message
+/// that names no field, so there is nothing to correct even when you can read
+/// it. Guessing which keyword a given build dislikes is a losing game: the next
+/// server will dislike a different one.
+function schemaRejected(status, message) {
+  return status === 400 && /grammar|json[_ ]?schema|response[_ ]?format|unsupported schema/i.test(String(message || ''));
+}
+
 async function chatJSON(request) {
   const settings = providerSettings.getRuntime().llm;
   try {
     return await sendChat(request, settings.extraBody || null);
   } catch (error) {
+    // Asking for a schema is an optimisation, not the contract. The prompt spells
+    // out the shape it wants in full, and the response is validated and trimmed
+    // here whatever the endpoint promised — so when a server cannot compile the
+    // schema, asking for plain JSON instead gets exactly the same guarantees by a
+    // slower road. Refusing to work at all because a server's grammar converter
+    // is limited would be the wrong answer, and it is the difference between a
+    // day of recordings becoming memories and sixteen failures in a row.
+    if (schemaRejected(error.status, error.message) && request.responseFormat) {
+      logger.warn('The endpoint could not compile the response schema; asking for plain JSON instead', {
+        purpose: request.purpose, model: settings.model, endpoint: settings.baseUrl,
+        reason: String(error.message || '').slice(0, 300),
+      });
+      return sendChat({ ...request, responseFormat: { type: 'json_object' } }, settings.extraBody || null);
+    }
     // A completion that ran out of budget on a reasoning model is the one
     // failure with an obvious second thing to try, and it matters most exactly
     // where it hurts most: consolidation treats truncation as the input's fault,
@@ -217,4 +243,4 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
   } finally { clearTimeout(timer); }
 }
 
-module.exports = { chatJSON, ready, contextOverflow, wireSchema, wireResponseFormat, NO_THINKING };
+module.exports = { chatJSON, ready, contextOverflow, schemaRejected, wireSchema, wireResponseFormat, NO_THINKING };

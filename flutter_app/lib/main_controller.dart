@@ -364,6 +364,12 @@ class NeoRecallController extends ChangeNotifier {
   RecallPage page = RecallPage.record;
   List<RecordingSession> recordings = <RecordingSession>[];
   List<TranscriptSegment> transcript = <TranscriptSegment>[];
+  /// Where the transcript page ended, so older segments can be pulled in on
+  /// demand. The timeline shows the most recent recordings first; without a way
+  /// to reach further back, a long history would simply stop at the page edge.
+  String? _transcriptCursor;
+  bool isLoadingOlderTranscript = false;
+  bool get hasOlderTranscript => _transcriptCursor != null;
   List<RecallMemory> memories = <RecallMemory>[];
   List<MiniMemory> miniMemories = <MiniMemory>[];
   List<RecallSpeaker> speakers = <RecallSpeaker>[];
@@ -2675,7 +2681,7 @@ class NeoRecallController extends ChangeNotifier {
         section('/api/v1/mini-memories?limit=200'),
         section('/api/v1/speakers'),
         section('/api/v1/devices'),
-        section('/api/v1/transcripts?limit=100'),
+        section('/api/v1/transcripts?limit=250'),
         section('/api/v1/conversations?limit=100'),
         section('/api/v1/daily-summaries?limit=100'),
         section('/api/v1/processing-status'),
@@ -2703,6 +2709,7 @@ class NeoRecallController extends ChangeNotifier {
       if (results[4] != null) devices = rows(4, 'devices');
       if (results[5] != null) {
         transcript = rows(5, 'items').map(TranscriptSegment.fromJson).toList();
+        _transcriptCursor = results[5]?['nextCursor']?.toString();
       }
       if (results[6] != null) conversations = rows(6, 'items');
       if (results[7] != null) dailySummaries = rows(7, 'items');
@@ -2728,6 +2735,37 @@ class NeoRecallController extends ChangeNotifier {
     } finally {
       _refreshing = false;
       loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Pulls in the page of transcript before the oldest one on screen. Failing
+  /// here leaves what is already shown untouched: reaching further back is a
+  /// convenience, and losing today's timeline to fetch yesterday's would be a
+  /// poor trade.
+  Future<void> loadOlderTranscript() async {
+    final cursor = _transcriptCursor;
+    if (cursor == null || isLoadingOlderTranscript) return;
+    isLoadingOlderTranscript = true;
+    notifyListeners();
+    try {
+      final payload = Map<String, dynamic>.from(
+        await api.request('GET', '/api/v1/transcripts?limit=250&before=$cursor') as Map,
+      );
+      final older = ((payload['items'] as List?) ?? <dynamic>[])
+          .cast<Map>()
+          .map((row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)))
+          .toList();
+      final known = transcript.map((segment) => segment.id).toSet();
+      transcript = <TranscriptSegment>[
+        ...transcript,
+        ...older.where((segment) => !known.contains(segment.id)),
+      ];
+      _transcriptCursor = payload['nextCursor']?.toString();
+    } catch (exception) {
+      warning = 'Older transcript could not be loaded just now.';
+    } finally {
+      isLoadingOlderTranscript = false;
       notifyListeners();
     }
   }
