@@ -5,6 +5,9 @@ const path = require('node:path');
 const { TranscriptionProvider } = require('../transcription_provider');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('transcription');
 
 const AUDIO_TYPES = Object.freeze({
   '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.mp4': 'audio/mp4', '.mpeg': 'audio/mpeg',
@@ -47,6 +50,7 @@ class OpenAICompatibleProvider extends TranscriptionProvider {
     form.append('response_format', settings.responseFormat);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.transcriptionTimeoutMs);
+    const startedAt = Date.now();
     try {
       const response = await fetch(transcriptionEndpoint(settings.baseUrl), {
         method: 'POST', signal: controller.signal,
@@ -54,9 +58,25 @@ class OpenAICompatibleProvider extends TranscriptionProvider {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw Object.assign(new Error(payload.error?.message || `Transcription endpoint returned HTTP ${response.status}.`), { code: 'TRANSCRIPTION_HTTP_ERROR', status: response.status });
-      return normalizedSegments(payload);
+      const segments = normalizedSegments(payload);
+      logger.debug('Transcribed a recording', {
+        model: settings.model, seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+        segments: segments.length, language: payload.language || null,
+      });
+      return segments;
     } catch (error) {
-      if (error.name === 'AbortError') throw Object.assign(new Error('The transcription request timed out.'), { code: 'TRANSCRIPTION_TIMEOUT' });
+      const timedOut = error.name === 'AbortError';
+      // Named here rather than left to the worker, because the worker only sees
+      // "the job failed" and the endpoint, model and wording are what actually
+      // identify the problem.
+      logger.warn('Transcription request failed', {
+        provider: settings.provider, model: settings.model, endpoint: settings.baseUrl,
+        errorCode: timedOut ? 'TRANSCRIPTION_TIMEOUT' : error.code || 'TRANSCRIPTION_FAILED',
+        httpStatus: error.status || null,
+        seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+        reason: String(error.message || '').slice(0, 400),
+      });
+      if (timedOut) throw Object.assign(new Error('The transcription request timed out.'), { code: 'TRANSCRIPTION_TIMEOUT' });
       throw error;
     } finally {
       clearTimeout(timer);

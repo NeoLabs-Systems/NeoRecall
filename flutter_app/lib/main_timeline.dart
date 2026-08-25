@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_processing_status.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/models/transcript.dart';
@@ -77,13 +78,25 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
           ),
           const SizedBox(height: 18),
+          ProcessingStatusCard(
+            issues: controller.processingIssues,
+            audioStillOnDevice: controller.audioStillOnDevice,
+          ),
           if (groups.isEmpty)
-            const GlassSurface(
+            // Only claim there is nothing here when there is genuinely nothing
+            // here. If something is holding recordings up, the card above has
+            // already said so, and telling someone who recorded all day to
+            // "start a recording" is the message that makes them think their
+            // audio was lost.
+            GlassSurface(
               child: EmptyState(
                 icon: Icons.view_timeline_outlined,
-                title: 'No transcript yet',
-                message:
-                    'Start a recording or import audio. Persisted segments will appear here.',
+                title: controller.processingIssues.isEmpty
+                    ? 'No transcript yet'
+                    : 'Nothing to show yet',
+                message: controller.processingIssues.isEmpty
+                    ? 'Start a recording or import audio. Persisted segments will appear here.'
+                    : 'Your recordings are safe. They will appear here once the above is sorted out.',
               ),
             )
           else

@@ -4,6 +4,9 @@ const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('language-model');
 
 /// Sends structured generation requests to the OpenAI-compatible endpoint the
 /// operator configured. NeoRecall deliberately has no in-process generation
@@ -131,6 +134,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     VALUES (?,?,?,?,?,'sent',?,?)`).run(id, userId, purpose, settings.provider, model, now, now);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.aiTimeoutMs);
+  const startedAt = Date.now();
   try {
     const response = await fetch(`${settings.baseUrl}/chat/completions`, {
       method: 'POST', signal: controller.signal,
@@ -159,11 +163,24 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     const usage = payload.usage || {};
     db.prepare(`UPDATE ai_requests SET state='succeeded',http_status=?,provider_request_id=?,prompt_tokens=?,completion_tokens=?,completed_at=? WHERE id=?`)
       .run(response.status, payload.id || null, usage.prompt_tokens ?? null, usage.completion_tokens ?? null, new Date().toISOString(), id);
+    logger.debug('Language-model request succeeded', {
+      requestId: id, purpose, model, seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      promptTokens: usage.prompt_tokens ?? null, completionTokens: usage.completion_tokens ?? null,
+    });
     return { value: parsed, requestId: id };
   } catch (error) {
     const code = error.name === 'AbortError' ? 'AI_TIMEOUT' : error.code || 'AI_REQUEST_FAILED';
     db.prepare(`UPDATE ai_requests SET state='failed',http_status=?,error_code=?,completed_at=? WHERE id=?`)
       .run(error.status || null, code, new Date().toISOString(), id);
+    // Everything needed to name the cause without opening the database: which
+    // endpoint, which model, what it said. This is the line that was missing
+    // while an installation spent hours failing every request in silence.
+    logger.warn('Language-model request failed', {
+      requestId: id, purpose, model, provider: settings.provider, endpoint: settings.baseUrl,
+      errorCode: code, httpStatus: error.status || null,
+      seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      reason: String(error.message || '').slice(0, 400),
+    });
     error.code = code;
     error.aiRequestId = id;
     throw error;

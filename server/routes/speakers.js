@@ -29,6 +29,18 @@ router.patch('/:id', requireScope('speakers:write'), validate(z.object({ display
   (req, res, next) => { try { res.json(service.update(req.auth.userId, req.params.id, req.body)); } catch (error) { next(error); } });
 router.post('/:id/merge', requireScope('speakers:write'), validate(z.object({ sourceId: z.string().uuid() })),
   (req, res, next) => { try { res.json(service.merge(req.auth.userId, req.params.id, req.body.sourceId)); } catch (error) { next(error); } });
+router.post('/merge', requireScope('speakers:write'), validate(z.object({
+  targetId: z.string().uuid(),
+  sourceIds: z.array(z.string().uuid()).min(1).max(20),
+})), (req, res, next) => {
+  try { res.json(service.mergeMany(req.auth.userId, req.body.targetId, req.body.sourceIds)); } catch (error) { next(error); }
+});
+router.post('/bulk', requireScope('speakers:write'), validate(z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100),
+  action: z.enum(['delete']),
+})), (req, res, next) => {
+  try { res.json(service.bulkRemove(req.auth.userId, req.body.ids)); } catch (error) { next(error); }
+});
 router.post('/:id/assignments', requireScope('speakers:write'), validate(z.object({ turnIds: z.array(z.string().uuid()).min(1).max(1000) })),
   (req, res, next) => { try { res.json(service.assign(req.auth.userId, req.params.id, req.body.turnIds)); } catch (error) { next(error); } });
 router.delete('/:id', requireScope('speakers:write'),

@@ -71,5 +71,14 @@ const controller = new AbortController();
 spawnInferenceHost();
 scheduler.start();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { controller.abort(); scheduler.stop(); child?.kill('SIGTERM'); });
+// Written once at start-up so the top of any log answers "what is this pointed
+// at" without a database query. Never fatal: a server that cannot describe its
+// configuration should still try to run with it.
+try {
+  logger.info('Inference providers', require('../services/settings/provider_settings_service').describeForLog());
+} catch (error) {
+  logger.warn('Could not read the inference provider configuration', { error: error.message });
+}
+
 runner.run({ inference, isInferenceReady: () => inferenceReady, signal: controller.signal })
   .catch((error) => { logger.error('Worker stopped unexpectedly', { error }); process.exitCode = 1; });

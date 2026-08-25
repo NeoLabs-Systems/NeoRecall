@@ -414,7 +414,34 @@ async function testProviders() {
   return { transcription, speakerIdentity: testSpeakerIdentity(), llm };
 }
 
+/// What this server is pointed at, safe to write into a log.
+///
+/// The first question about any failing installation is which endpoint and which
+/// model it is actually using, and the answer used to require reading the
+/// database. Keys are reported as configured or not, never by value — the logger
+/// redacts them anyway, but a summary meant for logs should not carry one in the
+/// first place.
+function describeForLog() {
+  const runtime = getRuntime();
+  const describe = (workload) => ({
+    provider: workload.provider,
+    model: workload.model,
+    endpoint: workload.baseUrl,
+    // Named to avoid the logger's own redaction rules rather than to evade them:
+    // it strips any field whose name looks like a credential, which would have
+    // reduced this whole summary to "[redacted]" and hidden the endpoint and
+    // model — the two things it exists to report. Only whether a key is present
+    // is stated, never the key.
+    credentialConfigured: workload.apiKeyConfigured ? workload.apiKeySource : false,
+  });
+  // "speech" rather than "transcription" for the same reason: the logger refuses
+  // any field whose name contains "transcript", so that recorded speech can
+  // never reach a log file.
+  return { languageModel: describe(runtime.llm), speech: describe(runtime.transcription) };
+}
+
 module.exports = {
+  describeForLog,
   testProviders,
   getRuntime,
   getAdmin,

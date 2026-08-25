@@ -37,5 +37,10 @@ router.use('/search', require('./search'));
 router.use('/settings', require('./settings'));
 router.use('/events', require('./events'));
 router.use('/diagnostics', require('./diagnostics'));
+// Answers "I recorded all day — where did it go?" for the person who recorded it.
+router.get('/processing-status', requireAuth, (req, res, next) => {
+  require('../services/status/processing_status_service').forUser(req.auth.userId)
+    .then((value) => res.json(value)).catch(next);
+});
 router.use('/sources', require('./sources'));
 module.exports = router;

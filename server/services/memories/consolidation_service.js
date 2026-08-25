@@ -13,6 +13,9 @@ const searchIndex = require('../../embeddings/search_index_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('memories');
 
 // Failures that mean the model could not produce a valid answer for this exact
 // input. Resending the same conversations reproduces them, so they drive the
@@ -40,6 +43,46 @@ function localDate(iso, timezone) {
 
 function lastOutbound(userId) {
   return getDatabase().prepare("SELECT sent_at FROM ai_requests WHERE user_id=? AND purpose='consolidation' AND sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1").get(userId);
+}
+
+/// How long to wait after a run that failed, growing with each failure in a row.
+///
+/// Without this, a consolidation that fails for a reason nothing about the input
+/// can fix — an endpoint that is down, a model name that does not exist, a
+/// context set larger than the server allows — is attempted again on the very
+/// next scheduler tick, and the one after that. Observed on a real installation:
+/// three language-model requests a minute, every minute, all failing, for hours.
+/// It produces nothing, fills the request log so the actual first failure cannot
+/// be found, and hammers an endpoint that is already unwell.
+///
+/// It backs off rather than giving up, because most of these causes are
+/// temporary and the recording is still waiting to become a memory. One minute,
+/// then two, four, eight, up to half an hour — so an outage costs a handful of
+/// attempts instead of hundreds, and recovery still happens on its own within
+/// half an hour of the cause being fixed. Asking by hand ignores it entirely.
+const FAILURE_BACKOFF_BASE_MS = 60_000;
+const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
+
+function failureBackoff(userId) {
+  const rows = getDatabase().prepare(`SELECT state,error_code,error_message,completed_at
+    FROM consolidation_runs WHERE user_id=? ORDER BY reserved_at DESC LIMIT 16`).all(userId);
+  let consecutive = 0;
+  let latest = null;
+  for (const row of rows) {
+    if (row.state !== 'failed') break;
+    if (!latest) latest = row;
+    consecutive += 1;
+  }
+  if (!consecutive || !latest?.completed_at) return null;
+  const delay = Math.min(FAILURE_BACKOFF_MAX_MS, FAILURE_BACKOFF_BASE_MS * 2 ** (consecutive - 1));
+  const retryAt = Date.parse(latest.completed_at) + delay;
+  if (Date.now() >= retryAt) return null;
+  return {
+    consecutiveFailures: consecutive,
+    retryAt: new Date(retryAt).toISOString(),
+    errorCode: latest.error_code || null,
+    errorMessage: latest.error_message || null,
+  };
 }
 
 function candidateConversations(userId) {
@@ -76,7 +119,7 @@ function buildCandidates(userId) {
   return { conversations: output, characters, audioMs, narrowed };
 }
 
-function eligibility(userId) {
+function eligibility(userId, { ignoreBackoff = false } = {}) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
   if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
@@ -86,6 +129,8 @@ function eligibility(userId) {
   const previous = lastOutbound(userId);
   const nextEligibleAt = previous ? new Date(Date.parse(previous.sent_at) + interval).toISOString() : new Date(0).toISOString();
   if (Date.parse(nextEligibleAt) > Date.now()) return { eligible: false, reason: 'interval', nextEligibleAt };
+  const backoff = ignoreBackoff ? null : failureBackoff(userId);
+  if (backoff) return { eligible: false, reason: 'recent_failure', ...backoff };
   const candidates = buildCandidates(userId);
   if (!candidates.conversations.length) {
     return { eligible: false, reason: 'insufficient_material', materialCharacters: 0, requiredCharacters: processingConfig.minNewMaterialChars };
@@ -146,7 +191,12 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
 }
 
 function request(userId, { manual = false } = {}) {
-  const state = eligibility(userId);
+  let state = eligibility(userId);
+  // Someone who presses the button has decided to try now, and is watching the
+  // result — the backoff exists to stop unattended retries, not to refuse them.
+  if (!state.eligible && state.reason === 'recent_failure' && manual) {
+    state = eligibility(userId, { ignoreBackoff: true });
+  }
   if (!state.eligible) {
     if (manual && state.reason === 'interval') {
       const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(state.nextEligibleAt) - Date.now()) / 1000));
@@ -411,9 +461,19 @@ async function execute(runId, reservedConversationIds = null) {
     const summaryTargetDate = localDate(conversations.at(-1).endedAt, userSettings.timezone);
     const previous = db.prepare('SELECT * FROM daily_summaries WHERE user_id=? AND local_date=? AND timezone=?')
       .get(run.user_id, summaryTargetDate, userSettings.timezone) || null;
+    logger.info('Writing up recordings', {
+      runId, userId: run.user_id, conversations: conversations.length,
+      characters: conversations.reduce((sum, conversation) => sum + conversation.segments.reduce((n, segment) => n + String(segment.text || '').length, 0), 0),
+    });
+    const startedAt = Date.now();
     const response = await ai.consolidate(run.user_id, { conversations, previousDailySummary: previous, timezone: userSettings.timezone });
     aiRequestId = response.requestId;
     persist(run.user_id, runId, response.value, conversations, response.requestId, response.speakerClusters);
+    logger.info('Recordings written up', {
+      runId, userId: run.user_id, seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      windows: response.windows, memories: response.value.memories.length,
+      sections: response.value.conversationSections.length,
+    });
     return { runId, memories: response.value.memories.length };
   } catch (error) {
     if (aiRequestId && error.code === 'AI_REFERENCE_INVALID') {
@@ -423,8 +483,23 @@ async function execute(runId, reservedConversationIds = null) {
     db.prepare(`UPDATE consolidation_runs SET state='failed',ai_request_id=?,error_code=?,error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
       .run(error.aiRequestId || null, error.code || 'CONSOLIDATION_FAILED', String(error.message || '').slice(0, 2000), runId);
     if (VALIDATION_FAILURE_CODES.includes(error.code)) {
-      recordValidationFailure(run.user_id, conversations.map((conversation) => conversation.id), error.code);
+      const { quarantined } = recordValidationFailure(run.user_id, conversations.map((conversation) => conversation.id), error.code);
+      if (quarantined.length) {
+        // Set aside deliberately, and worth saying loudly: these conversations
+        // stop becoming memories until someone intervenes.
+        logger.warn('Conversations set aside after repeated failures', {
+          userId: run.user_id, conversations: quarantined.length, errorCode: error.code,
+        });
+      }
     }
+    logger.warn('Writing up recordings failed', {
+      runId, userId: run.user_id, errorCode: error.code || 'CONSOLIDATION_FAILED',
+      conversations: conversations.length,
+      // Whether it will be retried on its own, which is the first thing anyone
+      // reading this wants to know.
+      retriedAutomatically: !VALIDATION_FAILURE_CODES.includes(error.code),
+      reason: String(error.message || '').slice(0, 400),
+    });
     throw error;
   }
 }
@@ -435,7 +510,7 @@ function latest(userId) {
 }
 
 module.exports = {
-  eligibility, request, execute, latest, validateReferences, applyMemoryWorthinessFloors,
+  eligibility, request, execute, latest, failureBackoff, validateReferences, applyMemoryWorthinessFloors,
   anchorMemoryRanges, localDate,
   recordValidationFailure, buildCandidates, VALIDATION_FAILURE_CODES,
 };

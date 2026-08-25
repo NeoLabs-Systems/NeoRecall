@@ -217,6 +217,16 @@ async function handle(job, inference) {
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
   const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout });
+  // The pipeline's heartbeat. One line per piece of audio saying what came back,
+  // which is what makes "it is working, just slowly" distinguishable from "it
+  // stopped" without waiting for a memory to appear at the end of the chain.
+  logger.info('Recording transcribed', {
+    chunkId: chunk.id, userId: chunk.user_id, sequence: chunk.sequence,
+    audioSeconds: Math.round((chunk.duration_ms || 0) / 1000),
+    seconds: Number((Number(process.hrtime.bigint() - inferenceStartedAt) / 1e9).toFixed(1)),
+    segments: segments.length,
+    speakers: new Set(segments.map((segment) => segment.diarizationSpeaker).filter((value) => value !== null && value !== undefined)).size,
+  });
   const inferenceSeconds = Number(process.hrtime.bigint() - inferenceStartedAt) / 1e9;
   db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
     VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));

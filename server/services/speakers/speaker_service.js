@@ -68,6 +68,27 @@ function merge(userId, targetId, sourceId) {
   return getOwned(userId, targetId);
 }
 
+function mergeMany(userId, targetId, sourceIds) {
+  const uniqueSources = [...new Set(sourceIds)].filter((id) => id !== targetId);
+  if (uniqueSources.length === 0) throw new HttpError(400, 'INVALID_MERGE', 'Select at least one other speaker to combine.');
+  let result;
+  for (const sourceId of uniqueSources) result = merge(userId, targetId, sourceId);
+  return result;
+}
+
+function bulkRemove(userId, ids) {
+  const uniqueIds = [...new Set(ids)];
+  const db = getDatabase();
+  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${uniqueIds.map(() => '?').join(',')})`)
+    .all(userId, ...uniqueIds);
+  if (rows.length !== uniqueIds.length) throw new HttpError(404, 'NOT_FOUND', 'One or more speakers were not found.');
+  db.transaction(() => {
+    const stmt = db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?');
+    for (const id of uniqueIds) stmt.run(id, userId);
+  })();
+  return { action: 'delete', count: uniqueIds.length, ids: uniqueIds };
+}
+
 function assign(userId, voiceprintId, turnIds) {
   getOwned(userId, voiceprintId);
   const db = getDatabase();
@@ -87,4 +108,4 @@ function remove(userId, id) {
   return { success: true };
 }
 
-module.exports = { list, update, merge, assign, remove };
+module.exports = { list, update, merge, mergeMany, assign, remove, bulkRemove };

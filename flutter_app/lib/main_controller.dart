@@ -369,6 +369,12 @@ class NeoRecallController extends ChangeNotifier {
   List<RecallSpeaker> speakers = <RecallSpeaker>[];
   List<Map<String, dynamic>> devices = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> conversations = <Map<String, dynamic>>[];
+  /// Why the timeline looks the way it does. Empty means nothing is wrong; an
+  /// entry means something is holding recordings up and the user should be told
+  /// rather than left staring at a screen that says there is nothing here.
+  List<Map<String, dynamic>> processingIssues = <Map<String, dynamic>>[];
+  String processingSummary = '';
+  int audioStillOnDevice = 0;
   List<Map<String, dynamic>> dailySummaries = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> searchResults = <Map<String, dynamic>>[];
   String? askAnswer;
@@ -2654,6 +2660,7 @@ class NeoRecallController extends ChangeNotifier {
         api.request('GET', '/api/v1/transcripts?limit=100'),
         api.request('GET', '/api/v1/conversations?limit=100'),
         api.request('GET', '/api/v1/daily-summaries?limit=100'),
+        api.request('GET', '/api/v1/processing-status'),
       ]);
       recordings = ((results[0] as Map)['items'] as List)
           .cast<Map>()
@@ -2697,6 +2704,14 @@ class NeoRecallController extends ChangeNotifier {
           .cast<Map>()
           .map(Map<String, dynamic>.from)
           .toList();
+      final processing = Map<String, dynamic>.from(results[8] as Map);
+      processingIssues = ((processing['issues'] as List?) ?? <dynamic>[])
+          .cast<Map>()
+          .map(Map<String, dynamic>.from)
+          .toList();
+      processingSummary = processing['summary']?.toString() ?? '';
+      audioStillOnDevice =
+          ((processing['audio'] as Map?)?['stillOnYourDevice'] as num?)?.toInt() ?? 0;
       cachedData = false;
     } catch (exception) {
       cachedData = true;
@@ -3100,6 +3115,26 @@ class NeoRecallController extends ChangeNotifier {
       'PATCH',
       '/api/v1/speakers/$id',
       body: <String, dynamic>{'matchingEnabled': enabled},
+    );
+    await refreshAll(silent: true);
+  }
+
+  Future<void> bulkDeleteSpeakers(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await api.request(
+      'POST',
+      '/api/v1/speakers/bulk',
+      body: <String, dynamic>{'ids': ids, 'action': 'delete'},
+    );
+    await refreshAll(silent: true);
+  }
+
+  Future<void> mergeSpeakers(String targetId, List<String> sourceIds) async {
+    if (sourceIds.isEmpty) return;
+    await api.request(
+      'POST',
+      '/api/v1/speakers/merge',
+      body: <String, dynamic>{'targetId': targetId, 'sourceIds': sourceIds},
     );
     await refreshAll(silent: true);
   }
