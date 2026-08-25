@@ -37,23 +37,8 @@ function embeddingForSpan(samples, startSeconds, endSeconds) {
   return model.compute(stream, false);
 }
 
-/// One fingerprint per voice per chunk, pooled from everything that voice said
-/// in it.
-///
-/// A fingerprint taken from a single turn is only as good as that turn, and
-/// turns are short: a second of speech makes an embedding unstable enough that
-/// two of the same person's turns can look less alike than two different
-/// people's. Measured on real diarized speech, same-speaker turn pairs sat at a
-/// median cosine of 0.53 while one sub-second pair from *different* speakers
-/// reached 0.97.
-///
-/// The diarizer has already decided which turns in this chunk are one voice, and
-/// it made that decision with more signal than any single turn carries. Taking
-/// it at its word and averaging across all of a speaker's turns — weighted by
-/// how long each lasted, so a four-second turn counts for more than a
-/// half-second one — turns three scattered seconds of speech into one fingerprint
-/// instead of three noisy ones. Every turn of that voice then carries the same
-/// stronger vector into matching.
+// One fingerprint per voice per chunk, pooled from everything that voice said
+// in it, weighted by turn duration so a longer turn counts for more.
 function poolBySpeaker(turns) {
   const bySpeaker = new Map();
   for (const turn of turns) {

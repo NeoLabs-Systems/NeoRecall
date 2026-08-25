@@ -26,10 +26,7 @@ function spawnInferenceHost() {
   child.on('message', (message) => {
     if (message.type === 'ready') {
       const ready = message.ready === true;
-      // The host re-checks every few seconds so that configuring a provider in
-      // the admin dashboard takes effect without a restart. Only a *change* is
-      // worth a line: logging every poll buried real events under an identical
-      // message twelve times a minute, forever.
+      // Only log on change; the host polls readiness every few seconds.
       if (ready !== inferenceReady) {
         logger.info('Inference host readiness changed', { ready, error: message.error });
       }

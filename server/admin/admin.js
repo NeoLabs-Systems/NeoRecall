@@ -148,12 +148,7 @@ function providerDraft(workload) {
   };
 }
 
-/// Renders each leg of the end-to-end test as a line someone can act on.
-///
-/// Reported per leg rather than as one verdict, because the failures need
-/// different fixes: a transcript that never arrives is a transcription problem,
-/// missing speakers are a server-side install problem, and a refused JSON
-/// contract is a language-model problem. One combined "failed" would hide which.
+// Renders each leg of the end-to-end test as a line someone can act on.
 function renderProviderTest(result) {
   const element = document.querySelector('#provider-test-result');
   const line = (label, value) => {
@@ -184,10 +179,6 @@ async function discoverProviderModels(workload, { quiet = false } = {}) {
       ? 'This provider selects its transcription model automatically.'
       : `${result.models.length} available model${result.models.length === 1 ? '' : 's'} loaded.`;
   } catch (error) {
-    // Discovery is a convenience, not a requirement: a model name typed by hand
-    // works exactly as well as one picked from a list, and some endpoints need
-    // no model at all. The message already says which case this is, so it is
-    // shown as-is rather than prefixed with a failure this is not.
     status.textContent = error.message;
     if (!quiet) throw error;
   }

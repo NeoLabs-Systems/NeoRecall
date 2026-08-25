@@ -311,11 +311,7 @@ async function discoverModels(input) {
   return { models, automatic: false, modelOptional: Boolean(definition.modelOptional) };
 }
 
-/// Eighteen seconds of real bilingual, two-speaker speech that ships with
-/// NeoRecall. Used as the probe because it exercises everything at once: the
-/// endpoint answers, the credentials work, the response parses, words come back,
-/// and the local pass finds two voices in it. A tone or silence would prove the
-/// connection and nothing about whether the result is usable.
+// Eighteen seconds of real bilingual, two-speaker speech used as the test probe.
 const PROBE_AUDIO = path.join(__dirname, '..', '..', '..', 'test', 'fixtures', 'de_en_two_speakers.wav');
 
 function summarize(text, limit = 240) {
@@ -323,13 +319,8 @@ function summarize(text, limit = 240) {
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
-/// The reason a request failed, in words that point somewhere.
-///
-/// `fetch` reports every transport failure as the single word "fetch failed" and
-/// hides what actually happened — a refused connection, an unknown host, an
-/// expired certificate — one level down in `cause`. Reporting only the outer
-/// message tells an operator their endpoint is broken without saying how, which
-/// is the difference between fixing a typo in a port number and guessing.
+// Unwraps `error.cause` chains, since `fetch` reports every transport failure
+// as the single word "fetch failed" and hides the real reason one level down.
 function describeError(error) {
   const parts = [];
   let current = error;
@@ -343,7 +334,7 @@ function describeError(error) {
   return parts.join(': ') || 'The request failed for an unknown reason.';
 }
 
-/// Sends one real request to the configured transcription service.
+// Sends one real request to the configured transcription service.
 async function testTranscription() {
   const settings = resolveWorkload('transcription');
   const started = Date.now();
@@ -367,8 +358,7 @@ async function testTranscription() {
   }
 }
 
-/// Runs the local speech-detection and diarization pass over the same sample, so
-/// a missing speaker label can be told apart from a bad transcript.
+// Runs the local speech-detection and diarization pass over the same sample.
 function testSpeakerIdentity() {
   const localAnalysis = require('../../transcription/local_analysis');
   if (!localAnalysis.available()) {
@@ -385,8 +375,8 @@ function testSpeakerIdentity() {
   }
 }
 
-/// Sends one real structured request to the configured language model, using the
-/// same JSON-contract path memory generation uses.
+// Sends one real structured request to the configured language model, using
+// the same JSON-contract path memory generation uses.
 async function testLlm() {
   const settings = resolveWorkload('llm');
   const started = Date.now();
@@ -417,13 +407,8 @@ async function testLlm() {
   }
 }
 
-/// Exercises the whole path a recording takes, against the services actually
-/// configured, and reports each leg separately.
-///
-/// Deliberately a real request rather than a reachability check: an endpoint that
-/// answers a ping can still reject the credentials, refuse the model name, or
-/// return a shape the pipeline cannot read, and every one of those looks
-/// identical from outside until a recording fails hours later.
+// Exercises the whole path a recording takes, against the services actually
+// configured, and reports each leg separately.
 async function testProviders() {
   const [transcription, llm] = await Promise.all([testTranscription(), testLlm()]);
   return { transcription, speakerIdentity: testSpeakerIdentity(), llm };

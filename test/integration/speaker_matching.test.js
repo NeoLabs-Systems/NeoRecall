@@ -30,10 +30,7 @@ function bytes(value) { return Buffer.from(value.buffer, value.byteOffset, value
 const QUERY = new Float32Array([1, 0]);
 function centroidWithSimilarity(similarity) { return new Float32Array([similarity, Math.sqrt(Math.max(0, 1 - similarity * similarity))]); }
 
-// Thresholds are read rather than written down. These tests are about the
-// policy — what continuity rescues, what the margin refuses, what gets merged —
-// and hard-coded similarities silently stop testing it the moment a default
-// moves, which is exactly what happened when the match threshold was retuned.
+// Thresholds are read rather than hard-coded, so tests stay valid as defaults move.
 const limits = () => require('../../server/services/settings/processing_settings_service').get();
 function belowPlainAboveContinuity() {
   const { speakerClusterThreshold: plain, speakerClusterContinuityThreshold: relaxed } = limits();
@@ -117,11 +114,8 @@ test('a continuity anchor outside the configured gap is ignored', () => {
 test('two clusters that both match strongly are one person, and are merged rather than tripled', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
-  // Both clear the threshold and sit within the margin of each other. Refusing
-  // both and minting a third is what turned one familiar voice into a screen
-  // full of speakers: every later turn then resembled all the copies, no single
-  // match stood out, and another copy appeared. Two strong candidates this
-  // alike are the same person already split, so they are folded together.
+  // Two strong candidates this alike are the same person already split, so
+  // they are folded together rather than left to accumulate a third copy.
   const { speakerClusterThreshold: plain, speakerClusterMargin: margin } = limits();
   const first = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(plain + 0.2) });
   const second = seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(plain + 0.2 - margin / 2) });
@@ -135,10 +129,8 @@ test('two clusters that both match strongly are one person, and are merged rathe
 test('a borderline match against a weak runner-up still refuses to guess', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
-  // The case the margin exists for, and the one it keeps: a genuinely new
-  // speaker grazing the threshold against an unrelated cluster, with the
-  // runner-up just below the bar. Both readings are equally weak, so neither is
-  // trusted.
+  // A genuinely new speaker grazing the threshold, with the runner-up just
+  // below the bar: both readings are equally weak, so neither is trusted.
   const { speakerClusterThreshold: plain, speakerClusterMargin: margin } = limits();
   seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(plain + margin / 4) });
   seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(plain - margin / 4) });
@@ -212,13 +204,6 @@ test('a session speaker cluster keeps its established voiceprint when global mat
 
 test('a voice is fingerprinted from everything it said in a chunk, not from one turn', () => {
   const { poolBySpeaker } = require('../../server/transcription/diarization');
-  // Four seconds of one voice arriving as four separate turns. A fingerprint
-  // built from any single one of them is a fingerprint of one second of speech,
-  // and one second does not identify anyone: measured against two known
-  // different voices, one-second fingerprints put the same voice as low as 0.20
-  // and two different voices as high as 0.77. At two seconds the two
-  // populations separate cleanly, which is why pooling is what makes the
-  // duration gate reachable at all.
   const turns = [
     { speaker: 0, startMs: 0, endMs: 1_000, embedding: new Float32Array([1, 0]) },
     { speaker: 0, startMs: 2_000, endMs: 3_000, embedding: new Float32Array([0, 1]) },

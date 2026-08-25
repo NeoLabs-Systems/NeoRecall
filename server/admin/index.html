@@ -136,10 +136,12 @@
               <label>Model<div class="input-action"><input id="llm-model" type="text" list="llm-model-options"><button class="btn btn-ghost btn-sm" data-discover-models="llm" type="button">Fetch models</button></div><datalist id="llm-model-options"></datalist><span class="field-note" id="llm-model-status"></span></label>
               <label>API base URL<input id="llm-base-url" type="url"></label>
               <label>API key<input id="llm-api-key" type="password" autocomplete="new-password"><span class="field-note" id="llm-key-status"></span></label>
-              <label class="check-field"><input id="llm-no-thinking" type="checkbox"> Turn off the model's thinking mode</label>
-              <span class="field-note">A reasoning model spends its output budget deliberating before it answers, which on a small local model costs minutes per request and can truncate the reply. This sends <code>chat_template_kwargs.enable_thinking = false</code>, which Qwen-family servers understand.</span>
-              <label>Extra request JSON<textarea id="llm-extra-body" rows="3" spellcheck="false" placeholder='{"chat_template_kwargs":{"enable_thinking":false}}'></textarea><span class="field-note" id="llm-extra-body-status">Merged into every request, last, for provider fields no shared contract covers. Leave empty unless your provider needs one.</span></label>
+              <label class="check-field check-field-stacked"><input id="llm-no-thinking" type="checkbox"><span>Skip the model's thinking step<span class="field-note">Faster, and avoids a reply cut off before it starts.</span></span></label>
               <label class="check-field"><input id="llm-clear-key" type="checkbox"> Remove the stored admin API key</label>
+              <details class="provider-advanced">
+                <summary>Advanced</summary>
+                <label>Extra request JSON<textarea id="llm-extra-body" rows="3" spellcheck="false" placeholder='{"top_p":0.9}'></textarea><span class="field-note" id="llm-extra-body-status">Merged into every request for provider fields NeoRecall does not set itself.</span></label>
+              </details>
             </div>
           </div>
           <div class="card provider-card" data-provider-workload="transcription">

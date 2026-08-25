@@ -55,6 +55,16 @@ A four-hour lecture does not fit in a typical model context, and it must still b
 
 `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` bounds the answer for one window and shares the context budget with the prompt, so it cannot be raised without raising `LLM_CONTEXT_SIZE` too. `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS` still bounds what one *run* may carry before windowing splits it.
 
+### When the context runs out anyway
+
+`LLM_CONTEXT_SIZE` is a claim about somebody else's server, so it can be wrong. Set it larger than the endpoint really allows and every request overflows — and an overflow is not a transport fault: it produces the identical rejection however many times it is sent. Treated as transient it would be retried, fail the run without narrowing or quarantining anything, re-enter the candidate set on the next scheduler tick, and repeat indefinitely without ever producing a memory.
+
+NeoRecall therefore reads the rejection rather than only its status code. Every vendor words it differently — `context_length_exceeded`, *maximum context length is…*, *prompt is too long*, *exceeds the available context* — and any of them becomes `AI_CONTEXT_EXCEEDED`, which is sent once, never retried, and narrows the batch exactly like any other input the model could not handle. An ordinary bad request (a rejected key, a rate limit) is untouched and still retried.
+
+The error names the two settings that fix it. Lower `LLM_CONTEXT_SIZE` to what the endpoint actually allows; that alone re-sizes every window. If the endpoint is small enough that the output budget no longer leaves room for a prompt, the server refuses to start rather than sending requests that cannot fit, and `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` has to come down with it.
+
+Every other path that builds a prompt is bounded the same way. Ask trims retrieved evidence to fit, dropping the weakest matches first, because search returns its results best-first and answering from slightly less evidence beats being refused. The day's summary trims the occasions it reads, which matters because a long recording produces many sections. Live previews already cut to a budget, falling back to the next refresh for whatever did not fit.
+
 ### What one request may return
 
 The contract caps a single pass at three memories, eight mini-memories per memory and sixteen entities. Without those bounds a model handed a dense transcript can emit one mini-memory per utterance until it exhausts its token budget.
@@ -155,12 +165,26 @@ Qwen-family servers accept that spelling; others differ, which is why this is a
 passthrough rather than a setting per vendor. It merges last, so it can override
 anything NeoRecall sets.
 
-The admin **Providers** page carries the same thing without the typing: a **Turn
-off the model's thinking mode** checkbox that writes exactly that payload into an
-**Extra request JSON** field beside it. The checkbox is a view of one key rather
-than a separate setting — ticking it alongside JSON you wrote yourself adds the
-key, and clearing it removes only that key. Saved there it is stored with the rest
-of the provider settings and takes effect without a restart.
+The admin **Providers** page carries the same thing without the typing: a **Skip
+the model's thinking step** checkbox that writes exactly that payload into the
+**Extra request JSON** field under Advanced. The checkbox is a view of one key
+rather than a separate setting — ticking it alongside JSON you wrote yourself adds
+the key, and clearing it removes only that key. Saved there it is stored with the
+rest of the provider settings and takes effect without a restart.
+
+You should rarely need it, because a truncated completion rescues itself: when a
+request runs out of budget mid-thought, NeoRecall retries it once with the
+thinking step off. That is deliberately narrow. It happens only after a real
+truncation, only once, and only when you have not set the field yourself, so a
+provider that has never heard of `chat_template_kwargs` is never sent it
+speculatively — and if the retry is itself rejected, the original truncation is
+what gets reported, since that is the fault worth fixing.
+
+The rescue matters most where truncation hurts most. Consolidation treats a
+truncated answer as the input's fault: it narrows the batch, and after enough
+failures quarantines the conversation. Without the retry, a model that always
+deliberates would work through an entire backlog that way, quarantining
+recordings that were never the problem.
 
 ### How a transcript gets a speaker
 

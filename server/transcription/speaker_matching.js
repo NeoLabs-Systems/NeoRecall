@@ -23,17 +23,8 @@ function stickyVoiceprintForCluster(database, { userId, clusterId }) {
     GROUP BY v.id ORDER BY assignment_count DESC,last_assignment_at DESC LIMIT 1`).get(clusterId, userId) || null;
 }
 
-/// Folds one cluster into another, because they turned out to be one voice.
-///
-/// The matcher can split a person in two — a noisy turn misses the threshold and
-/// starts a second identity for someone already present. Left alone that
-/// compounds: every later turn now resembles both halves, so no single match
-/// stands out, and a third identity appears. Merging on discovery is what stops
-/// the split from breeding, and it repairs recordings already fragmented as
-/// their later chunks arrive.
-///
-/// Everything pointing at the absorbed cluster is repointed first; the row is
-/// only removed once nothing references it.
+// Folds one cluster into another when they turn out to be one voice. Everything
+// pointing at the absorbed cluster is repointed first; the row is removed last.
 function mergeClusters(database, { userId, target, source }) {
   const targetCentroid = vectors.fromBuffer(target.centroid_embedding);
   const sourceCentroid = vectors.fromBuffer(source.centroid_embedding);
@@ -53,39 +44,17 @@ function mergeClusters(database, { userId, target, source }) {
   return database.prepare('SELECT * FROM speaker_clusters WHERE id=?').get(target.id);
 }
 
-/// Resolves the speaker cluster (a session-scoped voice identity) an embedding
-/// belongs to, creating one if none matches confidently.
-///
-/// Diarization runs independently on every chunk, so a continuous speaker
-/// crossing a chunk boundary is re-segmented from scratch: nothing about the
-/// voice changed, but the fresh embedding can drift below the plain matching
-/// threshold. `continuity` — the cluster active at the end of the previous
-/// chunk for this same audio component, and the gap since it — lets that
-/// cluster win at a relaxed bar instead of splintering into a new one. It only
-/// ever breaks a near-tie: a continuity candidate is accepted only when no
-/// other cluster clearly scores higher, so a real speaker change right at the
-/// boundary still resolves on its own merits.
-///
-/// Outside continuity, a match may additionally need a margin over the runner-up
-/// — but only when that runner-up is itself below the threshold.
-///
-/// The margin exists for one situation: a genuinely new speaker whose embedding
-/// grazes the threshold against some unrelated cluster by chance. There the
-/// runner-up sits just below the bar, the two readings are equally weak, and
-/// refusing both is right.
-///
-/// Applying it to a runner-up that is *above* the threshold inverts its purpose.
-/// Two clusters that both match strongly are not an ambiguity to refuse; they
-/// are almost always one person the matcher split earlier, and refusing the
-/// match creates a third copy. That is a loop which accelerates: the more times a
-/// voice has been split, the more strong near-ties it produces, and the faster it
-/// splits again. It is why a familiar voice could accumulate a dozen entries in
-/// one recording. Above the threshold the best match simply wins, and the two are
-/// merged.
+// Resolves the speaker cluster (a session-scoped voice identity) an embedding
+// belongs to, creating one if none matches confidently. `continuity` lets the
+// cluster active at the end of the previous chunk win at a relaxed bar, so a
+// speaker crossing a chunk boundary isn't split by re-segmentation. The margin
+// check only applies against a runner-up below the threshold; two clusters
+// that both match strongly are merged instead, since that means one voice was
+// split earlier rather than a genuine ambiguity.
 function resolveCluster(database, { userId, sessionId, embedding, continuity = null, durationMs = null }) {
   const config = processingSettings.get();
-  // Speech too short to fingerprint may join a voice that already exists, but it
-  // may not invent one, and it may not drag a centroid toward its own noise.
+  // Speech too short to fingerprint may join a voice that already exists, but
+  // it may not invent one or drag a centroid toward its own noise.
   const reliable = durationMs === null || durationMs >= config.speakerMinimumTurnMs;
   const rows = database.prepare('SELECT * FROM speaker_clusters WHERE user_id=? AND session_id=? AND centroid_embedding IS NOT NULL').all(userId, sessionId);
   const ranked = vectors.rank(embedding, rows);

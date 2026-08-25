@@ -56,7 +56,69 @@ function extractContent(payload) {
   throw Object.assign(new Error('The AI endpoint returned no message content.'), { code: 'AI_EMPTY_RESPONSE' });
 }
 
-async function chatJSON({ userId, purpose, messages, responseFormat = null, maxTokens = null }) {
+/// The request field that asks a model not to deliberate before answering.
+///
+/// Not standardised, which is why NeoRecall never sends it unprompted — a strict
+/// API rejects body fields it does not recognise, and breaking every request to
+/// pre-empt a problem the provider may not have would be a poor trade.
+/// Whether a rejection means the prompt did not fit, rather than something a
+/// retry could fix.
+///
+/// It matters which, because the two are handled in opposite ways. A transport
+/// fault is worth retrying; a prompt that is too long produces the identical
+/// rejection every time, and the pipeline treats it as transient — so an
+/// oversized conversation is retried, fails the run without being narrowed or
+/// quarantined, re-enters the candidate set on the next scheduler tick, and does
+/// it all again. Forever, without ever producing a memory.
+///
+/// That is not hypothetical: NeoRecall windows its input against LLM_CONTEXT_SIZE,
+/// which is a claim about somebody else's server. Set it larger than the endpoint
+/// really allows and every consolidation overflows.
+///
+/// No status code says this and every vendor words it differently, so the wording
+/// is what has to be read. Recognised, it becomes AI_CONTEXT_EXCEEDED, which
+/// narrows the batch and eventually quarantines the conversation rather than
+/// looping on it.
+const CONTEXT_OVERFLOW = /context[_ ]length|context window|maximum context|too many tokens|prompt is too long|exceeds the available context|reduce the length|input is too long|too long for/i;
+
+function contextOverflow(status, payload, message) {
+  if (![400, 413, 422].includes(status)) return false;
+  const code = String(payload?.error?.code || payload?.error?.type || '');
+  return /context_length_exceeded|string_above_max_length/i.test(code) || CONTEXT_OVERFLOW.test(String(message || ''));
+}
+
+const NO_THINKING = Object.freeze({ chat_template_kwargs: { enable_thinking: false } });
+
+function thinkingAlreadyDisabled(extraBody) {
+  return extraBody?.chat_template_kwargs?.enable_thinking === false;
+}
+
+async function chatJSON(request) {
+  const settings = providerSettings.getRuntime().llm;
+  try {
+    return await sendChat(request, settings.extraBody || null);
+  } catch (error) {
+    // A completion that ran out of budget on a reasoning model is the one
+    // failure with an obvious second thing to try, and it matters most exactly
+    // where it hurts most: consolidation treats truncation as the input's fault,
+    // narrows the batch, and eventually quarantines the conversation. A model
+    // that always deliberates would work through a user's whole backlog that
+    // way. So rather than let it fail, ask once more without the deliberation.
+    //
+    // Only after a real truncation, and only if the operator has not already set
+    // the field — so a provider that has no idea what it means is never sent it
+    // speculatively, and if this attempt is itself rejected the original
+    // truncation is what gets reported, since that is the fault worth fixing.
+    if (error.code !== 'AI_OUTPUT_TRUNCATED' || thinkingAlreadyDisabled(settings.extraBody)) throw error;
+    try {
+      return await sendChat(request, { ...(settings.extraBody || {}), ...NO_THINKING });
+    } catch (retryError) {
+      throw retryError.code === 'AI_OUTPUT_TRUNCATED' ? retryError : error;
+    }
+  }
+}
+
+async function sendChat({ userId, purpose, messages, responseFormat = null, maxTokens = null }, extraBody) {
   const config = getConfig();
   const settings = providerSettings.getRuntime().llm;
   if (!settings.baseUrl) throw Object.assign(new Error('The language-model API base URL is not configured.'), { code: 'AI_NOT_CONFIGURED' });
@@ -79,12 +141,18 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
       body: JSON.stringify({
         model, messages, response_format: responseFormat || { type: 'json_object' },
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
-        ...(settings.extraBody || {}),
+        ...(extraBody || {}),
       }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(payload?.error?.message || `The AI endpoint returned HTTP ${response.status}.`);
+      const detail = payload?.error?.message || `The AI endpoint returned HTTP ${response.status}.`;
+      if (contextOverflow(response.status, payload, detail)) {
+        throw Object.assign(new Error(`The request was longer than the model's context allows: ${detail} Lower LLM_CONTEXT_SIZE to match the endpoint, or lower NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS.`), {
+          code: 'AI_CONTEXT_EXCEEDED', status: response.status,
+        });
+      }
+      const error = new Error(detail);
       error.code = 'AI_HTTP_ERROR'; error.status = response.status; throw error;
     }
     const parsed = JSON.parse(extractContent(payload));
@@ -102,4 +170,4 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
   } finally { clearTimeout(timer); }
 }
 
-module.exports = { chatJSON, ready };
+module.exports = { chatJSON, ready, contextOverflow, NO_THINKING };

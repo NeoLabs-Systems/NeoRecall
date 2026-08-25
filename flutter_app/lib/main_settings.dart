@@ -816,11 +816,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _speakerSettings() {
     final current = settings!;
-    // Telling voices apart happens on the server, from the audio itself,
-    // because a transcription service returns words rather than voices. That
-    // needs a small speech model installed there, and it is not available on
-    // every platform. When it is missing these switches cannot change anything,
-    // so they are shown off with the reason rather than left to be flipped.
+    // The server reports whether local speaker identity models are installed;
+    // when unavailable these switches are shown off instead of left to flip.
     final available = current['speakerIdentityAvailable'] as bool? ?? true;
     return _sectionList(<Widget>[
       SectionCard(

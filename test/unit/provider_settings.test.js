@@ -133,3 +133,135 @@ test('extra request JSON must be an object, not any JSON value', () => {
     provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: 'enable_thinking=false',
   } }), /VALIDATION_ERROR|invalid/i);
 });
+
+test('a truncated reasoning model is retried without its thinking step rather than failed', async () => {
+  // The failure that matters most where it hurts most: consolidation reads
+  // truncation as the input's fault, narrows the batch and eventually
+  // quarantines the conversation. A model that always deliberates would work
+  // through an entire backlog that way, so one more attempt without the
+  // deliberation beats giving up.
+  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
+  const originalFetch = global.fetch;
+  const bodies = [];
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    bodies.push(body);
+    // Thinking on: burns the budget deliberating and never answers.
+    if (body.chat_template_kwargs?.enable_thinking !== false) {
+      return new Response(JSON.stringify({ id: 'r1', usage: { completion_tokens: 400, completion_tokens_details: { reasoning_tokens: 397 } },
+        choices: [{ finish_reason: 'length', message: { content: '{"ans' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ id: 'r2', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    const result = await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
+    assert.deepEqual(result.value, { answer: 'ready' }, 'the second attempt is what the caller gets');
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(bodies.length, 2, 'exactly one extra attempt, not a loop');
+  assert.equal(bodies[0].chat_template_kwargs, undefined,
+    'a provider that has never heard of the field is not sent it speculatively');
+  assert.deepEqual(bodies[1].chat_template_kwargs, { enable_thinking: false });
+});
+
+test('a model that truncates even without thinking still reports truncation', async () => {
+  // The rescue must not turn a real budget problem into a mystery.
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ id: 'r', usage: { completion_tokens: 400 }, choices: [{ finish_reason: 'length', message: { content: '{' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    await assert.rejects(
+      () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
+      (error) => { assert.equal(error.code, 'AI_OUTPUT_TRUNCATED'); return true; },
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(attempts, 2, 'it tries the rescue once and then stops');
+});
+
+test('an operator who already disabled thinking is not retried behind their back', async () => {
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1',
+    extraBody: { chat_template_kwargs: { enable_thinking: false } } } });
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'length', message: { content: '{' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    await assert.rejects(() => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }));
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(attempts, 1, 'there is nothing left to try, so it does not waste a request');
+});
+
+test('a prompt that does not fit is not mistaken for a transport fault', async () => {
+  // The two are handled in opposite ways. A transport fault is retried; a prompt
+  // that is too long produces the identical rejection every time. Classified as
+  // transient it was retried, failed the run without narrowing or quarantining,
+  // re-entered the candidate set on the next tick and did it again — forever,
+  // never producing a memory. It has to be a validation failure so the batch
+  // narrows and the conversation is eventually set aside.
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ error: { code: 'context_length_exceeded',
+      message: "This model's maximum context length is 8192 tokens, however you requested 12000." } }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    await assert.rejects(
+      () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
+      (error) => {
+        assert.equal(error.code, 'AI_CONTEXT_EXCEEDED', 'not AI_HTTP_ERROR, which the pipeline would retry');
+        assert.match(error.message, /LLM_CONTEXT_SIZE/, 'and it names the setting that is wrong');
+        return true;
+      },
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(attempts, 1, 'resending an oversized prompt cannot help, so it is not resent');
+
+  const { TRANSIENT_AI_CODES } = require('../../server/ai/ai_engine');
+  const { VALIDATION_FAILURE_CODES } = require('../../server/services/memories/consolidation_service');
+  assert.equal(TRANSIENT_AI_CODES.includes('AI_CONTEXT_EXCEEDED'), false);
+  assert.ok(VALIDATION_FAILURE_CODES.includes('AI_CONTEXT_EXCEEDED'),
+    'so consolidation narrows the batch and eventually quarantines rather than looping');
+});
+
+test('an ordinary bad request is still a transport fault worth retrying', () => {
+  const { contextOverflow } = require('../../server/ai/providers/openai_compatible_provider');
+  assert.equal(contextOverflow(400, {}, 'Invalid API key provided'), false);
+  assert.equal(contextOverflow(429, {}, 'rate limit exceeded'), false);
+  assert.equal(contextOverflow(400, {}, 'the request exceeds the available context size'), true);
+});
+
+test('retrieved evidence is trimmed to what the model can read, worst matches first', () => {
+  const { contextWithinBudget } = require('../../server/ai/ai_engine');
+  // Search returns best-first, so what has to go is the tail.
+  const context = Array.from({ length: 16 }, (_, index) => ({ sourceId: `memory:${index}`, text: 'x'.repeat(2_000) }));
+  const kept = contextWithinBudget(context, 10_000);
+  assert.ok(kept.length > 0 && kept.length < context.length, 'some evidence is dropped, not all of it');
+  assert.deepEqual(kept.map((item) => item.sourceId), context.slice(0, kept.length).map((item) => item.sourceId),
+    'the best matches are the ones kept');
+  // A single oversized item still goes, because answering from one long memory
+  // beats refusing to answer.
+  assert.equal(contextWithinBudget([{ sourceId: 'a', text: 'y'.repeat(50_000) }], 1_000).length, 1);
+});

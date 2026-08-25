@@ -57,13 +57,7 @@ function get(userId) {
   result.effectiveConsolidationIntervalMs = Math.max(result.consolidationIntervalMs, config.minConsolidationIntervalMs);
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;
-  // Derived, not chosen. Telling one speaker from another needs a voice
-  // embedding per turn, which NeoRecall produces itself from the audio — a
-  // transcription service returns words, not voices. That local pass depends on
-  // a native runtime with no build for every platform and on models an operator
-  // may have skipped, so whether it can run is a fact about this installation
-  // rather than a preference. Clients read it to disable the switches below
-  // instead of offering choices that would change nothing.
+  // Derived, not chosen: a fact about this installation's local voice-analysis models.
   result.speakerIdentityAvailable = require('../../transcription/local_analysis').available();
   return result;
 }

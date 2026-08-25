@@ -152,9 +152,7 @@ function persistSegments(chunk, inferred) {
             // The pooled speech behind the fingerprint when diarization supplied
             // it, falling back to this segment's own length.
             durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
-          // Speech too brief to fingerprint reliably resolves to no voice rather
-          // than to a new one. Saying "someone spoke here" is honest; inventing a
-          // person for a half-second of noise is what filled the Speakers screen.
+          // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
           voiceprint = cluster
             ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching })
             : null;

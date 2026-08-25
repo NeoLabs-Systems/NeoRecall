@@ -89,67 +89,30 @@ function getConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
-    // Voice activity detection and diarization run in this process on models
-    // small enough to be unremarkable — a 640 KB VAD and 31 MB of segmentation
-    // and speaker-embedding weights, against the gigabytes speech recognition
-    // and a language model would need. They are what NeoRecall still does
-    // itself, because they are what an external transcription service cannot
-    // give back: a service returns words, and at best a speaker label that is
-    // only consistent inside the one request that produced it. A voice
-    // embedding per turn is what makes a speaker the same person an hour later.
+    // VAD and diarization run locally; see docs/docs/configuration.md.
     diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
-    // Native threads for the audio models. They run per chunk on a handful of
-    // seconds of audio, so this is a small number by design.
+    // Native threads for the audio models.
     sherpaThreads: integer('NEORECALL_SHERPA_THREADS', 2, { min: 1, max: 128 }),
-    // Speech detection. Below the threshold a chunk is treated as silence and
-    // never reaches the transcription service at all, which on an always-on
-    // recorder is most of the day and most of the bill.
+    // Below this confidence a chunk is treated as silence and never sent anywhere.
     vadThreshold: number('NEORECALL_VAD_THRESHOLD', 0.5, { min: 0, max: 1 }),
     vadMinimumSpeechSeconds: number('NEORECALL_VAD_MIN_SPEECH_SECONDS', 0.25, { min: 0 }),
     vadMinimumSilenceSeconds: number('NEORECALL_VAD_MIN_SILENCE_SECONDS', 0.5, { min: 0 }),
     diarizationMinimumOnSeconds: number('NEORECALL_DIARIZATION_MIN_ON_SECONDS', 0.3, { min: 0 }),
     diarizationMinimumOffSeconds: number('NEORECALL_DIARIZATION_MIN_OFF_SECONDS', 0.2, { min: 0 }),
-    // Recognising a voice in a *different* recording. Stricter than matching
-    // inside one, because merging two people into a single named speaker is far
-    // harder to undo than leaving them apart, but no longer so strict that the
-    // same person earns a new entry in the Speakers screen every session. The
-    // same voice measured a median of 0.78 across separate samples, so 0.62
-    // leaves margin on both sides.
+    // Recognising a voice across different recordings. Stricter than matching
+    // inside one, since merging two people is harder to undo than leaving them apart.
     voiceMatchThreshold: number('NEORECALL_VOICE_MATCH_THRESHOLD', 0.62, { min: -1, max: 1 }),
     voiceMatchMargin: number('NEORECALL_VOICE_MATCH_MARGIN', 0.05, { min: 0, max: 2 }),
-    // How far apart two voices may be and still be grouped *inside* one chunk.
-    //
-    // This is a distance handed to the diarizer, where a larger value merges
-    // more, and it is deliberately a separate setting from the similarity
-    // threshold below even though both are about "the same voice". They point in
-    // opposite directions — raising this one yields fewer speakers, raising that
-    // one yields more — and for a while they were the same number, so an
-    // operator turning it to stop speakers multiplying made one half better and
-    // the other half worse.
+    // Distance for grouping voices inside one chunk; a larger value merges more.
+    // A separate setting from speakerClusterThreshold below: this is a distance
+    // (higher = fewer speakers), that is a similarity (higher = more speakers).
     diarizationClusterDistance: number('NEORECALL_DIARIZATION_CLUSTER_DISTANCE', 0.65, { min: 0, max: 2 }),
-    // How alike a turn must be to a cluster's centroid to be the same voice
-    // across chunks. A cosine similarity, so larger means stricter.
-    //
-    // Measured against two known-different voices rather than chosen. Given at
-    // least two seconds of speech per fingerprint, the same voice never scored
-    // below 0.55 and two different voices never above 0.50 — so anything in that
-    // gap separates them cleanly. The old default of 0.65 sat well above the
-    // floor for a genuine match, which is why one person kept failing to match
-    // themselves and minting another speaker instead.
+    // Cosine similarity a turn must clear against a cluster's centroid to count
+    // as the same voice across chunks.
     speakerClusterThreshold: number('NEORECALL_SPEAKER_CLUSTER_THRESHOLD', 0.52, { min: -1, max: 1 }),
-    // Two clusters in one recording this alike are one person the matcher
-    // already split, and are merged back rather than left to accumulate.
+    // Two clusters this alike in one recording are merged back into one.
     speakerClusterMergeThreshold: number('NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD', 0.55, { min: -1, max: 1 }),
-    // Below two seconds of speech a fingerprint simply does not identify anyone,
-    // and no threshold repairs that. Measured: with one second per fingerprint,
-    // the same voice ranged from 0.20 to 0.87 while two different voices reached
-    // 0.77 — the two populations overlap almost completely. At two seconds they
-    // separate with room to spare.
-    //
-    // This counts the speech a fingerprint was *pooled* from, not the length of
-    // one turn, so a speaker who says four one-second things in a chunk clears it
-    // comfortably. Speech below the bar may still join a voice that already
-    // exists; it may not found one, and it may not move a centroid.
+    // Speech shorter than this may join an existing voice but never founds a new one.
     speakerMinimumTurnMs: integer('NEORECALL_SPEAKER_MINIMUM_TURN_MS', 2_000, { min: 0, max: 60_000 }),
     // A cluster match this close to the runner-up is ambiguous, not confident.
     // Without a margin, a single fixed threshold occasionally lets a distinct new
@@ -168,10 +131,8 @@ function getConfig() {
     // change right at the boundary still gets its own identity. Independent of
     // chunk length: it compares actual timestamps, not chunk counts.
     speakerContinuityGapMs: integer('NEORECALL_SPEAKER_CONTINUITY_GAP_MS', 4_000, { min: 0 }),
-    // The relaxed bar a speaker still talking across a chunk boundary is held
-    // to, so it has to sit below the plain threshold to mean anything. 0.3 is
-    // between where different voices typically land (median 0.36) and the plain
-    // bar, so it rescues a continuing speaker without waving through a new one.
+    // Relaxed bar for a speaker still talking across a chunk boundary; must stay
+    // below speakerClusterThreshold.
     speakerClusterContinuityThreshold: number('NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD', 0.42, { min: -1, max: 1 }),
     speakerPreviewMinimumMs,
     speakerPreviewMaximumMs,

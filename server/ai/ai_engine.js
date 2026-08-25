@@ -71,18 +71,6 @@ async function consolidateWindowOnce(userId, window, carryOver) {
   }
 }
 
-/// Folds one window's answer into the answer built from the windows before it.
-///
-/// The model marks the section it is carrying on from the previous window, and
-/// the memory built from that section, with continuesPrevious. Merging is
-/// therefore a join rather than a guess: cited segments are appended in order,
-/// and the prose written for the wider view replaces the prose written for the
-/// narrower one, because the model was asked to describe the whole occasion each
-/// time — the same rolling-description contract live previews already use.
-///
-/// Only the trailing section may be continued, so a claim anywhere else is
-/// ignored and becomes a new section. That keeps section coverage contiguous no
-/// matter what the model returns.
 /// Makes a window's sections cover the window, exactly once, in order.
 ///
 /// The contract asks the model to partition every segment it was given into
@@ -121,6 +109,18 @@ function completeCoverage(sections, segmentIds) {
   return sections.filter((section) => section.sourceSegmentIds.length > 0);
 }
 
+/// Folds one window's answer into the answer built from the windows before it.
+///
+/// The model marks the section it is carrying on from the previous window, and
+/// the memory built from that section, with continuesPrevious. Merging is
+/// therefore a join rather than a guess: cited segments are appended in order,
+/// and the prose written for the wider view replaces the prose written for the
+/// narrower one, because the model was asked to describe the whole occasion each
+/// time — the same rolling-description contract live previews already use.
+///
+/// Only the trailing section may be continued, so a claim anywhere else is
+/// ignored and becomes a new section. That keeps section coverage contiguous no
+/// matter what the model returns.
 function mergeWindow(merged, output, segmentIds = null) {
   const prefix = `w${merged.windowCount + 1}/`;
   const entityRef = (ref) => `${prefix}${ref}`;
@@ -181,7 +181,13 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
   return withRetries(async () => {
     const response = await provider().chatJSON({
       userId, purpose: 'consolidation',
-      messages: dailySummaryMessages({ sections, previousDailySummary, timezone }),
+      // A long recording is read in many windows and yields many sections, so
+      // this grows with the day rather than staying the size of one request.
+      messages: dailySummaryMessages({
+        sections: contextWithinBudget(sections, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000),
+        previousDailySummary,
+        timezone,
+      }),
       maxTokens: config.aiPreviewMaxOutputTokens,
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
@@ -254,10 +260,37 @@ async function previewConversation(userId, { conversation, previousInsight = nul
   return { value: parsed.data, requestId: response.requestId };
 }
 
+/// Trims retrieved context to what the model can actually read.
+///
+/// Search returns its results best-first, so dropping from the end drops the
+/// least relevant evidence — which is the right thing to lose when something has
+/// to go. Without this the prompt is whatever sixteen results happen to weigh:
+/// a handful of long memories and daily summaries can exceed a modest context on
+/// their own, and the request is then rejected outright rather than answered
+/// from slightly less evidence.
+function contextWithinBudget(context, budgetCharacters) {
+  const kept = [];
+  let used = 0;
+  for (const item of context) {
+    const size = JSON.stringify(item).length;
+    if (kept.length && used + size > budgetCharacters) break;
+    kept.push(item);
+    used += size;
+  }
+  return kept;
+}
+
 async function answer(userId, question, context, beforeAttempt) {
+  const config = getConfig();
+  // The question and the instructions ride along with the evidence, so they come
+  // out of the same budget before it is spent.
+  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - 1_000;
+  const bounded = contextWithinBudget(context, Math.max(1_000, budget));
   return withRetries(async () => {
     if (beforeAttempt) beforeAttempt();
-    const response = await provider().chatJSON({ userId, purpose: 'ask', messages: answerMessages(question, context) });
+    const response = await provider().chatJSON({
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: answerMessages(question, bounded),
+    });
     const parsed = answerSchema.safeParse(response.value);
     if (!parsed.success) {
       markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
@@ -301,5 +334,5 @@ async function rewriteMergedMemory(userId, memories) {
 }
 
 module.exports = {
-  consolidate, previewConversation, answer, rewriteMergedMemory, writeDailySummary, mergeWindow, completeCoverage, TRANSIENT_AI_CODES,
+  consolidate, previewConversation, answer, rewriteMergedMemory, writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };
