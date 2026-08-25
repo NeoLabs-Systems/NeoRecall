@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'main_controller.dart';
 import 'main_shared.dart';
+import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/models/speaker.dart';
 
@@ -23,6 +24,7 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
   StreamSubscription<void>? _completeSubscription;
   String? _playingSpeakerId;
   bool _loadingPreview = false;
+  bool _reevaluating = false;
   bool _selecting = false;
   final Set<String> _selected = <String>{};
 
@@ -205,6 +207,32 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
     }
   }
 
+  Future<void> _reevaluateSpeakers() async {
+    if (_reevaluating) return;
+    setState(() => _reevaluating = true);
+    try {
+      final result = await controller.reevaluateSpeakers();
+      if (!mounted) return;
+      final merged = result['mergedCount'] as int? ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            merged == 0
+                ? 'Speaker profiles are already up to date'
+                : 'Merged $merged matching speaker profile${merged == 1 ? '' : 's'}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not re-evaluate speakers: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _reevaluating = false);
+    }
+  }
+
   Future<void> _togglePreview(RecallSpeaker speaker) async {
     if (_loadingPreview || !speaker.hasPreview) return;
     final player = _ensurePlayer();
@@ -246,13 +274,7 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final visibleSpeakers = controller.speakers
-        .where(
-          (speaker) =>
-              speaker.totalDurationMs != null &&
-              speaker.totalDurationMs! >= 5000,
-        )
-        .toList();
+    final visibleSpeakers = controller.speakers;
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
@@ -263,15 +285,36 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
             title: 'Recurring voices',
             description:
                 'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
-            trailing: _selecting
-                ? TextButton(onPressed: _exitSelect, child: const Text('Done'))
-                : TextButton.icon(
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Tooltip(
+                  message: 'Re-evaluate and merge matching speakers',
+                  child: IconButton.filledTonal(
+                    onPressed: _selecting || _reevaluating
+                        ? null
+                        : _reevaluateSpeakers,
+                    icon: _reevaluating
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded, size: 18),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                if (_selecting)
+                  TextButton(onPressed: _exitSelect, child: const Text('Done'))
+                else
+                  TextButton.icon(
                     onPressed: visibleSpeakers.isEmpty
                         ? null
                         : () => _enterSelect(),
                     icon: const Icon(Icons.checklist_rounded, size: 18),
                     label: const Text('Select'),
                   ),
+              ],
+            ),
           ),
           const SizedBox(height: 20),
           if (_selecting) ...<Widget>[
@@ -288,83 +331,88 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                 icon: Icons.record_voice_over_outlined,
                 title: 'No recurring speakers yet',
                 message:
-                    'Diarized speech and a confident cross-recording match are required.',
+                    'A speaker appears after a full 10-second clean voice preview is available.',
               ),
             )
           else
             GlassSurface(
               padding: EdgeInsets.zero,
-              child: Column(
-                children: <Widget>[
-                  for (
-                    var index = 0;
-                    index < visibleSpeakers.length;
-                    index++
-                  ) ...<Widget>[
-                    _SpeakerRow(
-                      speaker: visibleSpeakers[index],
-                      palette: palette,
-                      selecting: _selecting,
-                      selected: _selected.contains(visibleSpeakers[index].id),
-                      onTap: _selecting
-                          ? () => _toggleSelect(visibleSpeakers[index].id)
-                          : null,
-                      onLongPress: () =>
-                          _enterSelect(visibleSpeakers[index].id),
-                      playing:
-                          _playingSpeakerId == visibleSpeakers[index].id &&
-                          _player?.state == PlayerState.playing,
-                      loading:
-                          _loadingPreview &&
-                          _playingSpeakerId == visibleSpeakers[index].id,
-                      onPreview: () =>
-                          _togglePreview(visibleSpeakers[index]),
-                      onMatchingChanged: (value) =>
-                          controller.setSpeakerMatching(
-                            visibleSpeakers[index].id,
-                            value,
-                          ),
-                      onRename: () => _rename(
-                        context,
-                        visibleSpeakers[index].id,
-                        visibleSpeakers[index].name ?? '',
-                      ),
-                      onMerge: visibleSpeakers.length > 1
-                          ? () => _merge(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.panel - 1),
+                child: Column(
+                  children: <Widget>[
+                    for (
+                      var index = 0;
+                      index < visibleSpeakers.length;
+                      index++
+                    ) ...<Widget>[
+                      _SpeakerRow(
+                        speaker: visibleSpeakers[index],
+                        palette: palette,
+                        selecting: _selecting,
+                        selected: _selected.contains(visibleSpeakers[index].id),
+                        onTap: _selecting
+                            ? () => _toggleSelect(visibleSpeakers[index].id)
+                            : null,
+                        onLongPress: () =>
+                            _enterSelect(visibleSpeakers[index].id),
+                        playing:
+                            _playingSpeakerId == visibleSpeakers[index].id &&
+                            _player?.state == PlayerState.playing,
+                        loading:
+                            _loadingPreview &&
+                            _playingSpeakerId == visibleSpeakers[index].id,
+                        onPreview: () => _togglePreview(visibleSpeakers[index]),
+                        onMatchingChanged: (value) =>
+                            controller.setSpeakerMatching(
+                              visibleSpeakers[index].id,
+                              value,
+                            ),
+                        onRename: () => _rename(
+                          context,
+                          visibleSpeakers[index].id,
+                          visibleSpeakers[index].name ?? '',
+                        ),
+                        onMerge: visibleSpeakers.length > 1
+                            ? () => _merge(
                                 context,
                                 visibleSpeakers[index].id,
                                 visibleSpeakers,
                               )
-                          : null,
-                      onDelete: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Delete speaker?'),
-                            content: const Text(
-                              'This will permanently delete this speaker profile. Associated transcript segments will no longer identify this speaker.',
+                            : null,
+                        onDelete: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Delete speaker?'),
+                              content: const Text(
+                                'This will permanently delete this speaker profile. Associated transcript segments will no longer identify this speaker.',
+                              ),
+                              actions: <Widget>[
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
                             ),
-                            actions: <Widget>[
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirm == true) {
-                          await controller.deleteSpeaker(visibleSpeakers[index].id);
-                        }
-                      },
-                    ),
-                    if (index < visibleSpeakers.length - 1)
-                      Divider(height: 1, color: palette.border),
+                          );
+                          if (confirm == true) {
+                            await controller.deleteSpeaker(
+                              visibleSpeakers[index].id,
+                            );
+                          }
+                        },
+                      ),
+                      if (index < visibleSpeakers.length - 1)
+                        Divider(height: 1, color: palette.border),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
         ],
@@ -457,42 +505,49 @@ class _SpeakerRow extends StatelessWidget {
         final actions = selecting
             ? <Widget>[]
             : <Widget>[
-          Tooltip(
-            message: speaker.hasPreview
-                ? (playing ? 'Pause voice preview' : 'Play voice preview')
-                : 'A clean 1–10 second sample is needed',
-            child: IconButton.filledTonal(
-              onPressed: speaker.hasPreview ? onPreview : null,
-              icon: loading
-                  ? const SizedBox.square(
-                      dimension: 17,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    ),
-            ),
-          ),
-          Switch(value: speaker.matchingEnabled, onChanged: onMatchingChanged),
-          IconButton(
-            tooltip: 'Name speaker',
-            onPressed: onRename,
-            icon: const Icon(Icons.edit_outlined),
-          ),
-            if (onMerge != null)
-              IconButton(
-                tooltip: 'Merge another voice into this speaker',
-                onPressed: onMerge,
-                icon: const Icon(Icons.merge_outlined),
-              ),
-            IconButton(
-              tooltip: 'Delete speaker',
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline),
-            ),
-          ];
+                Tooltip(
+                  message: speaker.hasPreview
+                      ? (playing ? 'Pause voice preview' : 'Play voice preview')
+                      : 'A full clean voice preview is needed',
+                  child: IconButton.filledTonal(
+                    onPressed: speaker.hasPreview ? onPreview : null,
+                    icon: loading
+                        ? const SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                  ),
+                ),
+                Switch(
+                  value: speaker.matchingEnabled,
+                  onChanged: onMatchingChanged,
+                ),
+                IconButton(
+                  tooltip: 'Name speaker',
+                  onPressed: onRename,
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+                if (onMerge != null)
+                  IconButton(
+                    tooltip: 'Merge another voice into this speaker',
+                    onPressed: onMerge,
+                    icon: const Icon(Icons.merge_outlined),
+                  ),
+                IconButton(
+                  tooltip: 'Delete speaker',
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ];
         return Material(
-          color: selected ? palette.accentSoft.withValues(alpha: 0.25) : Colors.transparent,
+          color: selected
+              ? palette.accentSoft.withValues(alpha: 0.25)
+              : Colors.transparent,
           child: InkWell(
             onTap: onTap,
             onLongPress: onLongPress,

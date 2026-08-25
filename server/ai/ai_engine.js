@@ -54,7 +54,7 @@ async function consolidateWindowOnce(userId, window, carryOver) {
     userId, purpose: 'consolidation', messages: window.messages(carryOver),
     maxTokens: config.aiConsolidationMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
-      schema: consolidationJsonSchemaFor(window.segmentIds) } },
+      schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
   });
   const parsed = consolidationSchema.safeParse(response.value);
   if (!parsed.success) {
@@ -157,6 +157,10 @@ function mergeWindow(merged, output, segmentIds = null) {
       previous.emoji = memory.emoji;
       previous.importance = memory.importance;
       previous.topics = memory.topics;
+      previous.continuesMemoryIds = [...new Set([
+        ...previous.continuesMemoryIds,
+        ...memory.continuesMemoryIds,
+      ])];
       previous.sourceSegmentIds.push(...memory.sourceSegmentIds);
       previous.entities.push(...memory.entities);
       previous.miniMemories.push(...memory.miniMemories);
@@ -211,11 +215,14 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
 /// one memory rather than one per pass.
 async function consolidate(userId, input) {
   const config = getConfig();
+  const continuationCharacters = JSON.stringify(input.continuationCandidates || []).length;
   // Two separate limits, and the smaller wins: what the context can physically
   // hold, and how much input the configured output budget can afford to answer.
+  // Continuation cards ride in every window, so their exact size is reserved
+  // before the remaining budget is spent on transcript segments.
   const windowCharacters = Math.min(
     config.consolidationWindowCharacters,
-    inputBudgetCharacters(config.aiConsolidationMaxOutputTokens),
+    Math.max(1, inputBudgetCharacters(config.aiConsolidationMaxOutputTokens) - continuationCharacters),
   );
   const prepared = prepareConsolidationRequest(input, windowCharacters);
   const merged = { conversationSections: [], entities: [], memories: [], dailySummary: null, windowCount: 0 };

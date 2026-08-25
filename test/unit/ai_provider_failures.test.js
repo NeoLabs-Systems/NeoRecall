@@ -130,3 +130,62 @@ test('a consolidation whose first answer is empty succeeds on the retry', async 
   assert.equal(calls, 2, 'The empty first answer should have been retried.');
   assert.equal(result.value.conversationSections[0].titleEn, 'T');
 });
+
+test('a model that takes its time is not cut off by a hidden five-minute ceiling', async () => {
+  // Global fetch gives up when response headers have not arrived within five
+  // minutes and reports "fetch failed", which names nothing and ignores the
+  // configured allowance. A local model answering for a long conversation
+  // routinely needs longer, so the request must survive a slow start and the
+  // deadline must be the configured one.
+  server?.close();
+  const stalled = [];
+  server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      // Headers held back the way a non-streaming endpoint holds them until
+      // generation finishes.
+      stalled.push(setTimeout(() => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          id: 'slow',
+          choices: [{ finish_reason: 'stop', message: { content: '{"answer":"worth the wait"}' } }],
+        }));
+      }, 700));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  // Comfortably longer than the endpoint's delay: the request should wait.
+  process.env.AI_REQUEST_TIMEOUT_MS = '10000';
+  try {
+    const result = await provider.chatJSON({ purpose: 'consolidation', messages: [{ role: 'user', content: 'x' }] });
+    assert.deepEqual(result.value, { answer: 'worth the wait' });
+  } finally {
+    stalled.forEach(clearTimeout);
+    delete process.env.AI_REQUEST_TIMEOUT_MS;
+    }
+});
+
+test('an endpoint that never answers fails as a timeout, naming the wait rather than the transport', async () => {
+  server?.close();
+  server = http.createServer((req, res) => {
+    req.resume();
+    // Never responds: the socket simply goes quiet.
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_REQUEST_TIMEOUT_MS = '1000';
+  try {
+    await assert.rejects(
+      provider.chatJSON({ purpose: 'consolidation', messages: [{ role: 'user', content: 'x' }] }),
+      (error) => {
+        assert.equal(error.code, 'AI_TIMEOUT');
+        assert.match(error.message, /sent nothing for 1 seconds/);
+        return true;
+      },
+    );
+  } finally {
+    delete process.env.AI_REQUEST_TIMEOUT_MS;
+    }
+});

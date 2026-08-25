@@ -16,6 +16,7 @@ function handlerFor(type) {
   if (type === 'detect_boundaries') return require('./handlers/boundary_handler');
   if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
+  if (type === 'rewrite_merged_memory') return require('./handlers/memory_merge_handler');
   if (['maintenance', 'prune_events'].includes(type)) return require('./handlers/maintenance_handler');
   if (type === 'process_import') return require('./handlers/import_handler');
   throw Object.assign(new Error(`Unknown job type: ${type}`), { code: 'UNKNOWN_JOB_TYPE', retryable: false });

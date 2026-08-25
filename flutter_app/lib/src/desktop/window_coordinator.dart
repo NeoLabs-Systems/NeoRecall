@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -6,9 +7,10 @@ import 'package:window_manager/window_manager.dart';
 class DesktopWindowCoordinator {
   const DesktopWindowCoordinator();
 
-  static const Size floatingSize = Size(470, 238);
-  static const Size floatingMinimumSize = Size(400, 200);
-  static const Offset floatingScreenInset = Offset(20, 20);
+  static const Size floatingSize = Size(360, 84);
+  static const Size floatingMinimumSize = floatingSize;
+  static const Size consentSize = Size(380, 280);
+  static const Offset floatingScreenInset = Offset(16, 16);
   static const Size librarySize = Size(1180, 780);
   static const Size libraryMinimumSize = Size(760, 560);
 
@@ -19,7 +21,7 @@ class DesktopWindowCoordinator {
     title: 'NeoRecall',
   );
 
-  Future<void> showFloating() async {
+  Future<void> showFloating({bool activate = true}) async {
     await windowManager.setMinimumSize(floatingMinimumSize);
     await windowManager.setResizable(false);
     await windowManager.setTitleBarStyle(
@@ -27,15 +29,24 @@ class DesktopWindowCoordinator {
       windowButtonVisibility: false,
     );
     await windowManager.setAlwaysOnTop(true);
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await windowManager.setVisibleOnAllWorkspaces(
+        true,
+        visibleOnFullScreen: true,
+      );
+    }
+    await windowManager.setSkipTaskbar(true);
+    await windowManager.setHasShadow(true);
     await windowManager.setBackgroundColor(Colors.transparent);
     await windowManager.setSize(floatingSize, animate: true);
-    await windowManager.setAlignment(Alignment.bottomRight, animate: true);
-    final position = await windowManager.getPosition();
-    await windowManager.setPosition(
-      position - floatingScreenInset,
-      animate: true,
-    );
-    await _showAndFocus();
+    await _alignFloating();
+    await _show(activate: activate);
+  }
+
+  Future<void> showConsentSurface() async {
+    await windowManager.setMinimumSize(consentSize);
+    await windowManager.setSize(consentSize, animate: true);
+    await _alignFloating();
   }
 
   Future<void> showLibrary(Brightness brightness) async {
@@ -44,6 +55,10 @@ class DesktopWindowCoordinator {
       windowButtonVisibility: true,
     );
     await windowManager.setAlwaysOnTop(false);
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await windowManager.setVisibleOnAllWorkspaces(false);
+    }
+    await windowManager.setSkipTaskbar(false);
     await windowManager.setResizable(true);
     await windowManager.setMinimumSize(libraryMinimumSize);
     await windowManager.setBackgroundColor(
@@ -53,15 +68,24 @@ class DesktopWindowCoordinator {
     );
     await windowManager.setSize(librarySize, animate: true);
     await windowManager.center(animate: true);
-    await _showAndFocus();
+    await _show();
   }
 
   Future<void> hide() => windowManager.hide();
 
-  Future<void> show() => _showAndFocus();
+  Future<void> show() => _show();
 
-  Future<void> _showAndFocus() async {
-    await windowManager.show();
-    await windowManager.focus();
+  Future<void> _show({bool activate = true}) async {
+    await windowManager.show(inactive: !activate);
+    if (activate) await windowManager.focus();
+  }
+
+  Future<void> _alignFloating() async {
+    await windowManager.setAlignment(Alignment.bottomRight, animate: true);
+    final position = await windowManager.getPosition();
+    await windowManager.setPosition(
+      position - floatingScreenInset,
+      animate: true,
+    );
   }
 }

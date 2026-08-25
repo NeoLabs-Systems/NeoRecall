@@ -19,14 +19,16 @@ function localTimestamp(iso, timezone) {
   return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:${value.second}${offset}`;
 }
 
-function compactInput(conversations, timezone) {
+function compactInput(conversations, timezone, continuationCandidates = []) {
   const conversationAliases = new Map();
   const segmentAliases = new Map();
+  const memoryAliases = new Map();
   const speakerAliases = new Map();
   const reverseSpeakerAliases = new Map();
   const streamAliases = new Map();
   const reverseConversationAliases = new Map();
   const reverseSegmentAliases = new Map();
+  const reverseMemoryAliases = new Map();
   let segmentOrdinal = 0;
 
   const compactConversations = conversations.map((conversation, conversationIndex) => {
@@ -71,12 +73,42 @@ function compactInput(conversations, timezone) {
     };
   });
 
+  // The two facts that separate "this occasion is still running" from "the same
+  // subject came up again" are how much time passed and whether the recording
+  // ever stopped. Both are arithmetic over timestamps and stream ids, which a
+  // model should not be asked to redo — and neither of them decides anything on
+  // its own; they are evidence for the model's decision.
+  const inputStartedAt = conversations.reduce((earliest, conversation) => (
+    !earliest || Date.parse(conversation.startedAt) < Date.parse(earliest) ? conversation.startedAt : earliest
+  ), null);
+  const compactContinuationCandidates = continuationCandidates.map((memory, index) => {
+    const alias = `m${index + 1}`;
+    memoryAliases.set(memory.publicId, alias);
+    reverseMemoryAliases.set(alias, memory.publicId);
+    const sharedStreams = (memory.sessionIds || []).map((id) => streamAliases.get(id)).filter(Boolean);
+    return {
+      id: alias,
+      type: memory.type,
+      titleEn: memory.titleEn,
+      summaryEn: memory.summaryEn,
+      startedAt: localTimestamp(memory.startedAt, timezone),
+      endedAt: localTimestamp(memory.endedAt, timezone),
+      minutesBeforeThisInput: inputStartedAt
+        ? Math.round((Date.parse(inputStartedAt) - Date.parse(memory.endedAt)) / 60_000)
+        : null,
+      recordedInSameStreamAsThisInput: sharedStreams.length > 0,
+      topics: memory.topics,
+      highlights: memory.highlights,
+    };
+  });
+
   return {
-    compactConversations,
+    compactConversations, compactContinuationCandidates,
     conversationAliases,
     segmentAliases,
+    memoryAliases,
     reverseConversationAliases,
-    reverseSegmentAliases,
+    reverseSegmentAliases, reverseMemoryAliases,
     reverseSpeakerAliases,
   };
 }
@@ -148,6 +180,7 @@ function carryOverFor(merged) {
     memory: continuable ? {
       type: continuable.type, titleEn: continuable.titleEn, summaryEn: continuable.summaryEn,
       emoji: continuable.emoji, importance: continuable.importance, topics: continuable.topics,
+      continuesMemoryIds: continuable.continuesMemoryIds,
     } : null,
   };
 }
@@ -155,10 +188,11 @@ function carryOverFor(merged) {
 const WINDOW_INSTRUCTIONS = `This request is one window of a transcript that was too long to read at once. The window before it has already been described, and its description is supplied as carryOver. The occasion it describes may still be running in this window.
 Set continuesPrevious to true on your FIRST conversation section when this window opens in the middle of the occasion carryOver.section describes, and on the memory built from that section when it continues carryOver.memory. In that case write the title and summary of the WHOLE occasion — everything carryOver already says plus what this window adds — because NeoRecall replaces the earlier text with yours. Never refer to a previous window, never say the transcript is partial, and never repeat carryOver's segment IDs: cite only segment IDs from this window.
 Set continuesPrevious to false on every other section and memory, including when this window opens a new occasion. Only the first section of the window may set it to true.
+When a memory continues carryOver.memory, preserve its continuesMemoryIds. You may add another continuation candidate only if the wider evidence shows that candidate is another fragment of the exact same occasion.
 `;
 
-function consolidationMessages({ conversations, previousDailySummary, timezone, carryOver = null }, preparedReferences = null) {
-  const references = preparedReferences || compactInput(conversations, timezone);
+function consolidationMessages({ conversations, previousDailySummary, timezone, continuationCandidates = [], carryOver = null }, preparedReferences = null) {
+  const references = preparedReferences || compactInput(conversations, timezone, continuationCandidates);
   const compactPreviousSummary = previousDailySummary ? {
     localDate: previousDailySummary.local_date,
     timezone: previousDailySummary.timezone,
@@ -176,6 +210,13 @@ The input conversation objects are provisional local groups, not authoritative c
 Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories must be atomic and evidence-backed.
 memoryWorthy is a high bar. Set it true only for a substantial real-world occasion someone would open later as its own card — a meeting, lesson, multi-turn discussion, decision session, introduction with lasting context, or other experience with lasting narrative. Set it false for brief exchanges, hellos, logistics check-ins, one- or two-turn replies, ambient chatter, or any short stretch whose whole value is a single atomic fact, task, or promise. Those short items are not memories: if they appear inside a larger worthy occasion, put them in miniMemories under that memory; if the whole conversation is short and not a real occasion, mark the section not memory-worthy and create no memory for it.
 One real-world occasion is one memory. A single continuous meeting, lesson, lecture or call produces exactly one memory covering all of it, however long it ran and however many topics it moved through; use its internal topics and mini-memories to carry the detail instead of splitting it into several memories. A recording that merely spans a whole day is not one occasion: it produces one memory per distinct real-world occasion it captured. Prefer zero memories over inventing thin ones. Choose the memory type that matches the occasion, and use ${alternatives(MEMORY_TYPES)} exactly as named — lesson covers a class, lecture, seminar or any taught session.
+continuationCandidates are memory cards NeoRecall already wrote, close enough in time or recording to be worth comparing with this input. Each carries minutesBeforeThisInput (how long after that card ended this input begins) and recordedInSameStreamAsThisInput (whether the recording ran on without stopping).
+For every output memory, first write continuationReasoning: one sentence naming what the new segments say about whether this is the same sitting as a candidate, or null when there are no candidates. Then set continuesMemoryIds accordingly. Decide it as one question: is this the SAME sitting — the same people, still in the room, carrying on — or a later separate occasion?
+Same sitting looks like: the speech picks up mid-thread ("back to the integrator", "as we just calculated"), no restart, no greeting, no re-introduction, minutes rather than hours since the candidate ended, and the recording never stopped.
+A later occasion looks like: an opening or a greeting, the material introduced from the beginning, a new or partly new group, an explicit reference to the earlier sitting as something that already happened ("like this morning", "as we did last week", "for those who missed it"), or a long gap. Speech that calls the subject "the same exercise" or "the same topic" as an earlier sitting is telling you it is a DIFFERENT sitting, not a continuation. A matching title, topic, type, course or recurring meeting never merges anything on its own.
+Use [] whenever the transcript does not show the earlier sitting still running.
+If several candidate cards are duplicate fragments of the same continuing occasion, claim all of them in one output memory so NeoRecall can absorb them into one card. A candidate id may appear in at most one output memory. Write that memory's title, summary, type, emoji, importance and topics for the WHOLE combined occasion, including what the claimed candidates already say. Its sourceSegmentIds and miniMemories must still cite only new input segments. Existing highlights are preserved automatically, so do not repeat one unless the new transcript adds materially new information. Candidate text is context for the continuation decision and combined prose; never treat it as new transcript evidence.
+An otherwise short section that clearly continues a candidate's substantial occasion remains memoryWorthy: extending that card does not create a thin new card.
 Each memory needs exactly one emoji that a person would recognize as the occasion at a glance — a meeting, a meal, a school lesson, a travel moment, a decision. Prefer a concrete, widely supported emoji over abstract symbols; never return text, multiple emoji, or skin-tone modifiers for this field.
 Extract each distinct durable fact, decision, measurable requirement, task, promise, deadline, scheduled event, person or relationship, and location that is useful to recall. Perform a segment-by-segment completeness check so secondary assignees and commitments are not omitted merely because the parent memory mentions the topic. Completeness must not degrade with input length: a three-hour occasion carries proportionally more distinct facts, decisions, tasks and promises than a ten-minute one, and each phase of a long occasion deserves the same segment-by-segment attention as a short input would receive. Never summarize away extractable items because the input is large. Each mini-memory must contain exactly one independently searchable assertion; never combine distinct requirements, decisions, assignments, or promises in one mini-memory. Do not turn proposals, questions, negations, or uncertain statements into established facts. If the source explicitly says there is no task, do not create a task or promise from the negative instruction.
 When the evidence names the actor for a task or promise, include that actor in textEn as well as in the entity relation. Do not rely on entity metadata to make an atomic memory understandable. If the actor is not identifiable from the evidence, do not invent one.
@@ -195,6 +236,7 @@ ${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
       content: JSON.stringify({
         timezone,
         previousDailySummary: compactPreviousSummary,
+        continuationCandidates: references.compactContinuationCandidates,
         ...(carryOver ? { carryOver } : {}),
         conversations: references.compactConversations,
         outputContract: {
@@ -209,7 +251,9 @@ ${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
           entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'English canonical name', displayName: null,
             aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }],
             speakerAlias: 'speaker label this person is heard speaking as, or null' }],
-          memories: [{ type: alternatives(MEMORY_TYPES), continuesPrevious: false, titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
+          memories: [{ type: alternatives(MEMORY_TYPES), continuesPrevious: false,
+            continuationReasoning: 'one sentence, or null when there are no candidates', continuesMemoryIds: [],
+            titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
             sourceSegmentIds: ['input segment ID'], topics: ['English'],
             entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: alternatives(MINI_MEMORY_KINDS),
               textEn: 'English atomic statement', importance: 1, confidence: 0.5,
@@ -230,13 +274,14 @@ ${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
 /// can read in a single request; when the transcript fits inside it there is
 /// exactly one window and the result is identical to the unwindowed request.
 function prepareConsolidationRequest(input, budgetCharacters = Infinity) {
-  const references = compactInput(input.conversations, input.timezone);
+  const references = compactInput(input.conversations, input.timezone, input.continuationCandidates);
   const windows = windowConversations(references.compactConversations, budgetCharacters);
   return {
     references,
     windows: windows.map((compactConversations, index) => ({
       compactConversations,
       segmentIds: compactConversations.flatMap((conversation) => conversation.segments.map((segment) => segment.id)),
+      continuationMemoryIds: references.compactContinuationCandidates.map((memory) => memory.id),
       messages: (carryOver) => consolidationMessages({ ...input, carryOver }, { ...references, compactConversations }),
     })),
   };
@@ -244,10 +289,12 @@ function prepareConsolidationRequest(input, budgetCharacters = Infinity) {
 
 function restoreReferenceIds(output, references) {
   const segmentId = (alias) => references.reverseSegmentAliases.get(alias) || alias;
+  const memoryId = (alias) => references.reverseMemoryAliases.get(alias) || alias;
   for (const section of output.conversationSections) {
     section.sourceSegmentIds = section.sourceSegmentIds.map(segmentId);
   }
   for (const memory of output.memories) {
+    memory.continuesMemoryIds = (memory.continuesMemoryIds || []).map(memoryId);
     memory.sourceSegmentIds = memory.sourceSegmentIds.map(segmentId);
     for (const miniMemory of memory.miniMemories) miniMemory.sourceSegmentIds = miniMemory.sourceSegmentIds.map(segmentId);
   }

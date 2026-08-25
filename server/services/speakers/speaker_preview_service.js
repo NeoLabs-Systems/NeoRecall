@@ -114,6 +114,14 @@ function candidatesForChunk(database, chunkId) {
     .all(chunkId);
 }
 
+function shouldReplacePreview(current, selection, targetDurationMs) {
+  if (!current) return true;
+  const currentIsFull = current.duration_ms >= targetDurationMs;
+  const selectionIsFull = selection.durationMs >= targetDurationMs;
+  if (currentIsFull !== selectionIsFull) return selectionIsFull;
+  return selection.quality > Number(current.quality);
+}
+
 function captureFromChunk(chunk) {
   if (!chunk?.temporary_path) return 0;
   const database = getDatabase();
@@ -128,9 +136,10 @@ function captureFromChunk(chunk) {
     const selection = selectTurns(turns);
     if (!selection) continue;
     const current = database
-      .prepare('SELECT quality FROM speaker_previews WHERE voiceprint_id=?')
+      .prepare('SELECT duration_ms,quality FROM speaker_previews WHERE voiceprint_id=?')
       .get(voiceprintId);
-    if (current && Number(current.quality) >= selection.quality) continue;
+    const targetDurationMs = getConfig().speakerPreviewMaximumMs;
+    if (!shouldReplacePreview(current, selection, targetDurationMs)) continue;
     const audio = extractPreview(
       chunk.temporary_path,
       chunk.channel_layout,
@@ -175,4 +184,5 @@ module.exports = {
   extractPreview,
   captureFromChunk,
   get,
+  shouldReplacePreview,
 };

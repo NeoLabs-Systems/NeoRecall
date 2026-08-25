@@ -10,6 +10,7 @@ const jobs = require('../jobs/job_service');
 const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const searchIndex = require('../../embeddings/search_index_service');
+const memoryContinuity = require('./memory_continuity_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
@@ -170,7 +171,7 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
   if (!conversationIds.length) return { quarantined: [] };
   const db = getDatabase();
   const limit = processingSettings.get().consolidationMaxFailures;
-  return db.transaction(() => {
+  db.transaction(() => {
     const quarantined = [];
     for (const conversationId of conversationIds) {
       const row = db.prepare(`UPDATE conversations SET consolidation_failures=consolidation_failures+1,
@@ -259,8 +260,14 @@ function applyMemoryWorthinessFloors(output, conversations, floors = processingS
   if (minMs <= 0 && minChars <= 0) return output;
 
   const stats = segmentEvidenceStats(conversations);
+  const continuationSegmentIds = new Set((output.memories || [])
+    .filter((memory) => memory.continuesMemoryIds?.length)
+    .flatMap((memory) => memory.sourceSegmentIds));
   for (const section of output.conversationSections) {
     if (!section.memoryWorthy) continue;
+    // Extending a substantial existing occasion does not create the thin
+    // standalone card these floors are meant to prevent.
+    if (section.sourceSegmentIds.some((id) => continuationSegmentIds.has(id))) continue;
     const evidence = evidenceForSegmentIds(section.sourceSegmentIds, stats);
     if (evidence.durationMs < minMs || evidence.characters < minChars) {
       section.memoryWorthy = false;
@@ -319,7 +326,89 @@ function anchorMemoryRanges(output, conversations) {
   return output;
 }
 
-function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map()) {
+function persistMemory(database, { userId, runId, memory, refined, entityIds }) {
+  const continuity = memoryContinuity.absorbClaimed(database, userId, memory.continuesMemoryIds);
+  const startedAt = continuity && Date.parse(continuity.startedAt) < Date.parse(memory.startedAt)
+    ? continuity.startedAt : memory.startedAt;
+  const endedAt = continuity && Date.parse(continuity.endedAt) > Date.parse(memory.endedAt)
+    ? continuity.endedAt : memory.endedAt;
+  let memoryId;
+  if (continuity) {
+    memoryId = continuity.target.id;
+    // The summary always describes the whole occasion, including what the new
+    // material added. Wording the reader chose by hand is theirs and stays, and
+    // so does whether the card is pinned or put away: extending an occasion is
+    // not a reason to undo a decision someone made about it.
+    const edited = Boolean(continuity.target.prose_edited_at);
+    database.prepare(`UPDATE memories SET type=?,title_en=?,summary_en=?,emoji=?,importance=?,
+      started_at=?,ended_at=?,pinned=?,archived=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id=? AND user_id=?`).run(
+      edited ? continuity.target.type : memory.type,
+      edited ? continuity.target.title_en : memory.titleEn,
+      memory.summaryEn,
+      edited ? continuity.target.emoji : memory.emoji,
+      memory.importance,
+      startedAt, endedAt, continuity.pinned, continuity.archived, memoryId, userId,
+    );
+  } else {
+    const result = database.prepare(`INSERT INTO memories
+      (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, memory.type, memory.titleEn, memory.summaryEn,
+      memory.emoji, memory.importance, memory.startedAt, memory.endedAt, runId);
+    memoryId = Number(result.lastInsertRowid);
+  }
+
+  // A card that is extended already carries evidence, and memory_sources leaves
+  // one of its reference columns NULL — which a UNIQUE index does not treat as
+  // a duplicate. Attaching the same line twice would show it twice.
+  const sourceInsert = database.prepare(`INSERT INTO memory_sources (memory_id,conversation_id,segment_id)
+    SELECT ?,?,? WHERE NOT EXISTS (SELECT 1 FROM memory_sources
+      WHERE memory_id=? AND conversation_id IS ? AND segment_id IS ?)`);
+  const attachSource = (memoryIdValue, conversationId, segmentIdValue) => sourceInsert.run(
+    memoryIdValue, conversationId, segmentIdValue, memoryIdValue, conversationId, segmentIdValue,
+  );
+  const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(
+    (segmentPublicId) => refined.segmentConversationIds.get(segmentPublicId),
+  ))];
+  for (const conversationId of sourceConversationIds) attachSource(memoryId, conversationId, null);
+  const segmentId = database.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?');
+  for (const segmentPublicId of memory.sourceSegmentIds) {
+    attachSource(memoryId, null, segmentId.get(segmentPublicId, userId).id);
+  }
+  const topicInsert = database.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
+  for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
+  const memoryEntityInsert = database.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
+  for (const item of memory.entities) memoryEntityInsert.run(memoryId, entityIds.get(item.ref), item.role);
+  for (const mini of memory.miniMemories) {
+    const miniResult = database.prepare(`INSERT INTO mini_memories
+      (public_id,user_id,memory_id,kind,text_en,importance,confidence,due_at,occurred_at,status)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, memoryId, mini.kind, mini.textEn, mini.importance, mini.confidence,
+      mini.dueAt || null, mini.occurredAt || null, mini.status || (['task', 'promise'].includes(mini.kind) ? 'open' : null));
+    const miniId = Number(miniResult.lastInsertRowid);
+    const miniSourceInsert = database.prepare('INSERT INTO mini_memory_sources (mini_memory_id,segment_id) VALUES (?,?)');
+    for (const segmentPublicId of mini.sourceSegmentIds) miniSourceInsert.run(miniId, segmentId.get(segmentPublicId, userId).id);
+    const miniEntityInsert = database.prepare('INSERT OR IGNORE INTO mini_memory_entities (mini_memory_id,entity_id,role) VALUES (?,?,?)');
+    for (const item of mini.entities) miniEntityInsert.run(miniId, entityIds.get(item.ref), item.role);
+    searchIndex.upsertDocument({ userId, kind: 'mini_memory', sourceId: miniId, body: mini.textEn,
+      occurredAt: mini.occurredAt || memory.startedAt, importance: mini.importance }, database);
+  }
+  const indexed = database.prepare('SELECT title_en,importance,importance_override FROM memories WHERE id=?').get(memoryId);
+  searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: indexed.title_en,
+    body: memory.summaryEn, occurredAt: startedAt,
+    importance: Number(indexed.importance_override ?? indexed.importance) }, database);
+  return { continued: Boolean(continuity), absorbed: continuity?.absorbed.length || 0 };
+}
+
+function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map(), continuationCandidates = []) {
+  // Claims are settled first: the evidence floors waive themselves for material
+  // that extends an existing occasion, and a claim that cannot be acted on must
+  // not buy that waiver.
+  const droppedClaims = memoryContinuity.resolveClaims(output.memories, continuationCandidates);
+  if (droppedClaims.unknown || droppedClaims.duplicate) {
+    logger.warn('Ignored continuation claims that could not be acted on', {
+      userId, runId, ...droppedClaims,
+    });
+  }
   applyMemoryWorthinessFloors(output, conversations);
   validateReferences(output, conversations);
   anchorMemoryRanges(output, conversations);
@@ -331,7 +420,7 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
     throw Object.assign(new Error('Memory-worthy material requires a daily summary update.'), { code: 'AI_REFERENCE_INVALID' });
   }
   const entityIds = new Map();
-  db.transaction(() => {
+  return db.transaction(() => {
     const refined = refinement.applyConversationSections(
       db,
       userId,
@@ -357,39 +446,20 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
     // entity graph, at no extra AI cost. Never throws — an unresolved alias or a
     // cluster with no voiceprint yet is simply skipped.
     speakerIdentity.linkEntitiesToSpeakers(db, userId, output.entities, entityIds, speakerClusters);
+    let continuedMemories = 0;
+    let absorbedMemories = 0;
     for (const memory of output.memories) {
-      const publicId = crypto.randomUUID();
-      const result = db.prepare(`INSERT INTO memories
-        (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(publicId, userId, memory.type, memory.titleEn, memory.summaryEn,
-        memory.emoji, memory.importance, memory.startedAt, memory.endedAt, runId);
-      const memoryId = Number(result.lastInsertRowid);
-      const sourceInsert = db.prepare('INSERT OR IGNORE INTO memory_sources (memory_id,conversation_id,segment_id) VALUES (?,?,?)');
-      const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(
-        (segmentPublicId) => refined.segmentConversationIds.get(segmentPublicId),
-      ))];
-      for (const conversationId of sourceConversationIds) sourceInsert.run(memoryId, conversationId, null);
-      for (const segmentPublicId of memory.sourceSegmentIds) {
-        sourceInsert.run(memoryId, null, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
+      const result = persistMemory(db, { userId, runId, memory, refined, entityIds });
+      if (result.continued) {
+        continuedMemories += 1;
+        // Why this occasion was treated as one that was already under way. The
+        // sentence can quote the recording, so it stays at debug level with the
+        // rest of the detail an operator turns on deliberately.
+        logger.debug('Extended an occasion already written up', {
+          runId, userId, absorbed: result.absorbed, reason: memory.continuationReasoning || null,
+        });
       }
-      const topicInsert = db.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
-      for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
-      const memoryEntityInsert = db.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
-      for (const item of memory.entities) memoryEntityInsert.run(memoryId, entityIds.get(item.ref), item.role);
-      for (const mini of memory.miniMemories) {
-        const miniPublicId = crypto.randomUUID();
-        const miniResult = db.prepare(`INSERT INTO mini_memories
-          (public_id,user_id,memory_id,kind,text_en,importance,confidence,due_at,occurred_at,status)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`).run(miniPublicId, userId, memoryId, mini.kind, mini.textEn, mini.importance, mini.confidence,
-          mini.dueAt || null, mini.occurredAt || null, mini.status || (['task', 'promise'].includes(mini.kind) ? 'open' : null));
-        const miniId = Number(miniResult.lastInsertRowid);
-        const miniSourceInsert = db.prepare('INSERT INTO mini_memory_sources (mini_memory_id,segment_id) VALUES (?,?)');
-        for (const segmentPublicId of mini.sourceSegmentIds) miniSourceInsert.run(miniId, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
-        const miniEntityInsert = db.prepare('INSERT OR IGNORE INTO mini_memory_entities (mini_memory_id,entity_id,role) VALUES (?,?,?)');
-        for (const item of mini.entities) miniEntityInsert.run(miniId, entityIds.get(item.ref), item.role);
-        searchIndex.upsertDocument({ userId, kind: 'mini_memory', sourceId: miniId, body: mini.textEn, occurredAt: mini.occurredAt || memory.startedAt, importance: mini.importance }, db);
-      }
-      searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: memory.titleEn, body: memory.summaryEn, occurredAt: memory.startedAt, importance: memory.importance }, db);
+      absorbedMemories += result.absorbed;
     }
     if (output.dailySummary) {
       // Which day this covers, and in which timezone, are derived from the
@@ -425,8 +495,11 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
       VALUES (?,'consolidation.completed','consolidation_run',?,?,?)`).run(userId, runId, JSON.stringify({
       runId,
       memories: output.memories.length,
+      continuedMemories,
+      absorbedMemories,
       conversations: refined.conversations.length,
     }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
+    return { continuedMemories, absorbedMemories };
   })();
 }
 
@@ -466,12 +539,21 @@ async function execute(runId, reservedConversationIds = null) {
       characters: conversations.reduce((sum, conversation) => sum + conversation.segments.reduce((n, segment) => n + String(segment.text || '').length, 0), 0),
     });
     const startedAt = Date.now();
-    const response = await ai.consolidate(run.user_id, { conversations, previousDailySummary: previous, timezone: userSettings.timezone });
+    const continuationCandidates = memoryContinuity.findCandidates(run.user_id, conversations, db);
+    const response = await ai.consolidate(run.user_id, {
+      conversations,
+      continuationCandidates,
+      previousDailySummary: previous,
+      timezone: userSettings.timezone,
+    });
     aiRequestId = response.requestId;
-    persist(run.user_id, runId, response.value, conversations, response.requestId, response.speakerClusters);
+    const persisted = persist(run.user_id, runId, response.value, conversations, response.requestId,
+      response.speakerClusters, continuationCandidates);
     logger.info('Recordings written up', {
       runId, userId: run.user_id, seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
       windows: response.windows, memories: response.value.memories.length,
+      continuedMemories: persisted.continuedMemories,
+      absorbedMemories: persisted.absorbedMemories,
       sections: response.value.conversationSections.length,
     });
     return { runId, memories: response.value.memories.length };
@@ -512,5 +594,5 @@ function latest(userId) {
 module.exports = {
   eligibility, request, execute, latest, failureBackoff, validateReferences, applyMemoryWorthinessFloors,
   anchorMemoryRanges, localDate,
-  recordValidationFailure, buildCandidates, VALIDATION_FAILURE_CODES,
+  recordValidationFailure, buildCandidates, persist, VALIDATION_FAILURE_CODES,
 };

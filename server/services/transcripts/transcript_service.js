@@ -11,7 +11,7 @@ const { SPEAKER_NAME_COLUMNS, SPEAKER_NAME_JOINS } = require('../../db/speaker_r
 // history forward, and passing `after` selects it on its own so existing
 // callers keep the cursor they already hold.
 function list(userId, query = {}) {
-  const limit = pageLimit(query.limit, 250, 100);
+  const limit = pageLimit(query.limit, 1000, 100);
   const requested = String(query.order || '').toLowerCase();
   const ascending = requested === 'asc' || (requested !== 'desc' && Boolean(query.after));
   const cursor = Number((ascending ? query.after : (query.before || query.cursor)) || 0);

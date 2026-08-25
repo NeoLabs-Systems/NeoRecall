@@ -6,11 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:neorecall/main.dart';
 import 'package:neorecall/main_auth.dart';
 import 'package:neorecall/main_controller.dart';
+import 'package:neorecall/main_memories.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
 import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/main_timeline.dart';
 import 'package:neorecall/src/api_client.dart';
+import 'package:neorecall/src/models/memory.dart';
+import 'package:neorecall/src/models/timeline_moment.dart';
 import 'package:neorecall/src/models/transcript.dart';
 
 void main() {
@@ -131,6 +134,46 @@ void main() {
     });
   }
 
+  // 320 is the narrowest phone the app supports; the bin was the first icon
+  // to spill off the end of the row this toolbar used to be.
+  for (final width in <double>[320, 360, 390, 430]) {
+    testWidgets(
+      'memory selection actions wrap without hiding the delete button at $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final controller = NeoRecallController()
+          ..memories = <RecallMemory>[
+            RecallMemory(
+              id: 'memory-1',
+              type: 'conversation',
+              title: 'First memory',
+              summary: 'First summary',
+              emoji: '💬',
+              importance: 5,
+              startedAt: DateTime.utc(2026, 8, 25, 10),
+            ),
+          ];
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildNeoRecallTheme(Brightness.light),
+            home: Scaffold(body: MemoriesScreen(controller: controller)),
+          ),
+        );
+        await tester.tap(find.text('Select'));
+        await tester.pump();
+        await tester.tap(find.text('First memory'));
+        await tester.pump();
+
+        expect(find.byTooltip('Delete'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('desktop navigation keeps devices inside settings', (
     tester,
   ) async {
@@ -196,72 +239,84 @@ void main() {
     expect(find.text('New recording'), findsNothing);
   });
 
-  testWidgets(
-    'timeline compacts and expands interleaved conversation segments',
-    (tester) async {
-      tester.view.physicalSize = const Size(1180, 780);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final now = DateTime(2026, 7, 29, 12);
-      final controller = NeoRecallController()
-        ..transcript = <TranscriptSegment>[
-          TranscriptSegment(
-            id: 'a1',
-            text: 'First compact line',
-            startedAt: now.subtract(const Duration(minutes: 12)),
-            endedAt: now.subtract(const Duration(minutes: 11)),
-            speaker: 'Alex',
-            conversationId: 'conversation-a',
-          ),
-          TranscriptSegment(
-            id: 'b1',
-            text: 'A separate recent moment',
-            startedAt: now.subtract(const Duration(minutes: 8)),
-            endedAt: now.subtract(const Duration(minutes: 7)),
-            speaker: 'Morgan',
-            conversationId: 'conversation-b',
-          ),
-          TranscriptSegment(
-            id: 'a2',
-            text: 'Second compact line',
-            startedAt: now.subtract(const Duration(minutes: 10)),
-            endedAt: now.subtract(const Duration(minutes: 9)),
-            speaker: 'Alex',
-            conversationId: 'conversation-a',
-          ),
-          TranscriptSegment(
-            id: 'a3',
-            text: 'Hidden until expanded',
-            startedAt: now.subtract(const Duration(minutes: 9)),
-            endedAt: now.subtract(const Duration(minutes: 8)),
-            speaker: 'Sam',
-            conversationId: 'conversation-a',
-          ),
-        ]
-        ..conversations = <Map<String, dynamic>>[
-          <String, dynamic>{'id': 'conversation-a', 'state': 'complete'},
-          <String, dynamic>{'id': 'conversation-b', 'state': 'complete'},
-        ];
-      addTearDown(controller.dispose);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildNeoRecallTheme(Brightness.light),
-          home: TimelineScreen(controller: controller),
+  testWidgets('a timeline moment compacts, expands and offers a rewrite', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1180, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime(2026, 7, 29, 12);
+    TranscriptSegment line(String id, String text, int minutesAgo) =>
+        TranscriptSegment(
+          id: id,
+          text: text,
+          startedAt: now.subtract(Duration(minutes: minutesAgo)),
+          endedAt: now.subtract(Duration(minutes: minutesAgo - 1)),
+          speaker: 'Alex',
+          conversationId: 'conversation-a',
+        );
+    final controller = NeoRecallController()
+      ..moments = <TimelineMoment>[
+        TimelineMoment(
+          id: 'conversation-a',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 12)),
+          endedAt: now.subtract(const Duration(minutes: 8)),
+          state: 'consolidated',
+          titleEn: 'Irrigation planning',
+          summaryEn: 'The team agreed the next milestone.',
+          topics: const <String>['Project'],
+          segmentCount: 3,
+          segments: <TranscriptSegment>[
+            line('a1', 'First compact line', 12),
+            line('a2', 'Second compact line', 10),
+            line('a3', 'Hidden until expanded', 9),
+          ],
         ),
-      );
+        TimelineMoment(
+          id: 'conversation-b',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 6)),
+          endedAt: now.subtract(const Duration(minutes: 5)),
+          state: 'closed',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: <TranscriptSegment>[
+            TranscriptSegment(
+              id: 'b1',
+              text: 'A separate recent moment',
+              startedAt: now.subtract(const Duration(minutes: 6)),
+              endedAt: now.subtract(const Duration(minutes: 5)),
+              speaker: 'Morgan',
+              conversationId: 'conversation-b',
+            ),
+          ],
+        ),
+      ];
+    addTearDown(controller.dispose);
 
-      expect(find.text('2 moments · 4 segments'), findsOneWidget);
-      expect(find.text('1 more segment'), findsOneWidget);
-      expect(find.textContaining('Hidden until expanded'), findsNothing);
-      expect(tester.takeException(), isNull);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: TimelineScreen(controller: controller),
+      ),
+    );
 
-      await tester.tap(find.text('1 more segment'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Hidden until expanded'), findsOneWidget);
-      expect(find.text('Show less'), findsOneWidget);
-    },
-  );
+    expect(find.text('2 moments · 4 segments'), findsOneWidget);
+    expect(find.text('1 more line'), findsOneWidget);
+    expect(find.textContaining('Hidden until expanded'), findsNothing);
+    // A conversation with no write-up yet says so rather than looking finished.
+    expect(find.text('Summary on the way'), findsOneWidget);
+    // The rewrite is an action on an open moment, not clutter on a closed one.
+    expect(find.text('Write up again'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('1 more line'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Hidden until expanded'), findsOneWidget);
+    expect(find.text('Show less'), findsOneWidget);
+    expect(find.text('Write up again'), findsOneWidget);
+  });
 
   testWidgets('account registration remains reachable in a short viewport', (
     tester,

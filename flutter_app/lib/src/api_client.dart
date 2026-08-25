@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -18,6 +19,17 @@ class ApiException implements Exception {
   @override
   String toString() => message;
 }
+
+/// A request that ran out of time, said in the reader's terms.
+///
+/// Dart reports a lapsed deadline as "Future not completed", which is true of
+/// the code and meaningless to the person waiting. Every screen shows what the
+/// client throws, so the translation belongs here rather than in each caller.
+ApiException _requestTimedOut() => const ApiException(
+  0,
+  'REQUEST_TIMEOUT',
+  'The server did not respond in time. Check that it is running and reachable, then try again.',
+);
 
 class NeoRecallApiClient {
   NeoRecallApiClient({
@@ -77,12 +89,17 @@ class NeoRecallApiClient {
   }
 
   Future<Uint8List> speakerPreview(String speakerId) async {
-    final response = await _client
-        .get(
-          _resolve('/api/v1/speakers/$speakerId/preview'),
-          headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
-        )
-        .timeout(requestTimeout);
+    late http.Response response;
+    try {
+      response = await _client
+          .get(
+            _resolve('/api/v1/speakers/$speakerId/preview'),
+            headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
+          )
+          .timeout(requestTimeout);
+    } on TimeoutException {
+      throw _requestTimedOut();
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
     }
@@ -125,6 +142,7 @@ class NeoRecallApiClient {
           'error': error.toString(),
         },
       );
+      if (error is TimeoutException) throw _requestTimedOut();
       rethrow;
     }
     if (response.statusCode >= 400) {
@@ -461,11 +479,19 @@ class NeoRecallApiClient {
           filename: '$filename.part-$part',
         ),
       );
-      _decode(
-        await http.Response.fromStream(
+      late http.Response partResponse;
+      try {
+        partResponse = await http.Response.fromStream(
           await _client.send(partRequest).timeout(uploadTimeout),
-        ).timeout(uploadTimeout),
-      );
+        ).timeout(uploadTimeout);
+      } on TimeoutException {
+        throw const ApiException(
+          0,
+          'UPLOAD_CONNECTION_INTERRUPTED',
+          'The connection was interrupted while uploading. Try the import again.',
+        );
+      }
+      _decode(partResponse);
     }
     await request('POST', '/api/v1/imports/$id/complete');
   }

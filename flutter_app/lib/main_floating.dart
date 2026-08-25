@@ -16,7 +16,7 @@ class FloatingCaptureWindow extends StatefulWidget {
     required this.controller,
     required this.onOpenLibrary,
     required this.onHide,
-    required this.onDismissMeeting,
+    this.onConsentVisibilityChanged,
     this.meetingActivity,
     this.meetingEnded = false,
   });
@@ -26,7 +26,7 @@ class FloatingCaptureWindow extends StatefulWidget {
   final bool meetingEnded;
   final VoidCallback onOpenLibrary;
   final VoidCallback onHide;
-  final VoidCallback onDismissMeeting;
+  final Future<void> Function(bool visible)? onConsentVisibilityChanged;
 
   @override
   State<FloatingCaptureWindow> createState() => _FloatingCaptureWindowState();
@@ -72,35 +72,45 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
 
   Future<bool> _confirmConsent() async {
     if (widget.controller.consentAccepted) return true;
-    final accepted =
-        await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            scrollable: true,
-            insetPadding: const EdgeInsets.all(12),
-            titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-            contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            title: const Text('Before you record'),
-            content: const Text(
-              'Tell everyone that NeoRecall is recording and make sure you are '
-              'allowed to capture the conversation. Recording is always visibly '
-              'indicated.',
+    await widget.onConsentVisibilityChanged?.call(true);
+    if (!mounted) {
+      await widget.onConsentVisibilityChanged?.call(false);
+      return false;
+    }
+    bool accepted;
+    try {
+      accepted =
+          await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              scrollable: true,
+              insetPadding: const EdgeInsets.all(12),
+              titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              title: const Text('Before you record'),
+              content: const Text(
+                'Tell everyone that NeoRecall is recording and make sure you '
+                'are allowed to capture the conversation. Recording is always '
+                'visibly indicated.',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('I understand'),
+                ),
+              ],
             ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('I understand'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+          ) ??
+          false;
+    } finally {
+      await widget.onConsentVisibilityChanged?.call(false);
+    }
     if (accepted) await widget.controller.acceptConsent();
     return accepted;
   }
@@ -148,13 +158,11 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
 
   String get _headline {
     if (widget.controller.isRecording) {
-      return widget.meetingEnded
-          ? 'Meeting ended?'
-          : 'Listening in the background';
+      return widget.meetingEnded ? 'Meeting ended?' : 'Recording';
     }
     final activity = widget.meetingActivity;
-    if (activity != null) return '${activity.application} meeting detected';
-    return 'Ready when the conversation starts';
+    if (activity != null) return '${activity.application} detected';
+    return 'Ready to record';
   }
 
   String get _supportingText {
@@ -162,13 +170,13 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
     if (issue?.trim().isNotEmpty == true) return issue!.trim();
     if (widget.controller.isRecording) {
       return widget.meetingEnded
-          ? 'Stop when everyone is done. Your audio stays queued until its transcript is safely persisted.'
-          : '$_activeSourceLabel · private, visible capture';
+          ? 'Finish when everyone is done'
+          : _activeSourceLabel;
     }
     if (widget.meetingActivity != null) {
-      return 'Capture both sides without adding a bot to the call.';
+      return 'Mic + device audio ready';
     }
-    return 'NeoRecall is watching for meeting apps.';
+    return 'Mic + device audio · meeting detection on';
   }
 
   String get _activeSourceLabel {
@@ -182,241 +190,192 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
     return 'Audio capture';
   }
 
-  List<Widget> _sourceBadges(bool recording) {
-    final capability = widget.controller.capability;
-    final showMicrophone = !recording || capability?.microphone == true;
-    final showSystemAudio = !recording || capability?.systemAudio == true;
-    return <Widget>[
-      if (showMicrophone)
-        const _SourceBadge(icon: Icons.mic_none_rounded, label: 'Mic'),
-      if (showMicrophone && showSystemAudio) const SizedBox(width: 6),
-      if (showSystemAudio)
-        const _SourceBadge(
-          icon: Icons.volume_up_outlined,
-          label: 'Device audio',
-        ),
-    ];
-  }
-
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final palette = neoRecallPaletteOf(context);
     final recording = controller.isRecording;
-    final attention = widget.meetingEnded || widget.meetingActivity != null;
     final tint = recording ? palette.secondary : palette.accent;
+    final issue = _operationError ?? controller.warning;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Padding(
-        padding: const EdgeInsets.all(8),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: palette.bgCard,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: palette.borderLight),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.18),
-                blurRadius: 28,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(22),
-            child: Column(
-              children: <Widget>[
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => windowManager.startDragging(),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 8, 4),
-                    child: Row(
-                      children: <Widget>[
-                        const BrandLockup(logoSize: 24),
-                        const Spacer(),
-                        _WindowAction(
-                          tooltip: 'Open notes library',
-                          icon: Icons.open_in_full_rounded,
-                          onPressed: widget.onOpenLibrary,
-                        ),
-                        _WindowAction(
-                          tooltip: 'Hide',
-                          icon: Icons.close_rounded,
-                          onPressed: widget.onHide,
-                        ),
-                      ],
+        padding: const EdgeInsets.all(5),
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanStart: (_) => windowManager.startDragging(),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: palette.bgCard,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: palette.borderLight),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.20),
+                  blurRadius: 18,
+                  offset: const Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 7, 8),
+              child: Row(
+                children: <Widget>[
+                  const BrandLockup(logoSize: 28, showName: false),
+                  const SizedBox(width: 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: tint.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: CustomPaint(
+                      painter: _WaveformPainter(
+                        level: recording ? controller.audioLevel : 0.12,
+                        color: tint,
+                        active: recording,
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                    child: Column(
-                      children: <Widget>[
-                        Expanded(
-                          child: Row(
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Tooltip(
+                      message: issue?.trim().isNotEmpty == true
+                          ? issue!.trim()
+                          : _supportingText,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
                             children: <Widget>[
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 220),
-                                width: 76,
-                                height: 58,
-                                decoration: BoxDecoration(
-                                  color: tint.withValues(alpha: 0.10),
-                                  borderRadius: BorderRadius.circular(16),
+                              if (recording)
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: palette.secondary,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                                child: CustomPaint(
-                                  painter: _WaveformPainter(
-                                    level: recording
-                                        ? controller.audioLevel
-                                        : 0.08,
-                                    color: tint,
-                                    active: recording,
+                              Expanded(
+                                child: Text(
+                                  _headline,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: palette.textPrimary,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.15,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 13),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    Row(
-                                      children: <Widget>[
-                                        if (recording)
-                                          Container(
-                                            width: 7,
-                                            height: 7,
-                                            margin: const EdgeInsets.only(
-                                              right: 7,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: palette.secondary,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                        Expanded(
-                                          child: Text(
-                                            _headline,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              color: palette.textPrimary,
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w700,
-                                              letterSpacing: -0.3,
-                                            ),
-                                          ),
-                                        ),
-                                        if (recording)
-                                          Text(
-                                            _elapsed,
-                                            style: TextStyle(
-                                              color: palette.textPrimary,
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              fontFeatures: const <FontFeature>[
-                                                FontFeature.tabularFigures(),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      _supportingText,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: _operationError != null
-                                            ? palette.secondary
-                                            : palette.textMuted,
-                                        fontSize: 11.5,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (attention && !recording)
-                                IconButton(
-                                  tooltip: 'Dismiss',
-                                  onPressed: widget.onDismissMeeting,
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 17,
+                              if (recording)
+                                Text(
+                                  _elapsed,
+                                  style: TextStyle(
+                                    color: palette.textSecondary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    fontFeatures: const <FontFeature>[
+                                      FontFeature.tabularFigures(),
+                                    ],
                                   ),
                                 ),
                             ],
                           ),
-                        ),
-                        Row(
-                          children: <Widget>[
-                            ..._sourceBadges(recording),
-                            const Spacer(),
-                            SizedBox(
-                              width: 150,
-                              child: FilledButton(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: recording
-                                      ? palette.secondary
-                                      : palette.textPrimary,
-                                  foregroundColor: palette.bgCard,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                ),
-                                onPressed: _changingRecordingState
-                                    ? null
-                                    : _toggleRecording,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: <Widget>[
-                                    if (_changingRecordingState)
-                                      const SizedBox.square(
-                                        dimension: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    else
-                                      Icon(
-                                        recording
-                                            ? Icons.stop_rounded
-                                            : Icons.fiber_manual_record_rounded,
-                                        size: 17,
-                                      ),
-                                    const SizedBox(width: 7),
-                                    Flexible(
-                                      child: Text(
-                                        _changingRecordingState
-                                            ? recording
-                                                  ? 'Finishing…'
-                                                  : 'Starting…'
-                                            : recording
-                                            ? 'Finish'
-                                            : widget.meetingActivity != null
-                                            ? 'Record meeting'
-                                            : 'Record',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _supportingText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: _operationError != null
+                                  ? palette.secondary
+                                  : palette.textMuted,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w500,
                             ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  _RecordControl(
+                    recording: recording,
+                    busy: _changingRecordingState,
+                    onPressed: _toggleRecording,
+                  ),
+                  const SizedBox(width: 4),
+                  _WindowAction(
+                    tooltip: 'Open library',
+                    icon: Icons.open_in_full_rounded,
+                    onPressed: widget.onOpenLibrary,
+                  ),
+                  _WindowAction(
+                    tooltip: 'Hide',
+                    icon: Icons.close_rounded,
+                    onPressed: widget.onHide,
+                  ),
+                ],
+              ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordControl extends StatelessWidget {
+  const _RecordControl({
+    required this.recording,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  final bool recording;
+  final bool busy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return Tooltip(
+      message: busy
+          ? 'Working…'
+          : recording
+          ? 'Finish recording'
+          : 'Record',
+      child: SizedBox.square(
+        dimension: 42,
+        child: FilledButton(
+          style: FilledButton.styleFrom(
+            shape: const CircleBorder(),
+            padding: EdgeInsets.zero,
+            backgroundColor: recording
+                ? palette.secondary
+                : palette.textPrimary,
+            foregroundColor: palette.bgCard,
+          ),
+          onPressed: busy ? null : onPressed,
+          child: busy
+              ? const SizedBox.square(
+                  dimension: 15,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  recording
+                      ? Icons.stop_rounded
+                      : Icons.fiber_manual_record_rounded,
+                  size: 18,
+                ),
         ),
       ),
     );
@@ -435,47 +394,16 @@ class _WindowAction extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-    tooltip: tooltip,
-    visualDensity: VisualDensity.compact,
-    onPressed: onPressed,
-    icon: Icon(icon, size: 17),
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 30,
+    child: IconButton(
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+    ),
   );
-}
-
-class _SourceBadge extends StatelessWidget {
-  const _SourceBadge({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: palette.bgSecondary,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: palette.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 13, color: palette.textMuted),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: palette.textSecondary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _WaveformPainter extends CustomPainter {

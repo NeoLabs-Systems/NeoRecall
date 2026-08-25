@@ -37,6 +37,7 @@ const schema = z.object({
   minMemoryEvidenceChars: z.number().int().min(0).max(1_000_000).optional(),
   maxConsolidationInputChars: z.number().int().min(1_000).max(2_000_000).optional(),
   maxConsolidationConversations: z.number().int().min(1).max(200).optional(),
+  maxMemoryContinuationCandidates: z.number().int().min(0).max(32).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),
   consolidationMaxFailures: z.number().int().min(1).max(100).optional(),
 }).strict();

@@ -29,6 +29,11 @@ const MEMORY_MAX_COUNT = 3;
 const MINI_MEMORY_MAX_COUNT = 8;
 const ENTITY_MAX_COUNT = 16;
 const ENTITY_REFERENCE_MAX_COUNT = 8;
+// Existing cards one output memory may identify as fragments of its occasion.
+// Candidate retrieval uses the configurable context limit; this grammar cap is
+// the final safety bound for providers that enforce JSON Schema during decoding.
+const CONTINUATION_MEMORY_MAX_COUNT = 32;
+const CONTINUATION_REASONING_MAX_LENGTH = 400;
 // A single consumer-facing emoji (may be multi-codepoint, e.g. 👨‍👩‍👧‍👦).
 const EMOJI_MAX_LENGTH = 16;
 const DEFAULT_MEMORY_EMOJI = Object.freeze({
@@ -109,6 +114,16 @@ const miniMemory = z.object({
 const memory = z.object({
   type: z.enum(MEMORY_TYPES),
   continuesPrevious,
+  // Answered before the claim itself: a short statement of what makes this the
+  // same occasion as a candidate, or what makes it a different one. Deciding
+  // out loud measurably improves the decision, and it is what makes a wrong
+  // merge explainable afterwards instead of a mystery.
+  // Trimmed rather than rejected: the wire schema drops length bounds so the
+  // grammar stays compilable, and a long-winded reason must never be the thing
+  // that fails a whole consolidation.
+  continuationReasoning: boundedText(CONTINUATION_REASONING_MAX_LENGTH).nullable().default(null),
+  continuesMemoryIds: z.array(z.string().min(1)).max(CONTINUATION_MEMORY_MAX_COUNT)
+    .refine((ids) => new Set(ids).size === ids.length, 'Continuation memory ids must be unique.').default([]),
   titleEn: boundedText(TITLE_MAX_LENGTH), summaryEn: boundedText(SUMMARY_MAX_LENGTH),
   // One emoji that visually categorizes the occasion for the consumer list.
   emoji: z.string().min(1).max(EMOJI_MAX_LENGTH),
@@ -208,10 +223,18 @@ const consolidationJsonSchema = {
       type: 'array', maxItems: MEMORY_MAX_COUNT,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['type', 'continuesPrevious', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
+        required: ['type', 'continuesPrevious', 'continuationReasoning', 'continuesMemoryIds', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
         properties: {
           type: { type: 'string', enum: [...MEMORY_TYPES] },
           continuesPrevious: continuesPreviousJsonSchema,
+          // Ordered before the claim on purpose: a constrained decoder emits
+          // these fields in schema order, so the reason is written while the
+          // answer is still open rather than justified after the fact.
+          continuationReasoning: { type: ['string', 'null'], maxLength: CONTINUATION_REASONING_MAX_LENGTH },
+          continuesMemoryIds: {
+            type: 'array', maxItems: CONTINUATION_MEMORY_MAX_COUNT,
+            items: { type: 'string', minLength: 1 },
+          },
           titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
           summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
           emoji: { type: 'string', minLength: 1, maxLength: EMOJI_MAX_LENGTH },
@@ -240,12 +263,29 @@ const consolidationJsonSchema = {
   },
 };
 
-function consolidationJsonSchemaFor(segmentIds) {
+function consolidationJsonSchemaFor(segmentIds, continuationMemoryIds = []) {
   const schema = JSON.parse(JSON.stringify(consolidationJsonSchema));
   schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum = segmentIds;
   const memorySchema = schema.properties.memories.items;
   memorySchema.properties.sourceSegmentIds.items.enum = segmentIds;
   memorySchema.properties.miniMemories.items.properties.sourceSegmentIds.items.enum = segmentIds;
+  if (continuationMemoryIds.length) {
+    // With candidates on the table the reason is not optional. Left nullable, a
+    // small model takes the cheap path and answers without deciding — which is
+    // exactly the failure this field exists to prevent.
+    memorySchema.properties.continuationReasoning = {
+      type: 'string', minLength: 1, maxLength: CONTINUATION_REASONING_MAX_LENGTH,
+    };
+    memorySchema.properties.continuesMemoryIds.maxItems = Math.min(
+      CONTINUATION_MEMORY_MAX_COUNT,
+      continuationMemoryIds.length,
+    );
+    memorySchema.properties.continuesMemoryIds.items.enum = continuationMemoryIds;
+  } else {
+    // Nothing to continue: neither a claim nor a reason for one.
+    memorySchema.properties.continuesMemoryIds.maxItems = 0;
+    memorySchema.properties.continuationReasoning = { type: 'null' };
+  }
   return schema;
 }
 
@@ -285,4 +325,6 @@ module.exports = {
   MEMORY_MAX_COUNT,
   MINI_MEMORY_MAX_COUNT,
   ENTITY_MAX_COUNT,
+  CONTINUATION_MEMORY_MAX_COUNT,
+  CONTINUATION_REASONING_MAX_LENGTH,
 };

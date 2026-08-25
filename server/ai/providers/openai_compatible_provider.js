@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const http = require('node:http');
+const https = require('node:https');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
@@ -177,6 +179,41 @@ async function chatJSON(request) {
   }
 }
 
+/// One JSON POST whose deadline is the configured one.
+///
+/// Global fetch abandons a request whose response headers have not arrived
+/// within five minutes and reports it as "fetch failed". A model running on a
+/// modest machine can easily need longer than that to answer for a long
+/// conversation, and the operator's own allowance is what should decide when
+/// to give up — not a hidden default, and not with a message that names no
+/// cause. The timeout here is an inactivity timeout, so a model that is
+/// answering steadily is never cut off for taking its time.
+function postJson(url, { headers, body, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const transport = target.protocol === 'https:' ? https : http;
+    const request = transport.request(target, { method: 'POST', headers }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let payload = {};
+        try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
+        resolve({ status: response.statusCode, ok: response.statusCode >= 200 && response.statusCode < 300, payload });
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(Object.assign(
+        new Error(`The model sent nothing for ${Math.round(timeoutMs / 1000)} seconds.`),
+        { code: 'AI_TIMEOUT' },
+      ));
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+}
+
 async function sendChat({ userId, purpose, messages, responseFormat = null, maxTokens = null }, extraBody) {
   const config = getConfig();
   const settings = providerSettings.getRuntime().llm;
@@ -188,12 +225,9 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
   const db = getDatabase();
   db.prepare(`INSERT INTO ai_requests (id,user_id,purpose,provider,model,state,reserved_at,sent_at)
     VALUES (?,?,?,?,?,'sent',?,?)`).run(id, userId, purpose, settings.provider, model, now, now);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.aiTimeoutMs);
   const startedAt = Date.now();
   try {
-    const response = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: 'POST', signal: controller.signal,
+    const response = await postJson(`${settings.baseUrl}/chat/completions`, {
       headers: {
         'Content-Type': 'application/json',
         ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
@@ -203,8 +237,9 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(extraBody || {}),
       }),
+      timeoutMs: config.aiTimeoutMs,
     });
-    const payload = await response.json().catch(() => ({}));
+    const { payload } = response;
     if (!response.ok) {
       const detail = payload?.error?.message || `The AI endpoint returned HTTP ${response.status}.`;
       if (contextOverflow(response.status, payload, detail)) {
@@ -240,7 +275,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     error.code = code;
     error.aiRequestId = id;
     throw error;
-  } finally { clearTimeout(timer); }
+  }
 }
 
 module.exports = { chatJSON, ready, contextOverflow, schemaRejected, wireSchema, wireResponseFormat, NO_THINKING };

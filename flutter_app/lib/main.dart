@@ -137,13 +137,15 @@ class _NeoRecallAppState extends State<NeoRecallApp>
         _meetingActivity = activity;
         _meetingEnded = false;
       });
-      if (!controller.isRecording) unawaited(_enterFloatingMode());
+      if (!controller.isRecording) {
+        unawaited(_enterFloatingMode(activate: false));
+      }
       return;
     }
     if (_meetingActivity?.application == activity.application) {
       if (controller.isRecording) {
         setState(() => _meetingEnded = true);
-        unawaited(_enterFloatingMode());
+        unawaited(_enterFloatingMode(activate: false));
       } else {
         setState(() {
           _meetingActivity = null;
@@ -153,12 +155,12 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     }
   }
 
-  Future<void> _enterFloatingMode() async {
+  Future<void> _enterFloatingMode({bool activate = true}) async {
     if (!_desktop || !controller.authenticated || _configuringWindow) return;
     _configuringWindow = true;
     try {
       if (mounted && !_floatingMode) setState(() => _floatingMode = true);
-      await _window.showFloating();
+      await _window.showFloating(activate: activate);
     } finally {
       _configuringWindow = false;
     }
@@ -254,10 +256,9 @@ class _NeoRecallAppState extends State<NeoRecallApp>
                   meetingEnded: _meetingEnded,
                   onOpenLibrary: () => _openLibrary(),
                   onHide: () => _hideWindow(),
-                  onDismissMeeting: () => setState(() {
-                    _meetingActivity = null;
-                    _meetingEnded = false;
-                  }),
+                  onConsentVisibilityChanged: (visible) => visible
+                      ? _window.showConsentSurface()
+                      : _window.showFloating(),
                 )
               : NeoRecallShell(controller: controller)
         : NeoRecallAuthScreen(controller: controller),

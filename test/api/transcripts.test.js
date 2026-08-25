@@ -93,3 +93,12 @@ test('one account never sees another account transcripts', async () => {
   assert.ok(response.body.items.every((item) => item.user_id === mine.userId));
   assert.ok(!response.body.items.some((item) => item.user_id === theirs.userId));
 });
+
+test('a timeline page can hold a long day of recording', async () => {
+  const account = await accountWithHistory('transcripts-large-page', 600);
+  const response = await request(app).get('/api/v1/transcripts?limit=500')
+    .set('Authorization', `Bearer ${account.token}`).expect(200);
+  assert.equal(response.body.items.length, 500, 'a page must be able to hold far more than a hundred segments');
+  assert.equal(response.body.items[0].text, 'utterance 599');
+  assert.ok(response.body.nextCursor, 'the rest of the history stays reachable');
+});

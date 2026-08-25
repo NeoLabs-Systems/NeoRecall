@@ -24,6 +24,7 @@ import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
 import 'src/models/speaker.dart';
+import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
@@ -363,18 +364,40 @@ class NeoRecallController extends ChangeNotifier {
   List<Map<String, dynamic>> securityKeys = const <Map<String, dynamic>>[];
   RecallPage page = RecallPage.record;
   List<RecordingSession> recordings = <RecordingSession>[];
-  List<TranscriptSegment> transcript = <TranscriptSegment>[];
-  /// Where the transcript page ended, so older segments can be pulled in on
-  /// demand. The timeline shows the most recent recordings first; without a way
-  /// to reach further back, a long history would simply stop at the page edge.
-  String? _transcriptCursor;
-  bool isLoadingOlderTranscript = false;
-  bool get hasOlderTranscript => _transcriptCursor != null;
+
+  /// The timeline reads as moments: one conversation with everything said in
+  /// it. A page holds a handful of them, and each page remembers the cursor it
+  /// was reached by, so moving back towards today is a lookup rather than a
+  /// refetch from the start of the history.
+  static const int momentPageSize = 8;
+  List<TimelineMoment> moments = <TimelineMoment>[];
+  final List<String?> _momentPageCursors = <String?>[null];
+  String? _momentNextCursor;
+  int momentPage = 0;
+  bool isPagingMoments = false;
+  String? reprocessingMomentId;
+
+  /// Full transcripts for moments the reader has opened. A timeline refresh
+  /// carries only a preview of each moment, so opening one fetches the rest
+  /// once and keeps it for as long as the page is on screen.
+  final Map<String, List<TranscriptSegment>> momentTranscripts =
+      <String, List<TranscriptSegment>>{};
+  final Set<String> loadingMomentTranscripts = <String>{};
+  bool get hasOlderMoments => _momentNextCursor != null;
+  bool get hasNewerMoments => momentPage > 0;
+
+  String _momentPath([String? cursor]) {
+    final path = '/api/v1/conversations/timeline?limit=$momentPageSize';
+    return cursor == null
+        ? path
+        : '$path&before=${Uri.encodeQueryComponent(cursor)}';
+  }
+
   List<RecallMemory> memories = <RecallMemory>[];
   List<MiniMemory> miniMemories = <MiniMemory>[];
   List<RecallSpeaker> speakers = <RecallSpeaker>[];
   List<Map<String, dynamic>> devices = <Map<String, dynamic>>[];
-  List<Map<String, dynamic>> conversations = <Map<String, dynamic>>[];
+
   /// Why the timeline looks the way it does. Empty means nothing is wrong; an
   /// entry means something is holding recordings up and the user should be told
   /// rather than left staring at a screen that says there is nothing here.
@@ -717,7 +740,11 @@ class NeoRecallController extends ChangeNotifier {
             accountId: accountId,
           );
         } else {
-          await audioDeviceRegistry.initializeAll();
+          // Desktop Bluetooth is permission-gated and optional. Initializing
+          // every adapter here made an ordinary sign-in touch CoreBluetooth,
+          // which can terminate a native process before Flutter can recover
+          // from a packaging/TCC problem. Adapters initialize themselves when
+          // the user scans or reconnects a selected wearable.
           await audioDeviceSessions.bindAccount(accountId);
         }
         _deviceRuntimeInitialized = true;
@@ -2658,8 +2685,8 @@ class NeoRecallController extends ChangeNotifier {
     }
     try {
       // Each section is fetched independently on purpose. These used to share a
-      // single Future.wait, so one endpoint failing threw away all nine
-      // responses and the whole app came up empty — a day of recordings could
+      // single Future.wait, so one endpoint failing threw away every
+      // response and the whole app came up empty — a day of recordings could
       // be perfectly safe on the server and still show as nothing at all.
       //
       // What you have should never depend on what you cannot have: if writing up
@@ -2668,24 +2695,29 @@ class NeoRecallController extends ChangeNotifier {
       final failures = <String>[];
       Future<Map<String, dynamic>?> section(String path) async {
         try {
-          return Map<String, dynamic>.from(await api.request('GET', path) as Map);
+          return Map<String, dynamic>.from(
+            await api.request('GET', path) as Map,
+          );
         } catch (exception) {
           failures.add(path);
           return null;
         }
       }
 
-      final results = await Future.wait<Map<String, dynamic>?>(<Future<Map<String, dynamic>?>>[
-        section('/api/v1/recordings'),
-        section('/api/v1/memories?archived=all&limit=200'),
-        section('/api/v1/mini-memories?limit=200'),
-        section('/api/v1/speakers'),
-        section('/api/v1/devices'),
-        section('/api/v1/transcripts?limit=250'),
-        section('/api/v1/conversations?limit=100'),
-        section('/api/v1/daily-summaries?limit=100'),
-        section('/api/v1/processing-status'),
-      ]);
+      final results = await Future.wait<Map<String, dynamic>?>(
+        <Future<Map<String, dynamic>?>>[
+          section('/api/v1/recordings'),
+          section('/api/v1/memories?archived=all&limit=200'),
+          section('/api/v1/mini-memories?limit=200'),
+          section('/api/v1/speakers'),
+          section('/api/v1/devices'),
+          // Each timeline moment already carries its conversation, so the
+          // conversation list is no longer fetched alongside it.
+          section(_momentPath(_momentPageCursors[momentPage])),
+          section('/api/v1/daily-summaries?limit=100'),
+          section('/api/v1/processing-status'),
+        ],
+      );
       List<Map<String, dynamic>> rows(int index, String key) =>
           ((results[index]?[key] as List?) ?? <dynamic>[])
               .cast<Map>()
@@ -2693,9 +2725,7 @@ class NeoRecallController extends ChangeNotifier {
               .toList();
       // A section that failed keeps whatever it had rather than being blanked.
       if (results[0] != null) {
-        recordings = rows(0, 'items')
-            .map(RecordingSession.fromJson)
-            .toList();
+        recordings = rows(0, 'items').map(RecordingSession.fromJson).toList();
       }
       if (results[1] != null) {
         memories = rows(1, 'items').map(RecallMemory.fromJson).toList();
@@ -2708,14 +2738,13 @@ class NeoRecallController extends ChangeNotifier {
       }
       if (results[4] != null) devices = rows(4, 'devices');
       if (results[5] != null) {
-        transcript = rows(5, 'items').map(TranscriptSegment.fromJson).toList();
-        _transcriptCursor = results[5]?['nextCursor']?.toString();
+        moments = rows(5, 'moments').map(TimelineMoment.fromJson).toList();
+        _momentNextCursor = results[5]?['nextCursor']?.toString();
       }
-      if (results[6] != null) conversations = rows(6, 'items');
-      if (results[7] != null) dailySummaries = rows(7, 'items');
-      final processing = results[8];
+      if (results[6] != null) dailySummaries = rows(6, 'items');
+      final processing = results[7];
       if (processing != null) {
-        processingIssues = rows(8, 'issues');
+        processingIssues = rows(7, 'issues');
         processingSummary = processing['summary']?.toString() ?? '';
         audioStillOnDevice =
             ((processing['audio'] as Map?)?['stillOnYourDevice'] as num?)
@@ -2739,35 +2768,113 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
-  /// Pulls in the page of transcript before the oldest one on screen. Failing
-  /// here leaves what is already shown untouched: reaching further back is a
-  /// convenience, and losing today's timeline to fetch yesterday's would be a
-  /// poor trade.
-  Future<void> loadOlderTranscript() async {
-    final cursor = _transcriptCursor;
-    if (cursor == null || isLoadingOlderTranscript) return;
-    isLoadingOlderTranscript = true;
+  /// Moves one page further back in time. The cursor names the oldest moment
+  /// already shown, so a page that arrives while reading does not open a gap
+  /// or repeat what is on screen.
+  Future<void> showOlderMoments() =>
+      _switchMomentPage(momentPage + 1, _momentNextCursor);
+
+  /// Moves one page back towards today.
+  Future<void> showNewerMoments() => _switchMomentPage(
+    momentPage - 1,
+    momentPage - 1 >= 0 ? _momentPageCursors[momentPage - 1] : null,
+  );
+
+  Future<void> _switchMomentPage(int page, String? cursor) async {
+    if (page < 0 || isPagingMoments) return;
+    if (page > momentPage && cursor == null) return;
+    isPagingMoments = true;
     notifyListeners();
     try {
       final payload = Map<String, dynamic>.from(
-        await api.request('GET', '/api/v1/transcripts?limit=250&before=$cursor') as Map,
+        await api.request('GET', _momentPath(cursor)) as Map,
       );
-      final older = ((payload['items'] as List?) ?? <dynamic>[])
+      moments = ((payload['moments'] as List?) ?? <dynamic>[])
           .cast<Map>()
-          .map((row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)))
+          .map((row) => TimelineMoment.fromJson(Map<String, dynamic>.from(row)))
           .toList();
-      final known = transcript.map((segment) => segment.id).toSet();
-      transcript = <TranscriptSegment>[
-        ...transcript,
-        ...older.where((segment) => !known.contains(segment.id)),
-      ];
-      _transcriptCursor = payload['nextCursor']?.toString();
+      if (page < _momentPageCursors.length) {
+        _momentPageCursors[page] = cursor;
+      } else {
+        _momentPageCursors.add(cursor);
+      }
+      momentPage = page;
+      _momentNextCursor = payload['nextCursor']?.toString();
     } catch (exception) {
-      warning = 'Older transcript could not be loaded just now.';
+      // Reaching further back is a convenience; losing what is already on
+      // screen to fetch it would be a poor trade.
+      warning = 'That part of the timeline could not be loaded just now.';
     } finally {
-      isLoadingOlderTranscript = false;
+      isPagingMoments = false;
       notifyListeners();
     }
+  }
+
+  /// Fetches everything said in one moment, the first time it is opened.
+  Future<void> openMomentTranscript(TimelineMoment moment) async {
+    final id = moment.id;
+    if (id == null) return;
+    if (momentTranscripts.containsKey(id) ||
+        loadingMomentTranscripts.contains(id)) {
+      return;
+    }
+    if (moment.segments.length >= moment.segmentCount) return;
+    loadingMomentTranscripts.add(id);
+    notifyListeners();
+    try {
+      final payload = Map<String, dynamic>.from(
+        await api.request('GET', '/api/v1/conversations/$id/segments') as Map,
+      );
+      momentTranscripts[id] = ((payload['segments'] as List?) ?? <dynamic>[])
+          .cast<Map>()
+          .map(
+            (row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList();
+    } catch (exception) {
+      // The preview stays on screen; only the rest is missing.
+      warning = 'The rest of this moment could not be loaded just now.';
+    } finally {
+      loadingMomentTranscripts.remove(id);
+      notifyListeners();
+    }
+  }
+
+  /// Asks for one moment to be written up again.
+  ///
+  /// The transcript is never part of this: what gets rebuilt is the title,
+  /// summary and memory the model derived from it.
+  Future<void> reprocessMoment(String conversationId) async {
+    if (reprocessingMomentId != null) return;
+    reprocessingMomentId = conversationId;
+    notifyListeners();
+    try {
+      await api.request(
+        'POST',
+        '/api/v1/conversations/$conversationId/reprocess',
+      );
+      momentTranscripts.remove(conversationId);
+      notice = 'Writing this moment up again. It will update here when ready.';
+      await refreshAll(silent: true);
+    } catch (exception) {
+      warning = _describeReprocessFailure(exception);
+    } finally {
+      reprocessingMomentId = null;
+      notifyListeners();
+    }
+  }
+
+  /// What went wrong, in the reader's terms. Nobody pressing this button is
+  /// looking at a server, so the message never quotes one.
+  String _describeReprocessFailure(Object exception) {
+    final detail = exception.toString();
+    if (detail.contains('AI_NOT_CONFIGURED')) {
+      return 'Summaries are not available right now, so this moment was left as it is.';
+    }
+    if (detail.contains('CONVERSATION_OPEN')) {
+      return 'This conversation is still being recorded.';
+    }
+    return 'This moment could not be written up again just now.';
   }
 
   Future<void> search(String query) async {
@@ -2987,10 +3094,12 @@ class NeoRecallController extends ChangeNotifier {
     } catch (error) {
       // Surface the failure so a silent no-op never masquerades as success.
       // Strip Dart's "Bad state:"/"Exception:" prefixes for a cleaner message.
-      final message = error.toString().replaceFirst(
-        RegExp(r'^(Bad state|StateError|Exception):\s*'),
-        '',
-      );
+      final message = error is TimeoutException
+          ? '$deviceName did not respond in time. Keep it nearby and awake, then try again.'
+          : error.toString().replaceFirst(
+              RegExp(r'^(Bad state|StateError|Exception):\s*'),
+              '',
+            );
       // A single transient miss (device busy, a momentary link drop) between
       // unattended sweeps is not worth alarming anyone; a repeat is.
       if (userInitiated || _deviceSyncFailureIsPersistent) {
@@ -3186,6 +3295,14 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
+  Future<Map<String, dynamic>> reevaluateSpeakers() async {
+    final result = Map<String, dynamic>.from(
+      await api.request('POST', '/api/v1/speakers/reevaluate') as Map,
+    );
+    await refreshAll(silent: true);
+    return result;
+  }
+
   Future<Map<String, dynamic>> loadSettings() => _settings();
   Future<void> updateSettings(Map<String, dynamic> changes) async {
     final payload =
@@ -3270,7 +3387,12 @@ class NeoRecallController extends ChangeNotifier {
     await refreshAll(silent: true);
   }
 
-  /// Merge two or more memories into one with a rewritten title and summary.
+  /// Merge two or more memories into one.
+  ///
+  /// The server combines evidence and highlights and answers straight away, so
+  /// the merged card can take its place in the list without anyone waiting. A
+  /// reworded title and summary follow later from a background job; the next
+  /// refresh picks them up.
   Future<Map<String, dynamic>> mergeMemories(List<String> ids) async {
     if (ids.length < 2) {
       throw StateError('Select at least two memories to merge.');
@@ -3282,8 +3404,26 @@ class NeoRecallController extends ChangeNotifier {
               body: <String, dynamic>{'ids': ids},
             )
             as Map<dynamic, dynamic>;
-    await refreshAll(silent: true);
-    return Map<String, dynamic>.from(payload);
+    final result = Map<String, dynamic>.from(payload);
+    final absorbedIds = ((result['absorbedIds'] as List?) ?? <dynamic>[])
+        .map((value) => value.toString())
+        .toSet();
+    final memoryJson = result['memory'];
+    if (memoryJson is Map) {
+      final merged = RecallMemory.fromJson(
+        Map<String, dynamic>.from(memoryJson),
+      );
+      memories = <RecallMemory>[
+        merged,
+        ...memories.where(
+          (memory) =>
+              memory.id != merged.id && !absorbedIds.contains(memory.id),
+        ),
+      ];
+      notifyListeners();
+    }
+    unawaited(refreshAll(silent: true));
+    return result;
   }
 
   void selectPage(RecallPage value) {

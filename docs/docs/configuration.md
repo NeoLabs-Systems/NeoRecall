@@ -37,6 +37,8 @@ Processing gates are off by default and remain available when an external deploy
 
 `NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS` defaults to `1`. Batching several conversations into one request used to amortize a per-request price; it also asked the model to hold several unrelated occasions in mind at once, which is the harder job and the one it does worse. One conversation per run is the accurate unit — it is what a memory is anchored to — and the next run starts on the next tick, so a backlog still drains continuously.
 
+`NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES` defaults to `8`. A run still reads one new provisional conversation, but it also shows the model a bounded set of recent or same-recording memory cards. The model must explicitly identify which, if any, are fragments of the same real-world occasion. Claimed fragments are updated or absorbed into one card while their transcript sources and existing highlights remain attached. Time and recording continuity only narrow the candidates; matching titles, keywords, or a similarity threshold never decide a merge, and a recurring lesson or meeting remains separate unless the model identifies it as the same continuous occasion.
+
 `NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are unchanged and are what keeps short speech off the timeline as a memory *card* (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary, but it is not memory-worthy: atomic facts and tasks belong in mini-memories under a larger worthy occasion. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
 
 A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter so one client cannot overwhelm the configured provider while recordings are still arriving.
@@ -253,7 +255,9 @@ The character ceiling is deliberately set above what `NEORECALL_CONVERSATION_MAX
 
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.
-Both are validated within the product's 5–10 second preview contract.
+Both are validated within the product's 1–10 second storage contract.
+`NEORECALL_SPEAKER_DISPLAY_MIN_PREVIEW_MS` controls when a profile is mature
+enough to appear on the Speakers screen and defaults to a full 10 seconds.
 
 ## NeoAgent connection
 

@@ -289,58 +289,27 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        final palette = neoRecallPaletteOf(dialogContext);
-        return AlertDialog(
-          backgroundColor: palette.bgCard,
-          content: Row(
-            children: <Widget>[
-              const SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  'Merging memories…',
-                  style: TextStyle(color: palette.textSecondary),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+    // Combining evidence and highlights is server-side bookkeeping and returns
+    // at once; only the reworded description is left to a background job. So
+    // selection closes immediately and the one message the user gets is the
+    // result, rather than a spinner and a progress note it would replace.
+    _exitSelect();
 
     try {
       final result = await controller.mergeMemories(ids);
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      _exitSelect();
-      final rewritten = result['rewritten'] == true;
+      final rewriteQueued = result['rewriteQueued'] == true;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            rewritten
-                ? 'Memories merged with a fresh description.'
+            rewriteQueued
+                ? 'Memories merged. The description will update shortly.'
                 : 'Memories merged.',
           ),
         ),
       );
-      final memoryJson = result['memory'];
-      if (memoryJson is Map) {
-        final memory = RecallMemory.fromJson(
-          Map<String, dynamic>.from(memoryJson),
-        );
-        await _openMemory(memory);
-      }
     } catch (error) {
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not merge memories: $error')),
       );
@@ -771,7 +740,10 @@ class _SelectionBar extends StatelessWidget {
     final enabled = count > 0;
     return GlassSurface(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 6,
         children: <Widget>[
           Text(
             count == 0 ? 'Select memories' : '$count selected',
@@ -781,41 +753,44 @@ class _SelectionBar extends StatelessWidget {
               fontSize: 13,
             ),
           ),
-          const Spacer(),
-          if (onMerge != null)
-            _ActionIcon(
-              tooltip: 'Merge',
-              icon: Icons.merge_type_rounded,
-              onPressed: onMerge,
-            ),
-          if (onRename != null)
-            _ActionIcon(
-              tooltip: 'Rename',
-              icon: Icons.drive_file_rename_outline_rounded,
-              onPressed: enabled ? onRename : null,
-            ),
-          _ActionIcon(
-            tooltip: 'Pin',
-            icon: Icons.push_pin_outlined,
-            onPressed: enabled ? onPin : null,
-          ),
-          _ActionIcon(
-            tooltip: 'Unpin',
-            icon: Icons.push_pin,
-            onPressed: enabled ? onUnpin : null,
-          ),
-          _ActionIcon(
-            tooltip: archiveLabel,
-            icon: archiveLabel == 'Restore'
-                ? Icons.unarchive_outlined
-                : Icons.archive_outlined,
-            onPressed: enabled ? onArchive : null,
-          ),
-          _ActionIcon(
-            tooltip: 'Delete',
-            icon: Icons.delete_outline_rounded,
-            danger: true,
-            onPressed: enabled ? onDelete : null,
+          Wrap(
+            children: <Widget>[
+              if (onMerge != null)
+                _ActionIcon(
+                  tooltip: 'Merge',
+                  icon: Icons.merge_type_rounded,
+                  onPressed: onMerge,
+                ),
+              if (onRename != null)
+                _ActionIcon(
+                  tooltip: 'Rename',
+                  icon: Icons.drive_file_rename_outline_rounded,
+                  onPressed: enabled ? onRename : null,
+                ),
+              _ActionIcon(
+                tooltip: 'Pin',
+                icon: Icons.push_pin_outlined,
+                onPressed: enabled ? onPin : null,
+              ),
+              _ActionIcon(
+                tooltip: 'Unpin',
+                icon: Icons.push_pin,
+                onPressed: enabled ? onUnpin : null,
+              ),
+              _ActionIcon(
+                tooltip: archiveLabel,
+                icon: archiveLabel == 'Restore'
+                    ? Icons.unarchive_outlined
+                    : Icons.archive_outlined,
+                onPressed: enabled ? onArchive : null,
+              ),
+              _ActionIcon(
+                tooltip: 'Delete',
+                icon: Icons.delete_outline_rounded,
+                danger: true,
+                onPressed: enabled ? onDelete : null,
+              ),
+            ],
           ),
         ],
       ),

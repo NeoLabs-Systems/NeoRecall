@@ -50,6 +50,7 @@ function getConfig() {
   const chunkMaxMs = integer('NEORECALL_CHUNK_MAX_MS', 120_000, { min: chunkMinMs });
   const speakerPreviewMinimumMs = integer('NEORECALL_SPEAKER_PREVIEW_MIN_MS', 1_000, { min: 1_000, max: 10_000 });
   const speakerPreviewMaximumMs = integer('NEORECALL_SPEAKER_PREVIEW_MAX_MS', 10_000, { min: speakerPreviewMinimumMs, max: 10_000 });
+  const speakerDisplayMinimumPreviewMs = integer('NEORECALL_SPEAKER_DISPLAY_MIN_PREVIEW_MS', 10_000, { min: 1_000, max: 10_000 });
   const relevanceWeight = number('NEORECALL_SEARCH_RELEVANCE_WEIGHT', 0.5, { min: 0 });
   const recencyWeight = number('NEORECALL_SEARCH_RECENCY_WEIGHT', 0.25, { min: 0 });
   const importanceWeight = number('NEORECALL_SEARCH_IMPORTANCE_WEIGHT', 0.25, { min: 0 });
@@ -136,6 +137,7 @@ function getConfig() {
     speakerClusterContinuityThreshold: number('NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD', 0.42, { min: -1, max: 1 }),
     speakerPreviewMinimumMs,
     speakerPreviewMaximumMs,
+    speakerDisplayMinimumPreviewMs,
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
@@ -270,6 +272,11 @@ function getConfig() {
     // it is what a memory is anchored to — and the scheduler starts the next run
     // on its next tick, so a backlog still drains continuously.
     maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 1, { min: 1, max: 200 }),
+    // Recent cards shown to the consolidation model as possible fragments of
+    // the same real-world occasion. This bounds context only: timestamps,
+    // recording continuity and transcript meaning still decide whether the
+    // model claims any candidate, and no numeric similarity score merges data.
+    maxMemoryContinuationCandidates: integer('NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES', 8, { min: 0, max: 32 }),
     // Ask is answered by the same external provider. These limits keep one
     // client from queueing more generation than the provider can work through
     // while recordings are still arriving.

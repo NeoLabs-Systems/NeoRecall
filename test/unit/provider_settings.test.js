@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-provider-settings-'));
 delete process.env.AI_PROVIDER;
@@ -15,7 +16,35 @@ const { getDatabase, closeDatabase } = require('../../server/db/database');
 const settings = require('../../server/services/settings/provider_settings_service');
 
 migrate();
+let chatServer = null;
+const chatRequests = [];
+
+/// A real endpoint on loopback.
+///
+/// The provider sends chat completions over HTTP with its own timeouts rather
+/// than through global fetch, so a stub on fetch would intercept nothing. The
+/// handler receives each parsed request body and returns { status, body }.
+async function chatEndpoint(handler) {
+  await new Promise((resolve) => (chatServer ? chatServer.close(resolve) : resolve()));
+  chatRequests.length = 0;
+  chatServer = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      chatRequests.push(body);
+      const reply = handler(body, chatRequests.length);
+      response.statusCode = reply.status || 200;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(reply.body));
+    });
+  });
+  await new Promise((resolve) => chatServer.listen(0, '127.0.0.1', resolve));
+  return `http://127.0.0.1:${chatServer.address().port}/v1`;
+}
+
 test.after(() => {
+  chatServer?.close();
   closeDatabase();
   fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true });
 });
@@ -103,29 +132,21 @@ test('reset removes admin overrides and their encrypted keys', () => {
 });
 
 test('turning off thinking is stored, resolved, and actually sent', async () => {
+  const baseUrl = await chatEndpoint(() => ({
+    body: { id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] },
+  }));
   settings.update({ llm: {
-    provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1',
+    provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl,
     extraBody: { chat_template_kwargs: { enable_thinking: false } },
   } });
   const stored = settings.getAdmin().llm;
   assert.deepEqual(stored.extraBody, { chat_template_kwargs: { enable_thinking: false } });
   assert.equal(stored.sources.extraBody, 'admin');
 
-  const originalFetch = global.fetch;
-  let sent;
-  global.fetch = async (url, options) => {
-    sent = JSON.parse(options.body);
-    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.deepEqual(sent.chat_template_kwargs, { enable_thinking: false });
-  assert.equal(sent.model, 'Qwen3.5-4B');
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
+  assert.deepEqual(chatRequests[0].chat_template_kwargs, { enable_thinking: false });
+  assert.equal(chatRequests[0].model, 'Qwen3.5-4B');
 });
 
 test('extra request JSON must be an object, not any JSON value', () => {
@@ -140,72 +161,46 @@ test('a truncated reasoning model is retried without its thinking step rather th
   // quarantines the conversation. A model that always deliberates would work
   // through an entire backlog that way, so one more attempt without the
   // deliberation beats giving up.
-  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
-  const originalFetch = global.fetch;
-  const bodies = [];
-  global.fetch = async (url, options) => {
-    const body = JSON.parse(options.body);
-    bodies.push(body);
+  const baseUrl = await chatEndpoint((body) => (
     // Thinking on: burns the budget deliberating and never answers.
-    if (body.chat_template_kwargs?.enable_thinking !== false) {
-      return new Response(JSON.stringify({ id: 'r1', usage: { completion_tokens: 400, completion_tokens_details: { reasoning_tokens: 397 } },
-        choices: [{ finish_reason: 'length', message: { content: '{"ans' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    return new Response(JSON.stringify({ id: 'r2', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    const result = await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
-    assert.deepEqual(result.value, { answer: 'ready' }, 'the second attempt is what the caller gets');
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.equal(bodies.length, 2, 'exactly one extra attempt, not a loop');
-  assert.equal(bodies[0].chat_template_kwargs, undefined,
+    body.chat_template_kwargs?.enable_thinking !== false
+      ? { body: { id: 'r1', usage: { completion_tokens: 400, completion_tokens_details: { reasoning_tokens: 397 } },
+          choices: [{ finish_reason: 'length', message: { content: '{"ans' } }] } }
+      : { body: { id: 'r2', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] } }
+  ));
+  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl, extraBody: null } });
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  const result = await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
+  assert.deepEqual(result.value, { answer: 'ready' }, 'the second attempt is what the caller gets');
+  assert.equal(chatRequests.length, 2, 'exactly one extra attempt, not a loop');
+  assert.equal(chatRequests[0].chat_template_kwargs, undefined,
     'a provider that has never heard of the field is not sent it speculatively');
-  assert.deepEqual(bodies[1].chat_template_kwargs, { enable_thinking: false });
+  assert.deepEqual(chatRequests[1].chat_template_kwargs, { enable_thinking: false });
 });
 
 test('a model that truncates even without thinking still reports truncation', async () => {
   // The rescue must not turn a real budget problem into a mystery.
-  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
-  const originalFetch = global.fetch;
-  let attempts = 0;
-  global.fetch = async () => {
-    attempts += 1;
-    return new Response(JSON.stringify({ id: 'r', usage: { completion_tokens: 400 }, choices: [{ finish_reason: 'length', message: { content: '{' } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    await assert.rejects(
-      () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
-      (error) => { assert.equal(error.code, 'AI_OUTPUT_TRUNCATED'); return true; },
-    );
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.equal(attempts, 2, 'it tries the rescue once and then stops');
+  const baseUrl = await chatEndpoint(() => ({
+    body: { id: 'r', usage: { completion_tokens: 400 }, choices: [{ finish_reason: 'length', message: { content: '{' } }] },
+  }));
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl, extraBody: null } });
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  await assert.rejects(
+    () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
+    (error) => { assert.equal(error.code, 'AI_OUTPUT_TRUNCATED'); return true; },
+  );
+  assert.equal(chatRequests.length, 2, 'it tries the rescue once and then stops');
 });
 
 test('an operator who already disabled thinking is not retried behind their back', async () => {
-  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1',
+  const baseUrl = await chatEndpoint(() => ({
+    body: { id: 'r', usage: {}, choices: [{ finish_reason: 'length', message: { content: '{' } }] },
+  }));
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl,
     extraBody: { chat_template_kwargs: { enable_thinking: false } } } });
-  const originalFetch = global.fetch;
-  let attempts = 0;
-  global.fetch = async () => {
-    attempts += 1;
-    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'length', message: { content: '{' } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    await assert.rejects(() => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }));
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.equal(attempts, 1, 'there is nothing left to try, so it does not waste a request');
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  await assert.rejects(() => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }));
+  assert.equal(chatRequests.length, 1, 'there is nothing left to try, so it does not waste a request');
 });
 
 test('a prompt that does not fit is not mistaken for a transport fault', async () => {
@@ -215,29 +210,22 @@ test('a prompt that does not fit is not mistaken for a transport fault', async (
   // re-entered the candidate set on the next tick and did it again — forever,
   // never producing a memory. It has to be a validation failure so the batch
   // narrows and the conversation is eventually set aside.
-  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
-  const originalFetch = global.fetch;
-  let attempts = 0;
-  global.fetch = async () => {
-    attempts += 1;
-    return new Response(JSON.stringify({ error: { code: 'context_length_exceeded',
-      message: "This model's maximum context length is 8192 tokens, however you requested 12000." } }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    await assert.rejects(
-      () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
-      (error) => {
-        assert.equal(error.code, 'AI_CONTEXT_EXCEEDED', 'not AI_HTTP_ERROR, which the pipeline would retry');
-        assert.match(error.message, /LLM_CONTEXT_SIZE/, 'and it names the setting that is wrong');
-        return true;
-      },
-    );
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.equal(attempts, 1, 'resending an oversized prompt cannot help, so it is not resent');
+  const baseUrl = await chatEndpoint(() => ({
+    status: 400,
+    body: { error: { code: 'context_length_exceeded',
+      message: "This model's maximum context length is 8192 tokens, however you requested 12000." } },
+  }));
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl, extraBody: null } });
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  await assert.rejects(
+    () => provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] }),
+    (error) => {
+      assert.equal(error.code, 'AI_CONTEXT_EXCEEDED', 'not AI_HTTP_ERROR, which the pipeline would retry');
+      assert.match(error.message, /LLM_CONTEXT_SIZE/, 'and it names the setting that is wrong');
+      return true;
+    },
+  );
+  assert.equal(chatRequests.length, 1, 'resending an oversized prompt cannot help, so it is not resent');
 
   const { TRANSIENT_AI_CODES } = require('../../server/ai/ai_engine');
   const { VALIDATION_FAILURE_CODES } = require('../../server/services/memories/consolidation_service');
@@ -267,35 +255,24 @@ test('retrieved evidence is trimmed to what the model can read, worst matches fi
 });
 
 test('an endpoint that cannot compile the schema still gets a usable answer', async () => {
-  // Exactly what a real installation hit: llama.cpp answering
-  // "Failed to initialize samplers: failed to parse grammar" to every request,
-  // sixteen consecutive failures, no memories for a day of recording. The
-  // message names no field, so there is nothing to correct — and guessing which
-  // keyword that build dislikes only works until the next server dislikes
-  // another one.
-  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
-  const originalFetch = global.fetch;
+  // Some builds turn a JSON schema into a grammar and reject what they cannot
+  // express. Guessing which keyword offends is a losing game; asking for plain
+  // JSON instead is not, because the contract is in the prompt and the answer
+  // is validated either way.
   const asked = [];
-  global.fetch = async (url, options) => {
-    const body = JSON.parse(options.body);
+  const baseUrl = await chatEndpoint((body) => {
     asked.push(body.response_format?.type);
-    if (body.response_format?.type === 'json_schema') {
-      return new Response(JSON.stringify({ error: { message: 'Failed to initialize samplers: failed to parse grammar' } }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    const result = await provider.chatJSON({
-      userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
-      responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object', properties: { answer: { type: 'string' } } } } },
-    });
-    assert.deepEqual(result.value, { answer: 'ready' }, 'the caller gets its answer, not a failure');
-  } finally {
-    global.fetch = originalFetch;
-  }
+    return body.response_format?.type === 'json_schema'
+      ? { status: 400, body: { error: { message: 'Failed to initialize samplers: failed to parse grammar' } } }
+      : { body: { id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] } };
+  });
+  settings.update({ llm: { provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl, extraBody: null } });
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  const result = await provider.chatJSON({
+    userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
+    responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object', properties: { answer: { type: 'string' } } } } },
+  });
+  assert.deepEqual(result.value, { answer: 'ready' }, 'the caller gets its answer, not a failure');
   assert.deepEqual(asked, ['json_schema', 'json_object'],
     'the schema is tried first and plain JSON is the fallback, never the other way round');
 });
@@ -303,22 +280,14 @@ test('an endpoint that cannot compile the schema still gets a usable answer', as
 test('a refusal that is not about the schema is not papered over', async () => {
   // The fallback must not turn a genuine problem — a bad key, a missing model —
   // into a second wasted request and a confusing error.
-  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: null } });
-  const originalFetch = global.fetch;
-  let attempts = 0;
-  global.fetch = async () => {
-    attempts += 1;
-    return new Response(JSON.stringify({ error: { message: 'model "m" not found' } }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } });
-  };
-  try {
-    const provider = require('../../server/ai/providers/openai_compatible_provider');
-    await assert.rejects(() => provider.chatJSON({
-      userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
-      responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object' } } },
-    }));
-  } finally {
-    global.fetch = originalFetch;
-  }
-  assert.equal(attempts, 1, 'no pointless second attempt');
+  const baseUrl = await chatEndpoint(() => ({
+    status: 400, body: { error: { message: 'model "m" not found' } },
+  }));
+  settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl, extraBody: null } });
+  const provider = require('../../server/ai/providers/openai_compatible_provider');
+  await assert.rejects(() => provider.chatJSON({
+    userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }],
+    responseFormat: { type: 'json_schema', json_schema: { name: 't', strict: true, schema: { type: 'object' } } },
+  }));
+  assert.equal(chatRequests.length, 1, 'no pointless second attempt');
 });
