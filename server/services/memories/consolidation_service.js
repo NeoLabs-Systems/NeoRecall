@@ -152,7 +152,7 @@ function request(userId, { manual = false } = {}) {
       const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(state.nextEligibleAt) - Date.now()) / 1000));
       throw new HttpError(429, 'CONSOLIDATION_INTERVAL', 'The consolidation interval has not elapsed.', { retryAfterSeconds, nextEligibleAt: state.nextEligibleAt });
     }
-    if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The language model is not available. Run `neorecall setup` to install it, or configure an endpoint with AI_PROVIDER=openai_compatible.');
+    if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The external language-model provider is not configured. Choose a provider and model in the admin dashboard or `.env`.');
     return state;
   }
   const id = crypto.randomUUID();

@@ -7,6 +7,7 @@ const admin = require('../services/admin/admin_service');
 const adminTwoFactor = require('../services/auth/admin_two_factor_service');
 const audit = require('../services/audit/audit_service');
 const processingSettings = require('../services/settings/processing_settings_service');
+const providerSettings = require('../services/settings/provider_settings_service');
 const { requireAdmin } = require('../middleware/admin_auth');
 const { validate } = require('../middleware/validate');
 const { slidingWindow } = require('../middleware/rate_limit');
@@ -37,6 +38,26 @@ router.put('/processing-settings', (req, res, next) => { try {
   audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'processing_settings_updated', ipAddress: req.ip, metadata: req.body });
   res.json({ settings });
 } catch (error) { next(error); } });
+router.get('/provider-settings', (req, res) => res.json({ settings: providerSettings.getAdmin() }));
+router.post('/provider-settings/models', asyncRoute(async (req, res) => res.json(await providerSettings.discoverModels(req.body))));
+router.put('/provider-settings', (req, res, next) => { try {
+  const settings = providerSettings.update(req.body);
+  const metadata = Object.fromEntries(Object.entries(req.body).map(([workload, value]) => [workload, {
+    provider: value.provider,
+    model: value.model || null,
+    baseUrl: value.baseUrl || null,
+    language: value.language || null,
+    responseFormat: value.responseFormat || null,
+    apiKeyChanged: Boolean(value.apiKey || value.clearApiKey),
+  }]));
+  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider_settings_updated', ipAddress: req.ip, metadata });
+  res.json({ settings });
+} catch (error) { next(error); } });
+router.delete('/provider-settings', (req, res) => {
+  const settings = providerSettings.clearOverrides();
+  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider_settings_reset', ipAddress: req.ip });
+  res.json({ settings });
+});
 
 router.get('/settings/2fa', (req, res) => res.json(adminTwoFactor.getStatus(req.adminAuth.adminId)));
 router.post('/settings/2fa/setup', (req, res) => res.json(adminTwoFactor.beginSetup(req.adminAuth.adminId, req.adminAuth.username)));

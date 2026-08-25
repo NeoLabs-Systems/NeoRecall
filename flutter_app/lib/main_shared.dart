@@ -54,7 +54,7 @@ class AmbientBackdrop extends StatelessWidget {
             bottom: -140,
             left: -60,
             child: _Glow(
-              color: palette.secondary.withValues(alpha: 0.10),
+              color: palette.accentAlt.withValues(alpha: 0.10),
               size: 320,
             ),
           ),

@@ -128,18 +128,66 @@ class _Sidebar extends StatelessWidget {
     final initial = safeLabel.characters.first.toUpperCase();
 
     return Container(
-      width: 236,
+      width: 276,
       decoration: BoxDecoration(
-        color: palette.bgPrimary,
+        color: palette.bgSecondary.withValues(alpha: 0.96),
         border: Border(right: BorderSide(color: palette.border)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 24,
+            offset: const Offset(4, 0),
+          ),
+        ],
       ),
       child: Column(
         children: <Widget>[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(18, 20, 16, 18),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: BrandLockup(logoSize: 30),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 16, 14),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: palette.border),
+                gradient: LinearGradient(
+                  colors: <Color>[
+                    palette.bgCard.withValues(alpha: 0.9),
+                    palette.bgSecondary.withValues(alpha: 0.55),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Row(
+                children: <Widget>[
+                  const BrandLockup(logoSize: 38, showName: false),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          'NeoRecall',
+                          style: TextStyle(
+                            color: palette.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.35,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'CONTROL SURFACE',
+                          style: sectionEyebrowStyle(
+                            palette,
+                          ).copyWith(color: palette.textMuted, fontSize: 9.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -162,7 +210,7 @@ class _Sidebar extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: palette.border),
-              color: palette.bgSecondary.withValues(alpha: 0.7),
+              color: palette.bgCard.withValues(alpha: 0.72),
             ),
             child: Row(
               children: <Widget>[
@@ -267,27 +315,43 @@ class _SidebarButtonState extends State<_SidebarButton> {
               decoration: BoxDecoration(
                 borderRadius: radius,
                 color: widget.selected
-                    ? palette.bgSecondary
+                    ? palette.bgCard.withValues(alpha: 0.96)
                     : hovering
-                    ? palette.bgSecondary.withValues(alpha: 0.58)
+                    ? palette.bgTertiary.withValues(alpha: 0.66)
                     : Colors.transparent,
+                gradient: widget.selected
+                    ? LinearGradient(
+                        colors: <Color>[
+                          palette.accent.withValues(alpha: 0.10),
+                          palette.bgCard.withValues(alpha: 0.96),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
                 border: Border.all(
                   color: widget.selected
-                      ? palette.border
+                      ? palette.borderLight
                       : hovering
                       ? palette.border
                       : Colors.transparent,
                 ),
-                boxShadow: null,
+                boxShadow: widget.selected
+                    ? <BoxShadow>[
+                        BoxShadow(
+                          color: palette.accent.withValues(alpha: 0.05),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : null,
               ),
               child: Row(
                 children: <Widget>[
                   Icon(
                     widget.icon,
                     size: 19,
-                    color: widget.selected
-                        ? palette.textPrimary
-                        : palette.textMuted,
+                    color: widget.selected ? palette.accent : palette.textMuted,
                   ),
                   const SizedBox(width: 11),
                   Expanded(
@@ -298,9 +362,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
                             ? palette.textPrimary
                             : palette.textSecondary,
                         fontSize: 13.5,
-                        fontWeight: widget.selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),

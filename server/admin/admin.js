@@ -14,10 +14,12 @@ const pages = {
   jobs: ['Jobs', 'Background processing, retries and terminal failures.'],
   ai: ['AI requests', 'Language model usage.'],
   audit: ['Audit log', 'Security-sensitive administrative changes.'],
+  providers: ['Providers', 'External language-model and transcription services.'],
   processing: ['Processing', 'Live diarization, deduplication and consolidation thresholds.'],
   security: ['Security', 'Admin authentication and access control.'],
 };
 let toastTimer;
+let providerSettingsData;
 
 async function api(path, options = {}) {
   const response = await fetch(`/admin/api/v1${path}`, {
@@ -98,19 +100,88 @@ function renderSettings(settings) {
     .join('');
 }
 
+function providerElement(workload, field) {
+  return document.querySelector(`#${workload}-${field}`);
+}
+
+function renderProviderWorkload(workload, settings, catalog) {
+  const provider = providerElement(workload, 'provider');
+  provider.innerHTML = catalog.map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</option>`).join('');
+  provider.value = settings.provider;
+  providerElement(workload, 'model').value = settings.model || '';
+  providerElement(workload, 'base-url').value = settings.baseUrl || '';
+  providerElement(workload, 'api-key').value = '';
+  providerElement(workload, 'clear-key').checked = false;
+  providerElement(workload, 'key-status').textContent = settings.apiKeyConfigured
+    ? `A key is configured from ${settings.apiKeySource}. Leave this field blank to keep it.`
+    : 'No API key is configured.';
+  if (workload === 'transcription') {
+    providerElement(workload, 'language').value = settings.language || '';
+    providerElement(workload, 'response-format').value = settings.responseFormat || '';
+  }
+}
+
+function renderProviderSettings(settings) {
+  providerSettingsData = settings;
+  renderProviderWorkload('llm', settings.llm, settings.catalogs.llm);
+  renderProviderWorkload('transcription', settings.transcription, settings.catalogs.transcription);
+}
+
+function providerDraft(workload) {
+  return {
+    workload,
+    provider: providerElement(workload, 'provider').value,
+    baseUrl: providerElement(workload, 'base-url').value.trim() || null,
+    ...(providerElement(workload, 'api-key').value.trim() ? { apiKey: providerElement(workload, 'api-key').value.trim() } : {}),
+  };
+}
+
+async function discoverProviderModels(workload, { quiet = false } = {}) {
+  const status = providerElement(workload, 'model-status');
+  const list = providerElement(workload, 'model-options');
+  status.textContent = 'Fetching available models…';
+  try {
+    const result = await api('/provider-settings/models', { method: 'POST', body: JSON.stringify(providerDraft(workload)) });
+    list.innerHTML = result.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join('');
+    status.textContent = result.automatic
+      ? 'This provider selects its transcription model automatically.'
+      : `${result.models.length} available model${result.models.length === 1 ? '' : 's'} loaded.`;
+  } catch (error) {
+    status.textContent = `Model discovery unavailable: ${error.message}`;
+    if (!quiet) throw error;
+  }
+}
+
+function providerPayload(workload) {
+  const value = {
+    provider: providerElement(workload, 'provider').value,
+    model: providerElement(workload, 'model').value.trim() || null,
+    baseUrl: providerElement(workload, 'base-url').value.trim() || null,
+    clearApiKey: providerElement(workload, 'clear-key').checked,
+  };
+  const key = providerElement(workload, 'api-key').value.trim();
+  if (key) value.apiKey = key;
+  if (workload === 'transcription') {
+    value.language = providerElement(workload, 'language').value.trim() || null;
+    value.responseFormat = providerElement(workload, 'response-format').value.trim() || null;
+  }
+  return value;
+}
+
 function renderEmpty(columns, message) {
   return `<tr><td colspan="${columns}"><div class="empty">${escapeHtml(message)}</div></td></tr>`;
 }
 
 async function load({ announce = false } = {}) {
   document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData, tfStatus] = await Promise.all([
+  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus] = await Promise.all([
     api('/stats'),
     api('/users'),
     api('/jobs?limit=50'),
     api('/ai-requests?limit=50'),
     api('/audit?limit=50'),
     api('/processing-settings'),
+    api('/provider-settings'),
     api('/settings/2fa'),
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
@@ -141,6 +212,9 @@ async function load({ announce = false } = {}) {
   jobBadge.hidden = failed === 0;
   jobBadge.textContent = String(failed);
   renderSettings(settingsData.settings);
+  renderProviderSettings(providerData.settings);
+  discoverProviderModels('llm', { quiet: true });
+  discoverProviderModels('transcription', { quiet: true });
   renderSecurity(tfStatus); // 2fa status
   document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (announce) showToast('Admin data refreshed');
@@ -215,10 +289,44 @@ document.addEventListener('click', async (event) => {
       await handleTwoFactorDisable();
     } else if (button?.dataset.tfAction === 'recovery') {
       await handleTwoFactorRecovery();
+    } else if (button?.dataset.discoverModels) {
+      await discoverProviderModels(button.dataset.discoverModels);
     }
   } catch (error) {
     showError(error);
   }
+});
+
+for (const workload of ['llm', 'transcription']) {
+  providerElement(workload, 'provider').addEventListener('change', () => {
+    const entry = providerSettingsData.catalogs[workload].find((candidate) => candidate.id === providerElement(workload, 'provider').value);
+    providerElement(workload, 'base-url').value = entry?.defaultBaseUrl || '';
+    providerElement(workload, 'model').value = entry?.defaultModel || '';
+    providerElement(workload, 'key-status').textContent = 'Enter a key for this provider, or leave blank to reuse its saved or environment key.';
+    if (workload === 'transcription') providerElement(workload, 'response-format').value = entry?.defaultResponseFormat || '';
+    discoverProviderModels(workload, { quiet: true });
+  });
+}
+
+document.querySelector('#save-provider-settings').addEventListener('click', async () => {
+  try {
+    const result = await api('/provider-settings', { method: 'PUT', body: JSON.stringify({
+      llm: providerPayload('llm'),
+      transcription: providerPayload('transcription'),
+    }) });
+    renderProviderSettings(result.settings);
+    await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
+    showToast('Provider settings saved');
+  } catch (error) { showError(error); }
+});
+
+document.querySelector('#reset-provider-settings').addEventListener('click', async () => {
+  try {
+    const result = await api('/provider-settings', { method: 'DELETE' });
+    renderProviderSettings(result.settings);
+    await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
+    showToast('Using .env provider values');
+  } catch (error) { showError(error); }
 });
 
 document.querySelector('#save-settings').addEventListener('click', async () => {

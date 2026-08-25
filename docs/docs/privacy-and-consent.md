@@ -35,17 +35,15 @@ Users can listen to, name, merge, or correct recurring identities.
 
 ## Where text goes
 
-In the default configuration, nowhere. Speech recognition, diarization,
-embeddings, search and the language model that writes memories, previews and Ask
-answers all run on the machine you installed NeoRecall on. There is no account to
-create and no credential to supply, so there is nothing to disable.
+NeoRecall sends uploaded audio to the configured transcription provider. It sends
+transcript text and retrieved context to the configured language-model provider
+for memory consolidation, live previews, summaries, and Ask. Either provider may
+be a hosted API or a compatible service deployed elsewhere on a private network;
+NeoRecall cannot infer the privacy policy of that endpoint.
 
-The one exception is deliberate: setting `AI_PROVIDER=openai_compatible` sends
-memory consolidation, live conversation previews and Ask requests as text to the
-endpoint you name in `AI_API_BASE_URL`. Whether that endpoint is another machine
-in your home or a hosted service is your decision and NeoRecall cannot tell the
-difference. Audio is never sent in either configuration. Ask sends retrieved text
-context and returns cited sources.
+Embeddings and search remain on the NeoRecall host. Provider API keys supplied
+through the admin dashboard are encrypted at rest and never returned to clients.
+Ask sends only its retrieved text context and returns cited sources.
 
 ## Account isolation
 

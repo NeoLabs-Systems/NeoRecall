@@ -87,7 +87,7 @@ async function consolidateWindowOnce(userId, window, carryOver) {
 ///
 /// The contract asks the model to partition every segment it was given into
 /// contiguous sections, and validation rejects a consolidation that omits,
-/// duplicates or reorders one. A small local model does not always comply:
+/// duplicates or reorders one. A model does not always comply:
 /// measured against a real transcript, one window of thirty-five segments came
 /// back with fifteen of them cited and the rest simply missing, which would have
 /// thrown the whole run away.

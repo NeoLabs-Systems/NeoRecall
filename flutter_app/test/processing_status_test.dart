@@ -222,6 +222,37 @@ void main() {
     expect(status.pendingAudioDuration, const Duration(seconds: 86));
   });
 
+  test('an active chunk makes its recording visibly transcribing', () {
+    final status = ProcessingStatusSnapshot.fromChunks(
+      chunks: <AudioChunk>[
+        chunk(
+          'active',
+          LocalChunkState.uploaded,
+          sessionId: 'recording',
+          receipt: const <String, dynamic>{'state': 'processing'},
+        ),
+        chunk(
+          'later',
+          LocalChunkState.uploaded,
+          sessionId: 'recording',
+          receipt: const <String, dynamic>{'state': 'uploaded'},
+        ),
+      ],
+      pendingBytes: 2048,
+      localUploadBytes: 0,
+      uploadEta: null,
+      offline: false,
+      unmeteredOnly: false,
+      networkUnmetered: true,
+      deviceIssue: null,
+    );
+
+    expect(status.totalPending, 1);
+    expect(status.transcribing, 1);
+    expect(status.serverQueued, 0);
+    expect(status.activeStage, ProcessingPipelineStage.transcription);
+  });
+
   test(
     'watch transfer overrides the ledger stage and exposes real progress',
     () {

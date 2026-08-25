@@ -3,25 +3,17 @@
 const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
+const providerSettings = require('../../services/settings/provider_settings_service');
 
-/// Sends the same requests to an endpoint the operator chose instead of running
-/// the model in this process.
-///
-/// This exists for machines that cannot run a language model themselves — a
-/// low-power always-on recorder with a GPU box on the same LAN, an Ollama or
-/// llama-server instance the household already runs, or a hosted service the
-/// operator accepts sending transcripts to. Nothing here assumes any of those:
-/// the contract is the OpenAI chat-completions shape, which all of them speak.
-///
-/// Whether the endpoint is private is the operator's decision and not something
-/// this file can check, so the default provider is the local one and this has to
-/// be configured deliberately.
-
-const PROVIDER = 'openai_compatible';
+/// Sends structured generation requests to the OpenAI-compatible endpoint the
+/// operator configured. NeoRecall deliberately has no in-process generation
+/// fallback: the endpoint can be a hosted API or a separately deployed service
+/// on another machine.
 
 function ready() {
-  const config = getConfig();
-  return Boolean(config.aiApiBaseUrl && config.aiApiModel);
+  const settings = providerSettings.getRuntime().llm;
+  return settings.protocol === 'openai' && Boolean(settings.baseUrl && settings.model)
+    && (!providerSettings.LLM_PROVIDERS[settings.provider].requiresApiKey || settings.apiKeyConfigured);
 }
 
 function extractContent(payload) {
@@ -61,22 +53,23 @@ function extractContent(payload) {
 
 async function chatJSON({ userId, purpose, messages, responseFormat = null, maxTokens = null }) {
   const config = getConfig();
-  if (!config.aiApiBaseUrl) throw Object.assign(new Error('AI_API_BASE_URL is not configured.'), { code: 'AI_NOT_CONFIGURED' });
-  const model = config.aiApiModel;
+  const settings = providerSettings.getRuntime().llm;
+  if (!settings.baseUrl) throw Object.assign(new Error('The language-model API base URL is not configured.'), { code: 'AI_NOT_CONFIGURED' });
+  const model = settings.model;
   if (!model) throw Object.assign(new Error('AI_API_MODEL is not configured.'), { code: 'AI_MODEL_NOT_CONFIGURED' });
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const db = getDatabase();
   db.prepare(`INSERT INTO ai_requests (id,user_id,purpose,provider,model,state,reserved_at,sent_at)
-    VALUES (?,?,?,?,?,'sent',?,?)`).run(id, userId, purpose, PROVIDER, model, now, now);
+    VALUES (?,?,?,?,?,'sent',?,?)`).run(id, userId, purpose, settings.provider, model, now, now);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.aiTimeoutMs);
   try {
-    const response = await fetch(`${config.aiApiBaseUrl}/chat/completions`, {
+    const response = await fetch(`${settings.baseUrl}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        ...(config.aiApiKey ? { Authorization: `Bearer ${config.aiApiKey}` } : {}),
+        ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
       },
       body: JSON.stringify({
         model, messages, response_format: responseFormat || { type: 'json_object' },

@@ -17,31 +17,21 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `MAX_UPLOAD_BYTES` | Maximum live chunk upload | `33554432` |
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
 
-## Local inference
+## External inference providers
 
-`TRANSCRIPTION_PROVIDER=sherpa` (the default) selects the native CPU pipeline, running Whisper large-v3 fully on-device through `sherpa-onnx`. `NEORECALL_SHERPA_THREADS` controls native inference threads. An OpenAI-compatible transcription endpoint can be selected with `TRANSCRIPTION_PROVIDER=openai-compatible`, `TRANSCRIPTION_API_BASE_URL`, and an optional key; this is separate from the language model and is intended for self-hosted or remote speech servers, and defaults to requesting `whisper-large-v3` unless `TRANSCRIPTION_API_MODEL` overrides it.
+NeoRecall does not install or run a transcription or language model. Provider settings can come from `.env` or from encrypted live overrides on the admin **Providers** page. Admin API keys are never returned to the browser, and resetting the page restores `.env` as the source of truth.
 
-The embedding model must produce exactly 384 dimensions. `neorecall install` downloads and verifies every local model, including the ASR model, with no manual step; `neorecall setup` re-runs the same download/verify pass on demand (for example after switching release channel). Model files and their revisions are pinned in `models/manifest.json`.
+For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
-When the recogniser does not label a segment's language itself, a statistical detector fills in — but only above `NEORECALL_LANGUAGE_DETECTION_MIN_CHARACTERS`. Below it there is not enough text to decide, and the detector answers anyway: three hours of real council audio produced "Gentlemen." labelled Afrikaans and "Uh" labelled Klingon. A segment shorter than the threshold is left with no language, which is honest, rather than a confident wrong one that reaches both the interface and the consolidation prompt. Set it to `0` to trust every detection.
+For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`, `deepseek`, `openrouter`, `together`, or `openai_compatible`. Set `AI_API_MODEL` and either the provider-specific key from `.env.example` or `AI_API_KEY`. Custom OpenAI-compatible endpoints also require `AI_API_BASE_URL`.
 
-## The language model
+The admin dashboard fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
 
-`AI_PROVIDER=llama` is the default and runs the model inside the NeoRecall process through llama.cpp. Nothing about a request leaves the machine, there is no account and no key, and `neorecall setup` downloads the weights alongside the speech models. The default is Gemma 4 E4B Instruct at q4_0 — about 5.2 GB on disk, pinned by revision and SHA-256 in `models/manifest.json`, and replaceable with `LLM_MODEL_FILE` (inside the managed models directory) or `LLM_MODEL_PATH` (anywhere on disk). It is the quantization-aware trained build, so the 4-bit weights were trained at 4 bits rather than rounded down afterwards and lose little against the full-precision model.
-
-`LLM_GPU_LAYERS` defaults to `auto`, which offloads as many layers as the detected Metal, CUDA or Vulkan device has memory for and runs on the CPU when there is none — one default that works on a laptop and on a headless box with a GPU. `LLM_THREADS=0` lets llama.cpp choose a thread count. `LLM_TEMPERATURE` defaults to `0.2`: this is structured extraction, not prose, and near-greedy decoding keeps the model on the evidence.
-
-`LLM_CONTEXT_SIZE` is how much the model may hold at once, in tokens, and it is the single number that decides how much memory it needs beyond its weights. The default of 16 384 keeps the key–value cache of a 4B model well under a gigabyte. Consolidation splits longer transcripts to fit it, so raising it buys fewer and wider passes rather than deciding what can be processed at all.
-
-`LLM_IDLE_UNLOAD_MS` is how long the weights stay resident after the last request. The scheduler produces work in bursts, so holding the model briefly turns a burst into one load instead of one load per job, while an idle recorder gives the memory back.
-
-### Sending generation elsewhere
-
-`AI_PROVIDER=openai_compatible` sends the same requests to an endpoint you choose: another machine on the LAN with a GPU, an Ollama or llama-server instance you already run, or a hosted service. Set `AI_API_BASE_URL`, `AI_API_MODEL` and, if the endpoint requires one, `AI_API_KEY`. Whether that endpoint is private is your decision, which is why the local provider is the default and this has to be configured deliberately. `LLM_CONTEXT_SIZE` still describes how much the endpoint can read at once, and windowing still respects it.
+`LLM_CONTEXT_SIZE` describes how much the configured external model can read at once. Consolidation splits longer transcripts to fit it, so raising it buys fewer and wider passes rather than deciding what can be processed at all. The embedding model used for local semantic search remains pinned and verified by `neorecall setup`; it is not a generation model.
 
 ## Memory consolidation
 
-Because generation costs seconds of your own machine rather than money, the gates that used to ration it are off by default and remain available for a machine that cannot keep up with its own recordings.
+Processing gates are off by default and remain available when an external deployment cannot keep up or a hosted provider needs tighter request limits.
 
 `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` defaults to `0`, so a conversation is consolidated on the scheduler tick after it closes. `NEORECALL_MIN_AI_AUDIO_MS` and `NEORECALL_MIN_NEW_MATERIAL_CHARS` default to `0` and `1`: a thirty-second exchange is worth describing as soon as it ends. `NEORECALL_MAX_CONSOLIDATION_LATENCY_MS` defaults to `0`, so nothing waits for a batch to fill. Raising any of them restores the old behaviour exactly — `NEORECALL_MIN_AI_AUDIO_MS` in particular is still a hard floor rather than a heuristic: at one minute, a recording of a minute or less reaches no model at all, not through consolidation, not through a live preview, and not by asking for one by hand.
 
@@ -49,7 +39,7 @@ Because generation costs seconds of your own machine rather than money, the gate
 
 `NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are unchanged and are what keeps short speech off the timeline as a memory *card* (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary, but it is not memory-worthy: atomic facts and tasks belong in mini-memories under a larger worthy occasion. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
 
-A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter; those limits no longer protect a bill, they keep one client from queueing more generation than the machine can work through while recordings are still arriving.
+A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter so one client cannot overwhelm the configured provider while recordings are still arriving.
 
 ### The day's summary
 
@@ -59,7 +49,7 @@ Which local date that summary covers, and in which timezone, are derived from th
 
 ### Windowing a long transcript
 
-A four-hour lecture does not fit in any local context, and it must still become one memory. Consolidation therefore splits the transcript into windows that each fit `LLM_CONTEXT_SIZE`, cut on segment boundaries and processed in order. Each window after the first is told what the occasion looked like when the previous window stopped and marks the section — and the memory built from it — that carries on, so the two are folded back into one. A transcript that fits is exactly one request and behaves as it always did.
+A four-hour lecture does not fit in a typical model context, and it must still become one memory. Consolidation therefore splits the transcript into windows that each fit `LLM_CONTEXT_SIZE`, cut on segment boundaries and processed in order. Each window after the first is told what the occasion looked like when the previous window stopped and marks the section — and the memory built from it — that carries on, so the two are folded back into one. A transcript that fits is exactly one request and behaves as it always did.
 
 `NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS` is how much transcript one window carries, and it is sized against the *answer* rather than against the context. Those are different quantities, and the answer is the one that fails: a full contract for dense speech runs to roughly one output token per five input characters, so a window sized to fill a 16 384-token context — nearly thirty thousand characters — asks for several times more answer than `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` allows and arrives truncated. The default of 8 000 characters is five to eight minutes of speech and leaves the answer a fourfold margin. Raising it lets the model see more of an occasion at once; lowering it is the first thing to try if `AI_OUTPUT_TRUNCATED` appears. It is clamped to whatever the context can hold, so it can never exceed `LLM_CONTEXT_SIZE` minus the output budget.
 
@@ -67,7 +57,7 @@ A four-hour lecture does not fit in any local context, and it must still become 
 
 ### What one request may return
 
-The contract caps a single pass at three memories, eight mini-memories per memory and sixteen entities, and the local provider enforces those caps in the sampling grammar rather than checking them afterwards. Without them a small model handed a dense transcript emits one mini-memory per utterance until it exhausts its token budget, which arrives as a truncated completion — and on a machine generating a few tokens per second, an unbounded answer is also an unbounded wait.
+The contract caps a single pass at three memories, eight mini-memories per memory and sixteen entities. Without those bounds a model handed a dense transcript can emit one mini-memory per utterance until it exhausts its token budget.
 
 The caps bound a *window*, not an occasion. A three-hour lecture is read in many windows whose results merge, so it still accumulates as many mini-memories as it deserves while no single request grows without limit. Conversation sections are deliberately uncapped: they have to partition the whole input.
 
@@ -75,15 +65,13 @@ Because the caps make the largest possible answer arithmetic rather than a guess
 
 ### Throughput
 
-A rough figure to plan with: a 4B model at 4-bit on a laptop GPU generates something like fifteen tokens per second, and roughly half that while a schema grammar constrains every token. A consolidation answer of two to four thousand tokens is therefore several minutes of work per window, and a long conversation is several windows. That is why `AI_REQUEST_TIMEOUT_MS` defaults to thirty minutes and `NEORECALL_JOB_LEASE_MS` matches it: the timeout has to outlast the slowest legitimate answer, and a lease shorter than the job would let a second worker start the same run while the first is still writing.
+Provider latency depends on the selected deployment and model. `AI_REQUEST_TIMEOUT_MS` defaults to thirty minutes and `NEORECALL_JOB_LEASE_MS` matches it: the timeout has to outlast the slowest legitimate answer, and a lease shorter than the job would let a second worker start the same run while the first is still writing.
 
-All of it is background work — nothing waits on it — but it is why the preview intervals and the per-run conversation count matter, and why a machine that records all day may want them raised.
+All of it is background work, but preview intervals and per-run conversation limits still determine provider load.
 
 ### When an answer does not fit the contract
 
-The local provider compiles each JSON contract into a sampling grammar, so the model is only ever allowed to emit tokens that keep the answer valid. Missing fields, invented enum values and prose around the JSON are structurally impossible rather than validated after the fact. Two things a grammar cannot express are checked afterwards: a length bound on prose, which is trimmed with an ellipsis rather than rejected, and a date pattern, which is validated.
-
-What remains is a completion that runs out of budget, reported as `AI_OUTPUT_TRUNCATED`, and a request whose prompt does not fit the context at all, reported as `AI_CONTEXT_EXCEEDED` *before* generation starts — llama.cpp would otherwise begin discarding the start of the transcript to make room, and losing evidence silently is worse than refusing. Both narrow the next run.
+NeoRecall requests structured JSON and validates every response before changing memory state. Missing fields, invented enum values, invalid references, and prose around the JSON fail validation. A completion that reaches its provider token limit is reported as `AI_OUTPUT_TRUNCATED`; both truncation and contract failures narrow the next run rather than silently dropping evidence.
 
 Candidates are built oldest-first, so a conversation the model cannot partition would otherwise reappear in every later run. After a validation failure the next run carries a single conversation, and `NEORECALL_CONSOLIDATION_MAX_FAILURES` bounds how often one conversation may fail before it is quarantined. A quarantined conversation keeps its transcript and stays readable but no longer blocks memory generation.
 
@@ -91,7 +79,7 @@ Candidates are built oldest-first, so a conversation the model cannot partition 
 
 A conversation that is still being recorded gets a provisional title, summary and topics so it can be read before it ends. `AI_PREVIEW_MAX_OUTPUT_TOKENS` bounds the completion; a preview answer is three short fields, and the default model does not spend tokens thinking first.
 
-Preview work is bounded by transcript growth rather than by elapsed time: `NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS` is how much transcript the first preview needs, `NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS` how much new transcript each refresh needs, and `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` the minimum spacing between two previews of the same conversation. They now sit close to the scheduler tick — 300 characters, 600 characters, one minute — because a description that is a minute old is the thing worth avoiding when the model is your own CPU. Raise them if the machine falls behind. The interval is measured from the last attempt rather than the last success, so a model that cannot satisfy the contract costs one request per interval instead of one per scheduler tick.
+Preview work is bounded by transcript growth rather than by elapsed time: `NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS` is how much transcript the first preview needs, `NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS` how much new transcript each refresh needs, and `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` the minimum spacing between two previews of the same conversation. They sit close to the scheduler tick — 300 characters, 600 characters, one minute. Raise them if the provider falls behind. The interval is measured from the last attempt rather than the last success, so a model that cannot satisfy the contract costs one request per interval instead of one per scheduler tick.
 
 Beyond `NEORECALL_CONVERSATION_PREVIEW_FULL_CHARACTERS` a refresh sends the previous description plus only the speech recorded since, so a conversation that runs all day takes the same work per refresh instead of re-reading its whole history. A request is finally cut to what the model can read at once; when that bites, the description continues on the next refresh instead of the request failing. Any drift those rolling summaries accumulate is corrected when the conversation closes and consolidation reads the full transcript.
 
@@ -101,32 +89,28 @@ Previews never create memories; consolidation replaces the insight and marks it 
 
 `NEORECALL_IMPORT_SESSION_CONTINUITY_MS` is how large a gap may be between two imports from one device before they stop counting as the same recording stream. It has to comfortably exceed the client's device-sync poll and its failure backoff.
 
-## Speaker identity across chunk boundaries
+## Speaker identity
 
-Diarization runs independently on every audio chunk, so a continuous speaker
-crossing a chunk boundary is re-segmented from scratch and can drift below the
-plain matching threshold even though nothing about the voice changed. When the
-new chunk's first speech for an audio component starts within
-`NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of where that component's last known
-speaker turn ended, that cluster may be kept at the relaxed
-`NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD` instead of minting a new one.
-This only ever breaks a near-tie: it never overrides a cluster that clearly
-scores higher, so a genuine speaker change right at the boundary still resolves
-on its own. It works the same regardless of `NEORECALL_CHUNK_TARGET_MS`, since
-it compares actual segment timestamps rather than counting chunks.
+NeoRecall no longer forms speaker identities. Telling one voice from another
+across a recording needs a voice embedding for every turn, and that came from the
+speaker-embedding model NeoRecall used to run itself. External transcription
+services return what was said — text, timings, and at best a speaker label that
+is only consistent inside the single request that produced it. Since every audio
+chunk is its own request, such a label cannot be carried from one chunk to the
+next, and inventing that link would attribute speech to the wrong person rather
+than admit it is unknown.
 
-Outside continuity, a cluster match also needs `NEORECALL_SPEAKER_CLUSTER_MARGIN`
-over the runner-up, mirroring the margin cross-recording voice matching already
-applies — a single fixed threshold with no margin can otherwise let a distinct
-new speaker's embedding score just above it against some unrelated existing
-cluster purely by chance, misattributing their speech.
+So no new speaker clusters or voiceprints are created. The Speakers screen keeps
+showing identities formed earlier, names remain editable, and the settings for
+diarization and recurring matching are reported as unavailable rather than
+offered as switches that would change nothing. `NEORECALL_VOICE_MATCH_*` and
+`NEORECALL_SPEAKER_CLUSTER_*` are inert for the same reason; they are still read
+and validated, so a transcription provider that returns per-turn embeddings makes
+the whole path live again without a migration.
 
-Consolidation identifies people from evidence in the transcript, and when it can
-tell which speaker label a person's voice belongs to — a self-introduction, or
-another speaker naming them — it names that speaker's voiceprint from the same
-response, at no extra AI request. It never overwrites a name set manually
-through the Speakers screen, and an incorrect automatic name remains correctable
-through the same rename/merge flow as any other speaker.
+Consolidation still identifies people from evidence in the transcript — who was
+named, who introduced themselves — and writes them as memory entities. Only the
+link from a person to a *voice* is gone.
 
 ## Operational thresholds
 

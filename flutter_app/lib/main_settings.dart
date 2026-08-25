@@ -816,16 +816,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _speakerSettings() {
     final current = settings!;
+    // The server reports whether telling voices apart is possible at all. It
+    // needs a voice fingerprint for every turn, and transcription services
+    // return words rather than voices, so with one configured these switches
+    // cannot change anything. Showing them switched off and saying why is
+    // honest; letting someone flip a switch that does nothing is not.
+    final available = current['speakerIdentityAvailable'] as bool? ?? true;
     return _sectionList(<Widget>[
       SectionCard(
         eyebrow: 'SPEAKERS',
         child: Column(
           children: <Widget>[
+            if (!available)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Your transcription service returns what was said, not who '
+                  'said it, so NeoRecall cannot tell voices apart or recognise '
+                  'someone across recordings. Names you have already given a '
+                  'speaker are kept.',
+                ),
+              ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              value: current['diarizationEnabled'] as bool? ?? true,
-              onChanged: (value) =>
-                  setState(() => current['diarizationEnabled'] = value),
+              value: available &&
+                  (current['diarizationEnabled'] as bool? ?? true),
+              onChanged: available
+                  ? (value) =>
+                      setState(() => current['diarizationEnabled'] = value)
+                  : null,
               title: const Text('Speaker diarization'),
               subtitle: const Text(
                 'Separate overlapping speakers during transcription.',
@@ -834,9 +853,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              value: current['recurringSpeakerMatching'] as bool? ?? true,
-              onChanged: (value) =>
-                  setState(() => current['recurringSpeakerMatching'] = value),
+              value: available &&
+                  (current['recurringSpeakerMatching'] as bool? ?? true),
+              onChanged: available
+                  ? (value) => setState(
+                      () => current['recurringSpeakerMatching'] = value)
+                  : null,
               title: const Text('Recurring speaker matching'),
               subtitle: const Text(
                 'Match known voiceprints across recordings.',

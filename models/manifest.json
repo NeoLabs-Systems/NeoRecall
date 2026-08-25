@@ -1,69 +1,17 @@
 {
   "schemaVersion": 1,
   "retired": [
-    "llm/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+    "llm/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "llm/gemma-4-E4B_q4_0-it.gguf",
+    "asr/encoder.int8.onnx",
+    "asr/decoder.int8.onnx",
+    "asr/joiner.int8.onnx",
+    "asr/tokens.txt",
+    "vad/silero_vad.onnx",
+    "diarization/pyannote-segmentation-3.0.int8.onnx",
+    "diarization/wespeaker_en_voxceleb_CAM++_LM.onnx"
   ],
   "models": [
-    {
-      "id": "whisper-large-v3-int8",
-      "revision": "2a6507094dd6020d939d78e3f1834a1d06267fca",
-      "license": "MIT",
-      "licenseUrl": "https://github.com/openai/whisper/blob/main/LICENSE",
-      "huggingFace": {
-        "repo": "csukuangfj/sherpa-onnx-whisper-large-v3"
-      },
-      "files": [
-        { "path": "asr/encoder.int8.onnx", "hubPath": "large-v3-encoder.int8.onnx", "size": 766671985, "sha256": "d531cf17248acc43e8c09b472a0877055e770877857a5332fc1304b36534ec85" },
-        { "path": "asr/decoder.int8.onnx", "hubPath": "large-v3-decoder.int8.onnx", "size": 1008265203, "sha256": "ebc6bfd88e162a46cb3edee8a7e727e1dcbc65cabecb19e2573695e4d495e1af" },
-        { "path": "asr/tokens.txt", "hubPath": "large-v3-tokens.txt", "size": 816730, "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126" }
-      ]
-    },
-    {
-      "id": "gemma-4-e4b-it-qat-q4-0",
-      "revision": "4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
-      "license": "Apache-2.0",
-      "licenseUrl": "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf",
-      "huggingFace": {
-        "repo": "google/gemma-4-E4B-it-qat-q4_0-gguf"
-      },
-      "files": [
-        { "path": "llm/gemma-4-E4B_q4_0-it.gguf", "hubPath": "gemma-4-E4B_q4_0-it.gguf", "size": 5154941280, "sha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee" }
-      ]
-    },
-    {
-      "id": "silero-vad",
-      "revision": "sherpa-onnx-asr-models",
-      "license": "MIT",
-      "licenseUrl": "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
-      "files": [
-        { "path": "vad/silero_vad.onnx", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx", "size": 643854, "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6" }
-      ]
-    },
-    {
-      "id": "pyannote-segmentation-3.0-int8",
-      "revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0",
-      "license": "See upstream pyannote segmentation license",
-      "licenseUrl": "https://huggingface.co/pyannote/segmentation-3.0/blob/main/LICENSE",
-      "archive": {
-        "filename": "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-        "size": 6958444,
-        "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
-        "stripComponents": 1
-      },
-      "files": [
-        { "path": "diarization/pyannote-segmentation-3.0.int8.onnx", "archivePath": "model.int8.onnx", "size": 1540506, "sha256": "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d" }
-      ]
-    },
-    {
-      "id": "wespeaker-voxceleb-campplus-lm",
-      "revision": "0743f301363dec56491a490f6d6cbc9d67f9a3bf",
-      "license": "Apache-2.0",
-      "licenseUrl": "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus-LM",
-      "files": [
-        { "path": "diarization/wespeaker_en_voxceleb_CAM++_LM.onnx", "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_CAM%2B%2B_LM.onnx", "size": 29292687, "sha256": "e197af7e9d473030cf486b3124149a19bf37014d0e4485e4c70c483b0ec10cb2" }
-      ]
-    },
     {
       "id": "multilingual-e5-small-int8",
       "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",

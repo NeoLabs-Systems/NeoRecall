@@ -44,6 +44,10 @@
         Audit log
       </button>
       <div class="nav-section-label">Configure</div>
+      <button class="nav-item" data-page="providers" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm12.5 0L21 17.5 16.5 22 12 17.5l4.5-4.5Z"/></svg>
+        Providers
+      </button>
       <button class="nav-item" data-page="security" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
         Security
@@ -96,7 +100,7 @@
 
       <section class="page" data-page-content="ai">
         <div class="card table-card">
-          <div class="card-header"><div><div class="card-title">AI requests</div><p>Remote analysis usage; transcription remains on device.</p></div></div>
+          <div class="card-header"><div><div class="card-title">AI requests</div><p>External language-model usage and failures.</p></div></div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>Purpose</th><th>State</th><th>Model</th><th>Tokens</th><th>Sent</th></tr></thead><tbody id="ai"></tbody></table></div>
         </div>
       </section>
@@ -115,6 +119,37 @@
             <button id="save-settings" class="btn btn-primary" type="button">Save changes</button>
           </div>
           <div id="processing-settings" class="settings-grid"></div>
+        </div>
+      </section>
+
+      <section class="page" data-page-content="providers">
+        <div class="provider-actions">
+          <p>Admin values override `.env`. API keys are encrypted at rest and are never returned to the browser.</p>
+          <div><button id="reset-provider-settings" class="btn btn-ghost" type="button">Use .env values</button> <button id="save-provider-settings" class="btn btn-primary" type="button">Save providers</button></div>
+        </div>
+        <div class="provider-grid">
+          <div class="card provider-card" data-provider-workload="llm">
+            <div class="card-header"><div><div class="card-title">Language model</div><p>Memory generation, previews, summaries, and Ask.</p></div></div>
+            <div class="provider-fields">
+              <label>Provider<select id="llm-provider"></select></label>
+              <label>Model<div class="input-action"><input id="llm-model" type="text" list="llm-model-options"><button class="btn btn-ghost btn-sm" data-discover-models="llm" type="button">Fetch models</button></div><datalist id="llm-model-options"></datalist><span class="field-note" id="llm-model-status"></span></label>
+              <label>API base URL<input id="llm-base-url" type="url"></label>
+              <label>API key<input id="llm-api-key" type="password" autocomplete="new-password"><span class="field-note" id="llm-key-status"></span></label>
+              <label class="check-field"><input id="llm-clear-key" type="checkbox"> Remove the stored admin API key</label>
+            </div>
+          </div>
+          <div class="card provider-card" data-provider-workload="transcription">
+            <div class="card-header"><div><div class="card-title">Transcription</div><p>Audio is sent as multipart form data to the selected service.</p></div></div>
+            <div class="provider-fields">
+              <label>Provider<select id="transcription-provider"></select></label>
+              <label>Model<div class="input-action"><input id="transcription-model" type="text" list="transcription-model-options"><button class="btn btn-ghost btn-sm" data-discover-models="transcription" type="button">Fetch models</button></div><datalist id="transcription-model-options"></datalist><span class="field-note" id="transcription-model-status"></span></label>
+              <label>API base URL or full transcription endpoint<input id="transcription-base-url" type="url"></label>
+              <label>API key<input id="transcription-api-key" type="password" autocomplete="new-password"><span class="field-note" id="transcription-key-status"></span></label>
+              <label>Language<input id="transcription-language" type="text"><span class="field-note">Optional provider language code.</span></label>
+              <label>Response format<input id="transcription-response-format" type="text"></label>
+              <label class="check-field"><input id="transcription-clear-key" type="checkbox"> Remove the stored admin API key</label>
+            </div>
+          </div>
         </div>
       </section>
 

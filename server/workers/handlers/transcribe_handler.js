@@ -2,7 +2,6 @@
 
 const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
-const { getConfig } = require('../../config');
 const processingSettings = require('../../services/settings/processing_settings_service');
 const { sha256 } = require('../../utils/crypto');
 const tempAudio = require('../../services/ingest/temp_audio_service');
@@ -211,7 +210,7 @@ async function handle(job, inference) {
   if (!chunk.temporary_path) throw Object.assign(new Error('Server audio is missing and must be uploaded again.'), { code: 'AUDIO_REUPLOAD_REQUIRED', retryable: false });
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
-  const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, provider: getConfig().transcriptionProvider });
+  const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout });
   const inferenceSeconds = Number(process.hrtime.bigint() - inferenceStartedAt) / 1e9;
   db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
     VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));

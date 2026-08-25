@@ -5,21 +5,21 @@ title: Troubleshooting
 
 # Troubleshooting
 
-## `/ready` reports models unavailable
+## `/ready` reports providers unavailable
 
-Run `neorecall setup` and inspect `neorecall logs`. Setup verifies every downloaded SHA-256 and will resume incomplete downloads. Normal startup intentionally refuses to fetch missing model files.
+Inspect the admin **Providers** page and `neorecall logs`. Both transcription and language generation require an external provider, endpoint, and any credentials that provider needs. Use **Fetch models** to verify credentials and select a current model.
 
-The response separates them: `models` covers the speech pipeline and `languageModel` the model that writes memories, previews and Ask answers. Both gate readiness, because a server that transcribes but cannot write a memory looks healthy while producing nothing you installed it for. If `languageModel` is false with `AI_PROVIDER=openai_compatible`, it means `AI_API_BASE_URL` or `AI_API_MODEL` is unset — it does not test whether the endpoint answers.
+The response separates them: `models` covers the configured transcription provider and `languageModel` the provider that writes memories, previews, and Ask answers. Both gate readiness. Readiness checks configuration locally; model discovery is the explicit network check.
 
-Readiness compares each installed file against the size the manifest pins, not merely that a file of that name exists. That distinction matters when the pinned model changes between versions: a directory left behind by the previous generation has all the right filenames, and treating it as ready produces a server that reports healthy and then fails every job. `neorecall setup` after an update is what resolves it; `npm run verify:models` reports the same thing with a full SHA-256 check.
+`neorecall setup` only verifies the pinned semantic-search embedding model. It never downloads or starts speech or language models.
 
 ## Memory generation is slow or falls behind
 
-Generation runs on this machine, so it costs CPU or GPU time. Check the admin dashboard for queue depth. `LLM_GPU_LAYERS=auto` already offloads what a detected GPU can hold; on a CPU-only host the fastest fixes are a smaller quantization or a smaller model through `LLM_MODEL_FILE`, and then raising `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` and `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` so the machine is asked for less. `NEORECALL_MIN_AI_AUDIO_MS` keeps short recordings away from the model entirely.
+Check the admin dashboard for queue depth and provider failures. Choose a faster external model or deployment, or raise `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` and `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` so the provider receives less work. `NEORECALL_MIN_AI_AUDIO_MS` keeps short recordings away from the model entirely.
 
 ## `AI_CONTEXT_EXCEEDED`
 
-A single request did not fit in `LLM_CONTEXT_SIZE`. Consolidation windows its input to fit, so this means one indivisible piece of evidence — a single recognized utterance — is larger than a whole window. Raise `LLM_CONTEXT_SIZE` (which costs memory) or lower `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` to leave more room for input.
+A single request did not fit in `LLM_CONTEXT_SIZE`. Consolidation windows its input to fit, so this means one indivisible piece of evidence — a single recognized utterance — is larger than a whole window. Set `LLM_CONTEXT_SIZE` to the external model's real context limit or lower `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` to leave more room for input.
 
 ## A chunk remains cleanup-pending
 

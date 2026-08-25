@@ -86,7 +86,10 @@ class UploadPump {
   /// first sample exists the UI reports that it is calibrating.
   Duration? estimateUploadDuration(int bytes) {
     final rate = _uploadBytesPerSecond;
-    if (bytes <= 0) return Duration.zero;
+    // Zero local bytes means uploading is complete, not that the server-side
+    // transcription backlog has a zero-second ETA. Returning null lets receipt
+    // estimates (or the truthful "calibrating" state) own the server phase.
+    if (bytes <= 0) return null;
     if (rate == null || rate <= 0) return null;
     return Duration(milliseconds: (bytes * 1000 / rate).ceil());
   }

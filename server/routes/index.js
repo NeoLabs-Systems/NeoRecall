@@ -11,7 +11,7 @@ router.get('/meta', requireAuth, (req, res) => {
   res.json({
     product: 'NeoRecall', version: require('../../package.json').version,
     user: req.user,
-    capabilities: { localTranscription: true, diarization: config.diarizationEnabled, semanticSearch: true,
+    capabilities: { localTranscription: false, diarization: false, semanticSearch: true,
       displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true,
       gzipAudioUpload: true },
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,

@@ -58,70 +58,76 @@ class NeoRecallPalette {
   Color get accentStrong => accentHover;
   Color get accentSoft => accentMuted;
   Color get error => danger;
-  Color get glassFill => bgCard.withValues(alpha: 0.86);
-  Color get glassBorder => borderLight;
+  bool get isDark => bgPrimary.computeLuminance() < 0.5;
+  Color get glassFill => bgCard.withValues(alpha: isDark ? 0.82 : 0.9);
+  Color get glassBorder => Colors.white.withValues(alpha: isDark ? 0.11 : 0.24);
   Color get borderStrong => borderLight;
   Gradient get backgroundGradient => LinearGradient(
     colors: <Color>[
       bgPrimary,
-      Color.lerp(bgPrimary, bgSecondary, 0.55)!,
-      bgPrimary,
+      Color.lerp(bgSecondary, accentAlt, 0.08)!.withValues(alpha: 0.98),
+      Color.lerp(bgPrimary, accent, 0.05)!,
     ],
-    stops: const <double>[0, 0.62, 1],
+    stops: const <double>[0, 0.52, 1],
     begin: const Alignment(-0.95, -1),
     end: const Alignment(1, 0.92),
   );
   Gradient get panelGradient => LinearGradient(
-    colors: <Color>[bgCard, Color.lerp(bgCard, bgSecondary, 0.25)!],
+    colors: <Color>[
+      Colors.white.withValues(alpha: 0.10),
+      bgCard.withValues(alpha: 0.94),
+      bgSecondary.withValues(alpha: 0.88),
+    ],
+    stops: const <double>[0, 0.2, 1],
     begin: const Alignment(-0.85, -1),
     end: const Alignment(1, 1),
   );
 }
 
 const NeoRecallPalette _darkPalette = NeoRecallPalette(
-  bgPrimary: Color(0xFF151514),
-  bgSecondary: Color(0xFF1E1E1C),
-  bgTertiary: Color(0xFF272725),
-  bgCard: Color(0xFF20201E),
-  textPrimary: Color(0xFFF4F3EE),
-  textSecondary: Color(0xFFC3C1B8),
-  textMuted: Color(0xFF8D8B83),
-  accent: Color(0xFF8FA0FF),
-  accentHover: Color(0xFFAAB6FF),
-  accentAlt: Color(0xFF8BB7A4),
-  accentMuted: Color(0x248FA0FF),
-  secondary: Color(0xFFFF786D),
-  border: Color(0x18FFFFFF),
-  borderLight: Color(0x2AFFFFFF),
-  success: Color(0xFF82C79B),
-  warning: Color(0xFFE2B66A),
-  danger: Color(0xFFFF786D),
-  info: Color(0xFF8FA0FF),
-  onAccent: Color(0xFF111110),
-  shadow: Color(0xA0000000),
+  bgPrimary: Color(0xFF0E1511),
+  bgSecondary: Color(0xFF171F1A),
+  bgTertiary: Color(0xFF1C261F),
+  bgCard: Color(0xFF171F1A),
+  textPrimary: Color(0xFFECEFE5),
+  textSecondary: Color(0xFFAEB7A6),
+  textMuted: Color(0xFF7E8877),
+  accent: Color(0xFFE1B052),
+  accentHover: Color(0xFFEAC272),
+  accentAlt: Color(0xFF84BA87),
+  accentMuted: Color(0x24E1B052),
+  secondary: Color(0xFFDE8A78),
+  border: Color(0x14E0F0E0),
+  borderLight: Color(0x24E0F0E0),
+  success: Color(0xFF74C07C),
+  warning: Color(0xFFD9A24B),
+  danger: Color(0xFFDE8A78),
+  info: Color(0xFF6FB0A4),
+  onAccent: Color(0xFF0E1511),
+  shadow: Color(0x2E000000),
 );
 
 const NeoRecallPalette _lightPalette = NeoRecallPalette(
-  bgPrimary: Color(0xFFF8F7F2),
-  bgSecondary: Color(0xFFF0EFE9),
-  bgTertiary: Color(0xFFE8E7E1),
-  bgCard: Color(0xFFFFFFFF),
-  textPrimary: Color(0xFF151514),
-  textSecondary: Color(0xFF51504B),
-  textMuted: Color(0xFF85837C),
-  accent: Color(0xFF5E73E8),
-  accentHover: Color(0xFF495FD2),
-  accentAlt: Color(0xFF5F8F7B),
-  accentMuted: Color(0x1F5E73E8),
-  secondary: Color(0xFFE5534B),
-  border: Color(0x14000000),
-  borderLight: Color(0x24000000),
-  success: Color(0xFF3F7A58),
+  bgPrimary: Color(0xFFF4F1E8),
+  bgSecondary: Color(0xFFEDE9DC),
+  bgTertiary: Color(0xFFF1EDE1),
+  bgCard: Color(0xFFFDFCF8),
+  textPrimary: Color(0xFF1C2117),
+  textSecondary: Color(0xFF49503F),
+  textMuted: Color(0xFF7E8470),
+  accent: Color(0xFFB07D2B),
+  accentHover: Color(0xFFC8943F),
+  accentAlt: Color(0xFF5E6B4C),
+  accentMuted: Color(0x24B07D2B),
+  secondary: Color(0xFFAE473C),
+  border: Color(0x1A1C2117),
+  borderLight: Color(0x291C2117),
+  success: Color(0xFF527C4F),
   warning: Color(0xFF9A6B1E),
-  danger: Color(0xFFC6403A),
-  info: Color(0xFF495FD2),
+  danger: Color(0xFFAE473C),
+  info: Color(0xFF2F7D6E),
   onAccent: Color(0xFFFFFFFF),
-  shadow: Color(0x22000000),
+  shadow: Color(0x1F000000),
 );
 
 NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
@@ -150,14 +156,23 @@ TextStyle displayTitleStyle(NeoRecallPalette palette, {double size = 28}) =>
 TextStyle heroTitleStyle(NeoRecallPalette palette, {double size = 24}) =>
     TextStyle(
       color: palette.textPrimary,
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w800,
       fontSize: size,
       letterSpacing: -0.8,
       height: 1.08,
     );
 
 List<BoxShadow> softPanelShadow(NeoRecallPalette palette) => <BoxShadow>[
-  BoxShadow(color: palette.shadow, blurRadius: 24, offset: const Offset(0, 10)),
+  BoxShadow(
+    color: Colors.black.withValues(alpha: 0.18),
+    blurRadius: 40,
+    offset: const Offset(0, 18),
+  ),
+  BoxShadow(
+    color: palette.accent.withValues(alpha: 0.07),
+    blurRadius: 28,
+    offset: const Offset(0, 8),
+  ),
 ];
 
 ThemeData buildNeoRecallTheme(Brightness brightness) {

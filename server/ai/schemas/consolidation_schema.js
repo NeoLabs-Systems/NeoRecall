@@ -11,7 +11,7 @@ const TOPIC_MAX_COUNT = 12;
 // How much one consolidation request may return.
 //
 // These are grammar-enforced, which makes them the only thing standing between a
-// small local model and an answer that never ends: the contract otherwise allows
+// model and an answer that never ends: the contract otherwise allows
 // an unbounded array, and a model handed a dense transcript will emit one
 // mini-memory per utterance until it runs out of budget — which arrives as a
 // truncated completion, the failure that narrows and eventually quarantines. On
@@ -50,7 +50,7 @@ function defaultEmojiForType(type) {
 /// rejection.
 ///
 /// These limits exist so a title fits a card and a summary fits a panel; nothing
-/// downstream is unsafe when a summary runs long. A local model is constrained
+/// downstream is unsafe when a summary runs long. A provider may be constrained
 /// by a sampling grammar that can express "a string" but not "a string of at
 /// most two thousand characters", so an over-long field is the one contract
 /// violation it can still commit — and failing the whole consolidation over a
@@ -156,7 +156,7 @@ const topicsJsonSchema = {
 };
 const conversationInsightRequired = Object.freeze(['titleEn', 'summaryEn', 'memoryWorthy', 'topics']);
 // Enumerated rather than bounded so the constraint survives translation into a
-// sampling grammar: a local model is only ever allowed to emit a value the
+// provider response contract: a model should only emit a value the
 // schema accepts, where a `minimum`/`maximum` pair has no grammar equivalent and
 // would only be caught after the answer was already written.
 const importanceJsonSchema = { type: 'number', enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };

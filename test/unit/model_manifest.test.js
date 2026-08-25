@@ -41,14 +41,10 @@ test('every manifest entry is pinned well enough to verify after download', () =
   }
 });
 
-test('the configured default language model is one the manifest installs', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../server/config.js'), 'utf8');
-  const configured = source.match(/defaultLlmModelFile = '([^']+)'/)[1];
+test('the manifest contains search assets but no hosted transcription or language model', () => {
   const installed = manifest.models.flatMap((model) => model.files).map((file) => file.path);
-  assert.ok(
-    installed.includes(configured),
-    `config defaults to ${configured}, which setup never downloads`,
-  );
+  assert.ok(installed.some((file) => file.includes('multilingual-e5-small')));
+  assert.equal(installed.some((file) => file.startsWith('asr/') || file.startsWith('vad/') || file.startsWith('diarization/') || file.startsWith('llm/')), false);
 });
 
 test('a retired model is never still installed by the same manifest', () => {
@@ -64,7 +60,7 @@ test('update reclaims a superseded model without touching anything else', () => 
 
   seed(retired, 1024);
   seed(`${retired}.partial`, 512);
-  const ownModel = seed('llm/operator-supplied.gguf', 256);
+  const ownModel = seed('llm/operator-supplied.bin', 256);
 
   const removed = pruneRetired();
   assert.deepEqual(removed.map((entry) => entry.path), [retired]);
@@ -78,13 +74,13 @@ test('update reclaims a superseded model without touching anything else', () => 
   assert.deepEqual(pruneRetired(), [], 'pruning twice is a no-op');
 });
 
-test('a retired model the operator pinned is left alone', () => {
+test('an obsolete LLM_MODEL_FILE setting cannot keep a retired bundled model installed', () => {
   const retired = (manifest.retired || [])[0];
   const filename = seed(retired, 1024);
   process.env.LLM_MODEL_FILE = retired;
   try {
-    assert.deepEqual(pruneRetired(), []);
-    assert.ok(fs.existsSync(filename), 'LLM_MODEL_FILE is an explicit choice, not leftovers');
+    assert.deepEqual(pruneRetired().map((entry) => entry.path), [retired]);
+    assert.equal(fs.existsSync(filename), false);
   } finally {
     delete process.env.LLM_MODEL_FILE;
   }

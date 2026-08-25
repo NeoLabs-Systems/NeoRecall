@@ -1,6 +1,6 @@
 'use strict';
 
-// One finished recording, end to end, against the real speech models:
+// One finished recording, end to end, against stubbed external providers:
 // audio -> durable receipt -> transcript -> search -> memory -> cited Ask.
 
 const fs = require('node:fs');

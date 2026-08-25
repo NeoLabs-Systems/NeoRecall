@@ -219,6 +219,12 @@ LocalRecordingDeclaration _session() => LocalRecordingDeclaration(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('zero local upload bytes do not claim a zero server ETA', () {
+    final pump = UploadPump(store: _Store(_chunk()), api: _Api());
+
+    expect(pump.estimateUploadDuration(0), isNull);
+  });
+
   test('pending playback metadata stays lazy and account scoped', () async {
     final store = _Store(_chunk());
     final controller = NeoRecallController(store: store, api: _Api())

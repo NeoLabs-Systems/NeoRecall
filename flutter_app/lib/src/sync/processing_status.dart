@@ -204,16 +204,18 @@ class ProcessingStatusSnapshot {
       } else if (sessionChunks.any(
         (chunk) =>
             chunk.state == LocalChunkState.uploaded &&
-            chunk.receipt?['state'] != 'processing' &&
-            chunk.receipt?['state'] != 'persisted_cleanup_pending',
+            chunk.receipt?['state'] == 'processing',
       )) {
-        serverQueued += 1;
+        // A session normally has one chunk actively transcribing while its
+        // later chunks wait. Surface the real activity instead of making the
+        // whole recording look frozen in the queue.
+        transcribing += 1;
       } else if (sessionChunks.any(
         (chunk) =>
             chunk.state == LocalChunkState.uploaded &&
-            chunk.receipt?['state'] == 'processing',
+            chunk.receipt?['state'] != 'persisted_cleanup_pending',
       )) {
-        transcribing += 1;
+        serverQueued += 1;
       } else {
         finalizing += 1;
       }

@@ -12,14 +12,28 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
-      # The language model runs inside the container by default and needs no
-      # key. Set AI_PROVIDER=openai_compatible with AI_API_BASE_URL and
-      # AI_API_MODEL to send generation to an endpoint you run instead.
-      AI_PROVIDER: ${AI_PROVIDER:-llama}
+      AI_PROVIDER: ${AI_PROVIDER:-openai_compatible}
       LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE:-16384}
       AI_API_BASE_URL: ${AI_API_BASE_URL:-}
       AI_API_MODEL: ${AI_API_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai-compatible}
+      TRANSCRIPTION_API_BASE_URL: ${TRANSCRIPTION_API_BASE_URL:-}
+      TRANSCRIPTION_API_MODEL: ${TRANSCRIPTION_API_MODEL:-}
+      TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:-}
+      TRANSCRIPTION_API_LANGUAGE: ${TRANSCRIPTION_API_LANGUAGE:-}
+      TRANSCRIPTION_API_RESPONSE_FORMAT: ${TRANSCRIPTION_API_RESPONSE_FORMAT:-verbose_json}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
     volumes:
       - neorecall-data:/root/.neorecall
     healthcheck:

@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NeoRecall — your day, remembered privately</title>
-  <meta name="description" content="NeoRecall is private, self-hosted audio memory: capture anywhere, transcribe locally, find any moment, and delete audio only after persistence is proven.">
+  <meta name="description" content="NeoRecall is self-hosted audio memory: capture anywhere, use the inference services you choose, find any moment, and delete audio only after persistence is proven.">
   <meta name="theme-color" content="#0e1511" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#f4f1e8" media="(prefers-color-scheme: light)">
   <meta property="og:title" content="NeoRecall — your day, remembered privately">
-  <meta property="og:description" content="Private, self-hosted audio memory with local transcription, natural recall, and receipt-proven audio deletion.">
+  <meta property="og:description" content="Private, self-hosted audio memory with configurable inference providers, natural recall, and receipt-proven audio deletion.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
@@ -88,9 +88,9 @@
       <div class="wrap">
         <div class="hero-grid">
           <div class="hero-copy">
-            <p class="hero-kicker reveal"><span class="live-dot" aria-hidden="true"></span>Open source · self-hosted · local AI</p>
+            <p class="hero-kicker reveal"><span class="live-dot" aria-hidden="true"></span>Open source · self-hosted · provider-flexible</p>
             <h1 class="reveal" data-d="1">Your day,<br>still there <em>when you need it.</em></h1>
-            <p class="lede reveal" data-d="2">NeoRecall captures from the devices you already use, transcribes locally, and turns conversations into searchable memory. The audio disappears only after the system proves the transcript is safe.</p>
+            <p class="lede reveal" data-d="2">NeoRecall captures from the devices you already use, works with the inference providers you configure, and turns conversations into searchable memory. The audio disappears only after the system proves the transcript is safe.</p>
             <div class="hero-actions reveal" data-d="3">
               <a class="btn btn-primary btn-lg" href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest">
                 Get NeoRecall
@@ -148,10 +148,10 @@
     <!-- ============================== MANIFESTO ============================== -->
     <section class="section manifesto" id="why">
       <div class="wrap"><div class="manifesto-inner">
-        <p class="big-line reveal">Most of a day vanishes because nobody had time to write it down. <span class="dim">NeoRecall is built the other way around:</span> it listens with consent, understands locally, and keeps the useful parts — not the recording.</p>
+        <p class="big-line reveal">Most of a day vanishes because nobody had time to write it down. <span class="dim">NeoRecall is built the other way around:</span> it listens with consent, uses inference services you choose, and keeps the useful parts — not the recording.</p>
         <div class="manifesto-row">
           <div class="m-item reveal"><span class="m-num">01</span><h3>It keeps up</h3><p>Durable chunks survive weak connections and interrupted days. Every source can record offline and resume safely when the server returns.</p></div>
-          <div class="m-item reveal" data-d="1"><span class="m-num">02</span><h3>It understands</h3><p>Local speech recognition, speaker separation, search, and memory writing turn raw conversation into names, decisions, promises, and moments.</p></div>
+          <div class="m-item reveal" data-d="1"><span class="m-num">02</span><h3>It understands</h3><p>Configured transcription and language-model services, combined with local search, turn raw conversation into names, decisions, promises, and moments.</p></div>
           <div class="m-item reveal" data-d="2"><span class="m-num">03</span><h3>It lets go</h3><p>A terminal receipt proves the transcript is durable and the server copy is deleted before any client is allowed to release its audio.</p></div>
         </div>
       </div></div>
@@ -170,11 +170,11 @@
                 <div class="pb-msg user">Let’s use the smaller enclosure. I’ll send the revised dimensions after lunch.</div>
                 <div class="pb-tools">
                   <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path></svg>Capture</span>
-                  <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2l2-6 4 12 3-8 2 2h3"></path></svg>Local ASR</span>
+                  <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2l2-6 4 12 3-8 2 2h3"></path></svg>Transcription API</span>
                   <span class="tool-chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="10" r="2"></circle><path d="M3 20c0-4 2-6 6-6s6 2 6 6"></path></svg>Speakers</span>
                 </div>
                 <div class="pb-msg agent"><strong>Promise detected</strong> · Revised enclosure dimensions will be sent after lunch. Linked to the hardware planning conversation.</div>
-                <div class="pb-foot"><i></i>Streaming locally · audio retained until terminal receipt</div>
+                <div class="pb-foot"><i></i>Processing externally · audio retained until terminal receipt</div>
               </div>
             </div>
             <div class="story-panel" data-panel="1">
@@ -200,7 +200,7 @@
           </div></div>
           <div class="story-steps">
             <div class="story-step" data-step="0"><span class="eyebrow">Capture</span><h3>Keep living. NeoRecall keeps up.</h3><p>Record from web, desktop, imports, or a wearable. Independently decodable chunks queue locally, upload idempotently, and survive the ordinary failures of an ordinary day.</p></div>
-            <div class="story-step" data-step="1"><span class="eyebrow">Understand</span><h3>One conversation becomes one useful memory.</h3><p>Speech recognition, diarization, multilingual retrieval, and local memory writing work together on your machine. Search exact words or ask naturally across people, facts, tasks, and decisions.</p></div>
+            <div class="story-step" data-step="1"><span class="eyebrow">Understand</span><h3>One conversation becomes one useful memory.</h3><p>Your configured transcription and language-model endpoints work with NeoRecall's multilingual retrieval and self-hosted database. Search exact words or ask naturally across people, facts, tasks, and decisions.</p></div>
             <div class="story-step" data-step="2"><span class="eyebrow">Release</span><h3>Deletion is a protocol, not a promise.</h3><p>The client holds every audio chunk until a terminal receipt proves transcript persistence and server-side deletion. Only then can it release its own copy.</p></div>
           </div>
         </div>
@@ -233,14 +233,14 @@
       <div class="wrap"><div class="split rev">
         <div class="split-copy reveal">
           <span class="eyebrow">Yours, actually</span><h2>Your memory should live on your machine.</h2>
-          <p>NeoRecall runs speech recognition, diarization, multilingual embeddings, search, and memory writing on your hardware. There is no account to create, no API key to add, and no recording sent away to be understood.</p>
-          <ul class="plainlist"><li>Open source, AGPL-3.0 — inspect every layer</li><li>Local models with automatic GPU use when available</li><li>SQLite memory that you can search, back up, or erase</li></ul>
+          <p>NeoRecall keeps its database, search index, and durable capture state on your hardware. Speech and language inference always use services you configure separately, whether those are hosted APIs or endpoints on another machine you control.</p>
+          <ul class="plainlist"><li>Open source, AGPL-3.0 — inspect every layer</li><li>Bring any supported provider or compatible endpoint</li><li>SQLite memory that you can search, back up, or erase</li></ul>
         </div>
         <div class="term reveal" data-d="1" data-term>
           <div class="term-chrome"><span class="dv-traffic" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">neo@home-server — zsh</span></div>
           <div class="term-body" aria-label="Terminal showing NeoRecall installation">
             <div class="term-line"><span class="prompt">$</span> <span data-term-cmd="npm i -g github:NeoLabs-Systems/NeoRecall"></span></div>
-            <div class="term-out" data-term-out><div class="ok">✓ NeoRecall CLI installed</div><div class="dim-line">$ neorecall install</div><div class="ok">✓ user service configured</div><div class="dim-line">$ neorecall setup</div><div class="ok">✓ local models verified</div><div class="ok">✓ control surface on http://localhost:4500/app/</div><div class="dim-line">NeoRecall is ready. Your data stays here.</div></div>
+            <div class="term-out" data-term-out><div class="ok">✓ NeoRecall CLI installed</div><div class="dim-line">$ neorecall install</div><div class="ok">✓ user service configured</div><div class="dim-line">$ neorecall setup</div><div class="ok">✓ semantic search verified</div><div class="ok">✓ control surface on http://localhost:4500/app/</div><div class="dim-line">Configure inference providers in Admin to begin.</div></div>
           </div>
         </div>
       </div></div>
@@ -268,7 +268,7 @@
             <span class="brand-mark" aria-hidden="true"><img src="assets/logo.svg" alt=""></span>
             NeoRecall
           </a>
-          <p>Private, self-hosted audio memory — captured anywhere, understood locally, and recalled naturally.</p>
+          <p>Self-hosted audio memory — captured anywhere, processed by providers you choose, and recalled naturally.</p>
         </div>
 
         <div>

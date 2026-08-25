@@ -11,14 +11,13 @@ NeoRecall is a single-host Express and SQLite service with separate HTTP, worker
 Flutter durable ledger
   -> idempotent chunk ingest
   -> SQLite job lease
-  -> inference host (VAD, ASR, diarization)
+  -> configured external transcription endpoint
   -> FULL transcript transaction
-  -> optional clean speaker-preview derivation
   -> temporary audio unlink
   -> terminal receipt/outbox event
   -> local embeddings and boundaries
-  -> provisional local-model preview while a conversation is still open
-  -> final local-model consolidation once a conversation closes
+  -> provisional external-model preview while a conversation is still open
+  -> final external-model consolidation once a conversation closes
 ```
 
 Nothing in that chain waits for a recording to end. Chunks upload during capture,
@@ -34,7 +33,7 @@ redirect queued audio.
 
 ## Process boundaries
 
-`server/supervisor.js` owns the HTTP and worker-manager processes. The worker manager renews SQLite leases and heartbeats while `inference_host.js` owns synchronous sherpa native models. Speech inference defaults to one concurrent job per host so multi-gigabyte models are loaded once and CPU pressure stays predictable.
+`server/supervisor.js` owns the HTTP and worker-manager processes. The worker manager renews SQLite leases and heartbeats while `inference_host.js` isolates outbound transcription requests. It periodically re-reads provider configuration so admin changes become active without leasing audio work before a provider is ready.
 
 Routes contain HTTP translation only. Business logic lives in `server/services`, inference adapters in `server/transcription`, and all SQL is parameterized through `better-sqlite3`. Numbered migrations run before serving traffic.
 
@@ -111,11 +110,19 @@ PLAUD remains a separate import connector for finished wearable files.
 
 ## Processing pipeline
 
-Each logical audio channel is decoded to 16 kHz mono PCM. Silero VAD removes silence, Parakeet generates timestamped multilingual text, pyannote segmentation identifies speaker turns, and WeSpeaker embeddings support local clusters and optional cross-recording identities. Before source deletion, clean non-overlapping turns can be combined into a bounded 16 kHz mono preview for that recurring speaker. Time-constrained token alignment removes overlap and cross-channel leakage without phrase lists.
+Each independently decodable audio chunk is sent unchanged to the configured
+transcription service. OpenAI-compatible endpoints receive multipart form data
+with a `file` field plus the configured `model`, `language`, and
+`response_format` fields. Native Deepgram and AssemblyAI adapters normalize
+their responses into the same timestamped transcript-segment contract. No VAD,
+speech recognition, diarization model, or speaker-embedding model is installed
+or executed by NeoRecall.
 
-Diarization runs independently per chunk, so a session-scoped speaker cluster is the only thing carrying voice identity across chunk boundaries, and it does so by embedding similarity alone: the resolver keeps the cluster active at the end of the previous chunk for the same audio component when the new speech starts soon enough after it and still resembles that cluster reasonably well, but never when some other cluster clearly matches better — so continuity narrows fragmentation and cross-attribution without ever forcing a boundary-adjacent segment onto whoever spoke last. Outside that continuity case, a cluster match additionally needs a margin over its runner-up, the same discipline cross-recording voice matching already applies, closing the case where a fixed threshold alone would let a distinct speaker's embedding pass for an unrelated existing cluster by chance.
-
-Consolidation's person entities can carry the speaker label the transcript identifies them by (a self-introduction, or being named by another speaker); when present, that link names the corresponding voiceprint directly from the consolidation response already made, giving automatic speaker naming with no dedicated model call. A name set this way never overrides one the user set manually, and is corrected the same way any speaker name is.
+The normalized segments are deduplicated by time and multilingual token
+similarity, then persisted in one transaction. Audio deletion remains strictly
+after transcript persistence: a failed provider request cannot produce a
+terminal receipt, and a client must retain its local audio until that receipt
+also proves server-side unlink.
 
 Provisional boundary detection is time-driven: hard and soft silence gaps split a
 stream into conversations, and configurable duration and character ceilings
@@ -161,22 +168,18 @@ anything new.
 
 ## Generation
 
-The language model runs in the NeoRecall process through llama.cpp. It is
-downloaded and verified like every other model, it is loaded once and held while
-work keeps arriving, and requests are serialized so two jobs cannot each claim a
-GPU's worth of memory. Nothing about a request leaves the machine. An operator
-who would rather send generation to an endpoint they run — another host on the
-LAN, an existing Ollama or llama-server instance, a hosted service — can select
-an OpenAI-compatible provider instead; that is a deliberate configuration step,
-not a default.
+Language-model requests always go to the configured external provider. The
+provider may be a hosted API or a compatible service the operator deployed on a
+different machine. NeoRecall stores request state and validates responses, but
+does not install, load, or execute generation weights.
 
-Every contract is compiled into a sampling grammar, so the model may only emit
-tokens that keep the answer schema-valid. Prose around the JSON, a missing field
-and an invented enum value are structurally impossible rather than caught after
+Every request asks for structured JSON, and the returned value is checked
+against the same server-owned schema before it can change durable state. Prose
+around the JSON, a missing field, and an invented enum value are caught after
 generation. Length bounds on prose and date patterns have no grammar form and are
 still checked afterwards: an over-long field is trimmed, an invalid date rejected.
 
-A local context holds a fixed number of tokens, and a four-hour lecture does not
+A model context holds a fixed number of tokens, and a four-hour lecture does not
 fit in one. Consolidation therefore reads a long transcript in windows cut on
 segment boundaries and processed in order, each window told what the occasion
 looked like when the previous one stopped. The model marks the section — and the
@@ -188,20 +191,19 @@ the beginning of the transcript to a context shift.
 
 ## Memory scheduling
 
-The gates that used to ration outbound requests are off by default and remain
-configurable. Generation costs seconds of the host's own CPU rather than money,
-so a conversation is consolidated on the scheduler tick after it closes and one
-conversation is read per run — the unit a memory is anchored to — rather than a
-dozen batched together to amortize a price. An operator whose machine cannot keep
-up with its own recordings can restore any of the old floors; the audio floor in
-particular remains a hard gate that no path can bypass.
+The gates that ration outbound requests are configurable. A conversation is
+consolidated on the scheduler tick after it closes and one conversation is read
+per run — the unit a memory is anchored to — rather than batching unrelated
+conversations. Operators can raise the time, evidence, or audio floors to
+control request volume and provider cost; the audio floor remains a hard gate
+that no path can bypass.
 
 A consolidation is eligible only after the effective interval, sufficient complete
 material, and an available model. The per-user SQLite gate survives restarts.
 
 Consolidation candidates are ordered oldest-first, which makes an unpartitionable conversation a hazard in permanent operation: it would re-enter every later run and stop memory generation for good. A validation failure therefore narrows the next run to a single conversation, and a conversation that keeps failing is quarantined — still readable, no longer a candidate. One structured response per window refines provisional boundaries, writes a title and summary for every final conversation, and creates English episodic memories, atomic mini-memories, entities and importance values; the model may split a long provisional conversation or merge adjacent provisional conversations from the same recording stream. The incremental daily summary is a separate small request made afterwards, because no single window sees the day, and the local date it covers is derived from the evidence rather than read back from the model.
 
-One pass may only return a bounded answer — four memories, eight mini-memories each, sixteen entities — and the local provider enforces those bounds in the grammar. Without them a small model handed a dense transcript emits one mini-memory per utterance until its token budget runs out, which arrives as truncation. The bounds apply per window, so a long occasion still accumulates evidence across its windows while no single request grows without limit.
+One pass may only return a bounded answer — four memories, eight mini-memories each, sixteen entities. Without those limits a model handed a dense transcript can emit one mini-memory per utterance until its token budget runs out, which arrives as truncation. The bounds apply per window, so a long occasion still accumulates evidence across its windows while no single request grows without limit.
 
 Refinement is evidence-addressed and transactional. The model must partition every input segment exactly once into chronological, contiguous, single-stream sections. Server-side validation rejects missing, duplicated, reordered, invented, or cross-device segment references before any conversation is changed. Segment membership, conversation speakers, summaries, topics, memories, and source links then commit together or roll back together.
 
@@ -209,12 +211,13 @@ A validation failure records the specific reason it failed, not only a code, so 
 
 ## Search
 
-Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the same local model, with result citations.
+Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the configured external language model, with result citations.
 
 ## NeoAgent boundary
 
 NeoAgent is an OAuth client of NeoRecall, not another processing worker. It
 receives seven read-only tools for on-demand local search and evidence access.
-Audio, voice embeddings, ingest, settings, memory mutation, consolidation, and
-Ask remain inside NeoRecall. This avoids duplicated memory stores and prevents
-an otherwise unnecessary second round of generation.
+Ingest, settings, memory mutation, consolidation orchestration, and Ask remain
+inside NeoRecall; only the explicitly configured inference endpoints receive
+audio or transcript text. This avoids duplicated memory stores and prevents an
+otherwise unnecessary second round of generation.

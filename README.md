@@ -4,13 +4,13 @@
 
 <h1 align="center">NeoRecall</h1>
 
-<p align="center"><strong>Private, self-hosted audio memory — recorded anywhere, transcribed locally, and recalled naturally.</strong></p>
+<p align="center"><strong>Private, self-hosted audio memory — recorded anywhere, processed by providers you choose, and recalled naturally.</strong></p>
 
 <p align="center">
-  NeoRecall runs as a service on your own machine. It transcribes and diarizes
-  audio from web, desktop, and wearable clients entirely on-device, builds
-  searchable local memory, and writes that memory with a language model that
-  runs on the same machine. No account, no API key, nothing leaves the host.
+  NeoRecall runs as a service on your own machine. It receives audio from web,
+  desktop, and wearable clients, sends it to a separately deployed or hosted
+  transcription service, builds searchable local memory, and uses the external
+  language-model provider you configure to write memories.
 </p>
 
 <p align="center">
@@ -44,8 +44,8 @@ Read the [installation guide](docs/docs/installation.md) before exposing the ser
 ## ✨ What makes it different
 
 - **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
-- **Everything runs on your machine.** Speech recognition, diarization, multilingual embeddings, FTS5, sqlite-vec — and the language model that writes your memories. `neorecall setup` downloads all of it; a machine with 16 GB of RAM can run the lot, and any GPU it has is used automatically.
-- **Nothing is rationed.** Because generation costs seconds of your own CPU rather than a bill, memories are written as soon as a conversation ends, live previews refresh every minute, and one conversation is read at a time instead of a dozen at once. A transcript longer than the model's context is read in windows and folded back into one memory.
+- **Inference stays replaceable.** NeoRecall does not bundle or run speech or language models. Use a hosted provider or a compatible service you deploy elsewhere; provider and model choices are configurable in `.env` and the admin dashboard.
+- **Long recordings remain bounded.** Memories are written as soon as a conversation ends, and a transcript longer than the configured external model context is read in windows and folded back into one memory.
 - **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.
 - **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
 - **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) to search memories and transcript evidence through read-only, token-free retrieval tools.

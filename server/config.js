@@ -26,17 +26,6 @@ function boolean(name, fallback) {
   throw new Error(`${name} must be true or false.`);
 }
 
-// The local instruction model, downloaded by `neorecall setup` alongside the
-// speech models and run in-process through llama.cpp. Chosen so an always-on
-// recorder needs no account, no key and no outbound request: the on-device tier
-// of Gemma 4, quantization-aware trained at q4_0, is about 5.2 GB on disk, fits
-// in the RAM of an ordinary desktop, and runs on the CPU when there is no GPU to
-// offload to. QAT means the 4-bit weights were trained as 4-bit rather than
-// rounded afterwards, so the quality cost of running quantized is small.
-// Overridable with LLM_MODEL_FILE or LLM_MODEL_PATH; nothing in the pipeline
-// depends on this particular model.
-const defaultLlmModelFile = 'llm/gemma-4-E4B_q4_0-it.gguf';
-
 /// Context kept aside from every request for the chat template and for the gap
 /// between a character-based estimate of the prompt and the real tokenizer.
 /// Exported so the input budget and the configuration check that guards it use
@@ -79,11 +68,15 @@ function getConfig() {
     // stream, so erring long is the safe direction.
     importSessionContinuityMs: integer('NEORECALL_IMPORT_SESSION_CONTINUITY_MS', 600_000, { min: 0 }),
     importFailedTtlHours: integer('NEORECALL_IMPORT_FAILED_TTL_HOURS', 24, { min: 1 }),
-    transcriptionProvider: process.env.TRANSCRIPTION_PROVIDER || 'sherpa',
-    transcriptionApiBaseUrl: process.env.TRANSCRIPTION_API_BASE_URL || null,
+    transcriptionProvider: process.env.TRANSCRIPTION_PROVIDER || 'openai-compatible',
+    transcriptionApiBaseUrl: (process.env.TRANSCRIPTION_API_BASE_URL || '').replace(/\/+$/, '') || null,
     transcriptionApiKey: process.env.TRANSCRIPTION_API_KEY || null,
-    sherpaThreads: integer('NEORECALL_SHERPA_THREADS', 4, { min: 1, max: 128 }),
-    diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
+    transcriptionApiModel: process.env.TRANSCRIPTION_API_MODEL || null,
+    transcriptionApiLanguage: process.env.TRANSCRIPTION_API_LANGUAGE || null,
+    transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
+    transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
+    transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
+    diarizationEnabled: false,
     voiceMatchThreshold: number('NEORECALL_VOICE_MATCH_THRESHOLD', 0.72, { min: -1, max: 1 }),
     voiceMatchMargin: number('NEORECALL_VOICE_MATCH_MARGIN', 0.05, { min: 0, max: 2 }),
     speakerClusterThreshold: number('NEORECALL_SPEAKER_CLUSTER_THRESHOLD', 0.65, { min: -1, max: 1 }),
@@ -108,19 +101,8 @@ function getConfig() {
     speakerPreviewMinimumMs,
     speakerPreviewMaximumMs,
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
-    // Least text the statistical language detector is trusted with when the
-    // recogniser labelled nothing itself. Measured against three hours of real
-    // council audio: correctly labelled segments ran to a median of 88
-    // characters, misdetected ones to 13, and 23 of 26 misdetections were under
-    // thirty characters.
-    languageDetectionMinimumCharacters: integer('NEORECALL_LANGUAGE_DETECTION_MIN_CHARACTERS', 30, { min: 0 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
-    vadThreshold: number('NEORECALL_VAD_THRESHOLD', 0.5, { min: 0, max: 1 }),
-    vadMinimumSpeechSeconds: number('NEORECALL_VAD_MIN_SPEECH_SECONDS', 0.25, { min: 0 }),
-    vadMinimumSilenceSeconds: number('NEORECALL_VAD_MIN_SILENCE_SECONDS', 0.5, { min: 0 }),
-    diarizationMinimumOnSeconds: number('NEORECALL_DIARIZATION_MIN_ON_SECONDS', 0.3, { min: 0 }),
-    diarizationMinimumOffSeconds: number('NEORECALL_DIARIZATION_MIN_OFF_SECONDS', 0.2, { min: 0 }),
     conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
     conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
     conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),
@@ -141,9 +123,8 @@ function getConfig() {
     // on top of the previewed text, and two previews of one conversation stay at
     // least this far apart. Together they keep the machine's own work
     // proportional to new speech rather than to elapsed time. They are set close
-    // to the scheduler tick because a local model is paid for in seconds of CPU,
-    // not per request, so a description that is a minute old is the thing worth
-    // avoiding.
+    // to the scheduler tick so a description that is a minute old is refreshed
+    // without flooding the configured provider.
     conversationPreviewMinCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS', 300, { min: 1 }),
     conversationPreviewRefreshCharacters: integer('NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS', 600, { min: 1 }),
     conversationPreviewMinIntervalMs: integer('NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS', 60_000, { min: 0 }),
@@ -164,45 +145,22 @@ function getConfig() {
       importance: importanceWeight / searchWeightTotal,
     },
     searchHalfLifeDays: number('NEORECALL_SEARCH_HALF_LIFE_DAYS', 30, { min: 0.01 }),
-    // `llama` runs the model in this process through llama.cpp and never leaves
-    // the machine. `openai_compatible` points the same requests at an endpoint
-    // the operator runs or trusts — another host on the LAN with a GPU, Ollama,
-    // llama-server, or a hosted service. There is no built-in provider that
-    // requires an account.
-    aiProvider: process.env.AI_PROVIDER || 'llama',
-    // Where the GGUF weights live. LLM_MODEL_FILE is resolved inside the managed
-    // models directory that `neorecall setup` fills; LLM_MODEL_PATH overrides it
-    // with an absolute path for a model the operator manages themselves.
-    llmModelFile: process.env.LLM_MODEL_FILE || defaultLlmModelFile,
-    llmModelPath: process.env.LLM_MODEL_PATH || null,
-    // How much of the conversation the model may hold at once, in tokens. This
-    // is the single number that decides how much RAM the model needs beyond its
-    // weights, and consolidation windows its input to fit it, so raising it buys
-    // fewer, wider passes and lowering it buys narrower ones. 16 384 keeps the
-    // key-value cache of a 4B model well under a gigabyte.
+    aiProvider: process.env.AI_PROVIDER || 'openai_compatible',
+    // How much of the conversation the configured external model may hold at
+    // once, in tokens. Consolidation windows its input to fit, so raising this
+    // buys fewer, wider requests and lowering it buys narrower ones.
     llmContextSize: integer('LLM_CONTEXT_SIZE', 16_384, { min: 2_048, max: 262_144 }),
-    // Layers to offload to the GPU. 'auto' offloads as many as the detected
-    // Metal, CUDA or Vulkan device has memory for and silently runs on the CPU
-    // when there is none, which is what makes one default work everywhere.
-    llmGpuLayers: process.env.LLM_GPU_LAYERS || 'auto',
-    // 0 lets llama.cpp pick a thread count from the machine.
-    llmThreads: integer('LLM_THREADS', 0, { min: 0, max: 256 }),
     // Structured extraction, not prose: near-greedy decoding keeps the model on
     // the evidence instead of inventing plausible-sounding detail.
     llmTemperature: number('LLM_TEMPERATURE', 0.2, { min: 0, max: 2 }),
-    // How long the weights stay resident after the last request. Loading a model
-    // this size costs seconds, and the scheduler produces work in bursts, so
-    // holding it briefly turns a burst into one load instead of one per job —
-    // while an idle recorder still gives the memory back.
-    llmIdleUnloadMs: integer('LLM_IDLE_UNLOAD_MS', 600_000, { min: 0 }),
-    // Only used by the openai_compatible provider.
-    aiApiBaseUrl: (process.env.AI_API_BASE_URL || '').replace(/\/$/, '') || null,
+    // Generic endpoint settings. Provider-specific API keys are also supported
+    // and the admin page can override these values at runtime.
+    aiApiBaseUrl: (process.env.AI_API_BASE_URL || '').replace(/\/+$/, '') || null,
     aiApiKey: process.env.AI_API_KEY || null,
     aiApiModel: process.env.AI_API_MODEL || null,
-    // A local model is not a network call: this is how long the machine may
-    // spend *generating*, and a bounded consolidation answer on a CPU-only host
-    // is minutes of work, not seconds. Sized so the slowest legitimate answer
-    // finishes rather than being aborted and retried at the same cost.
+    // External deployments can still take minutes for a bounded consolidation
+    // answer. Sized so the slowest legitimate answer finishes rather than being
+    // aborted and retried at the same cost.
     aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     aiMaxRetries: integer('AI_MAX_RETRIES', 2, { min: 0, max: 10 }),
     // Has to cover the sections, memories and mini-memories one window of input
@@ -275,9 +233,9 @@ function getConfig() {
     // it is what a memory is anchored to — and the scheduler starts the next run
     // on its next tick, so a backlog still drains continuously.
     maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 1, { min: 1, max: 200 }),
-    // Ask is answered by the same local model. These limits no longer protect a
-    // bill — they keep one client from queueing more generation than the machine
-    // can work through while recordings are still arriving.
+    // Ask is answered by the same external provider. These limits keep one
+    // client from queueing more generation than the provider can work through
+    // while recordings are still arriving.
     askMaxPerHour: integer('NEORECALL_ASK_MAX_PER_HOUR', 240, { min: 0 }),
     askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 20, { min: 0 }),
     // How often the worker looks for conversations to preview, boundaries to

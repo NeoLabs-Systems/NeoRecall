@@ -1,16 +1,20 @@
 'use strict';
 
-// Shared scaffolding for the end-to-end smoke runs: a real server process with
-// the real speech models, a stubbed language-model endpoint, and the polling
-// helpers both runs need. Only the scenario lives in each script.
+// Shared scaffolding for the end-to-end smoke runs: a real server process, a
+// stubbed inference endpoint standing in for both external providers, and the
+// polling helpers both runs need. Only the scenario lives in each script.
 //
-// The stub speaks the OpenAI chat-completions contract and the server is pointed
-// at it with AI_PROVIDER=openai_compatible, so the smoke run exercises the whole
-// pipeline in seconds without loading two and a half gigabytes of weights and
-// without its assertions depending on what a real model happened to write. The
-// local provider is covered where its behaviour actually differs: the grammar it
-// derives from each contract, and the windowing that keeps a long transcript
-// inside its context.
+// NeoRecall runs no inference itself, so a smoke run needs somewhere to send
+// both workloads. One stub server answers both: multipart POSTs to
+// /audio/transcriptions with an OpenAI verbose_json transcript, and JSON POSTs
+// to /chat/completions with a contract-valid structured answer. The server is
+// pointed at it as an ordinary custom OpenAI-compatible provider, which is the
+// same path a self-hosted Whisper or llama.cpp server on the LAN takes.
+//
+// Stubbing both is what makes these runs deterministic: the assertions describe
+// the pipeline — receipts, boundaries, indexing, one occasion becoming one
+// memory — rather than whatever a particular model happened to transcribe or
+// write.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -154,14 +158,52 @@ function defaultAsk(input) {
   return { answer: 'The recalled discussion concerned project work and a follow-up.', citations: input.context.length ? [{ sourceId: input.context[0].sourceId }] : [] };
 }
 
-/// A stand-in model endpoint that answers each prompt kind with a valid contract
-/// response and records what it was asked, so a scenario can assert on the
-/// request rather than only on what was stored.
+/// Transcript for one uploaded chunk, in the shape an OpenAI-compatible
+/// `verbose_json` response has.
+///
+/// The text varies per request on purpose. Consecutive chunks of one recording
+/// pass through duplicate suppression, which exists because overlapping capture
+/// really does re-transcribe the same words; a stub that answered identically
+/// every time would have most of its output correctly discarded and the run
+/// would then fail for a reason that has nothing to do with what it tests.
+function defaultTranscription(index, durationSeconds) {
+  const sentences = [
+    'We reviewed the project report and agreed on the next milestone.',
+    'The project report needs one more section before Friday.',
+    'Maria will circulate the project report after the review.',
+    'We closed the discussion and scheduled the follow-up.',
+  ];
+  const text = sentences[index % sentences.length];
+  return {
+    task: 'transcribe',
+    language: 'en',
+    duration: durationSeconds,
+    text,
+    segments: [{ id: 0, start: 0, end: durationSeconds, text, avg_logprob: -0.2 }],
+  };
+}
+
+/// A stand-in inference endpoint covering both workloads.
+///
+/// Requests are routed by path, exactly as a real OpenAI-compatible server
+/// routes them, and every one is recorded so a scenario can assert on what was
+/// asked rather than only on what was stored.
 function modelEndpointMock(handlers = {}) {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
-    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const body = Buffer.concat(chunks);
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.url.includes('/audio/transcriptions')) {
+      const index = requests.filter((entry) => entry.purpose === 'transcription').length;
+      requests.push({ purpose: 'transcription', input: null, payload: null, system: '' });
+      const handler = handlers.transcription || defaultTranscription;
+      res.end(JSON.stringify(handler(index, 8)));
+      return;
+    }
+
+    const payload = JSON.parse(body.toString('utf8'));
     const system = payload.messages[0].content;
     const input = JSON.parse(payload.messages[1].content);
     const purpose = system.includes('consolidate personal transcripts') ? 'consolidation'
@@ -169,7 +211,6 @@ function modelEndpointMock(handlers = {}) {
         : system.includes('still being recorded') ? 'preview' : 'ask';
     requests.push({ purpose, input, payload, system });
     const handler = handlers[purpose] || { consolidation: defaultConsolidation, daily_summary: defaultDailySummary, preview: defaultPreview, ask: defaultAsk }[purpose];
-    res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
       id: `mock-${requests.length}`,
       usage: { prompt_tokens: 20, completion_tokens: 20, cost: 0 },
@@ -193,7 +234,8 @@ function requireModels(sourceModels) {
 }
 
 /// Boots a real NeoRecall server against a throwaway home directory and the
-/// real model files, and returns everything the scenario needs to talk to it.
+/// stub inference endpoint, and returns everything the scenario needs to talk to
+/// it. The only model files still involved are the local search embeddings.
 async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, timeoutMs }) {
   requireModels(sourceModels);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `neorecall-${label}-`));
@@ -214,8 +256,12 @@ async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, t
       NEORECALL_REQUIRE_VECTOR: 'true',
       NEORECALL_TRANSFORMERS_LOCAL_PATH: path.join(home, 'models'),
       AI_PROVIDER: 'openai_compatible',
-      AI_API_BASE_URL: `http://127.0.0.1:${mock.server.address().port}`,
+      AI_API_BASE_URL: `http://127.0.0.1:${mock.server.address().port}/v1`,
       AI_API_MODEL: 'e2e/mock',
+      TRANSCRIPTION_PROVIDER: 'openai-compatible',
+      TRANSCRIPTION_API_BASE_URL: `http://127.0.0.1:${mock.server.address().port}/v1`,
+      TRANSCRIPTION_API_MODEL: 'e2e/mock-asr',
+      TRANSCRIPTION_API_RESPONSE_FORMAT: 'verbose_json',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -265,6 +311,6 @@ async function runScenario(label, options, scenario) {
 
 module.exports = {
   assert, progress, delay, freePort, api, pollFactory, sliceWav, wavDurationMs, wavParts,
-  modelEndpointMock, startServer, runScenario, requireModels,
+  modelEndpointMock, startServer, runScenario, requireModels, defaultTranscription,
   defaultConsolidation, defaultPreview, defaultAsk,
 };

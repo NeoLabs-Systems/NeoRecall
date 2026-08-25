@@ -57,6 +57,16 @@ function get(userId) {
   result.effectiveConsolidationIntervalMs = Math.max(result.consolidationIntervalMs, config.minConsolidationIntervalMs);
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;
+  // Derived, not chosen. Telling one speaker from another across a recording
+  // needs a voice embedding per turn, and no external transcription provider
+  // returns one: they return text, timings, and at best a label that is only
+  // consistent inside the single request that produced it. NeoRecall no longer
+  // runs a speaker-embedding model of its own, so no new voice identities can be
+  // formed and the two preferences below cannot be honoured. They are still
+  // stored — a provider that returns embeddings makes them live again without a
+  // migration — and clients use this flag to say so instead of offering a switch
+  // that does nothing.
+  result.speakerIdentityAvailable = false;
   return result;
 }
 
