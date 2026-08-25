@@ -76,7 +76,26 @@ function getConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
-    diarizationEnabled: false,
+    // Voice activity detection and diarization run in this process on models
+    // small enough to be unremarkable — a 640 KB VAD and 31 MB of segmentation
+    // and speaker-embedding weights, against the gigabytes speech recognition
+    // and a language model would need. They are what NeoRecall still does
+    // itself, because they are what an external transcription service cannot
+    // give back: a service returns words, and at best a speaker label that is
+    // only consistent inside the one request that produced it. A voice
+    // embedding per turn is what makes a speaker the same person an hour later.
+    diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
+    // Native threads for the audio models. They run per chunk on a handful of
+    // seconds of audio, so this is a small number by design.
+    sherpaThreads: integer('NEORECALL_SHERPA_THREADS', 2, { min: 1, max: 128 }),
+    // Speech detection. Below the threshold a chunk is treated as silence and
+    // never reaches the transcription service at all, which on an always-on
+    // recorder is most of the day and most of the bill.
+    vadThreshold: number('NEORECALL_VAD_THRESHOLD', 0.5, { min: 0, max: 1 }),
+    vadMinimumSpeechSeconds: number('NEORECALL_VAD_MIN_SPEECH_SECONDS', 0.25, { min: 0 }),
+    vadMinimumSilenceSeconds: number('NEORECALL_VAD_MIN_SILENCE_SECONDS', 0.5, { min: 0 }),
+    diarizationMinimumOnSeconds: number('NEORECALL_DIARIZATION_MIN_ON_SECONDS', 0.3, { min: 0 }),
+    diarizationMinimumOffSeconds: number('NEORECALL_DIARIZATION_MIN_OFF_SECONDS', 0.2, { min: 0 }),
     voiceMatchThreshold: number('NEORECALL_VOICE_MATCH_THRESHOLD', 0.72, { min: -1, max: 1 }),
     voiceMatchMargin: number('NEORECALL_VOICE_MATCH_MARGIN', 0.05, { min: 0, max: 2 }),
     speakerClusterThreshold: number('NEORECALL_SPEAKER_CLUSTER_THRESHOLD', 0.65, { min: -1, max: 1 }),

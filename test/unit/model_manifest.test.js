@@ -41,10 +41,26 @@ test('every manifest entry is pinned well enough to verify after download', () =
   }
 });
 
-test('the manifest contains search assets but no hosted transcription or language model', () => {
+test('the manifest installs what listens to audio, never what recognizes or generates', () => {
+  // The line is drawn by what a service can give back rather than by size
+  // alone. Speech detection and diarization stay because a transcription
+  // service returns words, not voices, and only a voice embedding makes a
+  // speaker the same person in a later recording — and they are small enough
+  // for that to cost nothing much. Speech recognition and a language model are
+  // gigabytes and are exactly what an external provider does well, so they are
+  // never installed here.
   const installed = manifest.models.flatMap((model) => model.files).map((file) => file.path);
-  assert.ok(installed.some((file) => file.includes('multilingual-e5-small')));
-  assert.equal(installed.some((file) => file.startsWith('asr/') || file.startsWith('vad/') || file.startsWith('diarization/') || file.startsWith('llm/')), false);
+  assert.ok(installed.some((file) => file.includes('multilingual-e5-small')), 'local search needs its embeddings');
+  assert.ok(installed.some((file) => file.startsWith('vad/')), 'speech detection is what keeps silence off a paid endpoint');
+  assert.ok(installed.some((file) => file.startsWith('diarization/')), 'speaker identity comes from voice embeddings computed here');
+  assert.equal(installed.some((file) => file.startsWith('asr/') || file.startsWith('llm/')), false,
+    'recognition and generation belong to a provider, not to this repository');
+  // The whole point of keeping them is that they are unremarkable next to what
+  // was removed.
+  const audioBytes = manifest.models.flatMap((model) => model.files)
+    .filter((file) => file.path.startsWith('vad/') || file.path.startsWith('diarization/'))
+    .reduce((sum, file) => sum + file.size, 0);
+  assert.ok(audioBytes < 64 * 1024 * 1024, `audio models grew to ${(audioBytes / 1e6).toFixed(0)} MB; that is no longer lightweight`);
 });
 
 test('a retired model is never still installed by the same manifest', () => {

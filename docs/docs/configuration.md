@@ -89,28 +89,66 @@ Previews never create memories; consolidation replaces the insight and marks it 
 
 `NEORECALL_IMPORT_SESSION_CONTINUITY_MS` is how large a gap may be between two imports from one device before they stop counting as the same recording stream. It has to comfortably exceed the client's device-sync poll and its failure backoff.
 
-## Speaker identity
+## Speech detection and speaker identity
 
-NeoRecall no longer forms speaker identities. Telling one voice from another
-across a recording needs a voice embedding for every turn, and that came from the
-speaker-embedding model NeoRecall used to run itself. External transcription
-services return what was said — text, timings, and at best a speaker label that
-is only consistent inside the single request that produced it. Since every audio
-chunk is its own request, such a label cannot be carried from one chunk to the
-next, and inventing that link would attribute speech to the wrong person rather
-than admit it is unknown.
+These two run on the audio itself, in the NeoRecall process, and they are the
+only inference it still does. The reason is not size but capability: a
+transcription service returns what was said, never who said it. The best it
+offers is a speaker label valid inside the single request that produced it, and
+since every chunk is its own request, that label cannot be carried across a chunk
+boundary. A voice embedding can — it is what makes a speaker the same person in a
+recording made next week.
 
-So no new speaker clusters or voiceprints are created. The Speakers screen keeps
-showing identities formed earlier, names remain editable, and the settings for
-diarization and recurring matching are reported as unavailable rather than
-offered as switches that would change nothing. `NEORECALL_VOICE_MATCH_*` and
-`NEORECALL_SPEAKER_CLUSTER_*` are inert for the same reason; they are still read
-and validated, so a transcription provider that returns per-turn embeddings makes
-the whole path live again without a migration.
+They are cheap enough for that to be uncontroversial: a 640 KB voice-activity
+detector and 31 MB of segmentation and speaker-embedding weights, against the
+gigabytes recognition and generation would need. `neorecall setup` installs them
+with everything else.
 
-Consolidation still identifies people from evidence in the transcript — who was
-named, who introduced themselves — and writes them as memory entities. Only the
-link from a person to a *voice* is gone.
+Speech detection earns its place twice. A chunk it finds no speech in is never
+sent to the transcription service at all, so an idle microphone costs nothing —
+which on a recorder running all day is most of the day. `NEORECALL_VAD_THRESHOLD`
+sets that bar; raise it to send less, lower it if quiet speech is being missed.
+`NEORECALL_VAD_MIN_SPEECH_SECONDS` and `NEORECALL_VAD_MIN_SILENCE_SECONDS` decide
+how readily it opens and closes a span.
+
+`NEORECALL_DIARIZATION_ENABLED=false` turns both off. Every chunk then goes to
+the service, silence included, and transcripts arrive with no speaker labels.
+`NEORECALL_SHERPA_THREADS` bounds the native threads; the models run per chunk on
+a handful of seconds of audio, so the default of two is deliberate.
+
+### How a transcript gets a speaker
+
+The local pass and the service work on the same seconds of audio and meet on the
+same timeline. Diarization produces speaker turns with an embedding each; the
+service returns timestamped text for the whole chunk; every segment takes the
+turn it overlaps most, and that turn's embedding with it. A segment with a second
+voice talking across more than a fifth of it is marked as overlapping rather than
+quietly credited to one person.
+
+From there the existing matching applies unchanged. A cluster match needs
+`NEORECALL_SPEAKER_CLUSTER_MARGIN` over the runner-up, because a single fixed
+threshold can otherwise let a distinct new speaker score just above it against
+some unrelated cluster by chance. Diarization restarts on every chunk, so a
+speaker crossing a boundary can drift below the plain threshold with nothing about
+the voice having changed: when a component's first speech begins within
+`NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of where its last known turn ended, that
+cluster may be kept at the relaxed
+`NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a
+near-tie, so a genuine speaker change at the boundary still resolves on its own.
+
+Consolidation then identifies people from the transcript — a self-introduction,
+or another speaker naming them — and names that speaker's voiceprint from the
+same response, at no extra request. It never overwrites a name set by hand.
+
+### When it is unavailable
+
+The native runtime ships prebuilt binaries for the common platforms and is an
+optional dependency, so an install on a platform it does not cover has no audio
+models. That is survivable and deliberately not fatal: chunks are transcribed
+exactly as before and segments simply carry no speaker. The server reports this
+as `speakerIdentityAvailable`, `/ready` still passes, and the clients show the
+speaker settings switched off with the reason rather than offering choices that
+would change nothing.
 
 ## Operational thresholds
 

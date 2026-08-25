@@ -816,11 +816,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _speakerSettings() {
     final current = settings!;
-    // The server reports whether telling voices apart is possible at all. It
-    // needs a voice fingerprint for every turn, and transcription services
-    // return words rather than voices, so with one configured these switches
-    // cannot change anything. Showing them switched off and saying why is
-    // honest; letting someone flip a switch that does nothing is not.
+    // Telling voices apart happens on the server, from the audio itself,
+    // because a transcription service returns words rather than voices. That
+    // needs a small speech model installed there, and it is not available on
+    // every platform. When it is missing these switches cannot change anything,
+    // so they are shown off with the reason rather than left to be flipped.
     final available = current['speakerIdentityAvailable'] as bool? ?? true;
     return _sectionList(<Widget>[
       SectionCard(
@@ -831,10 +831,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Padding(
                 padding: EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'Your transcription service returns what was said, not who '
-                  'said it, so NeoRecall cannot tell voices apart or recognise '
-                  'someone across recordings. Names you have already given a '
-                  'speaker are kept.',
+                  'Your server cannot tell voices apart right now, so new '
+                  'recordings will not be split by speaker. Running setup on '
+                  'the server installs what it needs. Names you have already '
+                  'given a speaker are kept.',
                 ),
               ),
             SwitchListTile(

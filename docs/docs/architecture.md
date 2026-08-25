@@ -110,13 +110,28 @@ PLAUD remains a separate import connector for finished wearable files.
 
 ## Processing pipeline
 
-Each independently decodable audio chunk is sent unchanged to the configured
-transcription service. OpenAI-compatible endpoints receive multipart form data
-with a `file` field plus the configured `model`, `language`, and
-`response_format` fields. Native Deepgram and AssemblyAI adapters normalize
-their responses into the same timestamped transcript-segment contract. No VAD,
-speech recognition, diarization model, or speaker-embedding model is installed
-or executed by NeoRecall.
+Each independently decodable audio chunk is first read locally. A 640 KB
+voice-activity detector decides whether it contains speech at all — if it does
+not, the chunk is silence, no request is made, and the receipt is terminal
+without anything leaving the machine. When there is speech, a diarization model
+and a speaker-embedding model produce speaker turns with a voice fingerprint
+each.
+
+The chunk is then sent unchanged to the configured transcription service.
+OpenAI-compatible endpoints receive multipart form data with a `file` field plus
+the configured `model`, `language`, and `response_format` fields; native Deepgram
+and AssemblyAI adapters normalize their responses into the same timestamped
+transcript-segment contract. Because both passes describe the same chunk on the
+same timeline, each returned segment is joined to the speaker turn it overlaps
+most and inherits that turn's embedding.
+
+That split is deliberate and is drawn by capability rather than by size. Speech
+recognition and language generation are gigabytes and are exactly what an
+external service does well, so NeoRecall installs and runs neither. Speech
+detection and diarization are 31 MB and produce the one thing no service returns:
+a voice fingerprint, which is what identifies the same person in a recording made
+weeks later. The native runtime for them is an optional dependency — where it is
+unavailable, transcripts arrive without speaker labels rather than not at all.
 
 The normalized segments are deduplicated by time and multilingual token
 similarity, then persisted in one transaction. Audio deletion remains strictly

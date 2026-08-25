@@ -18,7 +18,7 @@ neorecall setup
 neorecall start
 ```
 
-`setup` creates `~/.neorecall`, runs database migrations, downloads and verifies the small multilingual embedding model used by local semantic search, and probes ffmpeg and sqlite-vec. Speech and language-model services are never downloaded or started by NeoRecall. Configure them through `.env` or the admin dashboard after installation.
+`setup` creates `~/.neorecall`, runs database migrations, downloads and verifies the small models NeoRecall runs itself — multilingual search embeddings, a voice-activity detector, and speaker diarization, about 165 MB in total — and probes ffmpeg and sqlite-vec. Speech recognition and language models are never downloaded or started; configure those services through `.env` or the admin dashboard after installation.
 
 Open `http://localhost:4500` after `neorecall status` reports a running service. Use a reverse proxy with TLS before exposing the server outside a trusted network.
 

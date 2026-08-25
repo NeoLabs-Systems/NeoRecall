@@ -78,6 +78,9 @@
     "sqlite-vec": "0.1.9",
     "zod": "3.25.76"
   },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "1.13.4"
+  },
   "devDependencies": {
     "supertest": "7.1.4"
   },

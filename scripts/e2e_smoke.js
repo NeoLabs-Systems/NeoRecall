@@ -97,6 +97,12 @@ async function main() {
     assert(receipt.persistedAt && receipt.serverAudioDeletedAt && receipt.transcriptSha256, 'Terminal receipt lacks durable deletion proof.');
     const transcript = await api('GET', `/api/v1/recordings/${sessionId}/transcript`, token);
     assert(transcript.items?.length && transcript.items.some((item) => item.language), 'Original-language transcript segments were not persisted.');
+    // The words come from the transcription service; who said them is worked out
+    // here, from the audio, and joined to those words by timestamp. The fixture
+    // is two people talking, so a segment with no speaker means that join — the
+    // one thing an external service cannot do for us — silently stopped working.
+    assert(transcript.items.some((item) => item.speaker_cluster_id),
+      'Transcript segments carry no speaker; local diarization did not reach the persisted transcript.');
 
     say('waiting for token-free boundaries and the hybrid search index');
     await poll('closed conversation', () => api('GET', '/api/v1/conversations?state=closed', token), (value) => value.items?.length > 0);

@@ -57,16 +57,14 @@ function get(userId) {
   result.effectiveConsolidationIntervalMs = Math.max(result.consolidationIntervalMs, config.minConsolidationIntervalMs);
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;
-  // Derived, not chosen. Telling one speaker from another across a recording
-  // needs a voice embedding per turn, and no external transcription provider
-  // returns one: they return text, timings, and at best a label that is only
-  // consistent inside the single request that produced it. NeoRecall no longer
-  // runs a speaker-embedding model of its own, so no new voice identities can be
-  // formed and the two preferences below cannot be honoured. They are still
-  // stored — a provider that returns embeddings makes them live again without a
-  // migration — and clients use this flag to say so instead of offering a switch
-  // that does nothing.
-  result.speakerIdentityAvailable = false;
+  // Derived, not chosen. Telling one speaker from another needs a voice
+  // embedding per turn, which NeoRecall produces itself from the audio — a
+  // transcription service returns words, not voices. That local pass depends on
+  // a native runtime with no build for every platform and on models an operator
+  // may have skipped, so whether it can run is a fact about this installation
+  // rather than a preference. Clients read it to disable the switches below
+  // instead of offering choices that would change nothing.
+  result.speakerIdentityAvailable = require('../../transcription/local_analysis').available();
   return result;
 }
 

@@ -9,7 +9,9 @@ sidebar_label: Overview
 NeoRecall is a self-hosted audio memory service. It records from web, desktop,
 and wearable clients, keeps its durable database and search index on the server
 you install, and sends inference to transcription and language-model services
-you configure separately. NeoRecall does not download or run either model.
+you configure separately. It never downloads or runs a speech-recognition or
+language model; the only inference it does itself is detecting speech and telling
+voices apart, which no such service can hand back.
 
 NeoRecall is beta software. Install it on a machine you administer and read
 the privacy guide before recording anyone else.
