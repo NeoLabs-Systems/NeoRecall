@@ -51,6 +51,11 @@ class NeoRecallApplication : Application() {
     backgroundCaptureChannel = BackgroundCaptureChannel(this).also {
       it.register(flutterEngine.dartExecutor.binaryMessenger)
     }
+    PhoneWearTransferManager.get(this).recoverPersistentItems(
+      onStarted = backgroundCaptureChannel::notifyWatchTransferStarted,
+      onInserted = backgroundCaptureChannel::notifyWatchRecordingAvailable,
+      onFinished = backgroundCaptureChannel::notifyWatchTransferFinished,
+    )
     flutterEngine.dartExecutor.executeDartEntrypoint(
       DartExecutor.DartEntrypoint.createDefault(),
     )

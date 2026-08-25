@@ -32,6 +32,9 @@ import 'src/recording/recorder.dart';
 import 'src/recording/recorder_mobile.dart';
 import 'src/recording/recording_schedule.dart';
 import 'src/sync/chunk_store.dart';
+import 'src/sync/pending_audio_preview.dart';
+import 'src/sync/processing_status.dart';
+import 'src/sync/storage_capacity_error.dart';
 import 'src/sync/sync_coordinator.dart';
 
 enum RecallPage {
@@ -178,6 +181,7 @@ class NeoRecallController extends ChangeNotifier {
   bool _resumingMobileCapture = false;
   bool _switchingMobileSource = false;
   Future<bool>? _widgetPhoneRecordingOperation;
+  Future<void> _watchImport = Future<void>.value();
   Timer? _mobileCaptureRecoveryTimer;
   Timer? _recordingScheduleTimer;
   int _mobileCaptureRecoveryAttempts = 0;
@@ -193,7 +197,164 @@ class NeoRecallController extends ChangeNotifier {
   // a stale reading would otherwise linger in the UI.
   int? preferredDeviceBatteryLevel;
   String? error;
-  String? notice;
+  String? _notice;
+  Timer? _noticeTimer;
+  bool _liveStatusScheduled = false;
+  bool _storageExhausted = false;
+  static const Duration _noticeLifetime = Duration(seconds: 5);
+
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
+    _scheduleLiveStatusUpdate();
+  }
+
+  void _scheduleLiveStatusUpdate() {
+    if (!isMobileCapturePlatform || recorder is! MobileRecallRecorder) return;
+    if (_liveStatusScheduled) return;
+    _liveStatusScheduled = true;
+    scheduleMicrotask(() {
+      _liveStatusScheduled = false;
+      unawaited(_pushLiveStatus());
+    });
+  }
+
+  Future<void> _pushLiveStatus() async {
+    if (recorder is! MobileRecallRecorder) return;
+    final mobile = recorder as MobileRecallRecorder;
+    await mobile.background.updateLiveStatus(_buildLiveStatus(mobile));
+  }
+
+  BackgroundLiveStatus _buildLiveStatus(MobileRecallRecorder mobile) {
+    final processing = processingStatus;
+    final issue = processing.issues.isEmpty
+        ? null
+        : processing.issues.first.message;
+    final etaSeconds = processing.eta?.inSeconds;
+    final facts = <String>[
+      if (processing.pendingBytes > 0) _compactBytes(processing.pendingBytes),
+      if (processing.totalAudioDuration > Duration.zero)
+        _compactDuration(processing.totalAudioDuration),
+      if (etaSeconds != null && etaSeconds > 0)
+        'about ${_compactDuration(processing.eta!)} left',
+    ];
+    String detail(String fallback) =>
+        facts.isEmpty ? fallback : '$fallback · ${facts.join(' · ')}';
+
+    if (_storageExhausted) {
+      return BackgroundLiveStatus(
+        phase: BackgroundLivePhase.storageFull,
+        title: 'Storage full — recording stopped',
+        detail: 'Free device storage, then reopen NeoRecall to resume safely.',
+        pendingBytes: processing.pendingBytes,
+        pendingAudioSeconds: processing.totalAudioDuration.inSeconds,
+        issue: 'No local space remains for another durable audio block.',
+      );
+    }
+    if (isRecording) {
+      final source = capability?.sourceKind == 'wearable'
+          ? preferredDeviceLabel ?? 'Bluetooth device'
+          : 'Phone microphone';
+      return BackgroundLiveStatus(
+        phase: BackgroundLivePhase.recording,
+        title: 'Recording from $source',
+        detail: detail(
+          processing.uploading > 0
+              ? 'Recording safely · uploading in background'
+              : 'Recording safely to this device',
+        ),
+        recordingStartedAt: recordingStartedAt,
+        pendingBytes: processing.pendingBytes,
+        pendingAudioSeconds: processing.totalAudioDuration.inSeconds,
+        etaSeconds: etaSeconds,
+        issue: issue,
+      );
+    }
+
+    final (phase, title, fallback) = switch (processing.activeStage) {
+      ProcessingPipelineStage.watchTransfer => (
+        BackgroundLivePhase.watchTransfer,
+        'Downloading from watch',
+        'Audio is moving into protected phone storage',
+      ),
+      ProcessingPipelineStage.upload => (
+        BackgroundLivePhase.uploading,
+        'Uploading recordings',
+        'Local originals stay protected until processing is verified',
+      ),
+      ProcessingPipelineStage.transcription => (
+        BackgroundLivePhase.transcribing,
+        'Transcribing on server',
+        'Audio is safely stored while the transcript is created',
+      ),
+      ProcessingPipelineStage.finalizing => (
+        BackgroundLivePhase.finalizing,
+        'Finalizing transcript',
+        'Waiting for verified persistence and server audio deletion',
+      ),
+      ProcessingPipelineStage.phoneQueue ||
+      ProcessingPipelineStage.serverQueue => (
+        BackgroundLivePhase.queued,
+        'Recordings safely queued',
+        issue ?? 'Waiting for the next processing step',
+      ),
+      ProcessingPipelineStage.complete =>
+        mobile.background.active.isNotEmpty
+            ? (
+                BackgroundLivePhase.connected,
+                'NeoRecall stays connected',
+                mobile.background.active.statusDetail,
+              )
+            : (
+                BackgroundLivePhase.idle,
+                'NeoRecall is ready',
+                'No recording or processing is active',
+              ),
+    };
+    return BackgroundLiveStatus(
+      phase: phase,
+      title: title,
+      detail: detail(fallback),
+      progress: processing.watchFraction,
+      pendingBytes: processing.pendingBytes,
+      pendingAudioSeconds: processing.totalAudioDuration.inSeconds,
+      etaSeconds: etaSeconds,
+      issue: issue,
+    );
+  }
+
+  static String _compactBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B queued';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB queued';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB queued';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB queued';
+  }
+
+  static String _compactDuration(Duration value) {
+    if (value.inHours > 0) {
+      final minutes = value.inMinutes.remainder(60);
+      return minutes == 0
+          ? '${value.inHours}h'
+          : '${value.inHours}h ${minutes}m';
+    }
+    if (value.inMinutes > 0) return '${value.inMinutes}m';
+    return '${value.inSeconds.clamp(1, 59)}s';
+  }
+
+  String? get notice => _notice;
+  set notice(String? value) {
+    _noticeTimer?.cancel();
+    _notice = value;
+    if (value == null) return;
+    _noticeTimer = Timer(_noticeLifetime, () {
+      if (_notice != value) return;
+      _notice = null;
+      notifyListeners();
+    });
+  }
+
   String? accountId;
   String? username;
   String? warning;
@@ -213,11 +374,47 @@ class NeoRecallController extends ChangeNotifier {
   String? askAnswer;
   List<Map<String, dynamic>> askCitations = <Map<String, dynamic>>[];
   int pendingAudioBytes = 0;
-  // Chunks parked after repeated server-side permanent failures; surfaced with a
-  // manual retry so a stuck queue is visible instead of silently growing.
+  // Recording sessions containing a chunk parked after repeated server-side
+  // permanent failures; surfaced without exposing transport chunk counts.
   int needsAttentionCount = 0;
-  // Chunks whose upload is currently failing (transient); still auto-retried.
+  // Recording sessions with a transiently failing chunk; still auto-retried.
   int failedUploadCount = 0;
+  ProcessingStatusSnapshot processingLedgerStatus =
+      const ProcessingStatusSnapshot();
+  int _watchImportingCount = 0;
+  int _watchDownloadingCount = 0;
+  String? _watchTransferError;
+
+  ProcessingStatusSnapshot get processingStatus {
+    final progress = deviceStorageSyncProgress;
+    final remainingTransferUnits = progress == null
+        ? 0
+        : (progress.total - progress.transferred)
+              .clamp(0, progress.total)
+              .toInt();
+    final transferIssues = <ProcessingIssue>[
+      ...processingLedgerStatus.issues,
+      if (deviceStorageSyncError?.trim().isNotEmpty == true)
+        ProcessingIssue(message: deviceStorageSyncError!),
+      if (_watchTransferError?.trim().isNotEmpty == true)
+        ProcessingIssue(message: _watchTransferError!),
+    ];
+    final nativeWatchPending = _watchDownloadingCount > _watchImportingCount
+        ? _watchDownloadingCount
+        : _watchImportingCount;
+    return processingLedgerStatus.copyWithTransfer(
+      active:
+          deviceStorageSyncing ||
+          _watchDownloadingCount > 0 ||
+          _watchImportingCount > 0,
+      pending: nativeWatchPending + remainingTransferUnits,
+      pendingSeconds: deviceStoragePendingSeconds,
+      transferred: progress?.transferred ?? 0,
+      total: progress?.total ?? 0,
+      issues: transferIssues,
+    );
+  }
+
   // True when Android/OEM battery optimization may suspend always-on capture.
   bool backgroundCaptureAtRisk = false;
   // Offline device-storage sync (recordings held on the wearable's own flash).
@@ -438,6 +635,8 @@ class NeoRecallController extends ChangeNotifier {
           _preferences!.getBool('recordingConsentAccepted') ?? false;
       await _loadCachedSettings(accountId);
       sync.pump.uploadAllowed = _uploadsAllowed;
+      sync.pump.onUploadActivity = _setBackgroundUploadActive;
+      sync.pump.onTerminalReceipt = _forwardWatchTerminalReceipt;
       try {
         autostartEnabled = await startupEnabled();
       } catch (_) {
@@ -454,6 +653,7 @@ class NeoRecallController extends ChangeNotifier {
           final user = payload['user'] as Map;
           accountId = user['id'] as String;
           username = user['username'] as String;
+          await api.discoverServerCapabilities();
           await _loadCachedSettings(accountId);
           sync.pump.accountId = accountId;
           // Databases created before account ownership was added can only be
@@ -540,6 +740,21 @@ class NeoRecallController extends ChangeNotifier {
                 notifyListeners();
               case BackgroundCaptureEventType.phoneRecordingRequested:
                 unawaited(_startPhoneRecordingFromWidget());
+              case BackgroundCaptureEventType.watchTransferStarted:
+                _watchDownloadingCount += 1;
+                _watchTransferError = null;
+                notifyListeners();
+              case BackgroundCaptureEventType.watchTransferFinished:
+                _watchDownloadingCount = (_watchDownloadingCount - 1)
+                    .clamp(0, _watchDownloadingCount)
+                    .toInt();
+                if (event.message?.trim().isNotEmpty == true) {
+                  _watchTransferError =
+                      'Watch download failed: ${event.message!.trim()}';
+                }
+                notifyListeners();
+              case BackgroundCaptureEventType.watchRecordingAvailable:
+                _queueWatchImport(mobile.background);
               case BackgroundCaptureEventType.message:
                 break;
             }
@@ -571,6 +786,9 @@ class NeoRecallController extends ChangeNotifier {
         // emitted before this subscription existed.
         unawaited(_resumeMobileCaptureAfterWidgetCheck());
       }
+      if (recorder is MobileRecallRecorder) {
+        _queueWatchImport((recorder as MobileRecallRecorder).background);
+      }
     } catch (exception) {
       initializationError =
           'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.';
@@ -588,8 +806,10 @@ class NeoRecallController extends ChangeNotifier {
       final write = _chunkWrite.then((_) => _storeRecordedChunk(chunk));
       _chunkWrite = write.catchError((Object exception) {
         error = exception.toString();
-        warning =
-            'Local audio could not be stored. Recording is stopping without deleting queued audio.';
+        _storageExhausted = isStorageCapacityError(exception);
+        warning = _storageExhausted
+            ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
+            : 'Local audio could not be stored. Recording is stopping without deleting queued audio.';
         if (recorder.isRecording) {
           unawaited(
             Future<void>.delayed(Duration.zero).then((_) => stopRecording()),
@@ -602,8 +822,10 @@ class NeoRecallController extends ChangeNotifier {
       _partialWrite = _partialWrite.then((_) => _storeCapturePartial(partial));
       _partialWrite = _partialWrite.catchError((Object exception) {
         error = exception.toString();
-        warning =
-            'The active desktop audio block could not be written to durable storage.';
+        _storageExhausted = isStorageCapacityError(exception);
+        warning = _storageExhausted
+            ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
+            : 'The active audio block could not be written to durable storage.';
         if (recorder.isRecording) {
           unawaited(
             Future<void>.delayed(Duration.zero).then((_) => stopRecording()),
@@ -626,8 +848,125 @@ class NeoRecallController extends ChangeNotifier {
     _networkSubscription = networkAvailability().listen((state) {
       online = state.connected;
       if (state.connected) sync.pump.pump();
+      unawaited(_refreshPending());
       notifyListeners();
     });
+  }
+
+  void _queueWatchImport(BackgroundCaptureService background) {
+    _watchImport = _watchImport
+        .then((_) => _importPendingWatchRecordings(background))
+        .catchError((Object exception) {
+          debugPrint('Wear OS inbox import deferred: $exception');
+        });
+  }
+
+  Future<void> _importPendingWatchRecordings(
+    BackgroundCaptureService background,
+  ) async {
+    final owner = accountId;
+    if (owner == null) return;
+    // Drain in bounded native batches. Each row is claimed only after both the
+    // session declaration and audio are durable in ChunkStore.
+    try {
+      while (true) {
+        final recordings = await background.takePendingWatchRecordings();
+        if (recordings.isEmpty) break;
+        _watchImportingCount = recordings.length;
+        notifyListeners();
+        for (final row in recordings) {
+          final recordingId = row['recordingId'] as String;
+          final sessionId = row['sessionId'] as String;
+          final sourceId = row['sourceId'] as String;
+          final watchDeviceId = row['watchDeviceId'] as String;
+          final watchName = row['watchName'] as String;
+          final sequence = (row['sequence'] as num).toInt();
+          final sessionStartedAt = DateTime.fromMillisecondsSinceEpoch(
+            (row['sessionStartedAtMs'] as num).toInt(),
+            isUtc: true,
+          );
+          final startedAt = DateTime.fromMillisecondsSinceEpoch(
+            (row['startedAtMs'] as num).toInt(),
+            isUtc: true,
+          );
+          final durationMs = (row['durationMs'] as num).toInt();
+          final isFinal = row['isFinal'] as bool;
+          final digest = row['sha256'] as String;
+          final bytes = row['bytes'];
+          if (bytes is! Uint8List) {
+            throw const FormatException('Wear OS audio payload is not binary.');
+          }
+          await store.putSession(
+            LocalRecordingDeclaration(
+              id: sessionId,
+              accountId: owner,
+              sourceId: sourceId,
+              deviceId: watchDeviceId,
+              deviceClientUuid: watchDeviceId,
+              deviceName: watchName,
+              platform: 'wearos',
+              startedAt: sessionStartedAt,
+              timezone: _cachedSettings['timezone'] as String? ?? 'UTC',
+              // Pressing Start on the watch is the user's direct attestation.
+              consentAttestedAt: sessionStartedAt,
+              sourceKind: 'microphone',
+              channelLayout: 'mono',
+              sampleRate: (row['sampleRate'] as num).toInt(),
+              endedAt: isFinal
+                  ? startedAt.add(Duration(milliseconds: durationMs))
+                  : null,
+              finalSequence: isFinal ? sequence : null,
+            ),
+          );
+          final alreadyStored = await store.hasMatchingChunk(
+            recordingId,
+            digest,
+          );
+          if (!alreadyStored) {
+            await store.put(
+              AudioChunk(
+                id: recordingId,
+                sessionId: sessionId,
+                sourceId: sourceId,
+                sequence: sequence,
+                startedAt: startedAt,
+                monotonicOffsetMs: (row['monotonicOffsetMs'] as num).toInt(),
+                durationMs: durationMs,
+                overlapMs: 0,
+                channelLayout: 'mono',
+                container: row['container'] as String,
+                codec: row['codec'] as String,
+                sha256: digest,
+                state: LocalChunkState.ready,
+                createdAt: DateTime.now().toUtc(),
+                isFinal: isFinal,
+              ),
+              bytes,
+            );
+          }
+          await background.markWatchRecordingImported(recordingId);
+          _watchImportingCount = (_watchImportingCount - 1)
+              .clamp(0, recordings.length)
+              .toInt();
+          notifyListeners();
+        }
+        await _refreshPending();
+        sync.pump.pump();
+        if (recordings.length < 20) break;
+      }
+    } finally {
+      _watchImportingCount = 0;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> _forwardWatchTerminalReceipt(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+  ) async {
+    if (recorder is! MobileRecallRecorder) return true;
+    return (recorder as MobileRecallRecorder).background
+        .acknowledgeWatchRecording(chunk.id, receipt);
   }
 
   Future<bool> setBackendUrl(String value) async {
@@ -868,6 +1207,7 @@ class NeoRecallController extends ChangeNotifier {
     api.token = session['token'] as String;
     accountId = user['id'] as String;
     username = user['username'] as String;
+    await api.discoverServerCapabilities();
     await _loadCachedSettings(accountId);
     sync.pump.accountId = accountId;
     await audioDeviceSessions.bindAccount(accountId);
@@ -885,6 +1225,9 @@ class NeoRecallController extends ChangeNotifier {
     await _settings();
     sync.pump.start();
     await _refreshPending();
+    if (recorder is MobileRecallRecorder) {
+      _queueWatchImport((recorder as MobileRecallRecorder).background);
+    }
   }
 
   Future<void> logout() async {
@@ -910,6 +1253,9 @@ class NeoRecallController extends ChangeNotifier {
     username = null;
     _cachedSettings = Map<String, dynamic>.from(_fallbackSettings);
     pendingAudioBytes = 0;
+    needsAttentionCount = 0;
+    failedUploadCount = 0;
+    processingLedgerStatus = const ProcessingStatusSnapshot();
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
@@ -1458,6 +1804,7 @@ class NeoRecallController extends ChangeNotifier {
     );
     await _partialWrite;
     await store.put(chunk, recorded.bytes);
+    if (_storageExhausted) _storageExhausted = false;
     _sequence = sequence + 1;
     // Opening the audio API is not enough to prove recovery. A full scheduled
     // chunk durably stored on disk is; a short final tail from another failure
@@ -1489,6 +1836,7 @@ class NeoRecallController extends ChangeNotifier {
       isFinal: true,
     );
     await store.putPartial(chunk, recorded.bytes);
+    if (_storageExhausted) _storageExhausted = false;
     await _refreshPending();
   }
 
@@ -2016,18 +2364,56 @@ class NeoRecallController extends ChangeNotifier {
       pendingAudioBytes = 0;
       needsAttentionCount = 0;
       failedUploadCount = 0;
+      processingLedgerStatus = const ProcessingStatusSnapshot();
       notifyListeners();
       return;
     }
     pendingAudioBytes = await store.pendingBytes(ownerAccountId);
     try {
-      final chunks = await store.pending(ownerAccountId, limit: 500);
+      final chunks = await store.pending(ownerAccountId, limit: 2000);
       needsAttentionCount = chunks
           .where((chunk) => chunk.state == LocalChunkState.needsAttention)
+          .map((chunk) => chunk.sessionId)
+          .toSet()
           .length;
       failedUploadCount = chunks
           .where((chunk) => chunk.state == LocalChunkState.failed)
+          .map((chunk) => chunk.sessionId)
+          .toSet()
           .length;
+      final byteCounts = await Future.wait(chunks.map(store.storedBytes));
+      var localUploadBytes = 0;
+      for (var index = 0; index < chunks.length; index += 1) {
+        if (<LocalChunkState>{
+          LocalChunkState.ready,
+          LocalChunkState.uploading,
+          LocalChunkState.failed,
+        }.contains(chunks[index].state)) {
+          localUploadBytes += byteCounts[index];
+        }
+      }
+      var connected = online;
+      var unmetered = true;
+      try {
+        final network = await currentNetworkState();
+        connected = network.connected;
+        unmetered = network.unmetered;
+      } catch (_) {
+        // The status remains conservative when Android cannot classify the
+        // active network: upload policy still performs its own authoritative check.
+      }
+      processingLedgerStatus = ProcessingStatusSnapshot.fromChunks(
+        chunks: chunks,
+        pendingBytes: pendingAudioBytes,
+        localUploadBytes: localUploadBytes,
+        uploadEta: sync.pump.estimateUploadDuration(localUploadBytes),
+        offline: !connected,
+        unmeteredOnly:
+            (_cachedSettings['uploadOnlyOnUnmetered'] as bool? ?? true) &&
+            !sync.pump.meteredUploadOverrideActive,
+        networkUnmetered: unmetered,
+        deviceIssue: sync.pump.processingIssue,
+      );
     } catch (_) {
       // Counts are best-effort UI hints; never block on them.
     }
@@ -2047,6 +2433,135 @@ class NeoRecallController extends ChangeNotifier {
     }
     await _refreshPending();
     sync.pump.pump();
+  }
+
+  /// Drains only the uploadable audio that is queued at the moment of the
+  /// request over the current metered network. The saved Wi-Fi-only preference
+  /// remains unchanged, so later recordings continue to wait for Wi-Fi.
+  Future<void> uploadQueuedAudioOnMobileDataOnce() async {
+    final ownerAccountId = accountId;
+    final recordingCount = ownerAccountId == null
+        ? 0
+        : (await store.pending(ownerAccountId, limit: 2000))
+              .where(
+                (chunk) => <LocalChunkState>{
+                  LocalChunkState.ready,
+                  LocalChunkState.uploading,
+                  LocalChunkState.failed,
+                }.contains(chunk.state),
+              )
+              .map((chunk) => chunk.sessionId)
+              .toSet()
+              .length;
+    final chunkCount = await sync.pump.uploadQueuedAudioOnMeteredOnce();
+    notice = chunkCount == 0
+        ? 'There is no queued audio ready to upload.'
+        : 'Uploading $recordingCount queued recording${recordingCount == 1 ? '' : 's'} using mobile data.';
+    await _refreshPending();
+    notifyListeners();
+  }
+
+  static const int _pendingAudioReviewPartLimit = 2000;
+
+  Future<List<PendingAudioRecording>> loadPendingAudioRecordings() async {
+    final ownerAccountId = accountId;
+    if (ownerAccountId == null) return const <PendingAudioRecording>[];
+    final chunks =
+        (await store.pending(
+          ownerAccountId,
+          limit: _pendingAudioReviewPartLimit,
+        )).where(
+          (chunk) =>
+              chunk.state != LocalChunkState.capturing &&
+              chunk.state != LocalChunkState.released,
+        );
+    final grouped = <String, List<AudioChunk>>{};
+    for (final chunk in chunks) {
+      grouped.putIfAbsent(chunk.sessionId, () => <AudioChunk>[]).add(chunk);
+    }
+
+    final recordings = await Future.wait(
+      grouped.entries.map((entry) async {
+        final parts = entry.value
+          ..sort((a, b) => a.sequence.compareTo(b.sequence));
+        final sizes = await Future.wait(parts.map(store.storedBytes));
+        final durationMs = parts.fold<int>(
+          0,
+          (total, chunk) => total + chunk.durationMs,
+        );
+        return PendingAudioRecording(
+          id: entry.key,
+          startedAt: parts.first.startedAt,
+          duration: Duration(milliseconds: durationMs),
+          byteSize: sizes.fold<int>(0, (total, size) => total + size),
+          stage: _pendingPlaybackStage(parts),
+          parts: parts
+              .map(
+                (chunk) => PendingAudioPart(
+                  id: chunk.id,
+                  duration: Duration(milliseconds: chunk.durationMs),
+                  mimeType: _audioMimeType(chunk.container),
+                ),
+              )
+              .toList(growable: false),
+        );
+      }),
+    );
+    recordings.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    return recordings;
+  }
+
+  PendingAudioPlaybackStage _pendingPlaybackStage(List<AudioChunk> chunks) {
+    if (chunks.any(
+      (chunk) =>
+          chunk.state == LocalChunkState.needsAttention ||
+          chunk.state == LocalChunkState.failed,
+    )) {
+      return PendingAudioPlaybackStage.needsAttention;
+    }
+    if (chunks.any((chunk) => chunk.state == LocalChunkState.ready)) {
+      return PendingAudioPlaybackStage.onDevice;
+    }
+    if (chunks.any((chunk) => chunk.state == LocalChunkState.uploading)) {
+      return PendingAudioPlaybackStage.uploading;
+    }
+    if (chunks.any((chunk) => chunk.state == LocalChunkState.uploaded)) {
+      return PendingAudioPlaybackStage.serverProcessing;
+    }
+    return PendingAudioPlaybackStage.finalizing;
+  }
+
+  String _audioMimeType(String container) => switch (container.toLowerCase()) {
+    'wav' => 'audio/wav',
+    'mp3' || 'mpeg' => 'audio/mpeg',
+    'm4a' || 'mp4' => 'audio/mp4',
+    'aac' || 'adts' => 'audio/aac',
+    'webm' => 'audio/webm',
+    'ogg' || 'opus' => 'audio/ogg',
+    _ => 'application/octet-stream',
+  };
+
+  Future<Uint8List> readPendingAudioPart(String partId) async {
+    final ownerAccountId = accountId;
+    if (ownerAccountId == null) {
+      throw StateError('Sign in to review retained audio.');
+    }
+    final chunks = await store.pending(
+      ownerAccountId,
+      limit: _pendingAudioReviewPartLimit,
+    );
+    final matches = chunks.where(
+      (chunk) =>
+          chunk.id == partId &&
+          chunk.state != LocalChunkState.capturing &&
+          chunk.state != LocalChunkState.released,
+    );
+    if (matches.isEmpty) {
+      throw StateError(
+        'This audio finished processing and is no longer retained locally.',
+      );
+    }
+    return store.readBytes(matches.first);
   }
 
   /// Opens OS settings so the user can lift battery restrictions that would
@@ -2456,6 +2971,11 @@ class NeoRecallController extends ChangeNotifier {
     await (recorder as MobileRecallRecorder).setDeviceSyncActive(active);
   }
 
+  Future<void> _setBackgroundUploadActive(bool active) async {
+    if (recorder is! MobileRecallRecorder) return;
+    await (recorder as MobileRecallRecorder).setUploadActive(active);
+  }
+
   /// True when the sweep that is failing right now is not the first one to fail.
   /// The scheduler counts a sweep only after it returns, so a non-zero count
   /// here means an earlier sweep already failed.
@@ -2589,6 +3109,9 @@ class NeoRecallController extends ChangeNotifier {
     final payload =
         await api.request('PUT', '/api/v1/settings', body: changes) as Map;
     await _cacheSettings(Map<String, dynamic>.from(payload['settings'] as Map));
+    // Status is derived from the cached policy, so refresh it before returning
+    // to a settings screen that may have just changed the network rule.
+    await _refreshPending();
     sync.pump.pump();
     _applyRecordingSchedule();
     notice = 'Settings saved.';
@@ -2696,6 +3219,7 @@ class NeoRecallController extends ChangeNotifier {
     _stopForegroundRefresh();
     _cancelMobileCaptureRecovery();
     _recordingScheduleTimer?.cancel();
+    _noticeTimer?.cancel();
     _chunkSubscription?.cancel();
     _partialSubscription?.cancel();
     _warningSubscription?.cancel();

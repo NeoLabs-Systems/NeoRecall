@@ -102,11 +102,27 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
+  Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async =>
+      const <Map<String, dynamic>>[];
+
+  @override
+  Future<void> markWatchRecordingImported(String recordingId) async {}
+
+  @override
+  Future<bool> acknowledgeWatchRecording(
+    String recordingId,
+    Map<String, dynamic> receipt,
+  ) async => true;
+
+  @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
     applied.add(request);
     _active = request;
     return true;
   }
+
+  @override
+  Future<void> updateLiveStatus(BackgroundLiveStatus status) async {}
 
   @override
   Future<void> stop() async {
@@ -190,6 +206,24 @@ void main() {
 
     expect(background.active.isEmpty, isTrue);
     expect(background.isRunning, isFalse);
+    await recorder.dispose();
+  });
+
+  test('an upload drain owns the host after the UI is gone', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final adapter = _FakeAdapter();
+    final background = _RecordingBackgroundService();
+    final recorder = _buildRecorder(adapter, background);
+    await recorder.initialize(accountId: 'account-1');
+
+    await recorder.setUploadActive(true);
+    expect(background.active.holds, <BackgroundHold>{
+      BackgroundHold.audioUpload,
+    });
+    expect(background.active.needsWakeLock, isTrue);
+
+    await recorder.setUploadActive(false);
+    expect(background.active.isEmpty, isTrue);
     await recorder.dispose();
   });
 

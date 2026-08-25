@@ -101,20 +101,12 @@ only when it transfers something or keeps failing.
 
 ## Live capture sources
 
-Discord voice and Google Meet / Zoom / Microsoft Teams share one product
-surface: a **live notetaker bot** that joins while the call is happening and
-streams audio into the ordinary ingest pipeline. There is no admin OAuth app
-per platform and no wait for cloud recordings after the meeting ends.
+Discord voice uses a **live notetaker bot** that joins while people are present
+and streams audio into the ordinary ingest pipeline.
 
 - **Discord** — each user pastes their own bot token and trigger usernames.
   When a listed person joins a voice channel, the bot joins and records every
   speaker until they leave.
-- **Meetings** — each user pastes a Meet, Zoom, or Teams link. Playwright
-  drives a real Chrome session that joins as a notetaker and captures tab
-  audio as PCM chunks. Optional per-user account sign-in (live browser relay)
-  stores an isolated browser profile so the bot is admitted as a real guest
-  rather than turned away as anonymous. No password is stored as text.
-
 PLAUD remains a separate import connector for finished wearable files.
 
 ## Processing pipeline

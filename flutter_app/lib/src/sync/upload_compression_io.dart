@@ -15,7 +15,11 @@ class UploadPayload {
 const int _minimumCompressionInputBytes = 32 * 1024;
 const double _maximumCompressedRatio = 0.9;
 
-Future<UploadPayload> prepareAudioUpload(Uint8List bytes) async {
+Future<UploadPayload> prepareAudioUpload(
+  Uint8List bytes, {
+  bool allowCompression = false,
+}) async {
+  if (!allowCompression) return UploadPayload(bytes);
   if (bytes.length < _minimumCompressionInputBytes) return UploadPayload(bytes);
   final compressed = await Isolate.run(
     () => Uint8List.fromList(gzip.encode(bytes)),

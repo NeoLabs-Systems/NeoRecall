@@ -7,5 +7,7 @@ class UploadPayload {
   final String? contentEncoding;
 }
 
-Future<UploadPayload> prepareAudioUpload(Uint8List bytes) async =>
-    UploadPayload(bytes);
+Future<UploadPayload> prepareAudioUpload(
+  Uint8List bytes, {
+  bool allowCompression = false,
+}) async => UploadPayload(bytes);

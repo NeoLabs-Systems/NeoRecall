@@ -9,7 +9,6 @@ const { validate } = require('../middleware/validate');
 const router = express.Router();
 
 const pairingService = require('../services/sources/pairing_service');
-const meetingAccounts = require('../services/sources/meeting_bot/meeting_account_service');
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
@@ -45,25 +44,6 @@ router.get('/discord/pairing/:token/status', (req, res) => {
 // Which source types this build can run, so the client offers only real ones.
 router.get('/types', (req, res) => res.json({ types: sources.availableTypes() }));
 
-// Meeting account: bots join as a real signed-in participant instead of an
-// anonymous guest. Sign-in happens live in the user's browser via a one-time
-// ticketed WebSocket relay — no admin OAuth app, no password stored as text.
-const signInSchema = z.object({ provider: z.enum(Object.keys(meetingAccounts.PROVIDERS)) });
-
-router.get('/meeting/account', (req, res) => res.json(meetingAccounts.getStatus(req.auth.userId)));
-
-router.post('/meeting/account/sign-in', validate(signInSchema), (req, res) => {
-  try {
-    res.json(meetingAccounts.beginSignIn(req.auth.userId, req.body.provider));
-  } catch (error) {
-    res.status(409).json({ error: error.message });
-  }
-});
-
-router.delete('/meeting/account', asyncRoute(async (req, res) => {
-  res.json(await meetingAccounts.signOut(req.auth.userId));
-}));
-
 const verifySchema = z.object({
   type: z.string().min(1),
   config: z.record(z.unknown()),
@@ -97,11 +77,6 @@ const updateSchema = z.object({
 router.get('/', (req, res) => res.json({ sources: sources.list(req.auth.userId) }));
 
 router.post('/', validate(createSchema), asyncRoute(async (req, res) => {
-  // Meeting links are verified before storage so unsupported URLs fail in the
-  // setup dialog rather than in a background bot start minutes later.
-  if (req.body.type === 'meeting') {
-    await sources.verifyConfig('meeting', req.body.config || {});
-  }
   res.status(201).json(sources.create(req.auth.userId, req.body));
 }));
 

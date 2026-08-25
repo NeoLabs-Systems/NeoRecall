@@ -77,4 +77,87 @@ void main() {
     );
     await service.dispose();
   });
+
+  test(
+    'live status replaces the native notification through one payload',
+    () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'backgroundRuntimeState') {
+          return <String, Object?>{
+            'running': true,
+            'holds': <String>['microphoneCapture'],
+            'foreground': true,
+            'microphoneUnavailable': false,
+          };
+        }
+        return true;
+      });
+      final service = AndroidBackgroundCaptureService();
+      await service.initialize();
+      const status = BackgroundLiveStatus(
+        phase: BackgroundLivePhase.uploading,
+        title: 'Uploading recordings',
+        detail: '12 minutes safely queued',
+        progress: 0.4,
+      );
+
+      await service.updateLiveStatus(status);
+      await service.updateLiveStatus(status);
+
+      final updates = calls.where((call) => call.method == 'updateLiveStatus');
+      expect(updates, hasLength(1));
+      expect(
+        Map<Object?, Object?>.from(updates.single.arguments as Map)['phase'],
+        'uploading',
+      );
+      await service.dispose();
+    },
+  );
+
+  test(
+    'watch download activity and failures reach the processing ledger',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'backgroundRuntimeState') {
+          return <String, Object?>{
+            'running': false,
+            'holds': <String>[],
+            'foreground': true,
+            'microphoneUnavailable': false,
+          };
+        }
+        return true;
+      });
+      final service = AndroidBackgroundCaptureService();
+      await service.initialize();
+      final events = service.events.take(2).toList();
+
+      for (final call in <MethodCall>[
+        const MethodCall('watchTransferStarted'),
+        const MethodCall('watchTransferFinished', <String, Object?>{
+          'error': 'Link interrupted',
+        }),
+      ]) {
+        await messenger.handlePlatformMessage(
+          channelName,
+          const StandardMethodCodec().encodeMethodCall(call),
+          (ByteData? _) {},
+        );
+      }
+
+      final received = await events;
+      expect(
+        received.first.type,
+        BackgroundCaptureEventType.watchTransferStarted,
+      );
+      expect(
+        received.last.type,
+        BackgroundCaptureEventType.watchTransferFinished,
+      );
+      expect(received.last.message, 'Link interrupted');
+      await service.dispose();
+    },
+  );
 }

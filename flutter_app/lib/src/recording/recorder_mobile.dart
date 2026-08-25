@@ -54,6 +54,7 @@ class MobileRecallRecorder implements RecallRecorder {
   Set<BackgroundHold> _captureHolds = const <BackgroundHold>{};
   bool _backgroundPaused = false;
   bool _syncing = false;
+  bool _uploading = false;
   bool _initialized = false;
 
   @override
@@ -79,7 +80,9 @@ class MobileRecallRecorder implements RecallRecorder {
     await devices.bindAccount(accountId);
     await background.initialize();
     _subs.add(devices.messages.listen(_warnings.add));
-    _subs.add(devices.linkIntents.listen((_) => unawaited(applyBackgroundHolds())));
+    _subs.add(
+      devices.linkIntents.listen((_) => unawaited(applyBackgroundHolds())),
+    );
     _subs.add(
       background.events.listen((event) {
         final message = event.message;
@@ -114,6 +117,7 @@ class MobileRecallRecorder implements RecallRecorder {
       // A transfer already in flight keeps the host regardless of the standing
       // preference: dropping it mid-drain would strand audio on the device.
       if (_syncing) holds.add(BackgroundHold.wearableSync);
+      if (_uploading) holds.add(BackgroundHold.audioUpload);
     }
     return background.apply(
       BackgroundRuntimeRequest(
@@ -132,6 +136,14 @@ class MobileRecallRecorder implements RecallRecorder {
     await applyBackgroundHolds();
   }
 
+  /// Keeps the process and CPU alive for an active upload drain even when no
+  /// recording or wearable link otherwise owns the background host.
+  Future<void> setUploadActive(bool active) async {
+    if (_uploading == active) return;
+    _uploading = active;
+    await applyBackgroundHolds();
+  }
+
   /// Releases every hold after the user tapped Stop on the notification: capture
   /// ends, the wearable is unlinked, and the host shuts down. Opening the app
   /// calls [resumeBackgroundRuntime] to arm it again.
@@ -141,6 +153,7 @@ class MobileRecallRecorder implements RecallRecorder {
     await stop();
     _captureHolds = const <BackgroundHold>{};
     _syncing = false;
+    _uploading = false;
     await devices.disconnect();
     await background.stop();
   }

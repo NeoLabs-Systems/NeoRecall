@@ -180,6 +180,7 @@ test('the source registry exposes plaud and hides credentials from clients', () 
   delete require.cache[REGISTRY_PATH];
   const registry = require(REGISTRY_PATH);
   assert.ok(registry.availableTypes().includes('plaud'));
+  assert.ok(!registry.availableTypes().includes('meeting'));
   assert.equal(typeof registry.verifyConfig, 'function');
   // getPublic/list must never echo a stored token back to the client.
   assert.equal(typeof registry.getPublic, 'function');

@@ -6,8 +6,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'background_hold.dart';
+import 'background_live_status.dart';
 
 export 'background_hold.dart';
+export 'background_live_status.dart';
 
 /// Cross-platform façade for the always-on mobile runtime host.
 ///
@@ -25,6 +27,10 @@ abstract class BackgroundCaptureService {
   ///
   /// Idempotent: re-applying the active request does not restart anything.
   Future<bool> apply(BackgroundRuntimeRequest request);
+
+  /// Updates the single native ongoing surface. Replacing one structured status
+  /// avoids separate recording, upload, watch-sync, and error notifications.
+  Future<void> updateLiveStatus(BackgroundLiveStatus status) async {}
 
   /// Releases every hold and stops the host.
   Future<void> stop();
@@ -51,6 +57,15 @@ abstract class BackgroundCaptureService {
   /// remains true across cold-engine and Activity attachment races.
   Future<bool> takePendingWidgetPhoneRecordingRequest();
 
+  /// Claims watch recordings from the native handoff inbox. The watch retains
+  /// its originals until [acknowledgeWatchRecording] persists a terminal proof.
+  Future<List<Map<String, dynamic>>> takePendingWatchRecordings();
+  Future<void> markWatchRecordingImported(String recordingId);
+  Future<bool> acknowledgeWatchRecording(
+    String recordingId,
+    Map<String, dynamic> receipt,
+  );
+
   Stream<BackgroundCaptureEvent> get events;
 }
 
@@ -59,6 +74,9 @@ enum BackgroundCaptureEventType {
   stopRequested,
   batteryOptimizationActive,
   phoneRecordingRequested,
+  watchTransferStarted,
+  watchTransferFinished,
+  watchRecordingAvailable,
 
   /// The host could not take a microphone hold because no UI is attached (a
   /// process the system started after a reboot or a crash). Wearable holds are
@@ -88,6 +106,12 @@ class PlatformManagedBackgroundCaptureService
   final StreamController<BackgroundCaptureEvent> _events =
       StreamController<BackgroundCaptureEvent>.broadcast();
   BackgroundRuntimeRequest _active = BackgroundRuntimeRequest.idle;
+  BackgroundLiveStatus? _liveStatus;
+  bool _initialized = false;
+  bool _notificationPermissionResolved = false;
+  static const MethodChannel _channel = MethodChannel(
+    'systems.neolabs.neorecall/background_capture',
+  );
 
   @override
   bool get isRunning => _active.isNotEmpty;
@@ -103,7 +127,41 @@ class PlatformManagedBackgroundCaptureService
   Stream<BackgroundCaptureEvent> get events => _events.stream;
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    if (_initialized) return;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      _channel.setMethodCallHandler((call) async {
+        if (call.method == 'backgroundStopRequested') {
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.stopRequested,
+            ),
+          );
+          try {
+            await _channel.invokeMethod<void>('acknowledgeLiveStopRequest');
+          } on MissingPluginException {
+            // The persisted request remains available for the next cold start.
+          }
+        }
+        return null;
+      });
+      try {
+        final pending =
+            await _channel.invokeMethod<bool>('takePendingLiveStopRequest') ??
+            false;
+        if (pending) {
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.stopRequested,
+            ),
+          );
+        }
+      } on MissingPluginException {
+        // Hosts built before interactive Live Activities still record normally.
+      }
+    }
+    _initialized = true;
+  }
 
   @override
   Future<BackgroundRuntimeState> refreshState() async => state;
@@ -112,19 +170,70 @@ class PlatformManagedBackgroundCaptureService
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
+  Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async =>
+      const <Map<String, dynamic>>[];
+
+  @override
+  Future<void> markWatchRecordingImported(String recordingId) async {}
+
+  @override
+  Future<bool> acknowledgeWatchRecording(
+    String recordingId,
+    Map<String, dynamic> receipt,
+  ) async => true;
+
+  @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
     _active = request;
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.iOS &&
+        request.isCapturing &&
+        !_notificationPermissionResolved) {
+      _notificationPermissionResolved = true;
+      try {
+        if (!await Permission.notification.isGranted) {
+          await Permission.notification.request();
+        }
+      } catch (_) {
+        // ActivityKit does not depend on notification permission. A denied or
+        // unavailable prompt only removes the separate storage-full alert.
+      }
+    }
     return true;
+  }
+
+  @override
+  Future<void> updateLiveStatus(BackgroundLiveStatus status) async {
+    if (_liveStatus == status) return;
+    _liveStatus = status;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        await _channel.invokeMethod<void>('updateLiveStatus', status.toMap());
+      } on MissingPluginException {
+        // Older hosts keep capture working without the optional live surface.
+      }
+    }
   }
 
   @override
   Future<void> stop() async {
     _active = BackgroundRuntimeRequest.idle;
+    _liveStatus = null;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        await _channel.invokeMethod<void>('clearLiveStatus');
+      } on MissingPluginException {
+        // Optional on hosts built before Live Activity support.
+      }
+    }
   }
 
   @override
   Future<void> dispose() async {
     await stop();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      _channel.setMethodCallHandler(null);
+    }
     await _events.close();
   }
 }
@@ -141,6 +250,7 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   bool _microphoneNoticeSent = false;
   bool _batteryNoticeSent = false;
   String? _lastMessage;
+  BackgroundLiveStatus? _liveStatus;
 
   @override
   bool get isRunning => _state.running;
@@ -170,6 +280,26 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
           _events.add(
             const BackgroundCaptureEvent(
               BackgroundCaptureEventType.phoneRecordingRequested,
+            ),
+          );
+        case 'watchRecordingAvailable':
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.watchRecordingAvailable,
+            ),
+          );
+        case 'watchTransferStarted':
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.watchTransferStarted,
+            ),
+          );
+        case 'watchTransferFinished':
+          final arguments = call.arguments;
+          _events.add(
+            BackgroundCaptureEvent(
+              BackgroundCaptureEventType.watchTransferFinished,
+              message: arguments is Map ? arguments['error'] as String? : null,
             ),
           );
       }
@@ -204,6 +334,40 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async {
+    try {
+      final rows = await _channel.invokeListMethod<dynamic>(
+        'takePendingWatchRecordings',
+      );
+      return rows
+              ?.whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList(growable: false) ??
+          const <Map<String, dynamic>>[];
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  @override
+  Future<void> markWatchRecordingImported(String recordingId) =>
+      _channel.invokeMethod<void>(
+        'markWatchRecordingImported',
+        <String, Object?>{'recordingId': recordingId},
+      );
+
+  @override
+  Future<bool> acknowledgeWatchRecording(
+    String recordingId,
+    Map<String, dynamic> receipt,
+  ) async =>
+      await _channel.invokeMethod<bool>(
+        'acknowledgeWatchRecording',
+        <String, Object?>{'recordingId': recordingId, 'receipt': receipt},
+      ) ??
+      false;
+
+  @override
   Future<bool> apply(BackgroundRuntimeRequest request) async {
     if (!_initialized) await initialize();
     if (request.isEmpty) {
@@ -220,12 +384,10 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
 
     if (!await _ensureHostPermissions(request)) return false;
     try {
-      await _channel
-          .invokeMethod<bool>('applyBackgroundHolds', <String, Object?>{
-            'holds': request.wireHolds,
-            'title': request.notificationTitle,
-            'text': request.notificationText,
-          });
+      await _channel.invokeMethod<bool>(
+        'applyBackgroundHolds',
+        <String, Object?>{'holds': request.wireHolds},
+      );
       _active = request;
       // The platform starts the host asynchronously, so this read describes the
       // host as it was, not as it will be. Accepting the request is what the
@@ -236,6 +398,18 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
     } catch (error) {
       _message('Background runtime could not start: $error');
       return false;
+    }
+  }
+
+  @override
+  Future<void> updateLiveStatus(BackgroundLiveStatus status) async {
+    if (!_initialized) await initialize();
+    if (_liveStatus == status) return;
+    _liveStatus = status;
+    try {
+      await _channel.invokeMethod<void>('updateLiveStatus', status.toMap());
+    } catch (error) {
+      _message('Background status could not be updated: $error');
     }
   }
 
@@ -343,6 +517,7 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   @override
   Future<void> stop() async {
     _active = BackgroundRuntimeRequest.idle;
+    _liveStatus = null;
     try {
       await _channel.invokeMethod<bool>('stopBackgroundCapture');
     } catch (_) {

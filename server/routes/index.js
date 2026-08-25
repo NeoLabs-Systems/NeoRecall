@@ -3,6 +3,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { getConfig } = require('../config');
+const { CHUNK_RECEIPT_BATCH_LIMIT } = require('../services/ingest/limits');
 
 const router = express.Router();
 router.get('/meta', requireAuth, (req, res) => {
@@ -11,10 +12,12 @@ router.get('/meta', requireAuth, (req, res) => {
     product: 'NeoRecall', version: require('../../package.json').version,
     user: req.user,
     capabilities: { localTranscription: true, diarization: config.diarizationEnabled, semanticSearch: true,
-      displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true },
+      displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true,
+      gzipAudioUpload: true },
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,
       chunkTargetMs: config.chunkTargetMs, chunkOverlapMs: config.chunkOverlapMs, importPartBytes: config.importPartBytes,
-      minimumConsolidationIntervalMs: config.minConsolidationIntervalMs },
+      minimumConsolidationIntervalMs: config.minConsolidationIntervalMs,
+      chunkReceiptBatch: CHUNK_RECEIPT_BATCH_LIMIT },
   });
 });
 router.use('/auth', require('./auth'));

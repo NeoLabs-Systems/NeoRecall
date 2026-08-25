@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? settings;
   final timezone = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
+  bool _savingUploadPolicy = false;
 
   @override
   void initState() {
@@ -73,6 +74,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
   }
 
+  Future<void> _setUploadOnlyOnUnmetered(bool value) async {
+    final current = settings;
+    if (current == null || _savingUploadPolicy) return;
+    final previous = current['uploadOnlyOnUnmetered'] as bool? ?? true;
+    setState(() {
+      current['uploadOnlyOnUnmetered'] = value;
+      _savingUploadPolicy = true;
+    });
+    try {
+      // Network policy affects a running background queue, so it is applied
+      // immediately instead of waiting for the page-level Save button.
+      await widget.controller.updateSettings(<String, dynamic>{
+        'uploadOnlyOnUnmetered': value,
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => current['uploadOnlyOnUnmetered'] = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update upload policy: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _savingUploadPolicy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.rail;
@@ -88,6 +114,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: FilledButton.icon(
               onPressed:
                   widget.controller.loading ||
+                      _savingUploadPolicy ||
                       settings == null ||
                       selectedSection == SettingsSection.devices
                   ? null
@@ -205,7 +232,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ctrl = widget.controller;
     final tfStatus = ctrl.accountTwoFactor;
     final isEnabled = tfStatus['enabled'] == true;
-    final recoveryCodesRemaining = tfStatus['recoveryCodesRemaining'] as int? ?? 0;
+    final recoveryCodesRemaining =
+        tfStatus['recoveryCodesRemaining'] as int? ?? 0;
 
     return _sectionList(<Widget>[
       SectionCard(
@@ -213,9 +241,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('Two-factor authentication', style: TextStyle(color: palette.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
+            Text(
+              'Two-factor authentication',
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text('Protect your account with an authenticator app.', style: TextStyle(color: palette.textSecondary, height: 1.45)),
+            Text(
+              'Protect your account with an authenticator app.',
+              style: TextStyle(color: palette.textSecondary, height: 1.45),
+            ),
             const SizedBox(height: 16),
             if (ctrl.isConfiguringTwoFactor)
               const Center(child: CircularProgressIndicator())
@@ -224,7 +262,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Icon(Icons.check_circle, color: palette.accent, size: 20),
                   const SizedBox(width: 8),
-                  Text('2FA is enabled ($recoveryCodesRemaining recovery codes remaining)', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
+                  Text(
+                    '2FA is enabled ($recoveryCodesRemaining recovery codes remaining)',
+                    style: TextStyle(
+                      color: palette.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -244,9 +288,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ] else ...<Widget>[
               Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.amber,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
-                  Text('2FA is not enabled', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
+                  Text(
+                    '2FA is not enabled',
+                    style: TextStyle(
+                      color: palette.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -270,7 +324,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text('Security keys', style: TextStyle(color: palette.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
+        Text(
+          'Security keys',
+          style: TextStyle(
+            color: palette.textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         const SizedBox(height: 6),
         Text(
           'Sign in with a hardware key or passkey instead of your password. A key that asks for a PIN or a fingerprint also replaces your two-factor code.',
@@ -278,7 +339,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 16),
         if (keys.isEmpty)
-          Text('No security keys registered.', style: TextStyle(color: palette.textSecondary))
+          Text(
+            'No security keys registered.',
+            style: TextStyle(color: palette.textSecondary),
+          )
         else
           ...keys.map((key) => _securityKeyRow(palette, ctrl, key)),
         const SizedBox(height: 16),
@@ -299,7 +363,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _securityKeyRow(NeoRecallPalette palette, NeoRecallController ctrl, Map<String, dynamic> key) {
+  Widget _securityKeyRow(
+    NeoRecallPalette palette,
+    NeoRecallController ctrl,
+    Map<String, dynamic> key,
+  ) {
     final lastUsedAt = key['lastUsedAt'] as String?;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -311,9 +379,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(key['label'] as String? ?? 'Security key', style: TextStyle(color: palette.textPrimary, fontWeight: FontWeight.w600)),
                 Text(
-                  lastUsedAt == null ? 'Never used' : 'Last used ${lastUsedAt.split('T').first}',
+                  key['label'] as String? ?? 'Security key',
+                  style: TextStyle(
+                    color: palette.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  lastUsedAt == null
+                      ? 'Never used'
+                      : 'Last used ${lastUsedAt.split('T').first}',
                   style: TextStyle(color: palette.textSecondary, fontSize: 12),
                 ),
               ],
@@ -336,41 +412,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addSecurityKey(NeoRecallController ctrl) async {
-    final label = await _promptDialog('Name this key', 'Give the key a name you will recognise, for example "YubiKey".');
+    final label = await _promptDialog(
+      'Name this key',
+      'Give the key a name you will recognise, for example "YubiKey".',
+    );
     if (label == null) return;
-    final name = label.trim().isEmpty ? 'Security key ${ctrl.securityKeys.length + 1}' : label.trim();
+    final name = label.trim().isEmpty
+        ? 'Security key ${ctrl.securityKeys.length + 1}'
+        : label.trim();
     await ctrl.registerSecurityKey(name);
     if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
     }
   }
 
-  Future<void> _renameSecurityKey(NeoRecallController ctrl, Map<String, dynamic> key) async {
-    final label = await _promptDialog('Rename security key', 'Enter a new name for "${key['label']}".');
+  Future<void> _renameSecurityKey(
+    NeoRecallController ctrl,
+    Map<String, dynamic> key,
+  ) async {
+    final label = await _promptDialog(
+      'Rename security key',
+      'Enter a new name for "${key['label']}".',
+    );
     if (label == null || label.trim().isEmpty) return;
     await ctrl.renameSecurityKey(key['id'] as String, label.trim());
     if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
     }
   }
 
   Future<void> _disableTwoFactor(NeoRecallController ctrl) async {
-    final password = await _promptDialog('Enter password', 'Your current password is required to disable 2FA', obscure: true);
+    final password = await _promptDialog(
+      'Enter password',
+      'Your current password is required to disable 2FA',
+      obscure: true,
+    );
     if (password == null || password.isEmpty) return;
     await ctrl.disableTwoFactor(password: password);
     if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
     }
   }
 
   Future<void> _regenerateRecoveryCodes(NeoRecallController ctrl) async {
-    final password = await _promptDialog('Enter password', 'Your current password is required.', obscure: true);
+    final password = await _promptDialog(
+      'Enter password',
+      'Your current password is required.',
+      obscure: true,
+    );
     if (password == null || password.isEmpty) return;
-    final code = await _promptDialog('Enter 2FA code', 'Enter your current authenticator code.');
+    final code = await _promptDialog(
+      'Enter 2FA code',
+      'Enter your current authenticator code.',
+    );
     if (code == null || code.isEmpty) return;
-    final codes = await ctrl.regenerateTwoFactorCodes(password: password, code: code);
+    final codes = await ctrl.regenerateTwoFactorCodes(
+      password: password,
+      code: code,
+    );
     if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
       return;
     }
     if (codes.isNotEmpty && mounted) {
@@ -394,20 +503,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Text('Scan this QR code in your authenticator app.'),
               const SizedBox(height: 16),
               if (setup['qrDataUrl'] != null)
-                Image.memory(base64Decode((setup['qrDataUrl'] as String).split(',').last), width: 200, height: 200),
+                Image.memory(
+                  base64Decode((setup['qrDataUrl'] as String).split(',').last),
+                  width: 200,
+                  height: 200,
+                ),
               const SizedBox(height: 8),
               SelectableText(setup['manualKey'] as String? ?? ''),
               const SizedBox(height: 16),
               TextField(
                 controller: codeController,
-                decoration: const InputDecoration(labelText: 'Authenticator code'),
+                decoration: const InputDecoration(
+                  labelText: 'Authenticator code',
+                ),
                 keyboardType: TextInputType.number,
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, codeController.text), child: const Text('Verify')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, codeController.text),
+              child: const Text('Verify'),
+            ),
           ],
         );
       },
@@ -415,7 +536,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (code == null || code.isEmpty) return;
     final codes = await ctrl.enableTwoFactor(code);
     if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
       return;
     }
     if (codes.isNotEmpty && mounted) {
@@ -432,27 +555,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Save these codes in a secure place. They are shown only once.'),
+            const Text(
+              'Save these codes in a secure place. They are shown only once.',
+            ),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: codes.map((c) => Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.grey.withAlpha(25)),
-                child: Text(c, style: const TextStyle(fontFamily: 'monospace')),
-              )).toList(),
+              children: codes
+                  .map(
+                    (c) => Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withAlpha(25),
+                      ),
+                      child: Text(
+                        c,
+                        style: const TextStyle(fontFamily: 'monospace'),
+                      ),
+                    ),
+                  )
+                  .toList(),
             ),
           ],
         ),
         actions: [
-          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
         ],
       ),
     );
   }
 
-  Future<String?> _promptDialog(String title, String message, {bool obscure = false}) {
+  Future<String?> _promptDialog(
+    String title,
+    String message, {
+    bool obscure = false,
+  }) {
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
@@ -463,12 +604,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Text(message),
             const SizedBox(height: 16),
-            TextField(controller: controller, obscureText: obscure, autofocus: true),
+            TextField(
+              controller: controller,
+              obscureText: obscure,
+              autofocus: true,
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('OK')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -487,9 +638,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: current['uploadOnlyOnUnmetered'] as bool? ?? true,
-              onChanged: (value) => setState(
-                () => current['uploadOnlyOnUnmetered'] = value,
-              ),
+              onChanged: _savingUploadPolicy ? null : _setUploadOnlyOnUnmetered,
               title: const Text('Upload only on Wi-Fi / unmetered networks'),
               subtitle: const Text(
                 'On by default. Recording continues to private app storage '
@@ -501,9 +650,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: current['recordingScheduleEnabled'] as bool? ?? false,
-              onChanged: (value) => setState(
-                () => current['recordingScheduleEnabled'] = value,
-              ),
+              onChanged: (value) =>
+                  setState(() => current['recordingScheduleEnabled'] = value),
               title: const Text('Daily recording window'),
               subtitle: const Text(
                 'Uses this device’s local time. Off means 24/7; overnight '
@@ -610,10 +758,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
   }
 
-  String _formatMinute(int minute) => TimeOfDay(
-    hour: minute ~/ 60,
-    minute: minute % 60,
-  ).format(context);
+  String _formatMinute(int minute) =>
+      TimeOfDay(hour: minute ~/ 60, minute: minute % 60).format(context);
 
   Future<void> _pickScheduleMinute({
     required String key,

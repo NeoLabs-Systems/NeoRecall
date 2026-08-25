@@ -6,12 +6,9 @@ const path = require('node:path');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const zlib = require('node:zlib');
-const { spawnSync } = require('node:child_process');
-const ffmpegPath = require('ffmpeg-static');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
-const { sha256 } = require('../../utils/crypto');
 const jobs = require('../jobs/job_service');
 const receipts = require('./receipt_service');
 const tempAudio = require('./temp_audio_service');
@@ -220,7 +217,9 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
 
 function status(userId, chunkIds) {
   const select = getDatabase().prepare('SELECT * FROM audio_chunks WHERE id=? AND user_id=?');
-  return chunkIds.map((id) => select.get(id, userId)).filter(Boolean).map(receipts.receipt);
+  const estimates = receipts.processingEstimateContext();
+  return chunkIds.map((id) => select.get(id, userId)).filter(Boolean)
+    .map((row) => receipts.receipt(row, estimates));
 }
 
 function released(userId, chunkIds) {
@@ -253,96 +252,16 @@ function syncState(userId, sessionId) {
   ownedSession(userId, sessionId);
   const db = getDatabase();
   const sources = db.prepare('SELECT * FROM recording_sources WHERE session_id=? ORDER BY created_at').all(sessionId);
+  const estimates = receipts.processingEstimateContext(db);
   return {
     sessionId,
     sources: sources.map((source) => {
       const chunks = db.prepare('SELECT * FROM audio_chunks WHERE source_id=? ORDER BY sequence').all(source.id);
       const gaps = db.prepare('SELECT * FROM recording_gaps WHERE source_id=? ORDER BY start_offset_ms').all(source.id);
-      return { sourceId: source.id, finalSequence: source.final_sequence, missingRanges: missingRanges(chunks, source.final_sequence, gaps), gaps, receipts: chunks.map(receipts.receipt) };
+      return { sourceId: source.id, finalSequence: source.final_sequence, missingRanges: missingRanges(chunks, source.final_sequence, gaps), gaps,
+        receipts: chunks.map((chunk) => receipts.receipt(chunk, estimates)) };
     }),
   };
 }
 
-// --- Live meeting-bot audio sink -------------------------------------------
-// The meeting bot streams raw f32le / 48kHz / mono PCM straight from the tab.
-// Buffer it per source and, once a chunk's worth has accumulated (or on
-// finalize), transcode to 16kHz mono pcm_s16le WAV — the transcription format —
-// and feed it into the same chunk pipeline the import handler uses.
-const meetingBuffers = new Map(); // sourceId -> { userId, sessionId, parts, bytes, sequence, baseMs, emittedMs }
-const F32_BYTES_PER_MS = (48000 * 4) / 1000;
-
-function meetingState(userId, sessionId, sourceId) {
-  let state = meetingBuffers.get(sourceId);
-  if (!state) {
-    const session = getDatabase().prepare('SELECT corrected_started_at FROM recording_sessions WHERE id=?').get(sessionId);
-    const baseMs = session ? Date.parse(session.corrected_started_at) : Date.now();
-    state = { userId, sessionId, parts: [], bytes: 0, sequence: 0, baseMs, emittedMs: 0 };
-    meetingBuffers.set(sourceId, state);
-  }
-  return state;
-}
-
-function flushMeetingChunk(sourceId, isFinal) {
-  const state = meetingBuffers.get(sourceId);
-  if (!state || state.bytes === 0) return;
-  const durationMs = Math.round(state.bytes / F32_BYTES_PER_MS);
-  if (!isFinal && durationMs < getConfig().chunkTargetMs) return;
-  if (durationMs < 1) return;
-
-  const pcm = Buffer.concat(state.parts, state.bytes);
-  state.parts = [];
-  state.bytes = 0;
-
-  const chunkId = crypto.randomUUID();
-  const destination = tempAudio.chunkPath(chunkId, 'wav');
-  const result = spawnSync(ffmpegPath, ['-v', 'error', '-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', 'pipe:0',
-    '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', destination], { input: pcm, maxBuffer: 1 << 30 });
-  if (result.status !== 0) {
-    console.error('[MeetingAudio] ffmpeg transcode failed:', result.stderr && result.stderr.toString().slice(0, 300));
-    return;
-  }
-
-  const bytes = fs.readFileSync(destination);
-  const db = getDatabase();
-  const sequence = state.sequence++;
-  const offsetMs = state.emittedMs;
-  state.emittedMs += durationMs;
-  try {
-    db.transaction(() => {
-      db.prepare(`INSERT INTO audio_chunks
-        (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,
-         device_started_at,monotonic_offset_ms,duration_ms,overlap_ms,state,temporary_path)
-        VALUES (?,?,?,?,?,?,?,?,'wav','pcm_s16le','mono',?,?,?,0,'uploaded',?)`).run(
-          chunkId, state.userId, state.sessionId, sourceId, sequence, `meeting:${sourceId}:${sequence}`,
-          sha256(bytes), bytes.length, new Date(state.baseMs + offsetMs).toISOString(), offsetMs, durationMs, destination);
-      jobs.enqueue({ userId: state.userId, resourceType: 'audio_chunk', resourceId: chunkId, type: 'transcribe_chunk', priority: 70 }, db);
-    })();
-    console.log(`[MeetingAudio] chunk ${sequence} persisted (${durationMs}ms) for source ${sourceId}`);
-  } catch (error) {
-    tempAudio.unlinkStrict(destination);
-    console.error('[MeetingAudio] failed to persist chunk:', error && error.message);
-  }
-}
-
-function processAudio(userId, sessionId, sourceId, buffer) {
-  try {
-    const state = meetingState(userId, sessionId, sourceId);
-    state.parts.push(buffer);
-    state.bytes += buffer.length;
-    flushMeetingChunk(sourceId, false);
-  } catch (error) {
-    console.error('[MeetingAudio] processAudio error:', error && error.message);
-  }
-}
-
-function finalizeAudio(sourceId) {
-  try {
-    flushMeetingChunk(sourceId, true);
-  } catch (error) {
-    console.error('[MeetingAudio] finalizeAudio error:', error && error.message);
-  } finally {
-    meetingBuffers.delete(sourceId);
-  }
-}
-
-module.exports = { createSession, addSource, closeSource, closeSession, addGaps, acceptChunk, status, released, syncState, processAudio, finalizeAudio };
+module.exports = { createSession, addSource, closeSource, closeSession, addGaps, acceptChunk, status, released, syncState };

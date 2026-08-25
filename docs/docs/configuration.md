@@ -136,21 +136,6 @@ Conversation boundaries expose separate controls for hard and soft silence gaps,
 
 The character ceiling is deliberately set above what `NEORECALL_CONVERSATION_MAXIMUM_MS` can produce, so duration rather than transcript length is what ends a conversation. A lower ceiling would split a long lecture or meeting into several conversations and therefore several memories purely because it ran long. Lowering it to suit a small-context model is supported, but `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` must stay large enough for the sections and memories a full-size input justifies — a completion cut off mid-JSON is indistinguishable from a validation failure.
 
-## Live meeting bot
-
-Meet / Zoom / Teams joins use Playwright + Chrome on the NeoRecall host. Users
-configure everything from the Sources screen (meeting link + optional account
-sign-in); no admin OAuth client registration is required.
-
-| Variable | Purpose |
-|---|---|
-| `NEORECALL_MEETING_JOIN_TIMEOUT_MS` | How long the bot may wait in the lobby before giving up (default 5 minutes) |
-| `NEORECALL_MEETING_LEAVE_GRACE_MS` | Quiet period after the call ends before tearing down capture (default 30 seconds) |
-| `NEORECALL_MEETING_SIGNIN_IDLE_TIMEOUT_MS` | Idle timeout for the live per-user account sign-in relay (default 10 minutes) |
-
-Install Chrome for Playwright (`npx playwright install chrome`) so Google Meet
-joins are reliable; Chromium is used as a fallback.
-
 `NEORECALL_SPEAKER_PREVIEW_MIN_MS` and
 `NEORECALL_SPEAKER_PREVIEW_MAX_MS` bound the derived clean-speaker sample.
 Both are validated within the product's 5–10 second preview contract.

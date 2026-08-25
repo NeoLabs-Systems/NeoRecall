@@ -26,8 +26,6 @@ class BackgroundCaptureChannel(private val context: Context) {
               BackgroundCaptureService.requestHolds(
                 context,
                 holds,
-                call.argument<String>("title"),
-                call.argument<String>("text"),
               )
             }
             result.success(true)
@@ -37,6 +35,19 @@ class BackgroundCaptureChannel(private val context: Context) {
         }
         "stopBackgroundCapture" -> {
           stopHost()
+          result.success(true)
+        }
+        "updateLiveStatus" -> {
+          val status = call.arguments as? Map<*, *>
+          if (status == null) {
+            result.error("INVALID_LIVE_STATUS", "Status payload is missing.", null)
+          } else {
+            BackgroundCaptureService.updateLiveStatus(context, status)
+            result.success(true)
+          }
+        }
+        "clearLiveStatus" -> {
+          BackgroundCaptureService.clearLiveStatus(context)
           result.success(true)
         }
         "backgroundRuntimeState" -> {
@@ -64,6 +75,27 @@ class BackgroundCaptureChannel(private val context: Context) {
             RecordWidgetProvider.updateAll(context)
           }
           result.success(pending)
+        }
+        "takePendingWatchRecordings" -> try {
+          result.success(PhoneWearTransferManager.get(context).pending())
+        } catch (error: Exception) {
+          result.error("WATCH_INBOX_FAILED", error.message, null)
+        }
+        "markWatchRecordingImported" -> {
+          PhoneWearTransferManager.get(context).markImported(
+            requireNotNull(call.argument<String>("recordingId")),
+          )
+          result.success(true)
+        }
+        "acknowledgeWatchRecording" -> try {
+          result.success(
+            PhoneWearTransferManager.get(context).acknowledge(
+              requireNotNull(call.argument<String>("recordingId")),
+              requireNotNull(call.argument<Map<String, Any?>>("receipt")),
+            ),
+          )
+        } catch (error: Exception) {
+          result.error("WATCH_ACK_FAILED", error.message, null)
         }
         else -> result.notImplemented()
       }
@@ -127,6 +159,26 @@ class BackgroundCaptureChannel(private val context: Context) {
     Handler(Looper.getMainLooper()).post {
       if (::channel.isInitialized) {
         channel.invokeMethod("backgroundHostMessage", mapOf("message" to message))
+      }
+    }
+  }
+
+  fun notifyWatchRecordingAvailable() {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) channel.invokeMethod("watchRecordingAvailable", null)
+    }
+  }
+
+  fun notifyWatchTransferStarted() {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) channel.invokeMethod("watchTransferStarted", null)
+    }
+  }
+
+  fun notifyWatchTransferFinished(error: String? = null) {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod("watchTransferFinished", mapOf("error" to error))
       }
     }
   }

@@ -239,6 +239,12 @@ class WebChunkStore implements ChunkStore {
         );
       });
   @override
+  Future<bool> hasMatchingChunk(String id, String sha256) =>
+      _withStore('readonly', (store) async {
+        final value = await store.getObject(id);
+        return value is Map && value['sha256'] == sha256;
+      });
+  @override
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes) async {}
   @override
   Future<void> clearPartial(String sourceId) async {}
@@ -347,6 +353,8 @@ class WebChunkStore implements ChunkStore {
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) async =>
       chunk.bytes ?? (throw StateError('Chunk has no browser audio bytes.'));
+  @override
+  Future<int> storedBytes(AudioChunk chunk) async => chunk.bytes?.length ?? 0;
   @override
   Future<void> setState(
     String id,

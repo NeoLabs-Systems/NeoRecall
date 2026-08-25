@@ -10,6 +10,7 @@ const { validate } = require('../middleware/validate');
 const { HttpError } = require('../middleware/error_handler');
 const { getConfig } = require('../config');
 const { isIanaTimezone } = require('../utils/time');
+const { CHUNK_RECEIPT_BATCH_LIMIT } = require('../services/ingest/limits');
 
 const router = express.Router();
 const storage = multer.diskStorage({
@@ -73,8 +74,8 @@ router.put('/sessions/:id/sources/:sourceId/chunks/:sequence', upload.single('au
   res.status(receipt.state === 'uploaded' && !receipt.duplicate ? 202 : 200).json({ receipt });
 }));
 
-router.post('/chunks/status', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(500) })), (req, res) => res.json({ receipts: service.status(req.auth.userId, req.body.chunkIds) }));
-router.post('/chunks/released', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(500) })), (req, res) => res.json({ released: service.released(req.auth.userId, req.body.chunkIds) }));
+router.post('/chunks/status', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(CHUNK_RECEIPT_BATCH_LIMIT) })), (req, res) => res.json({ receipts: service.status(req.auth.userId, req.body.chunkIds) }));
+router.post('/chunks/released', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(CHUNK_RECEIPT_BATCH_LIMIT) })), (req, res) => res.json({ released: service.released(req.auth.userId, req.body.chunkIds) }));
 router.get('/stream', (_req, _res, next) => next(new HttpError(501, 'FEATURE_NOT_ENABLED', 'Wearable streaming is not enabled in v1.')));
 
 module.exports = router;

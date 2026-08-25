@@ -273,6 +273,18 @@ class IoChunkStore implements ChunkStore {
   }
 
   @override
+  Future<bool> hasMatchingChunk(String id, String sha256) async {
+    final rows = await db.query(
+      'chunks',
+      columns: <String>['sha256'],
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    return rows.isNotEmpty && rows.first['sha256'] == sha256;
+  }
+
+  @override
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes) async {
     final file = File(p.join(_audioDirectory.path, '${chunk.id}.recovery.wav'));
     final handle = await file.open(mode: FileMode.writeOnly);
@@ -368,32 +380,42 @@ class IoChunkStore implements ChunkStore {
     if (row['receipt'] != null) 'receipt': jsonDecode(row['receipt'] as String),
   };
   @override
-  Future<List<AudioChunk>> pending(String accountId, {int limit = 100}) async =>
-      (await db.rawQuery(
-        // needsAttention is returned so callers can surface/retry it; the upload
-        // pump filters by state itself and never acts on needsAttention chunks.
-        '''SELECT c.* FROM chunks c
+  Future<List<AudioChunk>> pending(
+    String accountId, {
+    int limit = 100,
+  }) async => (await db.rawQuery(
+    // needsAttention is returned so callers can surface/retry it; the upload
+    // pump filters by state itself and never acts on needsAttention chunks.
+    '''SELECT c.* FROM chunks c
        JOIN sessions s ON s.id=c.sessionId
        WHERE s.accountId=? AND c.state IN (?,?,?,?,?,?,?)
        ORDER BY CASE WHEN c.state=? THEN 0 ELSE 1 END,
                 c.createdAt,c.sourceId,c.sequence
        LIMIT ?''',
-        <Object?>[
-          accountId,
-          LocalChunkState.ready.name,
-          LocalChunkState.uploading.name,
-          LocalChunkState.uploaded.name,
-          LocalChunkState.failed.name,
-          LocalChunkState.capturing.name,
-          LocalChunkState.needsAttention.name,
-          LocalChunkState.terminal.name,
-          LocalChunkState.terminal.name,
-          limit,
-        ],
-      )).map((row) => AudioChunk.fromMap(_map(row))).toList();
+    <Object?>[
+      accountId,
+      LocalChunkState.ready.name,
+      LocalChunkState.uploading.name,
+      LocalChunkState.uploaded.name,
+      LocalChunkState.failed.name,
+      LocalChunkState.capturing.name,
+      LocalChunkState.needsAttention.name,
+      LocalChunkState.terminal.name,
+      LocalChunkState.terminal.name,
+      limit,
+    ],
+  )).map((row) => AudioChunk.fromMap(_map(row))).toList();
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) =>
       File(chunk.filePath!).readAsBytes();
+  @override
+  Future<int> storedBytes(AudioChunk chunk) async {
+    final path = chunk.filePath;
+    if (path == null) return chunk.bytes?.length ?? 0;
+    final file = File(path);
+    return await file.exists() ? file.length() : 0;
+  }
+
   @override
   Future<void> setState(
     String id,

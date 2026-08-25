@@ -19,3 +19,4 @@ models/downloads/
 *.mp3
 !test/fixtures/*.wav
 /tmp
+/flutter_app/android/.kotlin

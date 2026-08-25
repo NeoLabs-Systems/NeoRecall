@@ -10,6 +10,10 @@ import 'chunk_store_stub.dart'
 abstract class ChunkStore {
   Future<void> initialize();
   Future<void> put(AudioChunk chunk, Uint8List bytes);
+
+  /// Used by cross-runtime handoffs to make the commit/claim boundary
+  /// idempotent after a process crash.
+  Future<bool> hasMatchingChunk(String id, String sha256) async => false;
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes);
   Future<void> clearPartial(String sourceId);
   Future<void> putSession(LocalRecordingDeclaration session);
@@ -18,6 +22,7 @@ abstract class ChunkStore {
   Future<void> markSessionSynced(String id);
   Future<List<AudioChunk>> pending(String accountId, {int limit = 100});
   Future<Uint8List> readBytes(AudioChunk chunk);
+  Future<int> storedBytes(AudioChunk chunk);
   Future<void> setState(
     String id,
     LocalChunkState state, {

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../main_controller.dart';
 import '../../main_theme.dart';
 import 'discord_setup_dialog.dart';
-import 'meeting_setup_dialog.dart';
 import 'platform_copy.dart';
 import 'plaud_setup_dialog.dart';
 import 'source_platform_card.dart';
@@ -22,7 +21,6 @@ class _SourcesScreenState extends State<SourcesScreen>
   bool _loading = true;
   List<Map<String, dynamic>> _sources = <Map<String, dynamic>>[];
   final Set<String> _busyTypes = <String>{};
-  String? _banner;
 
   @override
   void initState() {
@@ -59,9 +57,9 @@ class _SourcesScreenState extends State<SourcesScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load sources: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load sources: $error')));
     }
   }
 
@@ -75,7 +73,6 @@ class _SourcesScreenState extends State<SourcesScreen>
   Future<void> _setupManual(String typeId) async {
     final Widget? dialog = switch (typeId) {
       'discord' => DiscordSetupDialog(controller: widget.controller),
-      'meeting' => MeetingSetupDialog(controller: widget.controller),
       'plaud' => PlaudSetupDialog(controller: widget.controller),
       _ => null,
     };
@@ -86,12 +83,6 @@ class _SourcesScreenState extends State<SourcesScreen>
       builder: (context) => dialog,
     );
     if (result == true) {
-      if (typeId == 'meeting') {
-        setState(
-          () => _banner =
-              'Notetaker is joining the call. Audio streams into NeoRecall while the meeting is live.',
-        );
-      }
       await _load();
     }
   }
@@ -106,9 +97,9 @@ class _SourcesScreenState extends State<SourcesScreen>
       await _load(silent: true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $error')));
       }
     }
   }
@@ -117,10 +108,12 @@ class _SourcesScreenState extends State<SourcesScreen>
     final type = source['type'] as String? ?? '';
     setState(() => _busyTypes.add(type));
     try {
-      final result = await widget.controller.api.request(
-        'POST',
-        '/api/v1/sources/${source['id']}/sync',
-      ) as Map;
+      final result =
+          await widget.controller.api.request(
+                'POST',
+                '/api/v1/sources/${source['id']}/sync',
+              )
+              as Map;
       if (mounted) {
         final imported = result['imported'];
         ScaffoldMessenger.of(context).showSnackBar(
@@ -136,9 +129,9 @@ class _SourcesScreenState extends State<SourcesScreen>
       await _load(silent: true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync failed: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Sync failed: $error')));
       }
       await _load(silent: true);
     } finally {
@@ -152,14 +145,9 @@ class _SourcesScreenState extends State<SourcesScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: palette.bgCard,
-        title: Text(
-          'Disconnect',
-          style: TextStyle(color: palette.textPrimary),
-        ),
+        title: Text('Disconnect', style: TextStyle(color: palette.textPrimary)),
         content: Text(
-          source['type'] == 'meeting'
-              ? 'Leave the call and stop recording? Transcripts already captured stay in NeoRecall.'
-              : 'Stop this source? Existing transcripts stay in NeoRecall.',
+          'Stop this source? Existing transcripts stay in NeoRecall.',
           style: TextStyle(color: palette.textSecondary),
         ),
         actions: [
@@ -172,10 +160,7 @@ class _SourcesScreenState extends State<SourcesScreen>
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(
-              'Disconnect',
-              style: TextStyle(color: palette.danger),
-            ),
+            child: Text('Disconnect', style: TextStyle(color: palette.danger)),
           ),
         ],
       ),
@@ -189,16 +174,18 @@ class _SourcesScreenState extends State<SourcesScreen>
       await _load(silent: true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to disconnect: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to disconnect: $error')));
       }
     }
   }
 
   List<_CardModel> _buildCards(SourceCategory category) {
     final cards = <_CardModel>[];
-    for (final copy in kStaticIntegrations.where((c) => c.category == category)) {
+    for (final copy in kStaticIntegrations.where(
+      (c) => c.category == category,
+    )) {
       final source = _sourceFor(copy.id);
       cards.add(
         _CardModel(
@@ -209,8 +196,7 @@ class _SourcesScreenState extends State<SourcesScreen>
               ? (source!['config'] as Map)['accountEmail'] as String?
               : null,
           lastSyncAt: source?['config'] is Map
-              ? ((source!['config'] as Map)['lastSyncAt'] as String? ??
-                  (source['config'] as Map)['joinedAt'] as String?)
+              ? (source!['config'] as Map)['lastSyncAt'] as String?
               : null,
           error: source?['config'] is Map
               ? (source!['config'] as Map)['error'] as String?
@@ -313,59 +299,18 @@ class _SourcesScreenState extends State<SourcesScreen>
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              'Connect bots once. NeoRecall joins live calls and voice channels, records audio in real time, and runs the same transcription pipeline as your devices.',
+              'Connect external recording services and run their audio through the same transcription pipeline as your devices.',
               style: TextStyle(
                 color: palette.textSecondary,
                 fontSize: 13.5,
                 height: 1.4,
               ),
             ),
-            if (_banner != null) ...[
-              const SizedBox(height: 12),
-              Material(
-                color: palette.accent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        size: 18,
-                        color: palette.accent,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _banner!,
-                          style: TextStyle(
-                            color: palette.textPrimary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => setState(() => _banner = null),
-                        icon: Icon(
-                          Icons.close,
-                          size: 16,
-                          color: palette.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
             const SizedBox(height: 16),
             _section(
               palette,
               'Live capture',
-              'Discord voice and Meet / Zoom / Teams — the notetaker joins the call and records while it is happening.',
+              'Discord voice — the bot joins a channel and records while people are present.',
               live,
             ),
             _section(
