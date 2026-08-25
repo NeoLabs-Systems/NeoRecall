@@ -39,10 +39,15 @@ function extractContent(payload) {
   const choice = payload?.choices?.[0];
   if (choice?.finish_reason === 'length') {
     const usage = payload.usage || {};
-    throw Object.assign(new Error('The AI endpoint stopped the completion at the token limit; the response is incomplete.'), {
+    const completionTokens = usage.completion_tokens ?? null;
+    const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? null;
+    const spent = reasoningTokens
+      ? ` It spent ${reasoningTokens} of ${completionTokens} tokens reasoning before answering.`
+      : completionTokens ? ` It used all ${completionTokens} tokens it was allowed.` : '';
+    throw Object.assign(new Error(`The AI endpoint stopped the completion at the token limit; the response is incomplete.${spent}`), {
       code: 'AI_OUTPUT_TRUNCATED',
-      completionTokens: usage.completion_tokens ?? null,
-      reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? null,
+      completionTokens,
+      reasoningTokens,
     });
   }
   const content = choice?.message?.content;
@@ -74,6 +79,7 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
       body: JSON.stringify({
         model, messages, response_format: responseFormat || { type: 'json_object' },
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
+        ...(settings.extraBody || {}),
       }),
     });
     const payload = await response.json().catch(() => ({}));

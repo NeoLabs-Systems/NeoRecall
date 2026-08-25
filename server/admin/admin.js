@@ -107,6 +107,11 @@ function providerElement(workload, field) {
   return document.querySelector(`#${workload}-${field}`);
 }
 
+const NO_THINKING = { chat_template_kwargs: { enable_thinking: false } };
+function thinkingDisabled(extraBody) {
+  return extraBody?.chat_template_kwargs?.enable_thinking === false;
+}
+
 function renderProviderWorkload(workload, settings, catalog) {
   const provider = providerElement(workload, 'provider');
   provider.innerHTML = catalog.map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</option>`).join('');
@@ -118,6 +123,10 @@ function renderProviderWorkload(workload, settings, catalog) {
   providerElement(workload, 'key-status').textContent = settings.apiKeyConfigured
     ? `A key is configured from ${settings.apiKeySource}. Leave this field blank to keep it.`
     : 'No API key is configured.';
+  if (workload === 'llm') {
+    providerElement(workload, 'extra-body').value = settings.extraBody ? JSON.stringify(settings.extraBody, null, 2) : '';
+    providerElement(workload, 'no-thinking').checked = thinkingDisabled(settings.extraBody);
+  }
   if (workload === 'transcription') {
     providerElement(workload, 'language').value = settings.language || '';
     providerElement(workload, 'response-format').value = settings.responseFormat || '';
@@ -193,11 +202,34 @@ function providerPayload(workload) {
   };
   const key = providerElement(workload, 'api-key').value.trim();
   if (key) value.apiKey = key;
+  if (workload === 'llm') value.extraBody = llmExtraBody();
   if (workload === 'transcription') {
     value.language = providerElement(workload, 'language').value.trim() || null;
     value.responseFormat = providerElement(workload, 'response-format').value.trim() || null;
   }
   return value;
+}
+
+function llmExtraBody() {
+  const raw = providerElement('llm', 'extra-body').value.trim();
+  let parsed = null;
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch (error) {
+      throw new Error(`Extra request JSON is not valid JSON: ${error.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Extra request JSON must be a JSON object, for example {"chat_template_kwargs":{"enable_thinking":false}}.');
+    }
+  }
+  const disable = providerElement('llm', 'no-thinking').checked;
+  if (disable) return { ...(parsed || {}), ...NO_THINKING, chat_template_kwargs: { ...(parsed?.chat_template_kwargs || {}), enable_thinking: false } };
+  if (!parsed) return null;
+  if (!thinkingDisabled(parsed)) return parsed;
+  const { enable_thinking: _removed, ...rest } = parsed.chat_template_kwargs;
+  const kwargs = Object.keys(rest).length ? { chat_template_kwargs: rest } : {};
+  const { chat_template_kwargs: _dropped, ...others } = parsed;
+  const merged = { ...others, ...kwargs };
+  return Object.keys(merged).length ? merged : null;
 }
 
 function renderEmpty(columns, message) {
@@ -350,6 +382,11 @@ document.querySelector('#save-provider-settings').addEventListener('click', asyn
     await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
     showToast('Provider settings saved');
   } catch (error) { showError(error); }
+});
+
+document.querySelector('#llm-no-thinking').addEventListener('change', () => {
+  const next = llmExtraBody();
+  providerElement('llm', 'extra-body').value = next ? JSON.stringify(next, null, 2) : '';
 });
 
 document.querySelector('#test-providers').addEventListener('click', async (event) => {

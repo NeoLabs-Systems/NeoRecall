@@ -44,6 +44,7 @@ const workloadSchema = z.object({
   clearApiKey: z.boolean().optional(),
   language: z.string().trim().min(2).max(35).nullable().optional(),
   responseFormat: z.string().trim().min(1).max(100).nullable().optional(),
+  extraBody: z.record(z.any()).nullable().optional(),
 }).strict();
 const updateSchema = z.object({
   llm: workloadSchema.optional(),
@@ -113,6 +114,8 @@ function resolveWorkload(workload) {
   const apiKey = adminApiKey || environmentApiKey || null;
   const environmentLanguage = isLlm ? null : config.transcriptionApiLanguage;
   const environmentResponseFormat = isLlm ? null : config.transcriptionApiResponseFormat;
+  const environmentExtraBody = isLlm ? config.aiApiExtraBody : null;
+  const extraBody = override.extraBody ?? environmentExtraBody ?? null;
 
   return {
     provider,
@@ -123,12 +126,14 @@ function resolveWorkload(workload) {
     apiKey,
     language: isLlm ? null : override.language ?? environmentLanguage ?? null,
     responseFormat: isLlm ? null : (override.responseFormat ?? environmentResponseFormat ?? definition.responseFormat ?? 'verbose_json'),
+    extraBody,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
     sources: {
       provider: source(override.provider, environmentProvider, fallbackProvider),
       model: source(override.model, environmentModel, definition.defaultModel),
       baseUrl: source(override.baseUrl, environmentBaseUrl, definition.baseUrl),
+      ...(isLlm ? { extraBody: source(override.extraBody, environmentExtraBody) } : {}),
       ...(isLlm ? {} : {
         language: source(override.language, environmentLanguage),
         responseFormat: source(override.responseFormat, environmentResponseFormat, definition.responseFormat || 'verbose_json'),
@@ -197,7 +202,7 @@ function writeWorkload(workload, value, statement) {
     ...(workload === 'transcription' ? {
       language: value.language ?? null,
       responseFormat: value.responseFormat ?? definition.responseFormat ?? 'verbose_json',
-    } : {}),
+    } : { extraBody: value.extraBody ?? null }),
   };
   statement.run(SETTINGS_KEYS[workload], JSON.stringify(stored));
   const secretSettingKey = providerSecretKey(workload, value.provider);
@@ -393,7 +398,7 @@ async function testLlm() {
     const response = await provider.chatJSON({
       userId: null,
       purpose: 'ask',
-      maxTokens: 200,
+      maxTokens: getConfig().aiPreviewMaxOutputTokens,
       messages: [
         { role: 'system', content: 'You answer with one JSON object matching the supplied contract and no prose outside it.' },
         { role: 'user', content: JSON.stringify({ question: 'Reply with the single word "ready".', outputContract: { answer: 'ready' } }) },
@@ -404,7 +409,11 @@ async function testLlm() {
     });
     return { ok: true, provider: settings.provider, model: settings.model, ms: Date.now() - started, answer: summarize(response.value?.answer, 120) };
   } catch (error) {
-    return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started, error: describeError(error), code: error.code || null };
+    const advice = error.code === 'AI_OUTPUT_TRUNCATED'
+      ? ` This model needs a larger budget than it was given: raise AI_PREVIEW_MAX_OUTPUT_TOKENS (now ${getConfig().aiPreviewMaxOutputTokens}) and AI_CONSOLIDATION_MAX_OUTPUT_TOKENS, or turn off the model's thinking mode. Memory generation would hit the same limit.`
+      : '';
+    return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started,
+      error: `${describeError(error)}${advice}`, code: error.code || null };
   }
 }
 

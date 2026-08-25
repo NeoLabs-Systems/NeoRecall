@@ -101,3 +101,35 @@ test('reset removes admin overrides and their encrypted keys', () => {
   assert.equal(result.transcription.provider, 'openai-compatible');
   assert.equal(getDatabase().prepare("SELECT COUNT(*) count FROM app_settings WHERE key LIKE 'providers.%'").get().count, 0);
 });
+
+test('turning off thinking is stored, resolved, and actually sent', async () => {
+  settings.update({ llm: {
+    provider: 'openai_compatible', model: 'Qwen3.5-4B', baseUrl: 'http://gpu.internal/v1',
+    extraBody: { chat_template_kwargs: { enable_thinking: false } },
+  } });
+  const stored = settings.getAdmin().llm;
+  assert.deepEqual(stored.extraBody, { chat_template_kwargs: { enable_thinking: false } });
+  assert.equal(stored.sources.extraBody, 'admin');
+
+  const originalFetch = global.fetch;
+  let sent;
+  global.fetch = async (url, options) => {
+    sent = JSON.parse(options.body);
+    return new Response(JSON.stringify({ id: 'r', usage: {}, choices: [{ finish_reason: 'stop', message: { content: '{"answer":"ready"}' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const provider = require('../../server/ai/providers/openai_compatible_provider');
+    await provider.chatJSON({ userId: null, purpose: 'ask', messages: [{ role: 'user', content: '{}' }] });
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.deepEqual(sent.chat_template_kwargs, { enable_thinking: false });
+  assert.equal(sent.model, 'Qwen3.5-4B');
+});
+
+test('extra request JSON must be an object, not any JSON value', () => {
+  assert.throws(() => settings.update({ llm: {
+    provider: 'openai_compatible', model: 'm', baseUrl: 'http://gpu.internal/v1', extraBody: 'enable_thinking=false',
+  } }), /VALIDATION_ERROR|invalid/i);
+});

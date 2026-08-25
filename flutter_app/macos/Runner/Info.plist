@@ -26,6 +26,8 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NeoRecall uses the microphone only while visible recording is active so it can create local transcripts and memories.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>NeoRecall connects to your self-hosted NeoRecall server on your local network.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>NeoRecall connects to supported recording devices selected by you.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

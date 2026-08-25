@@ -83,3 +83,9 @@ button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:7p
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.provider-fields textarea {
+  width: 100%;
+  resize: vertical;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}

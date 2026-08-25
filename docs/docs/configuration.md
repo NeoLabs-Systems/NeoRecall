@@ -116,6 +116,52 @@ the service, silence included, and transcripts arrive with no speaker labels.
 `NEORECALL_SHERPA_THREADS` bounds the native threads; the models run per chunk on
 a handful of seconds of audio, so the default of two is deliberate.
 
+### Testing it end to end
+
+The admin **Providers** page has a **Test end to end** button. It sends a bundled
+eighteen-second sample of real two-speaker speech to the configured transcription
+service, runs the local speech-detection and diarization pass over the same
+sample, and makes one structured request to the language model — then reports the
+three legs separately, with the words that came back.
+
+Separately on purpose: a transcript that never arrives, a transcript with no
+speakers, and a model that refuses the JSON contract need three different fixes,
+and a single "failed" would hide which. The language-model leg uses the same
+budget a live preview gets, so it measures the pipeline rather than a stricter
+version of it. Transport failures name their cause rather than reporting
+`fetch failed`, so a wrong port reads as a wrong port.
+
+### Models that think before answering
+
+A reasoning model bills its internal deliberation against the same output budget
+as its answer, and spends it *first*. A request for a three-line preview can
+therefore exhaust the budget mid-thought and return nothing usable — which arrives
+looking exactly like a model that cannot follow the contract, and sends you to
+rewrite prompts instead of raising a number. `AI_OUTPUT_TRUNCATED` now reports the
+reasoning share when the endpoint provides it, so the cause is visible.
+
+Two remedies. Raise `AI_PREVIEW_MAX_OUTPUT_TOKENS` and
+`AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` — headroom is free, since `max_tokens` is a
+ceiling rather than a target and a model that answers briefly still stops briefly.
+Or switch the thinking off, usually the better trade on a small local model where
+deliberating costs minutes per request. That field is not standardised, so it goes
+through `AI_API_EXTRA_BODY`, a JSON object merged into every request:
+
+```
+AI_API_EXTRA_BODY={"chat_template_kwargs":{"enable_thinking":false}}
+```
+
+Qwen-family servers accept that spelling; others differ, which is why this is a
+passthrough rather than a setting per vendor. It merges last, so it can override
+anything NeoRecall sets.
+
+The admin **Providers** page carries the same thing without the typing: a **Turn
+off the model's thinking mode** checkbox that writes exactly that payload into an
+**Extra request JSON** field beside it. The checkbox is a view of one key rather
+than a separate setting — ticking it alongside JSON you wrote yourself adds the
+key, and clearing it removes only that key. Saved there it is stored with the rest
+of the provider settings and takes effect without a restart.
+
 ### How a transcript gets a speaker
 
 The local pass and the service work on the same seconds of audio and meet on the
@@ -125,16 +171,39 @@ turn it overlaps most, and that turn's embedding with it. A segment with a secon
 voice talking across more than a fifth of it is marked as overlapping rather than
 quietly credited to one person.
 
-From there the existing matching applies unchanged. A cluster match needs
-`NEORECALL_SPEAKER_CLUSTER_MARGIN` over the runner-up, because a single fixed
-threshold can otherwise let a distinct new speaker score just above it against
-some unrelated cluster by chance. Diarization restarts on every chunk, so a
-speaker crossing a boundary can drift below the plain threshold with nothing about
-the voice having changed: when a component's first speech begins within
-`NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of where its last known turn ended, that
-cluster may be kept at the relaxed
-`NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a
-near-tie, so a genuine speaker change at the boundary still resolves on its own.
+A voice is fingerprinted from everything it said in the chunk, weighted by how
+long each turn lasted — not from a single turn. That matters more than any
+threshold. Measured against two known-different voices: with one second of speech
+per fingerprint the same voice scored anywhere from 0.20 to 0.87 while two
+different voices reached 0.77, so the two populations are indistinguishable. With
+two seconds they separate cleanly — the same voice never below 0.55, different
+voices never above 0.50. `NEORECALL_SPEAKER_CLUSTER_THRESHOLD` sits at 0.52,
+inside that gap, and `NEORECALL_SPEAKER_MINIMUM_TURN_MS` refuses to found a new
+speaker on less than two seconds of pooled speech. Below that bar a turn may still
+join a voice that already exists; it cannot invent one, so a half-second of noise
+never becomes a person.
+
+A match needs `NEORECALL_SPEAKER_CLUSTER_MARGIN` over the runner-up only when that
+runner-up is itself *below* the threshold — the case the margin exists for, where a
+new speaker grazes the bar against an unrelated cluster and both readings are
+equally weak. When two clusters both match strongly they are not an ambiguity to
+refuse but one person split earlier, so the best match wins and the two are merged
+if their centroids are at least `NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD` alike.
+Refusing both used to mint a third copy, which made the next turn more ambiguous
+still — a loop that could turn one familiar voice into a dozen entries.
+
+Diarization restarts on every chunk, so a speaker crossing a boundary can drift
+below the plain threshold with nothing about the voice having changed: when a
+component's first speech begins within `NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of
+where its last known turn ended, that cluster may be kept at the relaxed
+`NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a near-tie,
+so a genuine speaker change at the boundary still resolves on its own.
+
+If one person still appears as several, lower `NEORECALL_SPEAKER_CLUSTER_THRESHOLD`;
+if different people are being merged, raise it. Note that
+`NEORECALL_DIARIZATION_CLUSTER_DISTANCE`, which groups voices *inside* a chunk,
+points the other way — it is a distance, so raising it yields fewer speakers. They
+were one setting until they were found to be pulling in opposite directions.
 
 Consolidation then identifies people from the transcript — a self-introduction,
 or another speaker naming them — and names that speaker's voiceprint from the

@@ -18,6 +18,19 @@ function number(name, fallback, { min = -Infinity, max = Infinity } = {}) {
   return value;
 }
 
+function jsonObject(name) {
+  const raw = String(process.env[name] || '').trim();
+  if (!raw) return null;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (error) {
+    throw new Error(`${name} must be valid JSON: ${error.message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON object, for example {"chat_template_kwargs":{"enable_thinking":false}}.`);
+  }
+  return parsed;
+}
+
 function boolean(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -219,6 +232,9 @@ function getConfig() {
     // and the admin page can override these values at runtime.
     aiApiBaseUrl: (process.env.AI_API_BASE_URL || '').replace(/\/+$/, '') || null,
     aiApiKey: process.env.AI_API_KEY || null,
+    // Extra JSON merged into every chat-completions request body, for
+    // provider-specific fields no shared contract covers.
+    aiApiExtraBody: jsonObject('AI_API_EXTRA_BODY'),
     aiApiModel: process.env.AI_API_MODEL || null,
     // External deployments can still take minutes for a bounded consolidation
     // answer. Sized so the slowest legitimate answer finishes rather than being
@@ -254,9 +270,7 @@ function getConfig() {
     // AI_OUTPUT_TRUNCATED appears. It is also clamped to whatever the context
     // can actually hold.
     consolidationWindowCharacters: integer('NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS', 8_000, { min: 1_000 }),
-    // A preview answer is a title, a summary and topics, and the model that
-    // writes it does not spend tokens thinking first.
-    aiPreviewMaxOutputTokens: integer('AI_PREVIEW_MAX_OUTPUT_TOKENS', 1_500, { min: 256, max: 200_000 }),
+    aiPreviewMaxOutputTokens: integer('AI_PREVIEW_MAX_OUTPUT_TOKENS', 4_000, { min: 256, max: 200_000 }),
     minConsolidationIntervalMs: integer('NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS', 0, { min: 0 }),
     // How long finished material may wait for the character threshold before it
     // is consolidated anyway. Zero means it never waits: with the model running
