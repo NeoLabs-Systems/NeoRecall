@@ -90,6 +90,36 @@ function contextOverflow(status, payload, message) {
   return /context_length_exceeded|string_above_max_length/i.test(code) || CONTEXT_OVERFLOW.test(String(message || ''));
 }
 
+/// Length bounds a schema-to-grammar converter cannot express cheaply.
+///
+/// Servers that enforce a JSON schema by compiling it into a sampling grammar —
+/// llama.cpp, and everything built on it — expand `maxLength: 2000` into two
+/// thousand unrolled repetitions of a character rule. The grammar becomes too
+/// large to compile and the whole request is rejected with "failed to parse
+/// grammar", which says nothing about which field caused it. Measured directly
+/// against that converter: the summary field alone is enough to break it.
+///
+/// Dropping the bound on the wire costs nothing, because it was never the thing
+/// enforcing it. The response schema still checks every length after generation,
+/// and prose that comes back too long is trimmed rather than rejected — so the
+/// guarantee is unchanged and only the impossible instruction is gone. Hosted
+/// APIs that do not compile grammars are unaffected either way.
+function wireSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(wireSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  return Object.fromEntries(Object.entries(schema)
+    .filter(([key]) => key !== 'maxLength')
+    .map(([key, value]) => [key, wireSchema(value)]));
+}
+
+function wireResponseFormat(responseFormat) {
+  if (responseFormat?.type !== 'json_schema' || !responseFormat.json_schema?.schema) return responseFormat;
+  return {
+    ...responseFormat,
+    json_schema: { ...responseFormat.json_schema, schema: wireSchema(responseFormat.json_schema.schema) },
+  };
+}
+
 const NO_THINKING = Object.freeze({ chat_template_kwargs: { enable_thinking: false } });
 
 function thinkingAlreadyDisabled(extraBody) {
@@ -143,7 +173,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
         ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
       },
       body: JSON.stringify({
-        model, messages, response_format: responseFormat || { type: 'json_object' },
+        model, messages, response_format: wireResponseFormat(responseFormat) || { type: 'json_object' },
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(extraBody || {}),
       }),
@@ -187,4 +217,4 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
   } finally { clearTimeout(timer); }
 }
 
-module.exports = { chatJSON, ready, contextOverflow, NO_THINKING };
+module.exports = { chatJSON, ready, contextOverflow, wireSchema, wireResponseFormat, NO_THINKING };

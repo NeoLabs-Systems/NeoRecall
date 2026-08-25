@@ -42,15 +42,22 @@ test('nothing configured is reported as a blocked pipeline, not as an empty time
   assert.ok(result.summary.length > 0);
 });
 
-test('every issue is written for the person who recorded, not the operator', async () => {
-  // No error codes, table names or settings jargon in anything the user reads.
+test('nothing a user reads leaks an internal error or asks them to change a setting', async () => {
+  // The person reading this is usually not the person who administers the
+  // server. A status code from a stranger's service is not information to them,
+  // and an instruction they cannot follow makes a stall feel like their fault.
   const result = await status.forUser(userId);
+  assert.ok(result.issues.length, 'the fixture must actually produce issues');
   for (const item of result.issues) {
     const prose = `${item.title} ${item.detail} ${item.action}`;
     assert.equal(/[A-Z_]{6,}/.test(prose), false, `${item.code} leaks an identifier: ${prose}`);
-    assert.equal(/\b(chunk|job|SQL|null|worker_heartbeats|audio_chunks)\b/i.test(prose), false,
+    assert.equal(/\b(chunk|job|SQL|worker_heartbeats|audio_chunks)\b/i.test(prose), false,
       `${item.code} leaks an internal term: ${prose}`);
-    assert.ok(item.title && item.detail && item.action, `${item.code} must say what, why and what to do`);
+    assert.equal(/HTTP|\b[45]\d\d\b|endpoint|API|token|schema|grammar/i.test(prose), false,
+      `${item.code} quotes something only an administrator could act on: ${prose}`);
+    assert.equal(/\b(env|\.env|config|restart|admin settings|dashboard)\b/i.test(prose), false,
+      `${item.code} tells a user to change something they cannot reach: ${prose}`);
+    assert.ok(item.title && item.detail && item.action, `${item.code} must say what, why and what happens next`);
   }
 });
 
@@ -96,8 +103,9 @@ test('memory writing that keeps failing says so, with when it will try again', a
   const failing = issues.find((item) => item.code === 'MEMORY_WRITING_FAILING');
   assert.ok(failing);
   assert.match(failing.detail, /4 attempts/, 'the number of failures is concrete');
-  assert.match(failing.detail, /404/, 'and the service\'s own words are passed through');
-  assert.match(failing.action, /Nothing is lost/i);
+  assert.equal(/404|HTTP|endpoint/i.test(`${failing.title} ${failing.detail} ${failing.action}`), false,
+    'but the service\'s own words stay in the logs, where somebody can act on them');
+  assert.match(failing.detail, /saved and searchable/i, 'and it says the recordings are safe');
   assert.equal(failing.retryAt, '2026-08-01T10:08:00.000Z');
 });
 

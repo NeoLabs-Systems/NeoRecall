@@ -2651,68 +2651,77 @@ class NeoRecallController extends ChangeNotifier {
       notifyListeners();
     }
     try {
-      final results = await Future.wait<dynamic>(<Future<dynamic>>[
-        api.request('GET', '/api/v1/recordings'),
-        api.request('GET', '/api/v1/memories?archived=all&limit=200'),
-        api.request('GET', '/api/v1/mini-memories?limit=200'),
-        api.request('GET', '/api/v1/speakers'),
-        api.request('GET', '/api/v1/devices'),
-        api.request('GET', '/api/v1/transcripts?limit=100'),
-        api.request('GET', '/api/v1/conversations?limit=100'),
-        api.request('GET', '/api/v1/daily-summaries?limit=100'),
-        api.request('GET', '/api/v1/processing-status'),
+      // Each section is fetched independently on purpose. These used to share a
+      // single Future.wait, so one endpoint failing threw away all nine
+      // responses and the whole app came up empty — a day of recordings could
+      // be perfectly safe on the server and still show as nothing at all.
+      //
+      // What you have should never depend on what you cannot have: if writing up
+      // memories is broken, the transcripts are still there and still worth
+      // showing.
+      final failures = <String>[];
+      Future<Map<String, dynamic>?> section(String path) async {
+        try {
+          return Map<String, dynamic>.from(await api.request('GET', path) as Map);
+        } catch (exception) {
+          failures.add(path);
+          return null;
+        }
+      }
+
+      final results = await Future.wait<Map<String, dynamic>?>(<Future<Map<String, dynamic>?>>[
+        section('/api/v1/recordings'),
+        section('/api/v1/memories?archived=all&limit=200'),
+        section('/api/v1/mini-memories?limit=200'),
+        section('/api/v1/speakers'),
+        section('/api/v1/devices'),
+        section('/api/v1/transcripts?limit=100'),
+        section('/api/v1/conversations?limit=100'),
+        section('/api/v1/daily-summaries?limit=100'),
+        section('/api/v1/processing-status'),
       ]);
-      recordings = ((results[0] as Map)['items'] as List)
-          .cast<Map>()
-          .map(
-            (value) =>
-                RecordingSession.fromJson(Map<String, dynamic>.from(value)),
-          )
-          .toList();
-      memories = ((results[1] as Map)['items'] as List)
-          .cast<Map>()
-          .map(
-            (value) => RecallMemory.fromJson(Map<String, dynamic>.from(value)),
-          )
-          .toList();
-      miniMemories = ((results[2] as Map)['items'] as List)
-          .cast<Map>()
-          .map((value) => MiniMemory.fromJson(Map<String, dynamic>.from(value)))
-          .toList();
-      speakers = ((results[3] as Map)['speakers'] as List)
-          .cast<Map>()
-          .map(
-            (value) => RecallSpeaker.fromJson(Map<String, dynamic>.from(value)),
-          )
-          .toList();
-      devices = ((results[4] as Map)['devices'] as List)
-          .cast<Map>()
-          .map(Map<String, dynamic>.from)
-          .toList();
-      transcript = ((results[5] as Map)['items'] as List)
-          .cast<Map>()
-          .map(
-            (value) =>
-                TranscriptSegment.fromJson(Map<String, dynamic>.from(value)),
-          )
-          .toList();
-      conversations = ((results[6] as Map)['items'] as List)
-          .cast<Map>()
-          .map(Map<String, dynamic>.from)
-          .toList();
-      dailySummaries = ((results[7] as Map)['items'] as List)
-          .cast<Map>()
-          .map(Map<String, dynamic>.from)
-          .toList();
-      final processing = Map<String, dynamic>.from(results[8] as Map);
-      processingIssues = ((processing['issues'] as List?) ?? <dynamic>[])
-          .cast<Map>()
-          .map(Map<String, dynamic>.from)
-          .toList();
-      processingSummary = processing['summary']?.toString() ?? '';
-      audioStillOnDevice =
-          ((processing['audio'] as Map?)?['stillOnYourDevice'] as num?)?.toInt() ?? 0;
-      cachedData = false;
+      List<Map<String, dynamic>> rows(int index, String key) =>
+          ((results[index]?[key] as List?) ?? <dynamic>[])
+              .cast<Map>()
+              .map(Map<String, dynamic>.from)
+              .toList();
+      // A section that failed keeps whatever it had rather than being blanked.
+      if (results[0] != null) {
+        recordings = rows(0, 'items')
+            .map(RecordingSession.fromJson)
+            .toList();
+      }
+      if (results[1] != null) {
+        memories = rows(1, 'items').map(RecallMemory.fromJson).toList();
+      }
+      if (results[2] != null) {
+        miniMemories = rows(2, 'items').map(MiniMemory.fromJson).toList();
+      }
+      if (results[3] != null) {
+        speakers = rows(3, 'speakers').map(RecallSpeaker.fromJson).toList();
+      }
+      if (results[4] != null) devices = rows(4, 'devices');
+      if (results[5] != null) {
+        transcript = rows(5, 'items').map(TranscriptSegment.fromJson).toList();
+      }
+      if (results[6] != null) conversations = rows(6, 'items');
+      if (results[7] != null) dailySummaries = rows(7, 'items');
+      final processing = results[8];
+      if (processing != null) {
+        processingIssues = rows(8, 'issues');
+        processingSummary = processing['summary']?.toString() ?? '';
+        audioStillOnDevice =
+            ((processing['audio'] as Map?)?['stillOnYourDevice'] as num?)
+                ?.toInt() ??
+            0;
+      }
+      cachedData = failures.isNotEmpty;
+      // Only worth interrupting for when nothing at all came back. A partial
+      // refresh has already shown what it could, and the status card explains
+      // anything genuinely wrong far better than a failed request URL would.
+      error = (!silent && failures.length == results.length)
+          ? 'Could not reach NeoRecall. Showing what was loaded last.'
+          : null;
     } catch (exception) {
       cachedData = true;
       error = silent ? null : exception.toString();

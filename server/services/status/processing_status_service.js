@@ -16,11 +16,19 @@ const consolidation = require('../memories/consolidation_service');
 /// transcribed, and waiting on a language model that was rejecting every
 /// request, and the app would say nothing at all.
 ///
-/// Written for that person rather than for an operator. Each issue says what is
-/// happening to their recordings, why, and what changes it — never an error code
-/// or a table name. Severities mean: `blocked`, nothing progresses until someone
-/// acts; `attention`, worth a look while the rest keeps moving; `working`,
-/// progress with nothing to do.
+/// Written for that person and nobody else. They are usually not the one who
+/// administers the server, so nothing here quotes what a service replied, names
+/// a setting, or tells them to change one — a stranger's HTTP status is not
+/// information to someone who cannot act on it, and instructions they cannot
+/// follow only make a stall feel like their fault.
+///
+/// What they get instead is the truthful shape of it: their audio is safe, this
+/// is being worked on or it is not, and whether anyone needs to be told. The
+/// technical cause is not lost — it goes to the logs and the admin dashboard,
+/// where somebody can act on it.
+///
+/// Severities mean: `blocked`, nothing progresses until someone with server
+/// access acts; `attention`, worth knowing while the rest keeps moving.
 
 /// How long queued work may sit before the queue looks stuck rather than busy.
 /// Transcribing a backlog is legitimately slow, so this is generous: it is meant
@@ -71,7 +79,7 @@ function memoryIssues(eligibility, data) {
       code: 'LANGUAGE_MODEL_NOT_CONFIGURED',
       title: 'Your recordings are saved, but nothing is being written up',
       detail: 'Transcripts are being kept safely. Turning them into memories needs a language model, and none is set up yet.',
-      action: 'Choose a language model in the server’s admin settings.',
+      action: 'Someone with access to this server needs to finish setting it up. Your recordings keep arriving in the meantime.',
     });
   }
   if (eligibility.reason === 'recent_failure') {
@@ -79,10 +87,8 @@ function memoryIssues(eligibility, data) {
       severity: 'attention',
       code: 'MEMORY_WRITING_FAILING',
       title: 'Writing up your recordings is not succeeding',
-      detail: eligibility.errorMessage
-        ? `The last ${plural(eligibility.consecutiveFailures, 'attempt')} did not complete. The service reported: ${String(eligibility.errorMessage).slice(0, 200)}`
-        : `The last ${plural(eligibility.consecutiveFailures, 'attempt')} did not complete.`,
-      action: 'Nothing is lost — the transcripts stay and this retries on its own. If it keeps failing, check the language-model settings.',
+      detail: `Everything you have recorded is still saved and searchable. The last ${plural(eligibility.consecutiveFailures, 'attempt')} to write it up did not finish.`,
+      action: 'It keeps trying on its own. If this is still here tomorrow, let whoever runs this server know.',
       retryAt: eligibility.retryAt,
     });
   }
@@ -92,7 +98,7 @@ function memoryIssues(eligibility, data) {
       code: 'CONVERSATIONS_SET_ASIDE',
       title: `${plural(data.quarantined, 'conversation')} could not be written up`,
       detail: 'They are still recorded and searchable. Repeated attempts to summarise them did not succeed, so they were set aside to let everything else through.',
-      action: 'They can be retried once the language-model settings change.',
+      action: 'They stay searchable. Someone with access to this server can put them back in the queue.',
     });
   }
   return issues;
@@ -107,7 +113,7 @@ function issuesFor(data, eligibility, providers, alive) {
       code: 'TRANSCRIPTION_NOT_CONFIGURED',
       title: 'Recordings are being kept but not turned into text',
       detail: 'Your audio is safe and nothing has been deleted. Transcribing it needs a transcription service, and none is set up yet.',
-      action: 'Choose a transcription service in the server’s admin settings.',
+      action: 'Someone with access to this server needs to finish setting it up. Nothing is being lost while you wait.',
     });
   } else if (data.failing) {
     const failure = data.failedJobs.find((row) => row.type === 'transcribe_chunk');
@@ -115,10 +121,8 @@ function issuesFor(data, eligibility, providers, alive) {
       severity: 'attention',
       code: 'TRANSCRIPTION_FAILING',
       title: `${plural(data.failing, 'recording')} could not be transcribed`,
-      detail: failure?.message
-        ? `The transcription service reported: ${String(failure.message).slice(0, 200)}`
-        : 'The transcription service did not accept them.',
-      action: 'Your device still holds this audio, so nothing is lost. It clears once the transcription settings are corrected.',
+      detail: 'Your device is still holding that audio, so none of it is lost.',
+      action: 'It keeps trying on its own. If this is still here tomorrow, let whoever runs this server know.',
     });
   }
 
@@ -127,7 +131,7 @@ function issuesFor(data, eligibility, providers, alive) {
       severity: 'attention',
       code: 'AUDIO_NEEDS_RESENDING',
       title: `${plural(data.needsReupload, 'recording')} needs sending again`,
-      detail: 'The server’s copy could not be processed and was cleared. Your device still has the original.',
+      detail: 'Your device still has the original, so nothing is lost.',
       action: 'Keep the app open and connected; it sends them again on its own.',
     });
   }
@@ -138,7 +142,7 @@ function issuesFor(data, eligibility, providers, alive) {
       code: 'PROCESSING_STOPPED',
       title: 'Processing is not running',
       detail: 'Recordings are still being received and kept, but nothing is being worked on. Your audio is safe in the meantime.',
-      action: 'The NeoRecall server needs restarting.',
+      action: 'Someone with access to this server needs to look at it. Keep recording — nothing is being lost.',
     });
   } else if (data.oldestQueuedAt && Date.now() - Date.parse(data.oldestQueuedAt) > STALLED_QUEUE_MS) {
     issues.push({
@@ -146,7 +150,7 @@ function issuesFor(data, eligibility, providers, alive) {
       code: 'PROCESSING_BEHIND',
       title: 'Processing is running behind',
       detail: 'Work has been waiting longer than expected. A large backlog or a slow transcription service will do this.',
-      action: 'Nothing is lost and it will catch up. If it does not, check the transcription service.',
+      action: 'Nothing is lost and it should catch up on its own.',
     });
   }
 
