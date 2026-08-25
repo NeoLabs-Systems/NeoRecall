@@ -72,7 +72,10 @@ function showPage(name, updateHash = true) {
 const settingLabels = {
   voiceMatchThreshold: 'Voice match threshold',
   voiceMatchMargin: 'Voice runner-up margin',
-  speakerClusterThreshold: 'Speaker cluster threshold',
+  speakerClusterThreshold: 'Speaker match threshold (higher = more speakers)',
+  speakerClusterMergeThreshold: 'Merge two speakers when this alike',
+  speakerMinimumTurnMs: 'Shortest speech that may create a speaker (ms)',
+  diarizationClusterDistance: 'Diarization grouping distance (higher = fewer speakers)',
   speakerClusterMargin: 'Speaker cluster runner-up margin',
   speakerContinuityGapMs: 'Speaker continuity gap (ms)',
   speakerClusterContinuityThreshold: 'Speaker continuity threshold',
@@ -136,6 +139,31 @@ function providerDraft(workload) {
   };
 }
 
+/// Renders each leg of the end-to-end test as a line someone can act on.
+///
+/// Reported per leg rather than as one verdict, because the failures need
+/// different fixes: a transcript that never arrives is a transcription problem,
+/// missing speakers are a server-side install problem, and a refused JSON
+/// contract is a language-model problem. One combined "failed" would hide which.
+function renderProviderTest(result) {
+  const element = document.querySelector('#provider-test-result');
+  const line = (label, value) => {
+    const mark = value.ok ? '✓' : '✗';
+    const took = value.ms === undefined ? '' : ` (${(value.ms / 1000).toFixed(1)}s)`;
+    const detail = value.ok
+      ? (value.text ? `"${value.text}"` : value.answer ? `answered "${value.answer}"` : value.voices !== undefined ? `${value.voices} voices over ${value.turns} turns` : 'ok')
+      : value.error;
+    const named = value.provider ? ` [${value.provider}${value.model ? ` · ${value.model}` : ''}]` : '';
+    return `${mark} ${label}${named}${took}\n    ${detail}`;
+  };
+  element.textContent = [
+    line('Transcription', result.transcription),
+    line('Speaker identity', result.speakerIdentity),
+    line('Language model', result.llm),
+  ].join('\n\n');
+  element.hidden = false;
+}
+
 async function discoverProviderModels(workload, { quiet = false } = {}) {
   const status = providerElement(workload, 'model-status');
   const list = providerElement(workload, 'model-options');
@@ -147,7 +175,11 @@ async function discoverProviderModels(workload, { quiet = false } = {}) {
       ? 'This provider selects its transcription model automatically.'
       : `${result.models.length} available model${result.models.length === 1 ? '' : 's'} loaded.`;
   } catch (error) {
-    status.textContent = `Model discovery unavailable: ${error.message}`;
+    // Discovery is a convenience, not a requirement: a model name typed by hand
+    // works exactly as well as one picked from a list, and some endpoints need
+    // no model at all. The message already says which case this is, so it is
+    // shown as-is rather than prefixed with a failure this is not.
+    status.textContent = error.message;
     if (!quiet) throw error;
   }
 }
@@ -318,6 +350,26 @@ document.querySelector('#save-provider-settings').addEventListener('click', asyn
     await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
     showToast('Provider settings saved');
   } catch (error) { showError(error); }
+});
+
+document.querySelector('#test-providers').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const element = document.querySelector('#provider-test-result');
+  button.disabled = true;
+  const previous = button.textContent;
+  // A real transcription of an eighteen-second sample plus a model round trip
+  // takes long enough that an unchanged button looks broken.
+  button.textContent = 'Testing…';
+  element.hidden = false;
+  element.textContent = 'Sending a sample recording to the transcription service and one request to the language model…';
+  try {
+    renderProviderTest(await api('/provider-settings/test', { method: 'POST' }));
+  } catch (error) {
+    element.textContent = `✗ The test could not be run\n    ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = previous;
+  }
 });
 
 document.querySelector('#reset-provider-settings').addEventListener('click', async () => {

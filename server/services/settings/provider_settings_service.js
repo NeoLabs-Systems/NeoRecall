@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { z } = require('zod');
 const { getConfig } = require('../../config');
 const { getDatabase } = require('../../db/database');
@@ -285,16 +287,141 @@ async function discoverModels(input) {
   try {
     response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
   } catch (cause) {
-    throw new HttpError(502, 'MODEL_DISCOVERY_FAILED', `Could not reach ${definition.label}: ${cause.message}`);
+    throw new HttpError(502, 'MODEL_DISCOVERY_FAILED', `Could not reach ${url}: ${describeError(cause)}`);
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new HttpError(502, 'MODEL_DISCOVERY_FAILED', payload?.error?.message || `${definition.label} returned HTTP ${response.status}.`);
+    // Plenty of self-hosted speech servers implement only the endpoint they
+    // exist for and never /models. That is not a misconfiguration, and saying
+    // so beats reporting the bare status of a request the operator never made.
+    const optional = definition.modelOptional
+      ? ' This provider does not require a model, so you can leave the field empty.'
+      : ' Type the model name yourself if the service does not list them.';
+    if ([404, 405, 501].includes(response.status)) {
+      throw new HttpError(502, 'MODEL_DISCOVERY_UNSUPPORTED', `${definition.label} does not offer a model list at ${url}.${optional}`);
+    }
+    throw new HttpError(502, 'MODEL_DISCOVERY_FAILED', payload?.error?.message || `${definition.label} returned HTTP ${response.status} from ${url}.${optional}`);
   }
-  return { models: modelIds(payload, definition.protocol), automatic: false };
+  const models = modelIds(payload, definition.protocol);
+  return { models, automatic: false, modelOptional: Boolean(definition.modelOptional) };
+}
+
+/// Eighteen seconds of real bilingual, two-speaker speech that ships with
+/// NeoRecall. Used as the probe because it exercises everything at once: the
+/// endpoint answers, the credentials work, the response parses, words come back,
+/// and the local pass finds two voices in it. A tone or silence would prove the
+/// connection and nothing about whether the result is usable.
+const PROBE_AUDIO = path.join(__dirname, '..', '..', '..', 'test', 'fixtures', 'de_en_two_speakers.wav');
+
+function summarize(text, limit = 240) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+}
+
+/// The reason a request failed, in words that point somewhere.
+///
+/// `fetch` reports every transport failure as the single word "fetch failed" and
+/// hides what actually happened — a refused connection, an unknown host, an
+/// expired certificate — one level down in `cause`. Reporting only the outer
+/// message tells an operator their endpoint is broken without saying how, which
+/// is the difference between fixing a typo in a port number and guessing.
+function describeError(error) {
+  const parts = [];
+  let current = error;
+  const seen = new Set();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const message = String(current.message || current.code || '').trim();
+    if (message && !parts.includes(message)) parts.push(message);
+    current = current.cause;
+  }
+  return parts.join(': ') || 'The request failed for an unknown reason.';
+}
+
+/// Sends one real request to the configured transcription service.
+async function testTranscription() {
+  const settings = resolveWorkload('transcription');
+  const started = Date.now();
+  try {
+    if (!fs.existsSync(PROBE_AUDIO)) {
+      return { ok: false, provider: settings.provider, error: 'The bundled sample recording is missing from this installation.' };
+    }
+    const provider = require('../../transcription/provider_registry').getProvider();
+    if (!(await provider.ready())) {
+      return { ok: false, provider: settings.provider, model: settings.model, error: 'Not fully configured: a base URL, a model, or an API key is still missing.' };
+    }
+    const segments = await provider.transcribe({ filename: PROBE_AUDIO, channelLayout: 'mono' });
+    const text = summarize(segments.map((segment) => segment.text).join(' '));
+    if (!segments.length) {
+      return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started,
+        error: 'The service answered but returned no speech for a recording that contains it. Check the model and language settings.' };
+    }
+    return { ok: true, provider: settings.provider, model: settings.model, ms: Date.now() - started, segments: segments.length, text };
+  } catch (error) {
+    return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started, error: describeError(error), code: error.code || null };
+  }
+}
+
+/// Runs the local speech-detection and diarization pass over the same sample, so
+/// a missing speaker label can be told apart from a bad transcript.
+function testSpeakerIdentity() {
+  const localAnalysis = require('../../transcription/local_analysis');
+  if (!localAnalysis.available()) {
+    return { ok: false, error: 'Not installed on this platform; transcripts will have no speaker labels. Run `neorecall setup`.' };
+  }
+  const started = Date.now();
+  try {
+    const result = localAnalysis.analyze(PROBE_AUDIO);
+    const voices = new Set(result.turns.map((turn) => turn.speaker)).size;
+    return { ok: voices > 0, ms: Date.now() - started, voices, turns: result.turns.length,
+      ...(voices > 0 ? {} : { error: 'No voices were separated in a sample that contains two.' }) };
+  } catch (error) {
+    return { ok: false, ms: Date.now() - started, error: describeError(error) };
+  }
+}
+
+/// Sends one real structured request to the configured language model, using the
+/// same JSON-contract path memory generation uses.
+async function testLlm() {
+  const settings = resolveWorkload('llm');
+  const started = Date.now();
+  try {
+    const provider = require('../../ai/provider_registry').provider();
+    if (!provider.ready()) {
+      return { ok: false, provider: settings.provider, model: settings.model, error: 'Not fully configured: a base URL, a model, or an API key is still missing.' };
+    }
+    const response = await provider.chatJSON({
+      userId: null,
+      purpose: 'ask',
+      maxTokens: 200,
+      messages: [
+        { role: 'system', content: 'You answer with one JSON object matching the supplied contract and no prose outside it.' },
+        { role: 'user', content: JSON.stringify({ question: 'Reply with the single word "ready".', outputContract: { answer: 'ready' } }) },
+      ],
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_provider_test', strict: true, schema: {
+        type: 'object', additionalProperties: false, required: ['answer'], properties: { answer: { type: 'string', minLength: 1 } },
+      } } },
+    });
+    return { ok: true, provider: settings.provider, model: settings.model, ms: Date.now() - started, answer: summarize(response.value?.answer, 120) };
+  } catch (error) {
+    return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started, error: describeError(error), code: error.code || null };
+  }
+}
+
+/// Exercises the whole path a recording takes, against the services actually
+/// configured, and reports each leg separately.
+///
+/// Deliberately a real request rather than a reachability check: an endpoint that
+/// answers a ping can still reject the credentials, refuse the model name, or
+/// return a shape the pipeline cannot read, and every one of those looks
+/// identical from outside until a recording fails hours later.
+async function testProviders() {
+  const [transcription, llm] = await Promise.all([testTranscription(), testLlm()]);
+  return { transcription, speakerIdentity: testSpeakerIdentity(), llm };
 }
 
 module.exports = {
+  testProviders,
   getRuntime,
   getAdmin,
   update,

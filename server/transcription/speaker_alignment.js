@@ -9,6 +9,9 @@ function alignSegments(asrSegments, speakerTurns) {
     const best = ranked[0];
     const overlappingSpeech = ranked.length > 1 && ranked[1].overlap / Math.max(1, segment.endMs - segment.startMs) > 0.2;
     return { ...segment, diarizationSpeaker: best?.turn.speaker ?? null, speakerEmbedding: best?.turn.embedding || null,
+      // How much speech the fingerprint was pooled from, which is what decides
+      // whether it is solid enough to found a new voice on.
+      speakerSpeechMs: best?.turn.speechMs ?? null,
       speakerConfidence: best ? best.overlap / Math.max(1, segment.endMs - segment.startMs) : null, overlappingSpeech };
   });
 }

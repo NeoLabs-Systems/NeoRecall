@@ -40,6 +40,14 @@ router.put('/processing-settings', (req, res, next) => { try {
 } catch (error) { next(error); } });
 router.get('/provider-settings', (req, res) => res.json({ settings: providerSettings.getAdmin() }));
 router.post('/provider-settings/models', asyncRoute(async (req, res) => res.json(await providerSettings.discoverModels(req.body))));
+// Deliberately exercises the configured services for real, so it is an explicit
+// button rather than something the dashboard does on load.
+router.post('/provider-settings/test', asyncRoute(async (req, res) => {
+  const result = await providerSettings.testProviders();
+  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider.test',
+    metadata: { transcription: result.transcription.ok, llm: result.llm.ok } });
+  res.json(result);
+}));
 router.put('/provider-settings', (req, res, next) => { try {
   const settings = providerSettings.update(req.body);
   const metadata = Object.fromEntries(Object.entries(req.body).map(([workload, value]) => [workload, {

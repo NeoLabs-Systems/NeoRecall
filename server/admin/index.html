@@ -125,8 +125,9 @@
       <section class="page" data-page-content="providers">
         <div class="provider-actions">
           <p>Admin values override `.env`. API keys are encrypted at rest and are never returned to the browser.</p>
-          <div><button id="reset-provider-settings" class="btn btn-ghost" type="button">Use .env values</button> <button id="save-provider-settings" class="btn btn-primary" type="button">Save providers</button></div>
+          <div><button id="test-providers" class="btn btn-ghost" type="button">Test end to end</button> <button id="reset-provider-settings" class="btn btn-ghost" type="button">Use .env values</button> <button id="save-provider-settings" class="btn btn-primary" type="button">Save providers</button></div>
         </div>
+        <pre id="provider-test-result" class="provider-test" hidden></pre>
         <div class="provider-grid">
           <div class="card provider-card" data-provider-workload="llm">
             <div class="card-header"><div><div class="card-title">Language model</div><p>Memory generation, previews, summaries, and Ask.</p></div></div>

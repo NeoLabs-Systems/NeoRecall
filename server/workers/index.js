@@ -25,8 +25,15 @@ function spawnInferenceHost() {
   child = fork(path.join(__dirname, 'inference_host.js'), [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   child.on('message', (message) => {
     if (message.type === 'ready') {
-      inferenceReady = message.ready === true;
-      logger.info('Inference host readiness', { ready: message.ready, error: message.error });
+      const ready = message.ready === true;
+      // The host re-checks every few seconds so that configuring a provider in
+      // the admin dashboard takes effect without a restart. Only a *change* is
+      // worth a line: logging every poll buried real events under an identical
+      // message twelve times a minute, forever.
+      if (ready !== inferenceReady) {
+        logger.info('Inference host readiness changed', { ready, error: message.error });
+      }
+      inferenceReady = ready;
     }
     const entry = pending.get(message.requestId);
     if (!entry) return;

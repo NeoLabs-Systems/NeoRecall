@@ -148,8 +148,16 @@ function persistSegments(chunk, inferred) {
           const anchor = continuity.get(segment.sourceComponent || 'combined');
           const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
           cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
-            continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null });
-          voiceprint = matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching });
+            continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null,
+            // The pooled speech behind the fingerprint when diarization supplied
+            // it, falling back to this segment's own length.
+            durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
+          // Speech too brief to fingerprint reliably resolves to no voice rather
+          // than to a new one. Saying "someone spoke here" is honest; inventing a
+          // person for a half-second of noise is what filled the Speakers screen.
+          voiceprint = cluster
+            ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching })
+            : null;
           resolved = { cluster, voiceprint, embedding };
           speakerCache.set(key, resolved);
         } else ({ cluster, voiceprint } = resolved);

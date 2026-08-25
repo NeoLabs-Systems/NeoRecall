@@ -30,6 +30,16 @@ function bytes(value) { return Buffer.from(value.buffer, value.byteOffset, value
 const QUERY = new Float32Array([1, 0]);
 function centroidWithSimilarity(similarity) { return new Float32Array([similarity, Math.sqrt(Math.max(0, 1 - similarity * similarity))]); }
 
+// Thresholds are read rather than written down. These tests are about the
+// policy — what continuity rescues, what the margin refuses, what gets merged —
+// and hard-coded similarities silently stop testing it the moment a default
+// moves, which is exactly what happened when the match threshold was retuned.
+const limits = () => require('../../server/services/settings/processing_settings_service').get();
+function belowPlainAboveContinuity() {
+  const { speakerClusterThreshold: plain, speakerClusterContinuityThreshold: relaxed } = limits();
+  return (plain + relaxed) / 2;
+}
+
 function seedSession(db) {
   const userId = crypto.randomUUID(); const deviceId = crypto.randomUUID(); const sessionId = crypto.randomUUID();
   db.prepare("INSERT INTO users (id,username,password_hash) VALUES (?,?,'test')").run(userId, `speaker-${userId}`);
@@ -52,10 +62,11 @@ function seedCluster(db, { userId, sessionId, ordinal, embedding }) {
 test('a boundary-continuity anchor keeps its cluster despite drift below the plain threshold', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
-  // Cosine 0.55 clears the relaxed continuity threshold (0.5 default) but not
-  // the plain clustering threshold (0.65 default): exactly the drift a
-  // re-segmented chunk boundary produces for the same continuing speaker.
-  const clusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(0.55) });
+  // A similarity between the relaxed continuity bar and the plain one: exactly
+  // the drift a re-segmented chunk boundary produces for the same continuing
+  // speaker.
+  const drifted = belowPlainAboveContinuity();
+  const clusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(drifted) });
 
   const withoutContinuity = matching.resolveCluster(db, { userId, sessionId, embedding: QUERY, continuity: null });
   assert.notEqual(withoutContinuity.id, clusterId, 'without continuity evidence, a below-threshold match still mints a new cluster');
@@ -63,7 +74,7 @@ test('a boundary-continuity anchor keeps its cluster despite drift below the pla
   // resolveCluster above mutated the first cluster's centroid and minted a
   // second one; reseed a clean single cluster for the continuity assertion.
   db.prepare('DELETE FROM speaker_clusters WHERE user_id=?').run(userId);
-  const freshClusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(0.55) });
+  const freshClusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(drifted) });
   const withContinuity = matching.resolveCluster(db, {
     userId, sessionId, embedding: QUERY, continuity: { clusterId: freshClusterId, gapMs: 500 },
   });
@@ -77,6 +88,9 @@ test('continuity breaks a genuine near-tie in favor of the anchor, but yields to
   // default 0.05 margin of each other. Continuity should still keep the anchor.
   const anchorId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(0.60) });
   seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(0.62) });
+  // Both clear the plain threshold and are near-identical to each other, so
+  // without continuity they would merge; the anchor is what decides which of
+  // the two the turn belongs to.
   const tieResolved = matching.resolveCluster(db, { userId, sessionId, embedding: QUERY, continuity: { clusterId: anchorId, gapMs: 200 } });
   assert.equal(tieResolved.id, anchorId, 'a near-tie at the boundary resolves to the continuity anchor, not the marginally closer cluster');
 
@@ -93,26 +107,62 @@ test('continuity breaks a genuine near-tie in favor of the anchor, but yields to
 test('a continuity anchor outside the configured gap is ignored', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
-  const clusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(0.55) });
+  const clusterId = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(belowPlainAboveContinuity()) });
   const resolved = matching.resolveCluster(db, {
     userId, sessionId, embedding: QUERY, continuity: { clusterId, gapMs: 60_000 },
   });
   assert.notEqual(resolved.id, clusterId, 'a gap beyond the configured continuity window is treated the same as no continuity at all');
 });
 
-test('an ambiguous global match without continuity mints a new cluster instead of guessing', () => {
+test('two clusters that both match strongly are one person, and are merged rather than tripled', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
-  // Both clusters clear the 0.65 threshold and sit within 0.05 of each other:
-  // exactly the ambiguity that let a distinct speaker's turn be silently
-  // folded into an unrelated cluster before the margin check existed.
-  seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(0.70) });
-  seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(0.68) });
+  // Both clear the threshold and sit within the margin of each other. Refusing
+  // both and minting a third is what turned one familiar voice into a screen
+  // full of speakers: every later turn then resembled all the copies, no single
+  // match stood out, and another copy appeared. Two strong candidates this
+  // alike are the same person already split, so they are folded together.
+  const { speakerClusterThreshold: plain, speakerClusterMargin: margin } = limits();
+  const first = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(plain + 0.2) });
+  const second = seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(plain + 0.2 - margin / 2) });
+  const resolved = matching.resolveCluster(db, { userId, sessionId, embedding: QUERY, continuity: null });
+
+  const remaining = db.prepare('SELECT id FROM speaker_clusters WHERE user_id=?').all(userId).map((row) => row.id);
+  assert.deepEqual(remaining, [resolved.id], 'the two candidates end as one voice, and no third is created');
+  assert.ok([first, second].includes(resolved.id), 'the survivor is one of the original clusters');
+});
+
+test('a borderline match against a weak runner-up still refuses to guess', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  // The case the margin exists for, and the one it keeps: a genuinely new
+  // speaker grazing the threshold against an unrelated cluster, with the
+  // runner-up just below the bar. Both readings are equally weak, so neither is
+  // trusted.
+  const { speakerClusterThreshold: plain, speakerClusterMargin: margin } = limits();
+  seedCluster(db, { userId, sessionId, ordinal: 1, embedding: centroidWithSimilarity(plain + margin / 4) });
+  seedCluster(db, { userId, sessionId, ordinal: 2, embedding: centroidWithSimilarity(plain - margin / 4) });
   const before = db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE user_id=?').get(userId).count;
   const resolved = matching.resolveCluster(db, { userId, sessionId, embedding: QUERY, continuity: null });
   const after = db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE user_id=?').get(userId).count;
-  assert.equal(after, before + 1, 'an ambiguous match mints a new cluster rather than attaching to either candidate');
+  assert.equal(after, before + 1, 'a contested borderline match mints a new cluster rather than attaching to either candidate');
   assert.equal(db.prepare('SELECT sample_count FROM speaker_clusters WHERE id=?').get(resolved.id).sample_count, 1);
+});
+
+test('speech too short to fingerprint never becomes a new speaker', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  // A sub-second turn produced a 0.97 similarity to a *different* speaker in
+  // measurement. Such a turn may join a voice that already exists, but letting
+  // it invent one turns noise into a person.
+  const { speakerMinimumTurnMs } = limits();
+  const before = db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE user_id=?').get(userId).count;
+  const resolved = matching.resolveCluster(db, {
+    userId, sessionId, embedding: QUERY, continuity: null, durationMs: Math.max(0, speakerMinimumTurnMs - 1),
+  });
+  assert.equal(resolved, null, 'the turn resolves to no speaker at all');
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE user_id=?').get(userId).count, before,
+    'and no cluster is created for it');
 });
 
 test('a confident global match without continuity still resolves normally', () => {
@@ -158,4 +208,39 @@ test('a session speaker cluster keeps its established voiceprint when global mat
   assert.equal(reused.id, first.id);
   assert.equal(db.prepare('SELECT count(*) count FROM voiceprints WHERE user_id=?').get(userId).count, 2);
   assert.equal(db.prepare('SELECT sample_count FROM voiceprints WHERE id=?').get(first.id).sample_count, 2);
+});
+
+test('a voice is fingerprinted from everything it said in a chunk, not from one turn', () => {
+  const { poolBySpeaker } = require('../../server/transcription/diarization');
+  // Four seconds of one voice arriving as four separate turns. A fingerprint
+  // built from any single one of them is a fingerprint of one second of speech,
+  // and one second does not identify anyone: measured against two known
+  // different voices, one-second fingerprints put the same voice as low as 0.20
+  // and two different voices as high as 0.77. At two seconds the two
+  // populations separate cleanly, which is why pooling is what makes the
+  // duration gate reachable at all.
+  const turns = [
+    { speaker: 0, startMs: 0, endMs: 1_000, embedding: new Float32Array([1, 0]) },
+    { speaker: 0, startMs: 2_000, endMs: 3_000, embedding: new Float32Array([0, 1]) },
+    { speaker: 1, startMs: 4_000, endMs: 7_000, embedding: new Float32Array([0, 1]) },
+  ];
+  const pooled = poolBySpeaker(turns);
+  assert.equal(pooled.get(0).speechMs, 2_000, 'both of the first voice\'s turns count toward its fingerprint');
+  assert.equal(pooled.get(1).speechMs, 3_000);
+  // Equal-length turns average evenly; the pooled vector is the mean.
+  assert.ok(Math.abs(pooled.get(0).embedding[0] - 0.5) < 1e-6);
+  assert.ok(Math.abs(pooled.get(0).embedding[1] - 0.5) < 1e-6);
+});
+
+test('pooling weights a long turn more heavily than a short one', () => {
+  const { poolBySpeaker } = require('../../server/transcription/diarization');
+  // Three seconds of clear speech should not be dragged around by a half-second
+  // fragment that happens to follow it.
+  const pooled = poolBySpeaker([
+    { speaker: 0, startMs: 0, endMs: 3_000, embedding: new Float32Array([1, 0]) },
+    { speaker: 0, startMs: 3_000, endMs: 3_500, embedding: new Float32Array([0, 1]) },
+  ]);
+  const voice = pooled.get(0);
+  assert.equal(voice.speechMs, 3_500);
+  assert.ok(voice.embedding[0] > voice.embedding[1] * 5, 'the long turn dominates the fingerprint');
 });
