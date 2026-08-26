@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/background/background_capture_service.dart';
@@ -115,6 +117,111 @@ void main() {
       await service.dispose();
     },
   );
+
+  test('an unchanged widget snapshot is not published twice', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'backgroundRuntimeState') {
+        return <String, Object?>{
+          'running': false,
+          'holds': <String>[],
+          'foreground': true,
+          'microphoneUnavailable': false,
+        };
+      }
+      return true;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+    const snapshot = HomeWidgetSnapshot(
+      signedIn: true,
+      capture: HomeWidgetCapture.idle,
+      today: HomeWidgetToday.empty,
+    );
+
+    await service.publishWidgetSnapshot(snapshot);
+    await service.publishWidgetSnapshot(snapshot);
+    await service.publishWidgetSnapshot(HomeWidgetSnapshot.signedOut);
+
+    final publishes = calls.where((call) => call.method == 'publishWidgetData');
+    expect(publishes, hasLength(2));
+    expect(
+      jsonDecode(
+        (publishes.first.arguments as Map)['payload'] as String,
+      )['signedIn'],
+      isTrue,
+    );
+    await service.dispose();
+  });
+
+  test('a snapshot the host refused is sent again next time', () async {
+    var accept = false;
+    final payloads = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'backgroundRuntimeState') {
+        return <String, Object?>{
+          'running': false,
+          'holds': <String>[],
+          'foreground': true,
+          'microphoneUnavailable': false,
+        };
+      }
+      if (call.method == 'publishWidgetData') {
+        if (!accept) throw PlatformException(code: 'NO_HOST');
+        payloads.add((call.arguments as Map)['payload'] as String);
+      }
+      return true;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+    const snapshot = HomeWidgetSnapshot(
+      signedIn: true,
+      capture: HomeWidgetCapture.idle,
+      today: HomeWidgetToday.empty,
+    );
+
+    await service.publishWidgetSnapshot(snapshot);
+    expect(payloads, isEmpty);
+    accept = true;
+    await service.publishWidgetSnapshot(snapshot);
+
+    expect(payloads, hasLength(1));
+    await service.dispose();
+  });
+
+  test('queued widget taps are claimed as typed actions', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'backgroundRuntimeState') {
+        return <String, Object?>{
+          'running': false,
+          'holds': <String>[],
+          'foreground': true,
+          'microphoneUnavailable': false,
+        };
+      }
+      if (call.method == 'takePendingWidgetActions') {
+        return <Object?>[
+          <Object?, Object?>{'type': 'stopRecording', 'targetId': null},
+          <Object?, Object?>{'type': 'completeHighlight', 'targetId': 'mini-1'},
+          // A malformed row must not take the rest of the queue down with it.
+          <Object?, Object?>{'type': '', 'targetId': 'ignored'},
+        ];
+      }
+      return true;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+
+    final actions = await service.takePendingWidgetActions();
+
+    expect(actions.map((action) => action.type), <String>[
+      HomeWidgetAction.stopRecording,
+      HomeWidgetAction.completeHighlight,
+    ]);
+    expect(actions.last.targetId, 'mini-1');
+    await service.dispose();
+  });
 
   test(
     'watch download activity and failures reach the processing ledger',

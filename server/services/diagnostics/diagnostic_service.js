@@ -18,6 +18,9 @@ function safeMessage(value) {
 function recordRequest({ userId, requestId, method, path, statusCode, durationMs, errorCode }) {
   if (!userId) return;
   const database = getDatabase();
+  // The account may have been deleted by the very request being recorded. There
+  // is no row to attach a diagnostic to, and nothing to retain for it.
+  if (!database.prepare('SELECT 1 FROM users WHERE id=?').get(userId)) return;
   const config = getConfig();
   database.prepare(`INSERT INTO diagnostic_request_events
     (user_id,request_id,method,path,status_code,duration_ms,error_code)

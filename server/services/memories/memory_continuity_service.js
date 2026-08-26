@@ -13,13 +13,13 @@ function sourceSessionIds(database, memoryId) {
     WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL`).all(memoryId).map((row) => row.session_id);
 }
 
-/// Existing cards the consolidation model may decide the new material continues.
-///
-/// Candidate selection only keeps the prompt bounded; it never decides a merge.
-/// Same-stream cards remain eligible across provisional boundaries, while cards
-/// from another recording stream are eligible only across the same configured
-/// hard gap used by conversation detection. The model receives timestamps,
-/// stream overlap and semantics and makes the actual same-occasion decision.
+// Existing cards the consolidation model may decide the new material continues.
+//
+// Candidate selection only keeps the prompt bounded; it never decides a merge.
+// Same-stream cards remain eligible across provisional boundaries, while cards
+// from another recording stream are eligible only across the same configured
+// hard gap used by conversation detection. The model receives timestamps,
+// stream overlap and semantics and makes the actual same-occasion decision.
 function findCandidates(userId, conversations, database = getDatabase(), options = processingSettings.get()) {
   if (!conversations.length || options.maxMemoryContinuationCandidates <= 0) return [];
   const inputSessionIds = [...new Set(conversations.map((conversation) => conversation.sessionId).filter(Boolean))];
@@ -62,15 +62,15 @@ function findCandidates(userId, conversations, database = getDatabase(), options
   }));
 }
 
-/// Keep only claims that can be acted on.
-///
-/// A claim is the model's answer to "is this the same occasion", and the answer
-/// is worth acting on only when it names a card that was actually offered. An
-/// id that was never a candidate, or a card two output memories both claim,
-/// says nothing about the material itself — so the claim is dropped and the
-/// material becomes its own card, which is exactly what would have happened
-/// without the feature. Failing the run instead would put real recordings on
-/// the path to being set aside over a slip in one field.
+// Keep only claims that can be acted on.
+//
+// A claim is the model's answer to "is this the same occasion", and the answer
+// is worth acting on only when it names a card that was actually offered. An
+// id that was never a candidate, or a card two output memories both claim,
+// says nothing about the material itself — so the claim is dropped and the
+// material becomes its own card, which is exactly what would have happened
+// without the feature. Failing the run instead would put real recordings on
+// the path to being set aside over a slip in one field.
 function resolveClaims(memories, candidates) {
   const allowed = new Set(candidates.map((candidate) => candidate.publicId));
   const claimed = new Set();
@@ -88,14 +88,14 @@ function resolveClaims(memories, candidates) {
   return dropped;
 }
 
-/// Move one card's relations onto another without ever attaching the same
-/// thing twice.
-///
-/// `INSERT OR IGNORE` cannot be relied on here: memory_sources carries a NULL
-/// in whichever of its two reference columns does not apply, and SQLite treats
-/// NULLs as distinct in a UNIQUE index, so the same piece of evidence would be
-/// attached again and the card would show that line twice. `IS` compares NULLs
-/// as equal, which is what "already attached" means.
+// Move one card's relations onto another without ever attaching the same
+// thing twice.
+//
+// `INSERT OR IGNORE` cannot be relied on here: memory_sources carries a NULL
+// in whichever of its two reference columns does not apply, and SQLite treats
+// NULLs as distinct in a UNIQUE index, so the same piece of evidence would be
+// attached again and the card would show that line twice. `IS` compares NULLs
+// as equal, which is what "already attached" means.
 function copyRelations(database, table, columns, targetId, absorbedId) {
   const names = columns.join(',');
   const selected = columns.map((column) => column === 'memory_id' ? '?' : `source.${column}`).join(',');
@@ -108,8 +108,8 @@ function copyRelations(database, table, columns, targetId, absorbedId) {
     .run(targetId, absorbedId, targetId);
 }
 
-/// Fold already-persisted fragments into their oldest card inside the caller's
-/// transaction. Raw transcript rows are never changed or discarded.
+// Fold already-persisted fragments into their oldest card inside the caller's
+// transaction. Raw transcript rows are never changed or discarded.
 function absorbClaimed(database, userId, publicIds) {
   const ids = [...new Set(publicIds || [])];
   if (!ids.length) return null;

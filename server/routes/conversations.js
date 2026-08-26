@@ -12,11 +12,11 @@ router.get('/', requireScope('recordings:read'), (req, res) => res.json(service.
 router.get('/timeline', requireScope('recordings:read'), (req, res) => res.json(timeline.list(req.auth.userId, req.query)));
 // Everything said in one moment, fetched when a reader opens it rather than
 // carried in every timeline refresh.
-router.get('/:id/segments', requireScope('recordings:read'), (req, res, next) => {
-  try { res.json(timeline.segments(req.auth.userId, req.params.id)); } catch (error) { next(error); }
+router.get('/:id/segments', requireScope('recordings:read'), (req, res) => {
+  res.json(timeline.segments(req.auth.userId, req.params.id));
 });
-router.post('/:id/reprocess', requireScope('memories:write'), (req, res, next) => {
-  try { res.status(202).json(reprocess.reprocess(req.auth.userId, req.params.id)); } catch (error) { next(error); }
+router.post('/:id/reprocess', requireScope('memories:write'), (req, res) => {
+  res.status(202).json(reprocess.reprocess(req.auth.userId, req.params.id));
 });
-router.get('/:id', requireScope('recordings:read'), (req, res, next) => { try { res.json(service.get(req.auth.userId, req.params.id)); } catch (error) { next(error); } });
+router.get('/:id', requireScope('recordings:read'), (req, res) => { res.json(service.get(req.auth.userId, req.params.id)); });
 module.exports = router;

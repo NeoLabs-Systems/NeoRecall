@@ -1,9 +1,13 @@
 node_modules/
 .env
+.env.*
+!.env.example
+!.env.*.example
 *.log
 .DS_Store
 __pycache__/
 *.py[cod]
+.venv*/
 *.kicad_prl
 coverage/
 docs/build/
@@ -20,3 +24,4 @@ models/downloads/
 !test/fixtures/*.wav
 /tmp
 /flutter_app/android/.kotlin
+.claude/worktrees/

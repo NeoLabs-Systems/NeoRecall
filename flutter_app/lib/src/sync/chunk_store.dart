@@ -30,6 +30,13 @@ abstract class ChunkStore {
     String? error,
   });
   Future<void> release(String id);
+
+  /// Erases every locally spooled recording and its metadata.
+  ///
+  /// Used when an account is deleted: the server cascade cannot reach audio
+  /// that is still sitting on this device waiting to upload, and leaving it
+  /// behind would make "delete everything" untrue.
+  Future<void> purgeAll();
   Future<int> pendingBytes(String accountId);
   Future<void> close();
 }

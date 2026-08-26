@@ -3,12 +3,13 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_background"
+    android:background="@drawable/widget_surface"
     android:clickable="true"
     android:focusable="true"
     android:padding="8dp">
 
-    <!-- These shared state views stay present for one RemoteViews update path. -->
+    <!-- The shared state ids stay present so one RemoteViews update path can
+         address every layout without branching per view. -->
     <TextView
         android:id="@+id/widget_status"
         android:layout_width="1dp"
@@ -25,6 +26,32 @@
         android:id="@+id/widget_subtitle"
         android:layout_width="1dp"
         android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widget_meta"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <Chronometer
+        android:id="@+id/widget_elapsed"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/widget_meter"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:orientation="horizontal"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/widget_configure"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:contentDescription="@null"
         android:visibility="gone" />
 
     <ImageView
@@ -46,7 +73,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:text="●"
-        android:textColor="#FFDF7D67"
+        android:textColor="@color/widget_danger"
         android:textSize="9sp"
         android:visibility="gone" />
 </FrameLayout>

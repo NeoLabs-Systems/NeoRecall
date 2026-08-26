@@ -98,7 +98,9 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
         WearableDeviceUuids.batteryLevel,
       );
       if (level.isNotEmpty) batteryLevels.add(level.first);
-    } catch (_) {}
+    } catch (error) {
+      _noteOptionalCharacteristic('battery_read', error);
+    }
     try {
       track(
         (await transport.characteristicStream(
@@ -108,7 +110,9 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
           if (value.isNotEmpty) batteryLevels.add(value.first);
         }),
       );
-    } catch (_) {}
+    } catch (error) {
+      _noteOptionalCharacteristic('battery_subscribe', error);
+    }
     try {
       track(
         (await transport.characteristicStream(
@@ -118,7 +122,9 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
           if (value.isNotEmpty) buttonEvents.add(value);
         }),
       );
-    } catch (_) {}
+    } catch (error) {
+      _noteOptionalCharacteristic('button_subscribe', error);
+    }
   }
 
   Future<void> _syncTime() async {
@@ -139,7 +145,9 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
         WearableDeviceUuids.timeSyncWrite,
         bytes.buffer.asUint8List(),
       );
-    } catch (_) {}
+    } catch (error) {
+      _noteOptionalCharacteristic('time_sync_write', error);
+    }
   }
 
   /// Reads the device's audio codec.
@@ -454,6 +462,20 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     WearableDeviceUuids.omiStorageData,
     bytes,
   );
+
+  // An optional characteristic that fails to read or subscribe is not the same
+  // as one the device does not have: the first is a fault worth seeing in a
+  // diagnostic export, the second is normal. Neither should interrupt the
+  // connection, so both are recorded rather than thrown.
+  void _noteOptionalCharacteristic(String event, Object error) {
+    ClientDiagnosticLog.instance.record(
+      'wearable',
+      event,
+      level: 'warn',
+      details: <String, Object?>{'reason': error.toString()},
+    );
+  }
+
 }
 
 class OmiGlassConnector extends OmiConnector {
@@ -461,4 +483,5 @@ class OmiGlassConnector extends OmiConnector {
 
   @override
   WearableAudioCodec get fallbackCodec => WearableAudioCodec.opus;
+
 }

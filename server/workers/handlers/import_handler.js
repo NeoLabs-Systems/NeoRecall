@@ -64,21 +64,21 @@ function importDevice(db, userId, deviceId) {
   return id;
 }
 
-/// Places an import on the timeline, continuing the previous one when it is the
-/// next stretch of the same recording.
-///
-/// A wearable with on-board storage is drained over and over — every few seconds
-/// while it is connected — and each sweep arrives here as a separate file. Given
-/// its own session each file would become its own conversation stream, and
-/// nothing downstream is allowed to merge across streams: refinement rejects a
-/// section that mixes them, precisely so unrelated recordings never fuse. One
-/// meeting would end up as one memory per sweep.
-///
-/// So a new import extends the previous import session of the same device when
-/// their audio is contiguous, and starts a fresh session when it is not. A
-/// device that timestamps its files is placed by those timestamps; one that does
-/// not is assumed to continue seamlessly where the previous sweep ended, which
-/// is what a drained ring buffer actually is.
+// Places an import on the timeline, continuing the previous one when it is the
+// next stretch of the same recording.
+//
+// A wearable with on-board storage is drained over and over — every few seconds
+// while it is connected — and each sweep arrives here as a separate file. Given
+// its own session each file would become its own conversation stream, and
+// nothing downstream is allowed to merge across streams: refinement rejects a
+// section that mixes them, precisely so unrelated recordings never fuse. One
+// meeting would end up as one memory per sweep.
+//
+// So a new import extends the previous import session of the same device when
+// their audio is contiguous, and starts a fresh session when it is not. A
+// device that timestamps its files is placed by those timestamps; one that does
+// not is assumed to continue seamlessly where the previous sweep ended, which
+// is what a drained ring buffer actually is.
 function placement(db, userId, deviceId, record) {
   const gapMs = getConfig().importSessionContinuityMs;
   // Only an import that names its device can continue a stream. Imports without

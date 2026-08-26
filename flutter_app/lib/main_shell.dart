@@ -11,6 +11,7 @@ import 'main_sources.dart';
 import 'main_speakers.dart';
 import 'main_theme.dart';
 import 'main_timeline.dart';
+import 'src/record/sync_cards.dart';
 
 class NeoRecallShell extends StatelessWidget {
   const NeoRecallShell({super.key, required this.controller});
@@ -429,7 +430,7 @@ class _GlobalStatusBar extends StatelessWidget {
 
     if (controller.backgroundCaptureAtRisk) {
       banners.add(
-        _StatusPill(
+        _StatusBanner(
           icon: Icons.battery_alert_rounded,
           color: palette.danger,
           message:
@@ -441,7 +442,7 @@ class _GlobalStatusBar extends StatelessWidget {
     }
     if (!controller.online) {
       banners.add(
-        _StatusPill(
+        _StatusBanner(
           icon: Icons.cloud_off_rounded,
           color: palette.textMuted,
           message:
@@ -451,7 +452,7 @@ class _GlobalStatusBar extends StatelessWidget {
     }
     if (controller.notice != null) {
       banners.add(
-        _StatusPill(
+        _StatusBanner(
           icon: Icons.info_outline_rounded,
           color: palette.accent,
           message: controller.notice!,
@@ -463,7 +464,7 @@ class _GlobalStatusBar extends StatelessWidget {
     }
     if (controller.isRecording && controller.page != RecallPage.record) {
       banners.add(
-        _StatusPill(
+        _StatusBanner(
           icon: Icons.fiber_manual_record_rounded,
           color: palette.secondary,
           message: 'Recording is active.',
@@ -576,8 +577,9 @@ class _SyncStatusPillState extends State<_SyncStatusPill>
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({
+/// A global status banner: icon, message, and an optional action.
+class _StatusBanner extends StatelessWidget {
+  const _StatusBanner({
     required this.icon,
     required this.color,
     required this.message,
@@ -594,13 +596,12 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    return Container(
+    return TintedSurface(
+      tint: color,
+      radius: 12,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
-      ),
+      fillOpacity: 0.12,
+      borderOpacity: 0.28,
       child: Row(
         children: <Widget>[
           Icon(icon, size: 16, color: color),

@@ -30,23 +30,23 @@ function findInState(userId, conversationId, states, database = getDatabase(), {
     ${quarantineClause(includeQuarantined)}`).get(conversationId, userId, ...states) || null;
 }
 
-/// Transcript size without loading the transcript.
-///
-/// Preview eligibility is re-evaluated for every open conversation on every
-/// scheduler tick, and only the size matters there — reading the text itself
-/// would make an idle check cost as much as an actual preview.
+// Transcript size without loading the transcript.
+//
+// Preview eligibility is re-evaluated for every open conversation on every
+// scheduler tick, and only the size matters there — reading the text itself
+// would make an idle check cost as much as an actual preview.
 function transcriptCharacters(userId, conversationId, database = getDatabase()) {
   return database.prepare('SELECT COALESCE(SUM(length(text)),0) characters FROM transcript_segments WHERE conversation_id=? AND user_id=?')
     .get(conversationId, userId).characters;
 }
 
-/// True when nothing earlier in the recording can still change this
-/// conversation's transcript.
-///
-/// A chunk is only meaningful once every earlier chunk of its own source has
-/// reached a terminal state: an outstanding chunk would insert segments *before*
-/// existing ones and silently change what the conversation contained. An empty
-/// conversation is never complete — there is nothing to describe.
+// True when nothing earlier in the recording can still change this
+// conversation's transcript.
+//
+// A chunk is only meaningful once every earlier chunk of its own source has
+// reached a terminal state: an outstanding chunk would insert segments *before*
+// existing ones and silently change what the conversation contained. An empty
+// conversation is never complete — there is nothing to describe.
 function isComplete(userId, conversationId, database = getDatabase()) {
   const chunkIds = database.prepare('SELECT DISTINCT chunk_id FROM transcript_segments WHERE conversation_id=? AND user_id=?')
     .all(conversationId, userId);
@@ -67,8 +67,8 @@ function segmentsOf(userId, conversationId, database = getDatabase()) {
   return database.prepare(`${SEGMENT_PROJECTION} ${SEGMENT_ORDER}`).all(conversationId, userId);
 }
 
-/// Segments recorded after a given instant, for a caller that has already
-/// described everything up to it.
+// Segments recorded after a given instant, for a caller that has already
+// described everything up to it.
 function segmentsAfter(userId, conversationId, endedAfter, database = getDatabase()) {
   return database.prepare(`${SEGMENT_PROJECTION} AND ended_at>? ${SEGMENT_ORDER}`).all(conversationId, userId, endedAfter);
 }
@@ -77,9 +77,9 @@ function characterCount(segments) {
   return segments.reduce((sum, segment) => sum + segment.text.length, 0);
 }
 
-/// How much audio a conversation spans, which is what the configurable audio
-/// floor is measured against. Character counts cannot answer that question: they
-/// scale with how fast someone talks, not with how long they talked.
+// How much audio a conversation spans, which is what the configurable audio
+// floor is measured against. Character counts cannot answer that question: they
+// scale with how fast someone talks, not with how long they talked.
 function durationMs(conversation) {
   const started = Date.parse(conversation.started_at ?? conversation.startedAt);
   const ended = Date.parse(conversation.ended_at ?? conversation.endedAt);

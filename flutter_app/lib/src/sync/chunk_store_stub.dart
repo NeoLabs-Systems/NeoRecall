@@ -52,4 +52,7 @@ class _UnsupportedChunkStore implements ChunkStore {
   Future<int> pendingBytes(String accountId) async => _unsupported();
   @override
   Future<void> close() async {}
+
+  @override
+  Future<void> purgeAll() async {}
 }

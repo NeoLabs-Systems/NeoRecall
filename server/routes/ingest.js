@@ -7,6 +7,7 @@ const service = require('../services/ingest/ingest_service');
 const tempAudio = require('../services/ingest/temp_audio_service');
 const { requireAuth, requireScope } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 const { HttpError } = require('../middleware/error_handler');
 const { getConfig } = require('../config');
 const { isIanaTimezone } = require('../utils/time');
@@ -18,7 +19,6 @@ const storage = multer.diskStorage({
   filename: (_req, _file, callback) => callback(null, require('node:path').basename(tempAudio.incomingPath())),
 });
 const upload = multer({ storage, limits: { fileSize: getConfig().maxUploadBytes, files: 1 } });
-const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
 router.use(requireAuth, requireScope('ingest:write'));
 const sourceSchema = z.object({
@@ -30,15 +30,15 @@ router.post('/sessions', validate(z.object({
   id: z.string().uuid().optional(), deviceId: z.string().uuid(), clientUuid: z.string().min(8).max(128), startedAt: z.string().datetime(),
   timezone: z.string().min(1).max(100).refine(isIanaTimezone, 'Invalid IANA timezone'), clockOffsetMs: z.number().optional(), consentAttestedAt: z.string().datetime(),
   sources: z.array(sourceSchema).min(1).max(8),
-})), (req, res, next) => { try { res.status(201).json(service.createSession(req.auth.userId, req.body)); } catch (error) { next(error); } });
-router.get('/sessions/:id/sync-state', (req, res, next) => { try { res.json(service.syncState(req.auth.userId, req.params.id)); } catch (error) { next(error); } });
+})), (req, res) => { res.status(201).json(service.createSession(req.auth.userId, req.body)); });
+router.get('/sessions/:id/sync-state', (req, res) => { res.json(service.syncState(req.auth.userId, req.params.id)); });
 router.patch('/sessions/:id', validate(z.object({
   endedAt: z.string().datetime(), status: z.enum(['ended', 'interrupted']).default('ended'),
   sources: z.array(z.object({ id: z.string().uuid(), finalSequence: z.number().int().min(-1) })).optional(),
-})), (req, res, next) => { try { res.json(service.closeSession(req.auth.userId, req.params.id, req.body)); } catch (error) { next(error); } });
-router.post('/sessions/:id/sources', validate(sourceSchema), (req, res, next) => { try { res.status(201).json(service.addSource(req.auth.userId, req.params.id, req.body)); } catch (error) { next(error); } });
-router.patch('/sessions/:id/sources/:sourceId', validate(z.object({ finalSequence: z.number().int().min(-1) })), (req, res, next) => {
-  try { res.json(service.closeSource(req.auth.userId, req.params.id, req.params.sourceId, req.body.finalSequence)); } catch (error) { next(error); }
+})), (req, res) => { res.json(service.closeSession(req.auth.userId, req.params.id, req.body)); });
+router.post('/sessions/:id/sources', validate(sourceSchema), (req, res) => { res.status(201).json(service.addSource(req.auth.userId, req.params.id, req.body)); });
+router.patch('/sessions/:id/sources/:sourceId', validate(z.object({ finalSequence: z.number().int().min(-1) })), (req, res) => {
+  res.json(service.closeSource(req.auth.userId, req.params.id, req.params.sourceId, req.body.finalSequence));
 });
 const gapSchema = z.object({
   id: z.string().uuid().optional(), sourceId: z.string().uuid(), startOffsetMs: z.number().int().nonnegative(),
@@ -49,7 +49,7 @@ const gapSchema = z.object({
   (gap.startSequence === undefined) === (gap.endSequence === undefined) &&
   (gap.startSequence === undefined || gap.endSequence >= gap.startSequence), 'Gap sequence coverage must be a complete, ordered range.');
 router.post('/sessions/:id/gaps', validate(z.object({ gaps: z.array(gapSchema).min(1).max(1000) })),
-  (req, res, next) => { try { service.addGaps(req.auth.userId, req.params.id, req.body.gaps); res.status(204).end(); } catch (error) { next(error); } });
+  (req, res) => { service.addGaps(req.auth.userId, req.params.id, req.body.gaps); res.status(204).end(); });
 
 router.put('/sessions/:id/sources/:sourceId/chunks/:sequence', upload.single('audio'), asyncRoute(async (req, res) => {
   const sequence = Number(req.params.sequence);

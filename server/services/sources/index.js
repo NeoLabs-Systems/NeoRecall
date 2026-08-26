@@ -5,23 +5,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { getDatabase } = require('../../db/database');
 const { paths } = require('../../../runtime/paths');
+const { createLogger } = require('../../utils/logger');
 
-/// Registry of source types.
-///
-/// Every type is a module exposing `startSource(source)` / `stopSource(id)`.
-/// Adding a source means adding one entry here — the lifecycle below (restore on
-/// boot, create, update, delete) is type-agnostic, so no new branch is needed in
-/// four different places. Loaded lazily so one connector's dependencies cannot
-/// break the whole service at require time.
+const logger = createLogger('sources');
+
+// Registry of source types.
+//
+// Every type is a module exposing `startSource(source)` / `stopSource(id)`.
+// Adding a source means adding one entry here — the lifecycle below (restore on
+// boot, create, update, delete) is type-agnostic, so no new branch is needed in
+// four different places. Loaded lazily so one connector's dependencies cannot
+// break the whole service at require time.
 const SOURCE_TYPES = {
   discord: () => require('./discord_source'),
   plaud: () => require('./plaud_source'),
 };
 
-/// Config keys that hold credentials and must never be echoed back to a client.
+// Config keys that hold credentials and must never be echoed back to a client.
 const SECRET_CONFIG_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'password', 'apiKey']);
 
-/// Removed connectors cannot start and should not remain visible in clients.
+// Removed connectors cannot start and should not remain visible in clients.
 const RETIRED_SOURCE_TYPES = Object.freeze(['google_meet', 'zoom', 'microsoft_teams', 'meeting']);
 
 function driverFor(type) {
@@ -30,18 +33,18 @@ function driverFor(type) {
   try {
     return load();
   } catch (error) {
-    console.error(`[Sources] Source type ${type} could not be loaded:`, error.message);
+    logger.error('Source type could not be loaded', { type, error });
     return null;
   }
 }
 
-/// Starts or stops a source according to its enabled flag, never throwing: one
-/// misbehaving connector must not take down the request or the boot sequence.
+// Starts or stops a source according to its enabled flag, never throwing: one
+// misbehaving connector must not take down the request or the boot sequence.
 function applyLifecycle(source) {
   const driver = driverFor(source.type);
   if (!driver) return;
   const onError = (error) =>
-    console.error(`[Sources] ${source.enabled ? 'Start' : 'Stop'} failed for ${source.id} (${source.type}):`, error.message);
+    logger.error('Source transition failed', { action: source.enabled ? 'start' : 'stop', sourceId: source.id, type: source.type, error });
   try {
     const result = source.enabled ? driver.startSource(source) : driver.stopSource(source.id);
     Promise.resolve(result).catch(onError);
@@ -54,8 +57,8 @@ function hydrate(row) {
   return { ...row, config: JSON.parse(row.config_json), enabled: row.enabled === 1 };
 }
 
-/// Strips credentials from a source before it leaves the API. The owner already
-/// supplied them; echoing them back only widens where they can leak.
+// Strips credentials from a source before it leaves the API. The owner already
+// supplied them; echoing them back only widens where they can leak.
 function redact(source) {
   const config = {};
   for (const [key, value] of Object.entries(source.config)) {
@@ -66,13 +69,13 @@ function redact(source) {
 }
 
 const sourcesService = {
-  /// Source types this build can run, for the client to offer.
+  // Source types this build can run, for the client to offer.
   availableTypes() {
     return Object.keys(SOURCE_TYPES);
   },
 
-  /// Validates a type's credentials before the source is stored. Types whose
-  /// driver exposes no `verifyAccess` are accepted as-is.
+  // Validates a type's credentials before the source is stored. Types whose
+  // driver exposes no `verifyAccess` are accepted as-is.
   async verifyConfig(type, config) {
     const driver = driverFor(type);
     if (!driver) throw new Error(`Unknown source type: ${type}`);
@@ -88,20 +91,20 @@ const sourcesService = {
         const placeholders = RETIRED_SOURCE_TYPES.map(() => '?').join(',');
         const removed = db.prepare(`DELETE FROM sources WHERE type IN (${placeholders})`).run(...RETIRED_SOURCE_TYPES);
         if (removed.changes > 0) {
-          console.log(`[Sources] Removed ${removed.changes} retired source(s).`);
+          logger.info('Removed retired sources', { removed: removed.changes });
         }
       } catch (cleanupError) {
-        console.error('[Sources] Failed to clean up retired sources:', cleanupError.message);
+        logger.error('Failed to clean up retired sources', { error: cleanupError });
       }
 
       try {
         const meetingProfiles = path.join(paths().home, 'meeting_profiles');
         if (fs.existsSync(meetingProfiles)) {
           fs.rmSync(meetingProfiles, { recursive: true, force: true });
-          console.log('[Sources] Removed retired meeting account profiles.');
+          logger.info('Removed retired meeting account profiles');
         }
       } catch (cleanupError) {
-        console.error('[Sources] Failed to clean up retired meeting account profiles:', cleanupError.message);
+        logger.error('Failed to clean up retired meeting account profiles', { error: cleanupError });
       }
 
       for (const row of db.prepare('SELECT * FROM sources WHERE enabled = 1').all()) {
@@ -109,13 +112,13 @@ const sourcesService = {
         try {
           source = hydrate(row);
         } catch (parseError) {
-          console.error(`[Sources] Skipping source ${row.id} with invalid config:`, parseError.message);
+          logger.error('Skipping source with invalid config', { sourceId: row.id, error: parseError });
           continue;
         }
         applyLifecycle(source);
       }
     } catch (error) {
-      console.error('[Sources] Failed to initialize sources:', error.message);
+      logger.error('Failed to initialize sources', { error });
     }
   },
 
@@ -125,7 +128,7 @@ const sourcesService = {
     return rows.map((row) => redact(hydrate(row)));
   },
 
-  /// Full record including secrets — for server-side use only, never a response.
+  // Full record including secrets — for server-side use only, never a response.
   get(userId, id) {
     const db = getDatabase();
     const row = db.prepare('SELECT * FROM sources WHERE user_id = ? AND id = ?').get(userId, id);
@@ -133,7 +136,7 @@ const sourcesService = {
     return hydrate(row);
   },
 
-  /// Safe projection for API responses.
+  // Safe projection for API responses.
   getPublic(userId, id) {
     return redact(this.get(userId, id));
   },

@@ -503,4 +503,22 @@ class IoChunkStore implements ChunkStore {
     await _database?.close();
     _database = null;
   }
+
+  @override
+  Future<void> purgeAll() async {
+    await initialize();
+    await _database!.delete('chunks');
+    await _database!.delete('sessions');
+    await _database!.delete('capture_partials');
+    if (_audioDirectory.existsSync()) {
+      for (final entity in _audioDirectory.listSync()) {
+        try {
+          entity.deleteSync(recursive: true);
+        } catch (_) {
+          // A file held open by a finishing write is retried by the caller's
+          // directory sweep; one stuck file must not abort the rest.
+        }
+      }
+    }
+  }
 }

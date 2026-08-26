@@ -360,3 +360,42 @@ class SectionCard extends StatelessWidget {
     );
   }
 }
+
+/// The tinted, softly-bordered surface every status chip and badge is built on.
+///
+/// Ten files had written out the same `Container` — a fill at ~12% of a tint,
+/// a border at ~29% of the same tint, a pill or rounded radius. Keeping the two
+/// alphas in one place is what stops them drifting apart between screens.
+class TintedSurface extends StatelessWidget {
+  const TintedSurface({
+    super.key,
+    required this.tint,
+    required this.child,
+    this.padding = const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    this.radius,
+    this.fillOpacity = 0.13,
+    this.borderOpacity = 0.30,
+  });
+
+  final Color tint;
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  /// Defaults to a full pill; pass a value for a rounded rectangle.
+  final double? radius;
+  final double fillOpacity;
+  final double borderOpacity;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: fillOpacity),
+        borderRadius: BorderRadius.circular(radius ?? AppRadius.pill),
+        border: Border.all(color: tint.withValues(alpha: borderOpacity)),
+      ),
+      child: child,
+    );
+  }
+}

@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import systems.neolabs.neorecall.widgets.WidgetStore
+import systems.neolabs.neorecall.widgets.WidgetUpdater
 
 /** Process-level bridge used by both the Activity and the foreground host. */
 class BackgroundCaptureChannel(private val context: Context) {
@@ -76,6 +78,17 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
           result.success(pending)
         }
+        "publishWidgetData" -> {
+          val payload = call.argument<String>("payload")
+          if (payload == null) {
+            result.error("INVALID_WIDGET_DATA", "Widget payload is missing.", null)
+          } else {
+            WidgetStore.publish(context, payload, System.currentTimeMillis())
+            RecordWidgetProvider.updateAll(context)
+            result.success(true)
+          }
+        }
+        "takePendingWidgetActions" -> result.success(WidgetStore.takeActions(context))
         "takePendingWatchRecordings" -> try {
           result.success(PhoneWearTransferManager.get(context).pending())
         } catch (error: Exception) {
@@ -115,6 +128,24 @@ class BackgroundCaptureChannel(private val context: Context) {
       if (::channel.isInitialized) {
         channel.invokeMethod("widgetPhoneRecordingRequested", null)
       }
+    }
+  }
+
+  /**
+   * Records a widget tap and tells Dart about it.
+   *
+   * Same order as [requestWidgetPhoneRecording] and for the same reason: the
+   * tap is on disk before anything is notified, so a cold engine or an Activity
+   * attachment race cannot lose it.
+   */
+  fun requestWidgetAction(type: String, targetId: String?) {
+    WidgetStore.queueAction(context, type, targetId, System.currentTimeMillis())
+    notifyWidgetActionRequested()
+  }
+
+  fun notifyWidgetActionRequested() {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) channel.invokeMethod("widgetActionRequested", null)
     }
   }
 

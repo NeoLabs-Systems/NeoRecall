@@ -10,6 +10,7 @@ const { requestId } = require('./middleware/request_id');
 const { cors } = require('./middleware/cors');
 const { userDiagnostics } = require('./middleware/user_diagnostics');
 const { slidingWindow } = require('./middleware/rate_limit');
+const { asyncRoute } = require('./middleware/async_route');
 const { notFound, errorHandler, HttpError } = require('./middleware/error_handler');
 const { hasBundledWebClient } = require('../lib/install_helpers');
 const { WEB_CLIENT_DIR } = require('../runtime/paths');
@@ -24,24 +25,22 @@ function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(userDiagnostics);
   app.get('/health', (_req, res) => res.json({ status: 'ok', process: 'http', version: require('../package.json').version }));
-  app.get('/ready', async (req, res, next) => {
-    try {
-      getDatabase().prepare('SELECT 1').get();
-      const worker = getDatabase().prepare('SELECT * FROM worker_heartbeats ORDER BY heartbeat_at DESC LIMIT 1').get();
-      const workerReady = Boolean(worker && worker.model_state === 'ready' &&
-        Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
-      const modelReady = await require('./transcription/provider_registry').getProvider().ready();
-      // Reported and gated on, because a server that transcribes but cannot
-      // write a memory looks healthy while quietly producing nothing a user
-      // came for. `neorecall setup` installs the weights; this is what says so
-      // when it did not.
-      const languageModelReady = require('./ai/provider_registry').ready();
-      const ready = workerReady && modelReady && languageModelReady && isVectorReady();
-      res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', database: true,
-        worker: workerReady, models: modelReady, languageModel: languageModelReady,
-        vector: isVectorReady(), vectorVersion: expectedVecVersion });
-    } catch (error) { next(error); }
-  });
+  app.get('/ready', asyncRoute(async (_req, res) => {
+    getDatabase().prepare('SELECT 1').get();
+    const worker = getDatabase().prepare('SELECT * FROM worker_heartbeats ORDER BY heartbeat_at DESC LIMIT 1').get();
+    const workerReady = Boolean(worker && worker.model_state === 'ready' &&
+      Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
+    const modelReady = await require('./transcription/provider_registry').getProvider().ready();
+    // Reported and gated on, because a server that transcribes but cannot
+    // write a memory looks healthy while quietly producing nothing a user
+    // came for. `neorecall setup` installs the weights; this is what says so
+    // when it did not.
+    const languageModelReady = require('./ai/provider_registry').ready();
+    const ready = workerReady && modelReady && languageModelReady && isVectorReady();
+    res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', database: true,
+      worker: workerReady, models: modelReady, languageModel: languageModelReady,
+      vector: isVectorReady(), vectorVersion: expectedVecVersion });
+  }));
   app.use(require('./routes/oauth'));
   app.use(['/api/v1', '/admin/api/v1'], slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
   app.use('/api/v1', require('./routes'));

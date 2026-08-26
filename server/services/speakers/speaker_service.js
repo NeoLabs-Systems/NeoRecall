@@ -5,6 +5,7 @@ const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const processingSettings = require('../settings/processing_settings_service');
 const vectors = require('../../transcription/speaker_embeddings');
+const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
 
 function list(userId) {
@@ -34,15 +35,14 @@ function update(userId, id, changes) {
   return getOwned(userId, id);
 }
 
-function floatVector(buffer) { return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4); }
 function mergedCentroid(first, second) {
-  const left = floatVector(first.centroid_embedding);
-  const right = floatVector(second.centroid_embedding);
+  const left = voiceprintStorage.readCentroid(first.centroid_embedding);
+  const right = voiceprintStorage.readCentroid(second.centroid_embedding);
   if (left.length !== right.length) throw new HttpError(409, 'MODEL_MISMATCH', 'Speaker profiles use incompatible embedding models.');
   const total = first.sample_count + second.sample_count;
   const output = new Float32Array(left.length);
   for (let i = 0; i < left.length; i += 1) output[i] = (left[i] * first.sample_count + right[i] * second.sample_count) / total;
-  return { buffer: Buffer.from(output.buffer), total };
+  return { buffer: voiceprintStorage.sealCentroid(output), total };
 }
 
 function merge(userId, targetId, sourceId) {
@@ -64,6 +64,9 @@ function merge(userId, targetId, sourceId) {
       sourceSelection,
       getConfig().speakerDisplayMinimumPreviewMs,
     )) {
+      // The clip is copied between rows exactly as stored — still sealed, never
+      // decrypted — so a merge does no crypto work and cannot leak a plaintext
+      // clip into a transaction that might roll back.
       db.prepare(`INSERT INTO speaker_previews
         (voiceprint_id,user_id,audio,content_type,duration_ms,quality,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?)
@@ -97,14 +100,14 @@ function sameExplicitIdentity(first, second) {
 }
 
 function rankedPeers(row, rows) {
-  const centroid = vectors.fromBuffer(row.centroid_embedding);
+  const centroid = voiceprintStorage.readCentroid(row.centroid_embedding);
   return rows
     .filter((candidate) => candidate.id !== row.id
       && candidate.embedding_model === row.embedding_model
       && candidate.embedding_dimensions === row.embedding_dimensions)
     .map((candidate) => ({
       row: candidate,
-      score: vectors.cosine(centroid, vectors.fromBuffer(candidate.centroid_embedding)),
+      score: vectors.cosine(centroid, voiceprintStorage.readCentroid(candidate.centroid_embedding)),
     }))
     .sort((left, right) => right.score - left.score);
 }

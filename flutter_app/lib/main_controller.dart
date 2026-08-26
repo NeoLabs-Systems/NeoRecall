@@ -34,9 +34,15 @@ import 'src/recording/recorder_mobile.dart';
 import 'src/recording/recording_schedule.dart';
 import 'src/sync/chunk_store.dart';
 import 'src/sync/pending_audio_preview.dart';
+import 'src/background/home_widget_publisher.dart';
 import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
 import 'src/sync/sync_coordinator.dart';
+
+part 'src/controller/auth_controller.dart';
+part 'src/controller/diagnostics_controller.dart';
+part 'src/controller/device_sync_controller.dart';
+part 'src/controller/library_controller.dart';
 
 enum RecallPage {
   record,
@@ -54,7 +60,12 @@ bool canRestoreSessionForBackend({
   required String baseUrl,
 }) => web || baseUrl.trim().isNotEmpty;
 
-class NeoRecallController extends ChangeNotifier {
+class NeoRecallController extends ChangeNotifier
+    with
+        AuthController,
+        DeviceSyncController,
+        DiagnosticsController,
+        LibraryController {
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
@@ -94,6 +105,12 @@ class NeoRecallController extends ChangeNotifier {
     'recordingScheduleEnabled': false,
     'recordingStartMinute': 0,
     'recordingEndMinute': 0,
+    'customVocabulary': <String>[],
+    'customVocabularyMaxTerms': 100,
+    'customVocabularyMaxTermLength': 120,
+    'vocabularyCorrectionMinimumLength': 8,
+    'vocabularyCorrectionEnabled': true,
+    'automaticSpeakerVocabulary': <String>[],
   };
 
   static String get _defaultBackendUrl {
@@ -149,15 +166,23 @@ class NeoRecallController extends ChangeNotifier {
     return false;
   }
 
+  @override
   final NeoRecallApiClient api;
+  @override
   final ChunkStore store;
+  @override
   final RecallRecorder recorder;
+  @override
   late final AudioDeviceAdapterRegistry audioDeviceRegistry;
+  @override
   late final DeviceSessionController audioDeviceSessions;
+  @override
   final WebAuthnClient _webAuthn = createWebAuthnClient();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  @override
   final Uuid _uuid = const Uuid();
   final AudioLevelScale _audioLevelScale = const AudioLevelScale();
+  @override
   late final SyncCoordinator sync = SyncCoordinator(
     store: store,
     api: api,
@@ -173,9 +198,12 @@ class NeoRecallController extends ChangeNotifier {
   StreamSubscription<BackgroundCaptureEvent>? _backgroundSubscription;
   StreamSubscription<CapturePipelineInterruption>?
   _mobileInterruptionSubscription;
+  @override
   SharedPreferences? _preferences;
   bool initialized = false;
+  @override
   bool loading = false;
+  @override
   bool online = true;
   bool consentAccepted = false;
   bool _stoppingRecording = false;
@@ -197,6 +225,7 @@ class NeoRecallController extends ChangeNotifier {
   // Cleared whenever the link drops or a different device is preferred, since
   // a stale reading would otherwise linger in the UI.
   int? preferredDeviceBatteryLevel;
+  @override
   String? error;
   String? _notice;
   Timer? _noticeTimer;
@@ -223,7 +252,56 @@ class NeoRecallController extends ChangeNotifier {
   Future<void> _pushLiveStatus() async {
     if (recorder is! MobileRecallRecorder) return;
     final mobile = recorder as MobileRecallRecorder;
-    await mobile.background.updateLiveStatus(_buildLiveStatus(mobile));
+    final status = _buildLiveStatus(mobile);
+    await mobile.background.updateLiveStatus(status);
+    // Home-screen widgets read the same state the ongoing notification does,
+    // so the two surfaces are updated from one place and cannot disagree.
+    await mobile.background.publishWidgetSnapshot(buildHomeWidgetSnapshot(status));
+  }
+
+  /// Today's day summary, and only today's.
+  ///
+  /// Daily summaries arrive newest first, but the newest one can be days old on
+  /// a quiet week, and a widget line reading like today's account of a day that
+  /// is not today would be worse than no line at all.
+  String? _todaysSummary() {
+    if (dailySummaries.isEmpty) return null;
+    final now = DateTime.now();
+    final today =
+        '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final newest = dailySummaries.first;
+    if (newest['local_date']?.toString() != today) return null;
+    final summary = newest['summary_en']?.toString().trim();
+    return summary?.isNotEmpty == true ? summary : null;
+  }
+
+  /// The snapshot the Android home-screen widgets render.
+  ///
+  /// Exposed rather than private so the shaping rules can be exercised directly:
+  /// what today covers, which commitments are open, what a widget may see.
+  HomeWidgetSnapshot buildHomeWidgetSnapshot([BackgroundLiveStatus? status]) {
+    final live = status ??
+        (recorder is MobileRecallRecorder
+            ? _buildLiveStatus(recorder as MobileRecallRecorder)
+            : null);
+    if (live == null) return HomeWidgetSnapshot.signedOut;
+    final device = audioDeviceSessions.preferredDevice;
+    return const HomeWidgetPublisher().build(
+      signedIn: authenticated,
+      status: live,
+      recording: isRecording,
+      recordingStartedAt: recordingStartedAt,
+      memories: memories,
+      miniMemories: miniMemories,
+      now: DateTime.now(),
+      deviceLabel: preferredDeviceLabel ?? device?.displayName,
+      deviceConnected: audioDeviceSessions.activeAdapter != null,
+      deviceBatteryPercent: preferredDeviceBatteryLevel,
+      devicePendingSeconds: deviceStoragePendingSeconds,
+      dayInReview: _todaysSummary(),
+    );
   }
 
   BackgroundLiveStatus _buildLiveStatus(MobileRecallRecorder mobile) {
@@ -344,7 +422,9 @@ class NeoRecallController extends ChangeNotifier {
     return '${value.inSeconds.clamp(1, 59)}s';
   }
 
+  @override
   String? get notice => _notice;
+  @override
   set notice(String? value) {
     _noticeTimer?.cancel();
     _notice = value;
@@ -356,12 +436,7 @@ class NeoRecallController extends ChangeNotifier {
     });
   }
 
-  String? accountId;
-  String? username;
   String? warning;
-  bool isConfiguringTwoFactor = false;
-  Map<String, dynamic> accountTwoFactor = const <String, dynamic>{};
-  List<Map<String, dynamic>> securityKeys = const <Map<String, dynamic>>[];
   RecallPage page = RecallPage.record;
   List<RecordingSession> recordings = <RecordingSession>[];
 
@@ -393,8 +468,11 @@ class NeoRecallController extends ChangeNotifier {
         : '$path&before=${Uri.encodeQueryComponent(cursor)}';
   }
 
+  @override
   List<RecallMemory> memories = <RecallMemory>[];
+  @override
   List<MiniMemory> miniMemories = <MiniMemory>[];
+  @override
   List<RecallSpeaker> speakers = <RecallSpeaker>[];
   List<Map<String, dynamic>> devices = <Map<String, dynamic>>[];
 
@@ -408,9 +486,11 @@ class NeoRecallController extends ChangeNotifier {
   List<Map<String, dynamic>> searchResults = <Map<String, dynamic>>[];
   String? askAnswer;
   List<Map<String, dynamic>> askCitations = <Map<String, dynamic>>[];
+  @override
   int pendingAudioBytes = 0;
   // Recording sessions containing a chunk parked after repeated server-side
   // permanent failures; surfaced without exposing transport chunk counts.
+  @override
   int needsAttentionCount = 0;
   // Recording sessions with a transiently failing chunk; still auto-retried.
   int failedUploadCount = 0;
@@ -452,42 +532,12 @@ class NeoRecallController extends ChangeNotifier {
 
   // True when Android/OEM battery optimization may suspend always-on capture.
   bool backgroundCaptureAtRisk = false;
-  // Offline device-storage sync (recordings held on the wearable's own flash).
-  bool deviceStorageSyncing = false;
-  int deviceStorageSyncedCount = 0;
-  int deviceStoragePendingCount = 0;
 
-  /// Live transfer progress of the running sweep, so a multi-minute drain shows
-  /// how far it has got instead of an indeterminate spinner.
-  WearableSyncProgress? deviceStorageSyncProgress;
-
-  /// Audio still waiting on the device, refreshed when the device links and
-  /// after each sweep. Lets the UI say what is outstanding before syncing.
-  int deviceStoragePendingSeconds = 0;
-  StreamSubscription<WearableSyncProgress>? _syncProgressSub;
-
-  /// Asks the connected wearable how much it is holding, without transferring.
-  Future<void> refreshDeviceStoragePending() async {
-    final adapter = audioDeviceSessions.activeAdapter;
-    if (adapter is! StorageSyncCapableAdapter) return;
-    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
-    if (storage == null) return;
-    try {
-      final pending = await storage.peekPending();
-      if (pending == null) return;
-      deviceStoragePendingSeconds = pending.pendingSeconds;
-      notifyListeners();
-    } catch (_) {
-      // Advisory only; never surface a probe failure as a sync error.
-    }
-  }
-
-  String? deviceStorageSyncError;
-  static const int _deviceStorageMinBytes = 2048;
   // Automatic on-device recording sync. It runs on every platform (web
   // included), needs no user action, and keeps sweeping for as long as the
   // process lives — which on Android is for as long as the wearable link hold
   // keeps the foreground host alive, i.e. also while the app is swiped away.
+  @override
   late final DeviceStorageSyncScheduler deviceStorageSync =
       DeviceStorageSyncScheduler(
         isEligible: _canSyncDeviceStorage,
@@ -500,10 +550,6 @@ class NeoRecallController extends ChangeNotifier {
   int _sequence = 0;
   Future<void> _chunkWrite = Future<void>.value();
   Future<void> _partialWrite = Future<void>.value();
-  String? _pendingAccount;
-  String? _pendingPassword;
-  bool _pendingSecurityKeyLogin = false;
-  bool _securityKeyDismissed = false;
   bool _initializing = false;
   bool _syncInitialized = false;
   bool _deviceRuntimeInitialized = false;
@@ -517,7 +563,9 @@ class NeoRecallController extends ChangeNotifier {
     minutes: 2,
   );
 
+  @override
   bool get authenticated => api.token != null && accountId != null;
+  @override
   bool get isRecording => recorder.isRecording;
 
   RecordingSchedule get _recordingSchedule => RecordingSchedule(
@@ -556,6 +604,7 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> _cacheSettings(Map<String, dynamic> value) async {
     _cachedSettings = <String, dynamic>{..._fallbackSettings, ...value};
     final ownerAccountId = accountId;
@@ -581,12 +630,14 @@ class NeoRecallController extends ChangeNotifier {
   /// True when the preferred wearable is actually connected right now — not
   /// merely saved as the preference. The device list must use this (rather than a
   /// name match) so its "connected" indicator never contradicts the sync card.
+  @override
   bool get deviceConnected =>
       audioDeviceSessions.state == DeviceTransportState.connectedStandby ||
       audioDeviceSessions.state == DeviceTransportState.recording;
 
   /// True when a connected wearable exposes on-board storage that can be synced,
   /// so the UI can offer a manual "sync device recordings" action.
+  @override
   bool get deviceStorageSyncAvailable {
     final adapter = audioDeviceSessions.activeAdapter;
     if (adapter is! StorageSyncCapableAdapter) return false;
@@ -605,6 +656,7 @@ class NeoRecallController extends ChangeNotifier {
             .supportsConcurrentCapture;
   }
 
+  @override
   String get backendUrl {
     if (api.baseUrl.isNotEmpty) return api.baseUrl;
     if (kIsWeb) return _sameOriginBackendUrl;
@@ -779,6 +831,8 @@ class NeoRecallController extends ChangeNotifier {
                 notifyListeners();
               case BackgroundCaptureEventType.phoneRecordingRequested:
                 unawaited(_startPhoneRecordingFromWidget());
+              case BackgroundCaptureEventType.widgetActionRequested:
+                unawaited(applyPendingWidgetActions());
               case BackgroundCaptureEventType.watchTransferStarted:
                 _watchDownloadingCount += 1;
                 _watchTransferError = null;
@@ -840,38 +894,47 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
+  /// Handles audio that could not reach durable storage.
+  ///
+  /// Recording stops either way: continuing would run a timer over audio that
+  /// is not being kept. A full disk gets its own wording because it is the one
+  /// cause the user can act on, and in both cases already-queued audio is left
+  /// untouched — losing the backlog to save the current block would be the
+  /// wrong trade.
+  void Function(Object) _onDurableWriteFailed(String genericWarning) {
+    return (Object exception) {
+      error = exception.toString();
+      _storageExhausted = isStorageCapacityError(exception);
+      warning = _storageExhausted
+          ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
+          : genericWarning;
+      if (recorder.isRecording) {
+        unawaited(
+          Future<void>.delayed(Duration.zero).then((_) => stopRecording()),
+        );
+      }
+      notifyListeners();
+    };
+  }
+
   void _attachRuntimeSubscriptions() {
     _chunkSubscription = recorder.chunks.listen((chunk) {
-      final write = _chunkWrite.then((_) => _storeRecordedChunk(chunk));
-      _chunkWrite = write.catchError((Object exception) {
-        error = exception.toString();
-        _storageExhausted = isStorageCapacityError(exception);
-        warning = _storageExhausted
-            ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
-            : 'Local audio could not be stored. Recording is stopping without deleting queued audio.';
-        if (recorder.isRecording) {
-          unawaited(
-            Future<void>.delayed(Duration.zero).then((_) => stopRecording()),
+      _chunkWrite = _chunkWrite
+          .then((_) => _storeRecordedChunk(chunk))
+          .catchError(
+            _onDurableWriteFailed(
+              'Local audio could not be stored. Recording is stopping without deleting queued audio.',
+            ),
           );
-        }
-        notifyListeners();
-      });
     });
     _partialSubscription = recorder.partials.listen((partial) {
-      _partialWrite = _partialWrite.then((_) => _storeCapturePartial(partial));
-      _partialWrite = _partialWrite.catchError((Object exception) {
-        error = exception.toString();
-        _storageExhausted = isStorageCapacityError(exception);
-        warning = _storageExhausted
-            ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
-            : 'The active audio block could not be written to durable storage.';
-        if (recorder.isRecording) {
-          unawaited(
-            Future<void>.delayed(Duration.zero).then((_) => stopRecording()),
+      _partialWrite = _partialWrite
+          .then((_) => _storeCapturePartial(partial))
+          .catchError(
+            _onDurableWriteFailed(
+              'The active audio block could not be written to durable storage.',
+            ),
           );
-        }
-        notifyListeners();
-      });
     });
     _warningSubscription = recorder.warnings.listen((value) {
       warning = value;
@@ -1062,184 +1125,8 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
-  Future<bool> login(
-    String account,
-    String password, {
-    String? twoFactorCode,
-  }) async {
-    return _run(
-      () async {
-        final payload =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/login',
-                  body: <String, dynamic>{
-                    'account': account,
-                    'password': password,
-                    'twoFactorCode': ?twoFactorCode,
-                  },
-                )
-                as Map;
-        await _acceptSession(payload);
-        _pendingAccount = null;
-        _pendingPassword = null;
-        await refreshAll(silent: true);
-      },
-      onTwoFactor: () {
-        _pendingAccount = account;
-        _pendingPassword = password;
-        _pendingSecurityKeyLogin = false;
-      },
-    );
-  }
 
-  bool get supportsSecurityKeys => _webAuthn.isSupported;
-
-  /// Signs in with a security key. A key that verifies the user with a PIN or a
-  /// fingerprint covers the second factor too, so no code is asked for; a
-  /// presence-only key falls back to the two-factor step.
-  Future<bool> signInWithSecurityKey({
-    String? account,
-    String? twoFactorCode,
-  }) async {
-    final signedIn = await _run(
-      () async {
-        final start =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/webauthn/options',
-                  body: <String, dynamic>{'account': ?account},
-                )
-                as Map;
-        final assertion = await _webAuthn.getAssertion(
-          Map<String, dynamic>.from(start['options'] as Map),
-        );
-        final payload =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/webauthn/verify',
-                  body: <String, dynamic>{
-                    'challengeId': start['challengeId'],
-                    'response': assertion,
-                    'twoFactorCode': ?twoFactorCode,
-                  },
-                )
-                as Map;
-        await _acceptSession(payload);
-        _pendingAccount = null;
-        _pendingSecurityKeyLogin = false;
-        await refreshAll(silent: true);
-      },
-      onTwoFactor: () {
-        _pendingAccount = account;
-        _pendingPassword = null;
-        _pendingSecurityKeyLogin = true;
-      },
-    );
-    // Dismissing the browser prompt is a deliberate choice, not a failure worth
-    // reporting back on the sign-in card.
-    if (!signedIn && _securityKeyDismissed) {
-      _securityKeyDismissed = false;
-      error = null;
-      notifyListeners();
-    }
-    return signedIn;
-  }
-
-  Future<void> fetchSecurityKeys() async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
-    try {
-      final response =
-          await api.request('GET', '/api/v1/settings/security-keys') as Map;
-      securityKeys = _securityKeyList(response);
-    } catch (_) {
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
-    }
-  }
-
-  Future<bool> registerSecurityKey(String label) async {
-    final registered = await _run(() async {
-      final start =
-          await api.request('POST', '/api/v1/settings/security-keys/options')
-              as Map;
-      final attestation = await _webAuthn.createCredential(
-        Map<String, dynamic>.from(start['options'] as Map),
-      );
-      final response =
-          await api.request(
-                'POST',
-                '/api/v1/settings/security-keys',
-                body: <String, dynamic>{
-                  'challengeId': start['challengeId'],
-                  'response': attestation,
-                  'label': label,
-                },
-              )
-              as Map;
-      securityKeys = _securityKeyList(response);
-      notice = 'Security key added.';
-    });
-    if (!registered && _securityKeyDismissed) {
-      _securityKeyDismissed = false;
-      error = null;
-      notifyListeners();
-    }
-    return registered;
-  }
-
-  Future<bool> renameSecurityKey(String id, String label) => _run(() async {
-    final response =
-        await api.request(
-              'PUT',
-              '/api/v1/settings/security-keys/$id',
-              body: <String, dynamic>{'label': label},
-            )
-            as Map;
-    securityKeys = _securityKeyList(response);
-  });
-
-  Future<bool> removeSecurityKey(String id) => _run(() async {
-    final response =
-        await api.request('DELETE', '/api/v1/settings/security-keys/$id')
-            as Map;
-    securityKeys = _securityKeyList(response);
-  });
-
-  List<Map<String, dynamic>> _securityKeyList(Map response) {
-    final rows = response['credentials'];
-    if (rows is! List) return const <Map<String, dynamic>>[];
-    return rows
-        .whereType<Map>()
-        .map((row) => Map<String, dynamic>.from(row))
-        .toList();
-  }
-
-  Future<bool> completeTwoFactor(String code) => _pendingSecurityKeyLogin
-      ? signInWithSecurityKey(account: _pendingAccount, twoFactorCode: code)
-      : login(
-          _pendingAccount ?? '',
-          _pendingPassword ?? '',
-          twoFactorCode: code,
-        );
-  Future<bool> register(String usernameValue, String? email, String password) =>
-      _run(() async {
-        final payload =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/register',
-                  body: <String, dynamic>{
-                    'username': usernameValue,
-                    if (email?.isNotEmpty ?? false) 'email': email,
-                    'password': password,
-                  },
-                )
-                as Map;
-        await _acceptSession(payload);
-        await refreshAll(silent: true);
-      });
+  @override
   Future<void> _acceptSession(Map payload) async {
     final session = payload['session'] as Map;
     final user = payload['user'] as Map;
@@ -1303,164 +1190,46 @@ class NeoRecallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> fetchTwoFactorStatus() async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
-    try {
-      final response = await api.request('GET', '/api/v1/settings/2fa');
-      accountTwoFactor = Map<String, dynamic>.from(response as Map);
-    } catch (_) {
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
-    }
-  }
-
-  Future<Map<String, dynamic>?> beginTwoFactorSetup() async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
-    try {
-      final response = await api.request('POST', '/api/v1/settings/2fa/setup');
-      return Map<String, dynamic>.from(response as Map);
-    } catch (e) {
-      error = e.toString();
-      return null;
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
-    }
-  }
-
-  Future<List<String>> enableTwoFactor(String code) async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
-    try {
-      final response = await api.request(
-        'POST',
-        '/api/v1/settings/2fa/enable',
-        body: {'code': code},
-      );
-      await fetchTwoFactorStatus();
-      final map = response as Map;
-      if (map['recoveryCodes'] is List) {
-        return (map['recoveryCodes'] as List).cast<String>();
-      }
-      return [];
-    } catch (e) {
-      error = e.toString();
-      return [];
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> disableTwoFactor({
+  /// Deletes the account on the server, then erases everything this device
+  /// still holds for it.
+  ///
+  /// Order matters. The server call goes first because it is the one that can
+  /// fail — on a wrong password, a missing code, or no network — and a local
+  /// wipe before a failed request would destroy recordings that still exist and
+  /// still belong to a live account. Once the server has cascaded, the local
+  /// spool is the only remaining copy of anything, so it is cleared
+  /// unconditionally: a failure to erase one file must not leave the user
+  /// signed in to an account that no longer exists.
+  ///
+  /// Returns null on success, or a message to show inside the confirmation
+  /// dialog. This one does not use [_run]: its errors belong in the dialog the
+  /// user is looking at, not in a snackbar behind it.
+  Future<String?> deleteAccount({
     required String password,
-    String? code,
+    String? twoFactorCode,
   }) async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
     try {
+      if (isRecording) await stopRecording();
       await api.request(
         'DELETE',
-        '/api/v1/settings/2fa',
-        body: {'password': password, 'code': ?code},
+        '/api/v1/auth/account',
+        body: {'password': password, 'twoFactorCode': ?twoFactorCode},
       );
-      await fetchTwoFactorStatus();
     } catch (e) {
-      error = e.toString();
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
+      return _readableError(e);
     }
-  }
-
-  Future<List<String>> regenerateTwoFactorCodes({
-    required String password,
-    required String code,
-  }) async {
-    isConfiguringTwoFactor = true;
-    notifyListeners();
     try {
-      final response = await api.request(
-        'POST',
-        '/api/v1/settings/2fa/recovery-codes',
-        body: {'password': password, 'code': code},
-      );
-      await fetchTwoFactorStatus();
-      final map = response as Map;
-      if (map['recoveryCodes'] is List) {
-        return (map['recoveryCodes'] as List).cast<String>();
-      }
-      return [];
-    } catch (e) {
-      error = e.toString();
-      return [];
-    } finally {
-      isConfiguringTwoFactor = false;
-      notifyListeners();
+      await store.purgeAll();
+    } catch (_) {
+      // Best effort. The account is already gone; being unable to unlink one
+      // spooled file is not a reason to keep the session alive.
     }
-  }
-
-  Future<String> buildDiagnosticExport() async {
-    if (!authenticated) {
-      throw StateError('Sign in before exporting diagnostics.');
-    }
-    Object backend;
-    var backendAvailable = true;
-    try {
-      backend = await api.request('GET', '/api/v1/diagnostics/export');
-    } catch (error) {
-      backendAvailable = false;
-      backend = <String, Object?>{
-        'available': false,
-        'error': error.toString(),
-      };
-    }
-    ClientDiagnosticLog.instance.record(
-      'diagnostics',
-      'export_created',
-      details: <String, Object?>{'backendAvailable': backendAvailable},
-    );
-    return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
-      'schemaVersion': 2,
-      'client': <String, Object?>{
-        ...ClientDiagnosticLog.instance.clientSummary(),
-        'wearableAudioCodec': wearableAudioCodecStatus,
-        'preferredDevice': audioDeviceSessions.preferredDevice?.displayName,
-        'preferredDeviceType':
-            audioDeviceSessions.preferredDevice?.metadata['type'],
-        'deviceState': audioDeviceSessions.state.name,
-        'deviceConnected': deviceConnected,
-        'pendingAudioBytes': pendingAudioBytes,
-        'needsAttentionCount': needsAttentionCount,
-      },
-      'backend': backend,
-    });
-  }
-
-  /// Recent diagnostic events (newest last) for the in-app viewer.
-  List<Map<String, Object?>> get diagnosticEvents =>
-      ClientDiagnosticLog.instance.recent(80);
-
-  int get diagnosticEventCount => ClientDiagnosticLog.instance.length;
-
-  /// One readable line for a diagnostic event (used by the viewer).
-  String formatDiagnosticEvent(Map<String, Object?> event) =>
-      ClientDiagnosticLog.instance.formatLine(event);
-
-  /// Wipes the local diagnostic log (the "delete" action in Settings).
-  Future<void> clearDiagnostics() async {
     await ClientDiagnosticLog.instance.clear();
-    ClientDiagnosticLog.instance.record(
-      'diagnostics',
-      'log_cleared',
-      details: <String, Object?>{'by': 'user'},
-    );
-    notifyListeners();
+    await logout();
+    return null;
   }
 
+  @override
   Future<bool> _run(
     Future<void> Function() operation, {
     void Function()? onTwoFactor,
@@ -1502,6 +1271,7 @@ class NeoRecallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   String get _platform => kIsWeb
       ? 'web'
       : switch (defaultTargetPlatform) {
@@ -1512,6 +1282,7 @@ class NeoRecallController extends ChangeNotifier {
           TargetPlatform.linux => 'linux',
           _ => defaultTargetPlatform.name,
         };
+  @override
   String get _deviceName => kIsWeb
       ? 'Web browser'
       : switch (defaultTargetPlatform) {
@@ -1925,6 +1696,7 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
+  @override
   void _applyRecordingSchedule() {
     final schedule = _recordingSchedule;
     if (isRecording && !schedule.allows(DateTime.now())) {
@@ -1970,10 +1742,137 @@ class NeoRecallController extends ChangeNotifier {
       'mobileCaptureIntent:$ownerAccountId';
 
   Future<void> _resumeMobileCaptureAfterWidgetCheck() async {
+    await applyPendingWidgetActions();
     if (!await _startPhoneRecordingFromWidget()) {
       await _resumeMobileCaptureIfRequested();
     }
   }
+
+  /// Where a home-screen widget asked the app to go, claimed once by the page
+  /// that can act on it. Null means the app was opened normally.
+  String? pendingWidgetMemoryId;
+  String? pendingWidgetHighlightId;
+
+  /// True when a widget asked for the highlights list rather than the memories
+  /// list. The two live on one page behind a tab.
+  bool pendingWidgetHighlightsTab = false;
+
+  String? takePendingWidgetMemoryId() {
+    final id = pendingWidgetMemoryId;
+    pendingWidgetMemoryId = null;
+    return id;
+  }
+
+  String? takePendingWidgetHighlightId() {
+    final id = pendingWidgetHighlightId;
+    pendingWidgetHighlightId = null;
+    return id;
+  }
+
+  bool takePendingWidgetHighlightsTab() {
+    final wanted = pendingWidgetHighlightsTab;
+    pendingWidgetHighlightsTab = false;
+    return wanted;
+  }
+
+  /// Applies every home-screen widget tap the app has not served yet.
+  ///
+  /// Taps are recorded natively before anything is launched, so this covers the
+  /// cold-start case as well as a tap that arrived while the app was running.
+  /// One failure never discards the rest of the queue: a commitment the server
+  /// refuses must not take a navigation request down with it.
+  Future<void> applyPendingWidgetActions() async {
+    if (recorder is! MobileRecallRecorder) return;
+    final mobile = recorder as MobileRecallRecorder;
+    final actions = await mobile.background.takePendingWidgetActions();
+    if (actions.isEmpty) return;
+    var changed = false;
+    for (final action in actions) {
+      try {
+        changed = await _applyWidgetAction(action) || changed;
+      } catch (exception) {
+        warning = 'A home-screen widget action could not be completed: $exception';
+        ClientDiagnosticLog.instance.record(
+          'widget_capture',
+          'action_failed',
+          details: <String, Object?>{
+            'type': action.type,
+            'error': exception.toString(),
+          },
+        );
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  Future<bool> _applyWidgetAction(HomeWidgetAction action) async {
+    switch (action.type) {
+      case HomeWidgetAction.stopRecording:
+        if (!isRecording) return false;
+        await stopRecording();
+        notice = 'Recording stopped from the home-screen widget.';
+        return true;
+      case HomeWidgetAction.completeHighlight:
+        final id = action.targetId;
+        if (id == null || id.isEmpty) return false;
+        if (!authenticated) {
+          warning = 'Sign in to complete highlights from the home screen.';
+          return true;
+        }
+        // Answered locally first so the list is right immediately; the refresh
+        // inside updateMiniMemory then replaces it with the server's word.
+        miniMemories = miniMemories
+            .map(
+              (mini) => mini.id == id && mini.status != 'completed'
+                  ? MiniMemory(
+                      id: mini.id,
+                      kind: mini.kind,
+                      text: mini.text,
+                      importance: mini.importance,
+                      status: 'completed',
+                      occurredAt: mini.occurredAt,
+                      dueAt: mini.dueAt,
+                      createdAt: mini.createdAt,
+                      timelineAt: mini.timelineAt,
+                      memoryId: mini.memoryId,
+                      memoryTitle: mini.memoryTitle,
+                      memoryEmoji: mini.memoryEmoji,
+                    )
+                  : mini,
+            )
+            .toList();
+        await updateMiniMemory(id, 'completed');
+        return true;
+      case HomeWidgetAction.openMemory:
+        page = RecallPage.memories;
+        pendingWidgetHighlightsTab = false;
+        pendingWidgetMemoryId = action.targetId;
+        return true;
+      case HomeWidgetAction.openHighlight:
+        page = RecallPage.memories;
+        pendingWidgetHighlightsTab = true;
+        pendingWidgetHighlightId = action.targetId;
+        return true;
+      case HomeWidgetAction.openPage:
+        final target = _widgetPage(action.targetId);
+        if (target == null) return false;
+        page = target;
+        pendingWidgetHighlightsTab = action.targetId == 'highlights';
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  RecallPage? _widgetPage(String? id) => switch (id) {
+    'record' => RecallPage.record,
+    'timeline' => RecallPage.timeline,
+    'memories' || 'highlights' => RecallPage.memories,
+    'search' => RecallPage.search,
+    'devices' => RecallPage.devices,
+    _ => null,
+  };
 
   Future<bool> _startPhoneRecordingFromWidget() {
     final current = _widgetPhoneRecordingOperation;
@@ -2383,6 +2282,7 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<Map<String, dynamic>> _settings() async {
     if (!authenticated || !online) {
       return Map<String, dynamic>.from(_cachedSettings);
@@ -2397,6 +2297,7 @@ class NeoRecallController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> _refreshPending() async {
     final ownerAccountId = accountId;
     if (ownerAccountId == null) {
@@ -2668,6 +2569,7 @@ class NeoRecallController extends ChangeNotifier {
   /// and device sync are owned by the background runtime and keep running.
   void onAppPaused() => _stopForegroundRefresh();
 
+  @override
   Future<void> refreshAll({bool silent = false}) async {
     if (!authenticated) {
       _stopForegroundRefresh();
@@ -2969,466 +2871,7 @@ class NeoRecallController extends ChangeNotifier {
   /// the wearable's BLE channel. Returns once the connector has stopped routing
   /// stored audio (so a subsequent live subscription can never be cross-fed).
   /// Safe to call when nothing is syncing.
-  Future<void> _stopDeviceStorageSyncForCapture(
-    AudioDeviceAdapter adapter,
-  ) async {
-    if (adapter is! StorageSyncCapableAdapter) return;
-    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
-    if (storage == null) return;
-    // Devices that keep live audio and their storage on separate channels can
-    // keep draining right through the capture — stopping it would be pure loss.
-    if (storage.supportsConcurrentCapture) return;
-    // Claim the device first and unconditionally: with no sweep in flight this
-    // method used to return immediately, leaving the periodic poll free to start
-    // one during the rest of capture setup.
-    _deviceClaimedForCapture = true;
-    if (!deviceStorageSync.isRunning) return;
-    try {
-      await storage.cancelStoredSync();
-    } catch (_) {
-      // Best-effort: the drain also unwinds on its own timeout/disconnect.
-    }
-    // Automatic sweeps run unattended, so the cancel above may land mid-drain.
-    // Wait for the sweep to actually unwind before the live stream subscribes,
-    // otherwise stored audio could still be routed into the live capture.
-    await deviceStorageSync.activeSweep;
-  }
 
-  /// Set while a live capture is claiming the wearable's BLE channel.
-  ///
-  /// `isRecording` only becomes true once capture is running, so between
-  /// cancelling the drain and that point an automatic sweep could still start
-  /// and take the channel back. The claim closes that window.
-  bool _deviceClaimedForCapture = false;
-
-  /// Whether an automatic sweep may run right now.
-  /// deviceStorageSyncAvailable already encodes whether this device may drain
-  /// while recording, so recording alone no longer blocks a sweep — only a
-  /// capture that is still claiming the transport does.
-  bool _canSyncDeviceStorage() =>
-      authenticated && !_deviceClaimedForCapture && deviceStorageSyncAvailable;
-
-  /// Pulls recordings held on the connected wearable's on-board storage and
-  /// ingests them through the durable import pipeline, deleting each file from
-  /// the device only once its import is accepted. Idempotent and interruption
-  /// safe: re-running re-imports the same content under the same import id.
-  Future<void> syncDeviceStorage({bool userInitiated = false}) =>
-      deviceStorageSync.requestSync(userInitiated: userInitiated);
-
-  /// One sweep. Returns false only when the device was reachable and failed to
-  /// answer — the scheduler turns that into a backoff instead of hammering a
-  /// device that is out of range or busy. A sweep that had nothing to do (state
-  /// changed between the eligibility check and the run) is not a failure.
-  Future<bool> _runDeviceStorageSync({required bool userInitiated}) async {
-    // Never drain on-device storage during a live recording: the two share the
-    // wearable's BLE channel/buffer and would corrupt each other.
-    if (!authenticated || isRecording) return true;
-    final adapter = audioDeviceSessions.activeAdapter;
-    if (adapter is! StorageSyncCapableAdapter) return true;
-    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
-    if (storage == null) return true;
-    final deviceName =
-        audioDeviceSessions.preferredDevice?.displayName ?? 'the device';
-
-    // An automatic sweep stays invisible until it actually transfers something.
-    // Showing a spinner on every poll would report activity, not progress.
-    deviceStorageSyncing = userInitiated;
-    deviceStorageSyncedCount = 0;
-    deviceStoragePendingCount = 0;
-    if (userInitiated) {
-      deviceStorageSyncError = null;
-      notifyListeners();
-      ClientDiagnosticLog.instance.record(
-        'device_sync',
-        'sync_started',
-        details: <String, Object?>{
-          'device': deviceName,
-          'type': audioDeviceSessions.preferredDevice?.metadata['type'],
-          'trigger': 'manual',
-        },
-      );
-    }
-    var succeeded = false;
-    // Follow the connector's own progress for as long as this sweep runs.
-    await _syncProgressSub?.cancel();
-    _syncProgressSub = storage.syncProgress.listen((progress) {
-      deviceStorageSyncProgress = progress;
-      deviceStoragePendingSeconds = progress.pendingSeconds;
-      // Real transfer means the sweep is worth showing, even automatic ones.
-      if (progress.transferred > 0) deviceStorageSyncing = true;
-      notifyListeners();
-    });
-    try {
-      // The connector owns its device protocol (file list/download/delete,
-      // ring-buffer drain, or flash-page batch) and hands back complete
-      // recordings; each is ingested through the durable import pipeline before
-      // the connector removes it from the device.
-      await storage.drainStoredAudio((recording) async {
-        // The first transferred recording makes an automatic sweep visible:
-        // now there is real progress to report. It also tells the background
-        // host to keep the CPU awake until the transfer finishes.
-        deviceStorageSyncing = true;
-        await _setBackgroundSyncActive(true);
-        notifyListeners();
-        await _ingestDeviceRecording(recording);
-        deviceStorageSyncedCount += 1;
-        notifyListeners();
-      }, minBytes: _deviceStorageMinBytes);
-      succeeded = true;
-      if (deviceStorageSyncedCount > 0) {
-        notice =
-            '$deviceStorageSyncedCount device recording(s) synced and queued for transcription.';
-        await refreshAll(silent: true);
-      } else {
-        // Reaching here with zero recordings means the device really was empty:
-        // a connector that could not talk to its device throws instead (HeyPocket
-        // raises on a failed handshake and on a sweep where every file failed),
-        // so those surface through the catch below rather than as "nothing new".
-        if (userInitiated) {
-          // Only tell the user "nothing to sync" when they asked; the automatic
-          // sweep stays quiet on an empty device.
-          notice = 'No new recordings on $deviceName to sync.';
-        }
-      }
-      if (succeeded) deviceStorageSyncError = null;
-    } catch (error) {
-      // Surface the failure so a silent no-op never masquerades as success.
-      // Strip Dart's "Bad state:"/"Exception:" prefixes for a cleaner message.
-      final message = error is TimeoutException
-          ? '$deviceName did not respond in time. Keep it nearby and awake, then try again.'
-          : error.toString().replaceFirst(
-              RegExp(r'^(Bad state|StateError|Exception):\s*'),
-              '',
-            );
-      // A single transient miss (device busy, a momentary link drop) between
-      // unattended sweeps is not worth alarming anyone; a repeat is.
-      if (userInitiated || _deviceSyncFailureIsPersistent) {
-        deviceStorageSyncError = 'Sync of $deviceName failed: $message';
-      }
-    } finally {
-      // Unattended polling must not flood the diagnostic ring: record a sweep
-      // that did something, failed, or was asked for — not every quiet check.
-      if (userInitiated || deviceStorageSyncedCount > 0 || !succeeded) {
-        ClientDiagnosticLog.instance.record(
-          'device_sync',
-          'sync_finished',
-          level: succeeded ? 'info' : 'warning',
-          details: <String, Object?>{
-            'device': deviceName,
-            'synced': deviceStorageSyncedCount,
-            'trigger': userInitiated ? 'manual' : 'auto',
-            'error': deviceStorageSyncError,
-            // Protocol-level facts from the connector, so a zero-recording sweep
-            // can be told apart from a device that never answered.
-            ...storage.syncDiagnostics,
-          },
-        );
-      }
-      await _syncProgressSub?.cancel();
-      _syncProgressSub = null;
-      deviceStorageSyncProgress = null;
-      deviceStorageSyncing = false;
-      await _setBackgroundSyncActive(false);
-      notifyListeners();
-      // The ring keeps filling while the sweep ran, so re-read what is left
-      // instead of leaving the pre-sweep figure on screen.
-      unawaited(refreshDeviceStoragePending());
-    }
-    return succeeded;
-  }
-
-  Future<void> _setBackgroundSyncActive(bool active) async {
-    if (recorder is! MobileRecallRecorder) return;
-    await (recorder as MobileRecallRecorder).setDeviceSyncActive(active);
-  }
-
-  Future<void> _setBackgroundUploadActive(bool active) async {
-    if (recorder is! MobileRecallRecorder) return;
-    await (recorder as MobileRecallRecorder).setUploadActive(active);
-  }
-
-  /// True when the sweep that is failing right now is not the first one to fail.
-  /// The scheduler counts a sweep only after it returns, so a non-zero count
-  /// here means an earlier sweep already failed.
-  bool get _deviceSyncFailureIsPersistent =>
-      deviceStorageSync.consecutiveFailures >= 1;
-
-  /// This client's durable device identity for [accountId], created once and
-  /// reused by recording and by device imports alike.
-  ///
-  /// Generating it here rather than at each call site is what keeps a drained
-  /// wearable recording attributable to the same device the live capture uses.
-  Future<({String id, String clientUuid})> _deviceIdentity(
-    String accountId,
-  ) async {
-    final idKey = 'deviceId:$accountId';
-    final clientUuidKey = 'deviceClientUuid:$accountId';
-    final id = _preferences!.getString(idKey) ?? _uuid.v4();
-    final clientUuid = _preferences!.getString(clientUuidKey) ?? _uuid.v4();
-    await _preferences!.setString(idKey, id);
-    await _preferences!.setString(clientUuidKey, clientUuid);
-    return (id: id, clientUuid: clientUuid);
-  }
-
-  /// Registers this client as a device so an import can be attributed to it, or
-  /// null when that is not possible.
-  ///
-  /// A failure here must not fail the import: an unattributed recording still
-  /// reaches the timeline, it just cannot be joined to the sweep before it.
-  Future<String?> _registeredDeviceId() async {
-    final account = accountId;
-    if (account == null || _preferences == null) return null;
-    try {
-      final identity = await _deviceIdentity(account);
-      return await api.registerDevice(
-        id: identity.id,
-        clientUuid: identity.clientUuid,
-        name: _deviceName,
-        platform: _platform,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _ingestDeviceRecording(WearableRecording recording) async {
-    final contentHash = sha256.convert(recording.bytes).toString();
-    final importId = _uuid.v5(
-      Namespace.url.value,
-      '$backendUrl:${username ?? ''}:device:$contentHash:${recording.bytes.length}',
-    );
-    ClientDiagnosticLog.instance.record(
-      'device_import',
-      'import_started',
-      details: <String, Object?>{
-        'importId': importId,
-        'bytes': recording.bytes.length,
-        'mime': recording.contentType,
-        'filename': recording.filename,
-        'capturedAt': recording.capturedAt?.toIso8601String(),
-        'source': 'device',
-      },
-    );
-    try {
-      await api.importAudio(
-        importId: importId,
-        bytes: recording.bytes,
-        filename: recording.filename,
-        contentType: recording.contentType,
-        captureTime: recording.capturedAt,
-        // A wearable is drained every few seconds, so consecutive sweeps are
-        // stretches of one recording. Naming the device lets the server keep
-        // them in one stream instead of one conversation per sweep.
-        deviceId: await _registeredDeviceId(),
-      );
-      ClientDiagnosticLog.instance.record(
-        'device_import',
-        'import_accepted',
-        details: <String, Object?>{
-          'importId': importId,
-          'bytes': recording.bytes.length,
-        },
-      );
-    } catch (error) {
-      ClientDiagnosticLog.instance.record(
-        'device_import',
-        'import_failed',
-        level: 'error',
-        details: <String, Object?>{
-          'importId': importId,
-          'error': error.toString(),
-        },
-      );
-      rethrow;
-    }
-  }
-
-  Future<void> renameSpeaker(String id, String name) async {
-    await api.request(
-      'PATCH',
-      '/api/v1/speakers/$id',
-      body: <String, dynamic>{'displayName': name},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> mergeSpeaker(String targetId, String sourceId) async {
-    await api.request(
-      'POST',
-      '/api/v1/speakers/$targetId/merge',
-      body: <String, dynamic>{'sourceId': sourceId},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> deleteSpeaker(String id) async {
-    await api.request('DELETE', '/api/v1/speakers/$id');
-    await refreshAll(silent: true);
-  }
-
-  Future<void> setSpeakerMatching(String id, bool enabled) async {
-    await api.request(
-      'PATCH',
-      '/api/v1/speakers/$id',
-      body: <String, dynamic>{'matchingEnabled': enabled},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> bulkDeleteSpeakers(List<String> ids) async {
-    if (ids.isEmpty) return;
-    await api.request(
-      'POST',
-      '/api/v1/speakers/bulk',
-      body: <String, dynamic>{'ids': ids, 'action': 'delete'},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> mergeSpeakers(String targetId, List<String> sourceIds) async {
-    if (sourceIds.isEmpty) return;
-    await api.request(
-      'POST',
-      '/api/v1/speakers/merge',
-      body: <String, dynamic>{'targetId': targetId, 'sourceIds': sourceIds},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<Map<String, dynamic>> reevaluateSpeakers() async {
-    final result = Map<String, dynamic>.from(
-      await api.request('POST', '/api/v1/speakers/reevaluate') as Map,
-    );
-    await refreshAll(silent: true);
-    return result;
-  }
-
-  Future<Map<String, dynamic>> loadSettings() => _settings();
-  Future<void> updateSettings(Map<String, dynamic> changes) async {
-    final payload =
-        await api.request('PUT', '/api/v1/settings', body: changes) as Map;
-    await _cacheSettings(Map<String, dynamic>.from(payload['settings'] as Map));
-    // Status is derived from the cached policy, so refresh it before returning
-    // to a settings screen that may have just changed the network rule.
-    await _refreshPending();
-    sync.pump.pump();
-    _applyRecordingSchedule();
-    notice = 'Settings saved.';
-    notifyListeners();
-  }
-
-  Future<void> revokeDevice(String id) async {
-    await api.request('DELETE', '/api/v1/devices/$id');
-    await refreshAll(silent: true);
-  }
-
-  Future<void> updateMiniMemory(String id, String status) async {
-    await api.request(
-      'PATCH',
-      '/api/v1/mini-memories/$id',
-      body: <String, dynamic>{'status': status},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> deleteMiniMemory(String id) async {
-    await api.request('DELETE', '/api/v1/mini-memories/$id');
-    miniMemories = miniMemories.where((mini) => mini.id != id).toList();
-    notifyListeners();
-  }
-
-  /// Full memory detail including linked transcript segments and mini-memories.
-  Future<Map<String, dynamic>> loadMemoryDetail(String id) async {
-    final payload =
-        await api.request('GET', '/api/v1/memories/$id')
-            as Map<dynamic, dynamic>;
-    return Map<String, dynamic>.from(payload);
-  }
-
-  Future<Map<String, dynamic>> loadMiniMemoryDetail(String id) async {
-    final payload =
-        await api.request('GET', '/api/v1/mini-memories/$id')
-            as Map<dynamic, dynamic>;
-    return Map<String, dynamic>.from(payload);
-  }
-
-  Future<void> renameMemory(String id, String title) async {
-    await api.request(
-      'PATCH',
-      '/api/v1/memories/$id',
-      body: <String, dynamic>{'titleEn': title},
-    );
-    await refreshAll(silent: true);
-  }
-
-  Future<void> updateMemory(String id, {bool? pinned, bool? archived}) async {
-    final body = <String, dynamic>{};
-    if (pinned != null) body['pinned'] = pinned;
-    if (archived != null) body['archived'] = archived;
-    if (body.isEmpty) return;
-    await api.request('PATCH', '/api/v1/memories/$id', body: body);
-    await refreshAll(silent: true);
-  }
-
-  Future<void> deleteMemory(String id) async {
-    await api.request('DELETE', '/api/v1/memories/$id');
-    memories = memories.where((memory) => memory.id != id).toList();
-    notifyListeners();
-  }
-
-  /// Mass pin / archive / delete for the consumer multi-select bar.
-  Future<void> bulkMemories(List<String> ids, String action) async {
-    if (ids.isEmpty) return;
-    await api.request(
-      'POST',
-      '/api/v1/memories/bulk',
-      body: <String, dynamic>{'ids': ids, 'action': action},
-    );
-    await refreshAll(silent: true);
-  }
-
-  /// Merge two or more memories into one.
-  ///
-  /// The server combines evidence and highlights and answers straight away, so
-  /// the merged card can take its place in the list without anyone waiting. A
-  /// reworded title and summary follow later from a background job; the next
-  /// refresh picks them up.
-  Future<Map<String, dynamic>> mergeMemories(List<String> ids) async {
-    if (ids.length < 2) {
-      throw StateError('Select at least two memories to merge.');
-    }
-    final mergeMax = api.maxMemoryMergeItems;
-    if (mergeMax != null && ids.length > mergeMax) {
-      throw StateError('Select at most $mergeMax memories to merge.');
-    }
-    final payload =
-        await api.request(
-              'POST',
-              '/api/v1/memories/merge',
-              body: <String, dynamic>{'ids': ids},
-            )
-            as Map<dynamic, dynamic>;
-    final result = Map<String, dynamic>.from(payload);
-    final absorbedIds = ((result['absorbedIds'] as List?) ?? <dynamic>[])
-        .map((value) => value.toString())
-        .toSet();
-    final memoryJson = result['memory'];
-    if (memoryJson is Map) {
-      final merged = RecallMemory.fromJson(
-        Map<String, dynamic>.from(memoryJson),
-      );
-      memories = <RecallMemory>[
-        merged,
-        ...memories.where(
-          (memory) =>
-              memory.id != merged.id && !absorbedIds.contains(memory.id),
-        ),
-      ];
-      notifyListeners();
-    }
-    unawaited(refreshAll(silent: true));
-    return result;
-  }
 
   void selectPage(RecallPage value) {
     page = value;

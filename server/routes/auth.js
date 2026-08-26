@@ -6,10 +6,10 @@ const auth = require('../services/auth/auth_service');
 const webauthn = require('../services/auth/webauthn_service');
 const { requireAuth, requireSession } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 const { slidingWindow } = require('../middleware/rate_limit');
 
 const router = express.Router();
-const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 const context = (req) => ({ ipAddress: req.ip, userAgent: req.get('User-Agent') });
 const relyingParty = (req) => webauthn.resolveRelyingParty({
   origin: req.get('Origin'),

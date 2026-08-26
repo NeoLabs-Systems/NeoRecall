@@ -102,6 +102,13 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
+  Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  @override
+  Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>
+      const <HomeWidgetAction>[];
+
+  @override
   Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async =>
       const <Map<String, dynamic>>[];
 

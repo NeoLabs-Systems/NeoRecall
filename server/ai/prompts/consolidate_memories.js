@@ -113,16 +113,16 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
   };
 }
 
-/// Splits the compacted transcript into windows that each fit one request.
-///
-/// A model running on this machine holds a fixed number of tokens at once, and a
-/// four-hour lecture does not fit in any of them. Windows are cut on segment
-/// boundaries and stay in order, so every window is a contiguous stretch of one
-/// stream — which is what section validation requires and what lets the engine
-/// join a section that spans two windows back together afterwards.
-///
-/// A conversation is never split across windows unless it is too large to be a
-/// window on its own, so in the ordinary case a window is one whole occasion.
+// Splits the compacted transcript into windows that each fit one request.
+//
+// A model running on this machine holds a fixed number of tokens at once, and a
+// four-hour lecture does not fit in any of them. Windows are cut on segment
+// boundaries and stay in order, so every window is a contiguous stretch of one
+// stream — which is what section validation requires and what lets the engine
+// join a section that spans two windows back together afterwards.
+//
+// A conversation is never split across windows unless it is too large to be a
+// window on its own, so in the ordinary case a window is one whole occasion.
 function windowConversations(compactConversations, budgetCharacters) {
   const windows = [];
   let current = [];
@@ -161,12 +161,12 @@ function windowConversations(compactConversations, budgetCharacters) {
   return windows.length ? windows : [[]];
 }
 
-/// What the next window is told about the occasion still in progress.
-///
-/// Only the trailing section can continue — windows are chronological — so this
-/// carries exactly that one section and the memory built from it, not the whole
-/// history. The size of a request therefore does not grow with the number of
-/// windows already processed.
+// What the next window is told about the occasion still in progress.
+//
+// Only the trailing section can continue — windows are chronological — so this
+// carries exactly that one section and the memory built from it, not the whole
+// history. The size of a request therefore does not grow with the number of
+// windows already processed.
 function carryOverFor(merged) {
   if (!merged?.conversationSections?.length) return null;
   const section = merged.conversationSections.at(-1);
@@ -267,13 +267,13 @@ ${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
   ];
 }
 
-/// Builds every request one consolidation run needs.
-///
-/// Aliasing happens once for the whole candidate set, so a segment has the same
-/// identifier in whichever window it lands and the engine can resolve every
-/// response against one reference table. `budgetCharacters` is what the provider
-/// can read in a single request; when the transcript fits inside it there is
-/// exactly one window and the result is identical to the unwindowed request.
+// Builds every request one consolidation run needs.
+//
+// Aliasing happens once for the whole candidate set, so a segment has the same
+// identifier in whichever window it lands and the engine can resolve every
+// response against one reference table. `budgetCharacters` is what the provider
+// can read in a single request; when the transcript fits inside it there is
+// exactly one window and the result is identical to the unwindowed request.
 function prepareConsolidationRequest(input, budgetCharacters = Infinity) {
   const references = compactInput(input.conversations, input.timezone, input.continuationCandidates);
   const windows = windowConversations(references.compactConversations, budgetCharacters);

@@ -1,28 +1,22 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
 import 'capture_source.dart';
+import 'capture_source_base.dart';
 
 /// Shared microphone source used by desktop and mobile.
-class MicrophoneCaptureSource implements CaptureSource {
+class MicrophoneCaptureSource extends CaptureSourceBase {
   MicrophoneCaptureSource({AudioRecorder? recorder})
-    : _recorder = recorder ?? AudioRecorder();
+    // PCM has exactly one pipeline consumer. A single-subscription controller
+    // queues frames produced during the small window between native startup and
+    // the pipeline attaching, instead of dropping those first samples.
+    : _recorder = recorder ?? AudioRecorder(),
+      super(broadcastPcm: false);
 
   final AudioRecorder _recorder;
   StreamSubscription<Uint8List>? _subscription;
-  // PCM has exactly one pipeline consumer. A single-subscription controller
-  // queues frames produced during the small window between native startup and
-  // the pipeline attaching, instead of dropping those first samples.
-  final StreamController<Uint8List> _pcm = StreamController<Uint8List>(
-    sync: true,
-  );
-  final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings =
-      StreamController<String>.broadcast();
-  bool _active = false;
   bool _started = false;
   bool _stopping = false;
 
@@ -30,21 +24,13 @@ class MicrophoneCaptureSource implements CaptureSource {
   String get id => 'microphone';
   @override
   String get kind => 'microphone';
-  @override
-  bool get isActive => _active;
-  @override
-  Stream<Uint8List> get pcm16Stream => _pcm.stream;
-  @override
-  Stream<double> get levelStream => _levels.stream;
-  @override
-  Stream<String> get warningStream => _warnings.stream;
 
   @override
   Future<bool> ensurePermission() => _recorder.hasPermission();
 
   @override
   Future<void> start({required int sampleRate, required int channels}) async {
-    if (_active) return;
+    if (isActive) return;
     if (!await ensurePermission()) {
       throw StateError('Microphone permission was not granted.');
     }
@@ -59,43 +45,23 @@ class MicrophoneCaptureSource implements CaptureSource {
       ),
     );
     _subscription = stream.listen(
-      (data) {
-        _pcm.add(data);
-        _emitLevel(data);
-      },
-      onError: (Object error) {
-        _active = false;
-        _warnings.add('Microphone capture interrupted: $error');
-        if (!_stopping && !_pcm.isClosed) _pcm.addError(error);
-      },
+      emitPcm,
+      onError: (Object error) => failCapture(
+        'Microphone capture interrupted: $error',
+        error,
+        stopping: _stopping,
+      ),
       onDone: () {
-        _active = false;
-        if (!_stopping && !_pcm.isClosed) {
-          final error = StateError(
-            'Microphone audio stream ended unexpectedly.',
-          );
-          _warnings.add(error.message);
-          _pcm.addError(error);
+        if (_stopping) {
+          active = false;
+          return;
         }
+        final error = StateError('Microphone audio stream ended unexpectedly.');
+        failCapture(error.message, error);
       },
     );
     _started = true;
-    _active = true;
-  }
-
-  void _emitLevel(Uint8List data) {
-    if (data.length < 2) return;
-    final view = ByteData.sublistView(data);
-    var energy = 0.0;
-    var samples = 0;
-    for (var offset = 0; offset + 1 < data.length; offset += 8) {
-      final value = view.getInt16(offset, Endian.little) / 32768.0;
-      energy += value * value;
-      samples += 1;
-    }
-    if (samples > 0) {
-      _levels.add(math.sqrt(energy / samples).clamp(0.0, 1.0));
-    }
+    active = true;
   }
 
   @override
@@ -108,24 +74,21 @@ class MicrophoneCaptureSource implements CaptureSource {
         // stopped so PCM already read by Android can still reach the pipeline.
         await _recorder.stop();
       } catch (error) {
-        _warnings.add('Microphone stop failed: $error');
+        warn('Microphone stop failed: $error');
       }
     }
     await Future<void>.delayed(Duration.zero);
     await subscription?.cancel();
     _subscription = null;
     _started = false;
-    _active = false;
+    active = false;
     _stopping = false;
   }
 
   @override
   Future<void> dispose() async {
-    await stop();
+    await super.dispose();
     await _recorder.dispose();
-    await _pcm.close();
-    await _levels.close();
-    await _warnings.close();
   }
 }
 

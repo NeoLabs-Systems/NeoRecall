@@ -18,14 +18,14 @@ const matching = require('../../transcription/speaker_matching');
 // (recurring speaker matching never ran for it) are all silently skipped. This
 // enrichment must never fail or destabilize consolidation itself.
 
-/// Links every person entity consolidation identified by voice to the
-/// voiceprint that cluster currently resolves to.
-///
-/// `entities` is the model's output.entities array (post schema validation).
-/// `entityIds` maps each entity's response-local `ref` to its durable entities
-/// row id, already resolved by the caller. `clusterIdsByAlias` maps the speaker
-/// labels this consolidation batch used (e.g. "speaker2") back to the durable
-/// speaker_clusters id they stood for.
+// Links every person entity consolidation identified by voice to the
+// voiceprint that cluster currently resolves to.
+//
+// `entities` is the model's output.entities array (post schema validation).
+// `entityIds` maps each entity's response-local `ref` to its durable entities
+// row id, already resolved by the caller. `clusterIdsByAlias` maps the speaker
+// labels this consolidation batch used (e.g. "speaker2") back to the durable
+// speaker_clusters id they stood for.
 function linkEntitiesToSpeakers(database, userId, entities, entityIds, clusterIdsByAlias) {
   const linked = [];
   for (const entity of entities) {

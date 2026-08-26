@@ -4,6 +4,7 @@ const { spawnSync } = require('node:child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
+const voiceprintStorage = require('../../transcription/voiceprint_storage');
 
 function channelIndex(layout, sourceComponent) {
   if (!['stereo', 'microphone_left_system_right'].includes(layout)) return 0;
@@ -160,7 +161,7 @@ function captureFromChunk(chunk) {
       .run(
         voiceprintId,
         chunk.user_id,
-        audio,
+        voiceprintStorage.sealPreviewAudio(audio),
         selection.durationMs,
         selection.quality,
       );
@@ -169,14 +170,17 @@ function captureFromChunk(chunk) {
   return captured;
 }
 
+// Returns the preview with playable audio. This is the only path that unseals a
+// clip, and it is already scoped to the owning account twice over.
 function get(userId, voiceprintId) {
-  return getDatabase()
+  const row = getDatabase()
     .prepare(
       `SELECT p.* FROM speaker_previews p
        JOIN voiceprints v ON v.id=p.voiceprint_id
        WHERE p.voiceprint_id=? AND p.user_id=? AND v.user_id=?`,
     )
     .get(voiceprintId, userId, userId);
+  return row ? { ...row, audio: voiceprintStorage.readPreviewAudio(row.audio) } : row;
 }
 
 module.exports = {

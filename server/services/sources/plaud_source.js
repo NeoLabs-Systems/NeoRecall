@@ -5,21 +5,24 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const imports = require('../ingest/import_service');
+const { createLogger } = require('../../utils/logger');
 
-/// PLAUD cloud source.
-///
-/// PLAUD wearables (NotePin, Note, Note Pro) sync their recordings to PLAUD's
-/// own cloud over the vendor app — their BLE protocol is closed on current
-/// firmware, so there is no local path to the device. This source therefore
-/// pulls the user's finished recordings from PLAUD's documented developer API
-/// and hands each one to the ordinary durable import pipeline, so a PLAUD
-/// recording is transcribed exactly like a manual upload.
-///
-/// API (from PLAUD's published developer client):
-///   GET {base}/open/third-party/users/current
-///   GET {base}/open/third-party/files/?page=N&page_size=M
-///   GET {base}/open/third-party/files/{fileId}   -> includes a short-lived audio URL
-/// Authenticated with `Authorization: Bearer <accessToken>`.
+const logger = createLogger('sources.plaud');
+
+// PLAUD cloud source.
+//
+// PLAUD wearables (NotePin, Note, Note Pro) sync their recordings to PLAUD's
+// own cloud over the vendor app — their BLE protocol is closed on current
+// firmware, so there is no local path to the device. This source therefore
+// pulls the user's finished recordings from PLAUD's documented developer API
+// and hands each one to the ordinary durable import pipeline, so a PLAUD
+// recording is transcribed exactly like a manual upload.
+//
+// API (from PLAUD's published developer client):
+//   GET {base}/open/third-party/users/current
+//   GET {base}/open/third-party/files/?page=N&page_size=M
+//   GET {base}/open/third-party/files/{fileId}   -> includes a short-lived audio URL
+// Authenticated with `Authorization: Bearer <accessToken>`.
 const DEFAULT_API_BASE = 'https://platform.plaud.ai/developer/api';
 const DEFAULT_POLL_MINUTES = 15;
 const MIN_POLL_MINUTES = 5;
@@ -30,12 +33,12 @@ const MAX_AUDIO_BYTES = 512 * 1024 * 1024;
 // One poll timer per source id.
 const activePollers = new Map();
 
-/// Deterministic import id for a PLAUD recording.
-///
-/// Re-polling must not re-import: the import pipeline is idempotent per import
-/// id, so deriving the id from (user, source, PLAUD file id) makes a repeated
-/// sweep resolve to the existing import instead of creating a duplicate. No
-/// separate "already seen" bookkeeping is needed.
+// Deterministic import id for a PLAUD recording.
+//
+// Re-polling must not re-import: the import pipeline is idempotent per import
+// id, so deriving the id from (user, source, PLAUD file id) makes a repeated
+// sweep resolve to the existing import instead of creating a duplicate. No
+// separate "already seen" bookkeeping is needed.
 function importIdFor(userId, sourceId, fileId) {
   const digest = crypto
     .createHash('sha256')
@@ -71,8 +74,8 @@ async function apiRequest(config, requestPath) {
   return response.json();
 }
 
-/// Verifies the token before a source is stored, so a typo surfaces in the setup
-/// dialog rather than as a silent background failure hours later.
+// Verifies the token before a source is stored, so a typo surfaces in the setup
+// dialog rather than as a silent background failure hours later.
 async function verifyAccess(config) {
   const user = await apiRequest(config, '/open/third-party/users/current');
   return user;
@@ -117,7 +120,7 @@ async function downloadTo(url, destination) {
   return buffer.length;
 }
 
-/// Pulls every recording on the first page(s) and imports the ones not yet seen.
+// Pulls every recording on the first page(s) and imports the ones not yet seen.
 async function sweep(source) {
   const { config } = source;
   const listing = await apiRequest(config, `/open/third-party/files/?page=1&page_size=${PAGE_SIZE}`);
@@ -141,7 +144,7 @@ async function sweep(source) {
       const detail = await apiRequest(config, `/open/third-party/files/${encodeURIComponent(id)}`);
       const url = pickAudioUrl(detail);
       if (!url) {
-        console.warn(`[PlaudSource] Recording ${id} has no audio URL; skipping.`);
+        logger.warn('Recording has no audio URL; skipping', { recordingId: id });
         continue;
       }
       staged = path.join(ensureRuntimeDirs().importTmp, `plaud-${importId}.download`);
@@ -157,7 +160,7 @@ async function sweep(source) {
     } catch (error) {
       // One bad recording must not stop the rest of the sweep; it is retried on
       // the next poll because nothing was recorded as imported.
-      console.error(`[PlaudSource] Failed to import recording ${id}:`, error.message);
+      logger.error('Failed to import recording', { recordingId: id, error });
     } finally {
       if (staged) { try { fs.unlinkSync(staged); } catch (_) { /* best-effort */ } }
     }
@@ -189,10 +192,10 @@ const plaudSourceService = {
       try {
         const result = await sweep(source);
         if (result.imported > 0) {
-          console.log(`[PlaudSource] Imported ${result.imported} recording(s) for source ${source.id}`);
+          logger.info('Imported recordings', { imported: result.imported, sourceId: source.id });
         }
       } catch (error) {
-        console.error(`[PlaudSource] Sweep failed for source ${source.id}:`, error.message);
+        logger.error('Sweep failed', { sourceId: source.id, error });
         // An expired or revoked token can never recover on its own, so disable
         // the source and surface why instead of retrying every poll forever.
         if (error.status === 401 || error.status === 403) {
@@ -208,7 +211,7 @@ const plaudSourceService = {
     const timer = setInterval(run, minutes * 60_000);
     if (typeof timer.unref === 'function') timer.unref();
     activePollers.set(source.id, timer);
-    console.log(`[PlaudSource] Started source ${source.id} (polling every ${minutes} min)`);
+    logger.info('Started source', { sourceId: source.id, pollMinutes: minutes });
     await run();
   },
 
@@ -217,7 +220,7 @@ const plaudSourceService = {
     if (timer) {
       clearInterval(timer);
       activePollers.delete(sourceId);
-      console.log(`[PlaudSource] Stopped source ${sourceId}`);
+      logger.info('Stopped source', { sourceId });
     }
   },
 

@@ -89,45 +89,45 @@
   }
 
   /* ============================================================
-     Hero chat demo — a small replay engine over the UI replica
+     Flutter Search replica — query, answer, citations, result card
      ============================================================ */
   const demo = document.querySelector('[data-chat-demo]');
   if (demo) {
-    const thread = demo.querySelector('[data-demo-thread]');
+    const results = demo.querySelector('[data-demo-thread]');
     const input = demo.querySelector('[data-demo-input]');
     const status = demo.querySelector('[data-demo-status]');
-    const sendBtn = demo.querySelector('.sa-btn.send');
+    const askButton = demo.querySelector('.fa-ask');
     const chips = document.querySelectorAll('.demo-chip');
 
     const scenarios = [
       {
-        user: 'What did I promise in the enclosure meeting?',
-        tools: ['Transcript', 'Memory', 'Speakers'],
-        reply: '<strong>You promised to send the revised enclosure dimensions after lunch.</strong> ' +
-          'The team had just chosen the smaller enclosure. Source: hardware planning, 10:14.',
-        stamp: '10:18',
+        query: 'What did I promise in the enclosure meeting?',
+        answer: 'You promised to send the revised enclosure dimensions after lunch. The team had just chosen the smaller enclosure.',
+        citation: 'memory · 10:14',
+        kind: 'memory',
+        score: '0.923',
+        title: 'Hardware planning',
+        body: 'The smaller enclosure was selected. Revised dimensions will be sent after lunch and reviewed before the prototype order.',
       },
       {
-        user: 'Who recommended the quiet café near the station?',
-        tools: ['Hybrid search', 'People', 'Evidence'],
-        reply: '<strong>Maya recommended Café Morgen.</strong> She called out the back room as quiet ' +
-          'enough for a client call. Source: Tuesday lunch, 12:36.',
-        stamp: '16:02',
+        query: 'Who recommended the quiet café near the station?',
+        answer: 'Maya recommended Café Morgen. She said the back room stays quiet enough for a client call.',
+        citation: 'transcript · Tuesday 12:36',
+        kind: 'transcript',
+        score: '0.901',
+        title: 'Lunch with Maya',
+        body: 'Café Morgen near the station has a quiet back room. Maya recommended it for conversations that need privacy.',
       },
       {
-        user: 'Why did we move the release to Thursday?',
-        tools: ['Memories', 'Timeline', 'Transcript'],
-        reply: '<strong>The release moved because the migration rehearsal exposed a rollback gap.</strong> ' +
-          'The decision was to fix it Wednesday, then ship Thursday morning. Source: release review, 15:47.',
-        stamp: '17:52',
+        query: 'Why did we move the release to Thursday?',
+        answer: 'The migration rehearsal exposed a rollback gap. The decision was to fix it Wednesday and release Thursday morning.',
+        citation: 'memory · 15:47',
+        kind: 'memory',
+        score: '0.887',
+        title: 'Release review',
+        body: 'The release moved to Thursday so the rollback path could be corrected and rehearsed before shipping.',
       },
     ];
-
-    // A dimmed earlier exchange so the canvas never reads as empty.
-    const threadPrefix =
-      '<div class="sa-earlier">recent recall</div>' +
-      '<div class="sa-msg user faded">When did I last talk to Jonas about the prototype?</div>' +
-      '<div class="sa-msg agent faded">Yesterday at 14:22. You agreed to test the new microphone board before Friday.</div>';
 
     let timers = [];
     let running = 0;
@@ -135,102 +135,96 @@
     const later = (fn, ms) => { timers.push(setTimeout(fn, reduced ? 0 : ms)); };
     const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
 
-    const el = (cls, html) => {
-      const node = document.createElement('div');
-      node.className = cls;
-      if (html !== undefined) node.innerHTML = html;
-      return node;
-    };
-
     const setStatus = (busy) => {
-      status.classList.toggle('busy', busy);
-      status.innerHTML = '<i></i>' + (busy ? 'searching' : 'ready');
+      status.textContent = busy ? 'searching' : 'ready';
+      askButton.classList.toggle('armed', busy);
     };
 
-    const play = (idx) => {
+    const setQuery = (value, placeholder = false) => {
+      input.textContent = '';
+      const text = document.createElement('span');
+      text.className = placeholder ? 'fa-placeholder' : 'fa-query-text';
+      text.textContent = value;
+      input.appendChild(text);
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      caret.setAttribute('aria-hidden', 'true');
+      input.appendChild(caret);
+    };
+
+    const renderResult = (scenario) => {
+      results.innerHTML =
+        '<div class="fa-answer">' +
+          '<span>ANSWER</span>' +
+          '<p>' + scenario.answer + '</p>' +
+          '<div class="fa-citations"><i>↗ ' + scenario.citation + '</i></div>' +
+        '</div>' +
+        '<div class="fa-result-card">' +
+          '<div class="fa-result-meta"><span class="fa-kind">' + scenario.kind + '</span><span class="fa-score">' + scenario.score + '</span></div>' +
+          '<strong>' + scenario.title + '</strong>' +
+          '<p>' + scenario.body + '</p>' +
+        '</div>';
+    };
+
+    const play = (index) => {
       clearTimers();
-      const s = scenarios[idx];
+      const scenario = scenarios[index];
       const run = ++running;
       const alive = () => run === running;
-      thread.innerHTML = threadPrefix;
-      input.innerHTML = '<span class="sa-placeholder">Ask what happened…</span><span class="caret" aria-hidden="true"></span>';
-      setStatus(false);
-      sendBtn.classList.remove('armed');
 
-      // 1. type the request into the composer
+      results.innerHTML = '';
+      setQuery('Try a name, topic, or event…', true);
+      setStatus(false);
+
       later(() => {
         if (!alive()) return;
-        const caret = '<span class="caret" aria-hidden="true"></span>';
         if (reduced) {
-          input.innerHTML = s.user + caret;
-          send();
+          setQuery(scenario.query);
+          search();
           return;
         }
-        let i = 0;
-        const tick = () => {
+
+        let cursor = 0;
+        const type = () => {
           if (!alive()) return;
-          i++;
-          input.innerHTML = s.user.slice(0, i) + caret;
-          if (i < s.user.length) {
-            timers.push(setTimeout(tick, 26 + Math.random() * 42));
+          cursor += 1;
+          setQuery(scenario.query.slice(0, cursor));
+          if (cursor < scenario.query.length) {
+            timers.push(setTimeout(type, 24 + Math.random() * 36));
           } else {
-            sendBtn.classList.add('armed');
-            later(send, 420);
+            askButton.classList.add('armed');
+            later(search, 380);
           }
         };
-        tick();
-      }, 700);
+        type();
+      }, 650);
 
-      // 2. send: user bubble appears, composer clears
-      const send = () => {
+      const search = () => {
         if (!alive()) return;
-        sendBtn.classList.remove('armed');
-        input.innerHTML = '<span class="sa-placeholder">Ask what happened…</span><span class="caret" aria-hidden="true"></span>';
-        thread.appendChild(el('sa-msg user', s.user + '<span class="stamp">' + s.stamp + '</span>'));
         setStatus(true);
-
-        // 3. tool chips appear and resolve one by one
-        const row = el('sa-toolrow');
-        thread.appendChild(row);
-        s.tools.forEach((name, i) => {
-          later(() => {
-            if (!alive()) return;
-            const chip = el('sa-tool', '<i></i>' + name);
-            row.appendChild(chip);
-            later(() => { if (alive()) chip.classList.add('done'); }, 900 + Math.random() * 500);
-          }, 500 + i * 650);
-        });
-
-        // 4. typing indicator, then the reply
-        const afterTools = 500 + s.tools.length * 650 + 1100;
+        results.innerHTML = '<div class="fa-loading" aria-label="Searching memories"><span><i></i><i></i><i></i></span></div>';
         later(() => {
           if (!alive()) return;
-          const typing = el('sa-typing', '<i></i><i></i><i></i>');
-          thread.appendChild(typing);
-          later(() => {
-            if (!alive()) return;
-            typing.remove();
-            thread.appendChild(el('sa-msg agent', s.reply + '<span class="stamp">' + s.stamp + '</span>'));
-            setStatus(false);
-            // idle a while, then move on to the next scenario
-            later(() => { if (alive()) select((idx + 1) % scenarios.length); }, 7000);
-          }, 1300);
-        }, afterTools);
+          renderResult(scenario);
+          setStatus(false);
+          later(() => { if (alive()) select((index + 1) % scenarios.length); }, 7000);
+        }, 1450);
       };
     };
 
-    const select = (idx) => {
-      chips.forEach((c) => c.classList.toggle('is-active', Number(c.dataset.scenario) === idx));
-      play(idx);
+    const select = (index) => {
+      chips.forEach((chip) => {
+        chip.classList.toggle('is-active', Number(chip.dataset.scenario) === index);
+      });
+      play(index);
     };
 
     chips.forEach((chip) => {
       chip.addEventListener('click', () => select(Number(chip.dataset.scenario)));
     });
 
-    // start once the demo scrolls into view
     const demoIo = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) {
+      if (entries.some((entry) => entry.isIntersecting)) {
         demoIo.disconnect();
         select(0);
       }
@@ -440,4 +434,3 @@
     termIo.observe(term);
   }
 })();
-

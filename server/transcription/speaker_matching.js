@@ -7,15 +7,17 @@ const vectors = require('./speaker_embeddings');
 const modelName = 'wespeaker_en_voxceleb_CAM++_LM';
 
 function storeVector(value) { return Buffer.from(value.buffer, value.byteOffset, value.byteLength); }
+// Voiceprints are sealed at rest; session clusters are not. See voiceprint_storage.js.
+const voiceprintStorage = require('./voiceprint_storage');
 
-/// The voiceprint a cluster's turns currently stick to, if any.
-///
-/// "Sticky" means most-assigned-and-most-recent, not merely first-seen: a
-/// cluster can carry a few stray turns from a bad early match, and those must
-/// not outvote the voiceprint the cluster has actually been resolving to.
-/// Shared by voice matching (to keep resolving a session's cluster the way it
-/// already has) and by consolidation's speaker naming (to find the voice a
-/// newly identified person actually belongs to) — one query, two callers.
+// The voiceprint a cluster's turns currently stick to, if any.
+//
+// "Sticky" means most-assigned-and-most-recent, not merely first-seen: a
+// cluster can carry a few stray turns from a bad early match, and those must
+// not outvote the voiceprint the cluster has actually been resolving to.
+// Shared by voice matching (to keep resolving a session's cluster the way it
+// already has) and by consolidation's speaker naming (to find the voice a
+// newly identified person actually belongs to) — one query, two callers.
 function stickyVoiceprintForCluster(database, { userId, clusterId }) {
   return database.prepare(`SELECT v.*,COUNT(*) assignment_count,MAX(st.created_at) last_assignment_at
     FROM speaker_turns st JOIN voiceprints v ON v.id=st.voiceprint_id
@@ -57,7 +59,7 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
   // it may not invent one or drag a centroid toward its own noise.
   const reliable = durationMs === null || durationMs >= config.speakerMinimumTurnMs;
   const rows = database.prepare('SELECT * FROM speaker_clusters WHERE user_id=? AND session_id=? AND centroid_embedding IS NOT NULL').all(userId, sessionId);
-  const ranked = vectors.rank(embedding, rows);
+  const ranked = voiceprintStorage.rankVoiceprints(embedding, rows);
   const best = ranked[0];
   const runnerUp = ranked[1];
   let cluster = null;
@@ -99,10 +101,11 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) 
   if (!enabled) return null;
   const assigned = clusterId ? stickyVoiceprintForCluster(database, { userId, clusterId }) : null;
   if (assigned) {
-    const centroid = vectors.updateCentroid(vectors.fromBuffer(assigned.centroid_embedding), assigned.sample_count, embedding);
+    const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(assigned.centroid_embedding), assigned.sample_count, embedding);
+    const sealed = voiceprintStorage.sealCentroid(centroid);
     database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
-      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(storeVector(centroid), assigned.id);
-    return { ...assigned, centroid_embedding: storeVector(centroid), sample_count: assigned.sample_count + 1 };
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(sealed, assigned.id);
+    return { ...assigned, centroid_embedding: sealed, sample_count: assigned.sample_count + 1 };
   }
   const rows = database.prepare('SELECT * FROM voiceprints WHERE user_id=? AND matching_enabled=1 AND embedding_model=? AND embedding_dimensions=?')
     .all(userId, modelName, embedding.length);
@@ -114,13 +117,14 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) 
     const id = crypto.randomUUID();
     database.prepare(`INSERT INTO voiceprints
       (id,user_id,centroid_embedding,embedding_model,embedding_dimensions,sample_count) VALUES (?,?,?,?,?,1)`)
-      .run(id, userId, storeVector(embedding), modelName, embedding.length);
+      .run(id, userId, voiceprintStorage.sealCentroid(embedding), modelName, embedding.length);
     return database.prepare('SELECT * FROM voiceprints WHERE id=?').get(id);
   }
-  const centroid = vectors.updateCentroid(vectors.fromBuffer(voiceprint.centroid_embedding), voiceprint.sample_count, embedding);
+  const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(voiceprint.centroid_embedding), voiceprint.sample_count, embedding);
+  const sealed = voiceprintStorage.sealCentroid(centroid);
   database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
-    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(storeVector(centroid), voiceprint.id);
-  return { ...voiceprint, centroid_embedding: storeVector(centroid), sample_count: voiceprint.sample_count + 1 };
+    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(sealed, voiceprint.id);
+  return { ...voiceprint, centroid_embedding: sealed, sample_count: voiceprint.sample_count + 1 };
 }
 
 module.exports = { resolveCluster, resolveVoiceprint, stickyVoiceprintForCluster, mergeClusters, modelName };

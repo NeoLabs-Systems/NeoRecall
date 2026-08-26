@@ -23,7 +23,27 @@ NeoRecall does not install or run a transcription or language model. Provider se
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
+Each account can add custom vocabulary under **Settings → Recording → Transcription**, one word or phrase per line. NeoRecall also includes every named speaker automatically and shows those names separately in Settings. The combined list is sent as an OpenAI-compatible prompt, Deepgram keywords/keyterms, or AssemblyAI keyterms according to the selected provider. For prompt-only OpenAI-compatible providers, an account-level switch controls an additional conservative correction: NeoRecall rewrites a returned word only when it is a long, close, unambiguous match for one single-word vocabulary entry; multi-word phrases are never rewritten. Applied corrections are counted in server logs without logging transcript text or vocabulary. `NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS` and `NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH` control the list limits. The conservative fallback is configured with `NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH`, `NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE`, `NEORECALL_VOCABULARY_CORRECTION_SIMILARITY`, and `NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN`.
+
 For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`, `deepseek`, `openrouter`, `together`, or `openai_compatible`. Set `AI_API_MODEL` and either the provider-specific key from `.env.example` or `AI_API_KEY`. Custom OpenAI-compatible endpoints also require `AI_API_BASE_URL`.
+
+## Backups
+
+NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts it with the installation key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
+
+`NEORECALL_BACKUP_DESTINATION` selects where artifacts land. `local` (the default) writes to `~/.neorecall/backups`. Artifacts are encrypted before they leave the process, so a destination never handles plaintext.
+
+The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
+
+From the command line:
+
+```bash
+neorecall backup          # snapshot now
+neorecall backup list     # what is stored, and the schedule
+neorecall restore <key>   # decrypt one artifact beside the live database
+```
+
+`restore` refuses to run while NeoRecall is up, and never writes over the live database. It decrypts the artifact next to the original, runs an integrity check, reports the account count and checksum, and prints the two `mv` commands to put it into service. Verify a restore periodically — a backup that has never been restored is an assumption, not a control.
 
 The admin dashboard fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
 

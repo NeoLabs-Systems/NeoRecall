@@ -76,6 +76,37 @@ storage, or some vendor battery-management policies. iOS cannot continue after
 a user force-quit. Those operating-system actions are shown as limitations,
 not described as guaranteed background execution.
 
+## Android home-screen widgets
+
+Five widgets are available from the Android widget picker. All of them are
+configurable: long-press a placed widget and choose the gear, or use the
+settings screen shown while placing one. Every option previews live before it is
+saved.
+
+| Widget | Shows | Configure |
+| --- | --- | --- |
+| **Recorder** | Start capture, stop it again, and the elapsed recording time | What the button does while recording; appearance |
+| **Capture status** | The current pipeline stage, its progress, queued audio, and any issue holding it up | Where a tap opens; appearance |
+| **Commitments** | Open tasks and promises with their due dates | Which commitments to show; whether to show the source conversation; appearance |
+| **Memories** | Recent memories with their summaries | Which memories to show; whether to show summaries; appearance |
+| **Today** | One headline number against the last seven days, or the week ahead | Which number to headline; appearance |
+
+Widgets render in the launcher's process, so they cannot reach the server or
+the local database. The app publishes one snapshot of what a widget may show,
+and the widget renders only that. A widget therefore shows the state as of the
+last time NeoRecall ran, which on Android is whenever capture, a wearable link,
+or sync is active.
+
+Two actions do not open the app: stopping a recording, and ticking a commitment
+done. Both are recorded on disk before anything else happens, so a tap survives
+a cold start; a ticked commitment disappears from the widget immediately and is
+sent to the server the next time the app runs. Starting phone-microphone capture
+still opens NeoRecall, because Android refuses microphone access to a process
+with no attached UI.
+
+Signing out clears every widget: they fall back to asking for a sign-in rather
+than continuing to show the previous account's memories.
+
 ## Importing existing audio
 
 Choose **Import audio** on the Record screen. Large files use the multipart import protocol and enter the same VAD, transcription, diarization, search, and memory pipeline as live capture. Selecting the same file again after an interrupted transfer resumes its missing parts for the same account and server. Failed imports expire according to the server TTL because a browser may no longer retain access to the original file.

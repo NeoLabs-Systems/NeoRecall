@@ -15,6 +15,7 @@ const pages = {
   ai: ['AI requests', 'Language model usage.'],
   audit: ['Audit log', 'Security-sensitive administrative changes.'],
   providers: ['Providers', 'External language-model and transcription services.'],
+  backups: ['Backups', 'Encrypted database snapshots and their retention.'],
   processing: ['Processing', 'Live diarization, deduplication and consolidation thresholds.'],
   security: ['Security', 'Admin authentication and access control.'],
 };
@@ -229,7 +230,7 @@ function renderEmpty(columns, message) {
 
 async function load({ announce = false } = {}) {
   document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus] = await Promise.all([
+  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus, backupData] = await Promise.all([
     api('/stats'),
     api('/users'),
     api('/jobs?limit=50'),
@@ -238,6 +239,7 @@ async function load({ announce = false } = {}) {
     api('/processing-settings'),
     api('/provider-settings'),
     api('/settings/2fa'),
+    api('/backups?limit=50'),
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
   const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
@@ -271,8 +273,58 @@ async function load({ announce = false } = {}) {
   discoverProviderModels('llm', { quiet: true });
   discoverProviderModels('transcription', { quiet: true });
   renderSecurity(tfStatus); // 2fa status
+  renderBackups(backupData);
   document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (announce) showToast('Admin data refreshed');
+}
+
+
+const megabytes = (bytes) => `${(Number(bytes || 0) / 1048576).toFixed(1)} MB`;
+
+// The three questions an operator actually has — is it on, did the last one
+// work, and when is the next — answered before any history table.
+function renderBackups(data) {
+  const { status, history } = data;
+  const stale = status.enabled && status.due;
+  const failing = status.last && status.last.state === 'failed';
+  const tiles = [
+    ['Schedule', status.enabled ? `Every ${status.intervalHours}h` : 'Disabled', status.enabled ? 'ok' : 'warn'],
+    ['Last backup', status.lastSuccessAt ? dateLabel(status.lastSuccessAt) : 'Never', status.lastSuccessAt ? (failing ? 'warn' : 'ok') : 'fail'],
+    ['Next due', status.running ? 'Running now' : (status.nextDueAt ? dateLabel(status.nextDueAt) : 'As soon as a worker runs'), stale ? 'warn' : 'ok'],
+    ['Retained', `${status.artifactCount} of ${status.retain} · ${megabytes(status.artifactBytes)}`, status.artifactCount ? 'ok' : 'fail'],
+  ];
+  document.querySelector('#backup-status').innerHTML = tiles
+    .map(([label, value, state]) => `<article class="status-tile"><span class="status-dot ${state}"></span><div><div class="status-label">${escapeHtml(label)}</div><div class="status-detail">${escapeHtml(value)}</div></div></article>`)
+    .join('');
+
+  const destination = status.unreachable
+    ? `Destination <strong>${escapeHtml(status.destination)}</strong> is unreachable: ${escapeHtml(status.unreachable)}`
+    : `Destination <strong>${escapeHtml(status.destination)}</strong> · <code>${escapeHtml(status.location || '')}</code> · artifacts are encrypted with this installation's key before they are written.`;
+  document.querySelector('#backup-destination').innerHTML = destination;
+
+  document.querySelector('#backup-history').innerHTML = history.length
+    ? history.map((entry) => `<tr><td>${dateLabel(entry.started_at)}</td><td>${escapeHtml(entry.trigger_kind)}</td><td>${badge(entry.state)}${entry.error_code ? `<small class="reason" title="${escapeHtml(entry.error_message || '')}">${escapeHtml(entry.error_code)}</small>` : ''}</td><td>${entry.bytes ? megabytes(entry.bytes) : '—'}</td><td><small>${escapeHtml(entry.artifact_key || '—')}${entry.pruned_at ? ' · pruned' : ''}</small></td></tr>`).join('')
+    : renderEmpty(5, 'No backup has run yet.');
+
+  const badgeElement = document.querySelector('#backup-badge');
+  badgeElement.hidden = !(failing || (stale && status.lastSuccessAt));
+  badgeElement.textContent = '!';
+}
+
+async function runBackupNow() {
+  const button = document.querySelector('#run-backup');
+  button.disabled = true;
+  button.textContent = 'Backing up…';
+  try {
+    const result = await api('/backups/run', { method: 'POST' });
+    showToast(result.skipped ? 'A backup is already running' : `Backup complete · ${megabytes(result.bytes)}`);
+    renderBackups(await api('/backups?limit=50'));
+  } catch (error) {
+    showError(error);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Back up now';
+  }
 }
 
 function renderSecurity(tfStatus) {
@@ -419,6 +471,8 @@ document.querySelector('#save-settings').addEventListener('click', async () => {
     showError(error);
   }
 });
+
+document.querySelector('#run-backup').addEventListener('click', runBackupNow);
 
 document.querySelector('#logout').addEventListener('click', async () => {
   try { await api('/logout', { method: 'POST' }); } finally {

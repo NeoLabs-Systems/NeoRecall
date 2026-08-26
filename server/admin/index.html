@@ -43,6 +43,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 5h10V6H7v2Zm0 5h10v-2H7v2Zm0 5h7v-2H7v2Z"/></svg>
         Audit log
       </button>
+      <button class="nav-item" data-page="backups" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3Zm6 15c0 .4-2.2 1.5-6 1.5S6 18.4 6 18v-2.6c1.5.9 3.8 1.3 6 1.3s4.5-.4 6-1.3V18Zm0-5c0 .4-2.2 1.5-6 1.5S6 13.4 6 13v-2.6c1.5.9 3.8 1.3 6 1.3s4.5-.4 6-1.3V13Zm-6-3.5c-3.8 0-6-1.1-6-1.5s2.2-1.5 6-1.5 6 1.1 6 1.5-2.2 1.5-6 1.5Z"/></svg>
+        Backups <span class="nav-badge" id="backup-badge" hidden></span>
+      </button>
       <div class="nav-section-label">Configure</div>
       <button class="nav-item" data-page="providers" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm12.5 0L21 17.5 16.5 22 12 17.5l4.5-4.5Z"/></svg>
@@ -109,6 +113,21 @@
         <div class="card table-card">
           <div class="card-header"><div><div class="card-title">Audit log</div><p>Administrative and security-sensitive changes.</p></div></div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>Actor</th><th>Action</th><th>Resource</th><th>Time</th></tr></thead><tbody id="audit"></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="page" data-page-content="backups">
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Backups</div><p>Encrypted database snapshots, written to the configured destination.</p></div>
+            <button id="run-backup" class="btn btn-primary" type="button">Back up now</button>
+          </div>
+          <div id="backup-status" class="status-grid"></div>
+          <div id="backup-destination" class="field-note"></div>
+        </div>
+        <div class="card table-card">
+          <div class="card-header"><div><div class="card-title">History</div><p>Every run, including failures. Artifacts beyond the retention count are pruned automatically.</p></div></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Started</th><th>Trigger</th><th>Result</th><th>Size</th><th>Artifact</th></tr></thead><tbody id="backup-history"></tbody></table></div>
         </div>
       </section>
 

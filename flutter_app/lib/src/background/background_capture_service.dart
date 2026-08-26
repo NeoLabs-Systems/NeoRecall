@@ -7,9 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'background_hold.dart';
 import 'background_live_status.dart';
+import 'home_widget_snapshot.dart';
 
 export 'background_hold.dart';
 export 'background_live_status.dart';
+export 'home_widget_snapshot.dart';
 
 /// Cross-platform façade for the always-on mobile runtime host.
 ///
@@ -57,6 +59,22 @@ abstract class BackgroundCaptureService {
   /// remains true across cold-engine and Activity attachment races.
   Future<bool> takePendingWidgetPhoneRecordingRequest();
 
+  /// Hands the home-screen widgets everything they are allowed to show.
+  ///
+  /// Widgets render in the launcher's process with no access to the network or
+  /// the app database, so one published snapshot is their entire world. Sending
+  /// an unchanged snapshot is a no-op, which keeps a chatty notifyListeners()
+  /// from redrawing every widget on every frame.
+  Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  /// Atomically claims every widget tap that could not be served at the time.
+  ///
+  /// Same guarantee as [takePendingWidgetPhoneRecordingRequest], generalised:
+  /// a tap is recorded natively before anything is launched, so completing a
+  /// task or stopping capture from the home screen survives a cold start.
+  Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>
+      const <HomeWidgetAction>[];
+
   /// Claims watch recordings from the native handoff inbox. The watch retains
   /// its originals until [acknowledgeWatchRecording] persists a terminal proof.
   Future<List<Map<String, dynamic>>> takePendingWatchRecordings();
@@ -74,6 +92,10 @@ enum BackgroundCaptureEventType {
   stopRequested,
   batteryOptimizationActive,
   phoneRecordingRequested,
+
+  /// A home-screen widget was tapped while the process was alive; the payload
+  /// is claimed through [BackgroundCaptureService.takePendingWidgetActions].
+  widgetActionRequested,
   watchTransferStarted,
   watchTransferFinished,
   watchRecordingAvailable,
@@ -170,6 +192,13 @@ class PlatformManagedBackgroundCaptureService
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
+  Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  @override
+  Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>
+      const <HomeWidgetAction>[];
+
+  @override
   Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async =>
       const <Map<String, dynamic>>[];
 
@@ -251,6 +280,7 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   bool _batteryNoticeSent = false;
   String? _lastMessage;
   BackgroundLiveStatus? _liveStatus;
+  String? _widgetPayload;
 
   @override
   bool get isRunning => _state.running;
@@ -280,6 +310,12 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
           _events.add(
             const BackgroundCaptureEvent(
               BackgroundCaptureEventType.phoneRecordingRequested,
+            ),
+          );
+        case 'widgetActionRequested':
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.widgetActionRequested,
             ),
           );
         case 'watchRecordingAvailable':
@@ -330,6 +366,40 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
           false;
     } catch (_) {
       return false;
+    }
+  }
+
+  @override
+  Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {
+    final payload = snapshot.encode();
+    if (payload == _widgetPayload) return;
+    _widgetPayload = payload;
+    try {
+      await _channel.invokeMethod<void>('publishWidgetData', <String, Object?>{
+        'payload': payload,
+      });
+    } catch (_) {
+      // Widgets are an accessory surface: a host that cannot take the snapshot
+      // must never disturb capture. The next publish resends it anyway, so
+      // clear the cache to make sure that retry actually goes out.
+      _widgetPayload = null;
+    }
+  }
+
+  @override
+  Future<List<HomeWidgetAction>> takePendingWidgetActions() async {
+    try {
+      final rows = await _channel.invokeListMethod<dynamic>(
+        'takePendingWidgetActions',
+      );
+      return rows
+              ?.whereType<Map<Object?, Object?>>()
+              .map(HomeWidgetAction.fromMap)
+              .where((action) => action.type.isNotEmpty)
+              .toList(growable: false) ??
+          const <HomeWidgetAction>[];
+    } catch (_) {
+      return const <HomeWidgetAction>[];
     }
   }
 

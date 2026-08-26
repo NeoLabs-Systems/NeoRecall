@@ -77,7 +77,8 @@ function rebuildAffectedVoiceprints(database, userId, sessionId) {
       WHERE st.voiceprint_id=? AND st.user_id=? AND c.session_id<>? AND st.embedding IS NOT NULL`).all(voiceprintId, userId, sessionId);
     const centroid = meanTurnEmbedding(remaining);
     if (centroid) database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,
-      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(centroid, remaining.length, voiceprintId, userId);
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`)
+      .run(require('../../transcription/voiceprint_storage').sealCentroid(centroid), remaining.length, voiceprintId, userId);
     else database.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(voiceprintId, userId);
   }
 }

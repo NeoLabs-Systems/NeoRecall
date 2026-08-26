@@ -10,10 +10,9 @@ const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('language-model');
 
-/// Sends structured generation requests to the OpenAI-compatible endpoint the
-/// operator configured. NeoRecall deliberately has no in-process generation
-/// fallback: the endpoint can be a hosted API or a separately deployed service
-/// on another machine.
+// Structured generation against the operator's OpenAI-compatible endpoint.
+// There is deliberately no in-process fallback: the endpoint may be a hosted
+// API or a service on another machine.
 
 function ready() {
   const settings = providerSettings.getRuntime().llm;
@@ -22,18 +21,10 @@ function ready() {
 }
 
 function extractContent(payload) {
-  // A model that ran out of completion budget still answers 200 with a
-  // perfectly ordinary-looking body whose JSON simply stops mid-string. Read as
-  // a parse error that is indistinguishable from a model that cannot follow the
-  // contract, and the remedy — more budget, or a narrower window — is the one
-  // thing nobody would try. Reasoning models make this the common case rather
-  // than the rare one: their internal tokens are billed as completion tokens and
-  // count against the same limit, so most of the budget can be gone before the
-  // answer starts.
-  //
-  // A gateway can also answer HTTP 200 and still carry a failure: an error in
-  // the payload or on the choice itself. Without this check that surfaces as
-  // "no message content", which hides the actual reason from the operator.
+  // A 200 can still carry a failure two ways: an error embedded in the payload,
+  // and a completion that hit the token limit and simply stops mid-JSON. Both
+  // otherwise surface as an unexplained parse error or "no message content",
+  // hiding the one remedy that works — more budget, or a narrower window.
   const embedded = payload?.error || payload?.choices?.[0]?.error;
   if (embedded) {
     throw Object.assign(new Error(embedded.message || 'The AI endpoint reported a provider error.'), {
@@ -61,29 +52,12 @@ function extractContent(payload) {
   throw Object.assign(new Error('The AI endpoint returned no message content.'), { code: 'AI_EMPTY_RESPONSE' });
 }
 
-/// The request field that asks a model not to deliberate before answering.
-///
-/// Not standardised, which is why NeoRecall never sends it unprompted — a strict
-/// API rejects body fields it does not recognise, and breaking every request to
-/// pre-empt a problem the provider may not have would be a poor trade.
-/// Whether a rejection means the prompt did not fit, rather than something a
-/// retry could fix.
-///
-/// It matters which, because the two are handled in opposite ways. A transport
-/// fault is worth retrying; a prompt that is too long produces the identical
-/// rejection every time, and the pipeline treats it as transient — so an
-/// oversized conversation is retried, fails the run without being narrowed or
-/// quarantined, re-enters the candidate set on the next scheduler tick, and does
-/// it all again. Forever, without ever producing a memory.
-///
-/// That is not hypothetical: NeoRecall windows its input against LLM_CONTEXT_SIZE,
-/// which is a claim about somebody else's server. Set it larger than the endpoint
-/// really allows and every consolidation overflows.
-///
-/// No status code says this and every vendor words it differently, so the wording
-/// is what has to be read. Recognised, it becomes AI_CONTEXT_EXCEEDED, which
-/// narrows the batch and eventually quarantines the conversation rather than
-/// looping on it.
+// Wording that means "the prompt did not fit", which no status code
+// distinguishes from a transient fault. Every vendor words it differently, so
+// the message is what has to be read. Recognised, it becomes
+// AI_CONTEXT_EXCEEDED, which narrows the batch and eventually quarantines the
+// conversation — otherwise an oversized conversation is retried as transient
+// forever and never produces a memory.
 const CONTEXT_OVERFLOW = /context[_ ]length|context window|maximum context|too many tokens|prompt is too long|exceeds the available context|reduce the length|input is too long|too long for/i;
 
 function contextOverflow(status, payload, message) {
@@ -92,20 +66,12 @@ function contextOverflow(status, payload, message) {
   return /context_length_exceeded|string_above_max_length/i.test(code) || CONTEXT_OVERFLOW.test(String(message || ''));
 }
 
-/// Length bounds a schema-to-grammar converter cannot express cheaply.
-///
-/// Servers that enforce a JSON schema by compiling it into a sampling grammar —
-/// llama.cpp, and everything built on it — expand `maxLength: 2000` into two
-/// thousand unrolled repetitions of a character rule. The grammar becomes too
-/// large to compile and the whole request is rejected with "failed to parse
-/// grammar", which says nothing about which field caused it. Measured directly
-/// against that converter: the summary field alone is enough to break it.
-///
-/// Dropping the bound on the wire costs nothing, because it was never the thing
-/// enforcing it. The response schema still checks every length after generation,
-/// and prose that comes back too long is trimmed rather than rejected — so the
-/// guarantee is unchanged and only the impossible instruction is gone. Hosted
-/// APIs that do not compile grammars are unaffected either way.
+// Strips `maxLength` before sending. Servers that compile a JSON schema into a
+// sampling grammar (llama.cpp and everything on it) unroll `maxLength: 2000`
+// into 2000 repetitions of a character rule and reject the request with
+// "failed to parse grammar", naming no field. Measured: the summary field alone
+// breaks it. Costs nothing to drop — the response schema still checks every
+// length after generation and trims overlong prose.
 function wireSchema(schema) {
   if (Array.isArray(schema)) return schema.map(wireSchema);
   if (!schema || typeof schema !== 'object') return schema;
@@ -122,20 +88,20 @@ function wireResponseFormat(responseFormat) {
   };
 }
 
+// Asks a model not to deliberate before answering. Not standardised, so it is
+// never sent unprompted: a strict API rejects body fields it does not
+// recognise. Sent only after a real truncation, and only if the operator has
+// not already set the field.
 const NO_THINKING = Object.freeze({ chat_template_kwargs: { enable_thinking: false } });
 
 function thinkingAlreadyDisabled(extraBody) {
   return extraBody?.chat_template_kwargs?.enable_thinking === false;
 }
 
-/// Whether the endpoint refused the *shape* we asked for rather than the request.
-///
-/// Servers that enforce a JSON schema compile it into a sampling grammar, and
-/// their converters do not all cover the same keywords. One rejected a schema
-/// with "Failed to initialize samplers: failed to parse grammar" — a message
-/// that names no field, so there is nothing to correct even when you can read
-/// it. Guessing which keyword a given build dislikes is a losing game: the next
-/// server will dislike a different one.
+// Whether the endpoint refused the shape we asked for rather than the request.
+// Grammar converters do not all cover the same keywords, and their errors name
+// no field — so the response is to retry without a schema rather than guess
+// which keyword this build dislikes.
 function schemaRejected(status, message) {
   return status === 400 && /grammar|json[_ ]?schema|response[_ ]?format|unsupported schema/i.test(String(message || ''));
 }
@@ -145,13 +111,9 @@ async function chatJSON(request) {
   try {
     return await sendChat(request, settings.extraBody || null);
   } catch (error) {
-    // Asking for a schema is an optimisation, not the contract. The prompt spells
-    // out the shape it wants in full, and the response is validated and trimmed
-    // here whatever the endpoint promised — so when a server cannot compile the
-    // schema, asking for plain JSON instead gets exactly the same guarantees by a
-    // slower road. Refusing to work at all because a server's grammar converter
-    // is limited would be the wrong answer, and it is the difference between a
-    // day of recordings becoming memories and sixteen failures in a row.
+    // A schema is an optimisation, not the contract: the prompt states the shape
+    // and the response is validated here regardless, so plain JSON gets the same
+    // guarantees by a slower road.
     if (schemaRejected(error.status, error.message) && request.responseFormat) {
       logger.warn('The endpoint could not compile the response schema; asking for plain JSON instead', {
         purpose: request.purpose, model: settings.model, endpoint: settings.baseUrl,
@@ -159,17 +121,10 @@ async function chatJSON(request) {
       });
       return sendChat({ ...request, responseFormat: { type: 'json_object' } }, settings.extraBody || null);
     }
-    // A completion that ran out of budget on a reasoning model is the one
-    // failure with an obvious second thing to try, and it matters most exactly
-    // where it hurts most: consolidation treats truncation as the input's fault,
-    // narrows the batch, and eventually quarantines the conversation. A model
-    // that always deliberates would work through a user's whole backlog that
-    // way. So rather than let it fail, ask once more without the deliberation.
-    //
-    // Only after a real truncation, and only if the operator has not already set
-    // the field — so a provider that has no idea what it means is never sent it
-    // speculatively, and if this attempt is itself rejected the original
-    // truncation is what gets reported, since that is the fault worth fixing.
+    // Truncation on a reasoning model is worth one retry without deliberation:
+    // consolidation otherwise blames the input, narrows the batch, and
+    // quarantines the conversation. If the retry fails too, report the original
+    // truncation — that is the fault worth fixing.
     if (error.code !== 'AI_OUTPUT_TRUNCATED' || thinkingAlreadyDisabled(settings.extraBody)) throw error;
     try {
       return await sendChat(request, { ...(settings.extraBody || {}), ...NO_THINKING });
@@ -179,15 +134,10 @@ async function chatJSON(request) {
   }
 }
 
-/// One JSON POST whose deadline is the configured one.
-///
-/// Global fetch abandons a request whose response headers have not arrived
-/// within five minutes and reports it as "fetch failed". A model running on a
-/// modest machine can easily need longer than that to answer for a long
-/// conversation, and the operator's own allowance is what should decide when
-/// to give up — not a hidden default, and not with a message that names no
-/// cause. The timeout here is an inactivity timeout, so a model that is
-/// answering steadily is never cut off for taking its time.
+// One JSON POST on the configured deadline. Not `fetch`: it abandons a request
+// whose response headers have not arrived in five minutes and reports only
+// "fetch failed", and a local model can legitimately need longer. This deadline
+// is an inactivity timeout, so a model answering steadily is never cut off.
 function postJson(url, { headers, body, timeoutMs }) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
@@ -263,9 +213,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     const code = error.name === 'AbortError' ? 'AI_TIMEOUT' : error.code || 'AI_REQUEST_FAILED';
     db.prepare(`UPDATE ai_requests SET state='failed',http_status=?,error_code=?,completed_at=? WHERE id=?`)
       .run(error.status || null, code, new Date().toISOString(), id);
-    // Everything needed to name the cause without opening the database: which
-    // endpoint, which model, what it said. This is the line that was missing
-    // while an installation spent hours failing every request in silence.
+    // Names the cause without opening the database: endpoint, model, wording.
     logger.warn('Language-model request failed', {
       requestId: id, purpose, model, provider: settings.provider, endpoint: settings.baseUrl,
       errorCode: code, httpStatus: error.status || null,

@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:desktop_audio_capture/audio_capture.dart';
 import 'package:flutter/foundation.dart';
 
 import 'capture_source.dart';
+import 'capture_source_base.dart';
 
 /// Desktop system-audio source (ScreenCaptureKit / WASAPI loopback).
-class SystemAudioCaptureSource implements CaptureSource {
+class SystemAudioCaptureSource extends CaptureSourceBase {
   SystemAudioCaptureSource({SystemAudioCapture? capture})
     : _capture =
           capture ??
@@ -17,25 +17,12 @@ class SystemAudioCaptureSource implements CaptureSource {
 
   final SystemAudioCapture _capture;
   StreamSubscription<Uint8List>? _subscription;
-  final StreamController<Uint8List> _pcm =
-      StreamController<Uint8List>.broadcast();
-  final StreamController<double> _levels = StreamController<double>.broadcast();
-  final StreamController<String> _warnings =
-      StreamController<String>.broadcast();
-  bool _active = false;
+  bool _stopping = false;
 
   @override
   String get id => 'system_audio';
   @override
   String get kind => 'system';
-  @override
-  bool get isActive => _active;
-  @override
-  Stream<Uint8List> get pcm16Stream => _pcm.stream;
-  @override
-  Stream<double> get levelStream => _levels.stream;
-  @override
-  Stream<String> get warningStream => _warnings.stream;
 
   @override
   Future<bool> ensurePermission() async {
@@ -47,14 +34,14 @@ class SystemAudioCaptureSource implements CaptureSource {
     try {
       return await _capture.requestPermissions();
     } catch (error) {
-      _warnings.add('System audio permission was not granted: $error');
+      warn('System audio permission was not granted: $error');
       return false;
     }
   }
 
   @override
   Future<void> start({required int sampleRate, required int channels}) async {
-    if (_active) return;
+    if (isActive) return;
     if (!await ensurePermission()) {
       throw StateError('System audio capture is unavailable on this platform.');
     }
@@ -65,52 +52,38 @@ class SystemAudioCaptureSource implements CaptureSource {
       throw StateError('System audio stream did not become available.');
     }
     _subscription = stream.listen(
-      (data) {
-        _pcm.add(data);
-        _emitLevel(data);
-      },
-      onError: (Object error) {
-        _warnings.add('System audio capture interrupted: $error');
+      emitPcm,
+      onError: (Object error) => failCapture(
+        'System audio capture interrupted: $error',
+        error,
+        stopping: _stopping,
+      ),
+      onDone: () {
+        if (_stopping) {
+          active = false;
+          return;
+        }
+        final error = StateError('System audio stream ended unexpectedly.');
+        failCapture(error.message, error);
       },
     );
-    _active = true;
-  }
-
-  void _emitLevel(Uint8List data) {
-    if (data.length < 2) return;
-    final view = ByteData.sublistView(data);
-    var energy = 0.0;
-    var samples = 0;
-    for (var offset = 0; offset + 1 < data.length; offset += 8) {
-      final value = view.getInt16(offset, Endian.little) / 32768.0;
-      energy += value * value;
-      samples += 1;
-    }
-    if (samples > 0) {
-      _levels.add(math.sqrt(energy / samples).clamp(0.0, 1.0));
-    }
+    active = true;
   }
 
   @override
   Future<void> stop() async {
+    _stopping = true;
     await _subscription?.cancel();
     _subscription = null;
-    if (_active) {
+    if (isActive) {
       try {
         await _capture.stopCapture();
       } catch (error) {
-        _warnings.add('System audio stop failed: $error');
+        warn('System audio stop failed: $error');
       }
     }
-    _active = false;
-  }
-
-  @override
-  Future<void> dispose() async {
-    await stop();
-    await _pcm.close();
-    await _levels.close();
-    await _warnings.close();
+    active = false;
+    _stopping = false;
   }
 }
 

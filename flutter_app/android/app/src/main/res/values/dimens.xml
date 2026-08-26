@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Preview heights in the configuration screen, chosen to match the cell
+         sizes each widget is offered at. -->
+    <dimen name="widget_preview_short">116dp</dimen>
+    <dimen name="widget_preview_tall">210dp</dimen>
+</resources>

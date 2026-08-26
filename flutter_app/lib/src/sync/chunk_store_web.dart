@@ -418,4 +418,13 @@ class WebChunkStore implements ChunkStore {
     db.close();
     _database = null;
   }
+
+  @override
+  Future<void> purgeAll() async {
+    await initialize();
+    await _withStore('readwrite', (store) => store.clear());
+    final sessions = db.transaction('sessions', 'readwrite');
+    await sessions.objectStore('sessions').clear();
+    await sessions.completed;
+  }
 }

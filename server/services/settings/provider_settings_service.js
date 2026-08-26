@@ -414,13 +414,13 @@ async function testProviders() {
   return { transcription, speakerIdentity: testSpeakerIdentity(), llm };
 }
 
-/// What this server is pointed at, safe to write into a log.
-///
-/// The first question about any failing installation is which endpoint and which
-/// model it is actually using, and the answer used to require reading the
-/// database. Keys are reported as configured or not, never by value — the logger
-/// redacts them anyway, but a summary meant for logs should not carry one in the
-/// first place.
+// What this server is pointed at, safe to write into a log.
+//
+// The first question about any failing installation is which endpoint and which
+// model it is actually using, and the answer used to require reading the
+// database. Keys are reported as configured or not, never by value — the logger
+// redacts them anyway, but a summary meant for logs should not carry one in the
+// first place.
 function describeForLog() {
   const runtime = getRuntime();
   const describe = (workload) => ({

@@ -46,21 +46,21 @@ function lastOutbound(userId) {
   return getDatabase().prepare("SELECT sent_at FROM ai_requests WHERE user_id=? AND purpose='consolidation' AND sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1").get(userId);
 }
 
-/// How long to wait after a run that failed, growing with each failure in a row.
-///
-/// Without this, a consolidation that fails for a reason nothing about the input
-/// can fix — an endpoint that is down, a model name that does not exist, a
-/// context set larger than the server allows — is attempted again on the very
-/// next scheduler tick, and the one after that. Observed on a real installation:
-/// three language-model requests a minute, every minute, all failing, for hours.
-/// It produces nothing, fills the request log so the actual first failure cannot
-/// be found, and hammers an endpoint that is already unwell.
-///
-/// It backs off rather than giving up, because most of these causes are
-/// temporary and the recording is still waiting to become a memory. One minute,
-/// then two, four, eight, up to half an hour — so an outage costs a handful of
-/// attempts instead of hundreds, and recovery still happens on its own within
-/// half an hour of the cause being fixed. Asking by hand ignores it entirely.
+// How long to wait after a run that failed, growing with each failure in a row.
+//
+// Without this, a consolidation that fails for a reason nothing about the input
+// can fix — an endpoint that is down, a model name that does not exist, a
+// context set larger than the server allows — is attempted again on the very
+// next scheduler tick, and the one after that. Observed on a real installation:
+// three language-model requests a minute, every minute, all failing, for hours.
+// It produces nothing, fills the request log so the actual first failure cannot
+// be found, and hammers an endpoint that is already unwell.
+//
+// It backs off rather than giving up, because most of these causes are
+// temporary and the recording is still waiting to become a memory. One minute,
+// then two, four, eight, up to half an hour — so an outage costs a handful of
+// attempts instead of hundreds, and recovery still happens on its own within
+// half an hour of the cause being fixed. Asking by hand ignores it entirely.
 const FAILURE_BACKOFF_BASE_MS = 60_000;
 const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
 
@@ -91,13 +91,13 @@ function candidateConversations(userId) {
     .filter((conversation) => material.isComplete(userId, conversation.id));
 }
 
-/// True when the most recent consolidation could not be validated.
-///
-/// Candidates are always taken oldest-first, so a conversation the model cannot
-/// partition would otherwise reappear in every later run and stop memory
-/// generation for good. After such a failure the next run carries a single
-/// conversation, which both isolates the cause and stops a whole batch from
-/// being blamed for one bad member.
+// True when the most recent consolidation could not be validated.
+//
+// Candidates are always taken oldest-first, so a conversation the model cannot
+// partition would otherwise reappear in every later run and stop memory
+// generation for good. After such a failure the next run carries a single
+// conversation, which both isolates the cause and stops a whole batch from
+// being blamed for one bad member.
 function narrowingAfterFailure(userId) {
   const previous = getDatabase().prepare('SELECT state,error_code FROM consolidation_runs WHERE user_id=? ORDER BY reserved_at DESC LIMIT 1').get(userId);
   return Boolean(previous && previous.state === 'failed' && VALIDATION_FAILURE_CODES.includes(previous.error_code));
@@ -161,12 +161,12 @@ function eligibility(userId, { ignoreBackoff = false } = {}) {
   return { eligible: true, nextEligibleAt, ...candidates };
 }
 
-/// Records that a consolidation could not be validated.
-///
-/// Only the conversations the run actually carried are charged, and a
-/// conversation that reaches the configured limit is quarantined: it keeps its
-/// transcript and stays readable, but it no longer enters candidate sets, so one
-/// unpartitionable conversation cannot stop every later memory.
+// Records that a consolidation could not be validated.
+//
+// Only the conversations the run actually carried are charged, and a
+// conversation that reaches the configured limit is quarantined: it keeps its
+// transcript and stays readable, but it no longer enters candidate sets, so one
+// unpartitionable conversation cannot stop every later memory.
 function recordValidationFailure(userId, conversationIds, errorCode) {
   if (!conversationIds.length) return { quarantined: [] };
   const db = getDatabase();
@@ -249,11 +249,11 @@ function evidenceForSegmentIds(segmentIds, stats) {
   return { durationMs, characters };
 }
 
-/// Demote thin conversation sections the model over-promoted to memory-worthy.
-///
-/// Brief exchanges still get a title and summary on the timeline; they must not
-/// become episodic memory cards. Atomic facts from short speech are what
-/// mini-memories are for — and those only attach under a worthy parent memory.
+// Demote thin conversation sections the model over-promoted to memory-worthy.
+//
+// Brief exchanges still get a title and summary on the timeline; they must not
+// become episodic memory cards. Atomic facts from short speech are what
+// mini-memories are for — and those only attach under a worthy parent memory.
 function applyMemoryWorthinessFloors(output, conversations, floors = processingSettings.get()) {
   const minMs = Number(floors.minMemoryEvidenceMs ?? 0);
   const minChars = Number(floors.minMemoryEvidenceChars ?? 0);

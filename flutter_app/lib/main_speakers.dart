@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'main_controller.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/models/speaker.dart';
+import 'src/widgets/selection_mixin.dart';
 
 class SpeakersScreen extends StatefulWidget {
   const SpeakersScreen({super.key, required this.controller});
@@ -19,14 +19,13 @@ class SpeakersScreen extends StatefulWidget {
   State<SpeakersScreen> createState() => _SpeakersScreenState();
 }
 
-class _SpeakersScreenState extends State<SpeakersScreen> {
+class _SpeakersScreenState extends State<SpeakersScreen>
+    with SelectionMixin<SpeakersScreen> {
   AudioPlayer? _player;
   StreamSubscription<void>? _completeSubscription;
   String? _playingSpeakerId;
   bool _loadingPreview = false;
   bool _reevaluating = false;
-  bool _selecting = false;
-  final Set<String> _selected = <String>{};
 
   NeoRecallController get controller => widget.controller;
 
@@ -104,34 +103,8 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
     if (sourceId != null) await controller.mergeSpeaker(targetId, sourceId);
   }
 
-  void _toggleSelect(String id) {
-    setState(() {
-      if (_selected.contains(id)) {
-        _selected.remove(id);
-      } else {
-        _selected.add(id);
-      }
-      if (_selected.isEmpty) _selecting = false;
-    });
-  }
-
-  void _enterSelect([String? id]) {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _selecting = true;
-      if (id != null) _selected.add(id);
-    });
-  }
-
-  void _exitSelect() {
-    setState(() {
-      _selecting = false;
-      _selected.clear();
-    });
-  }
-
   Future<void> _deleteSelected() async {
-    final ids = _selected.toList();
+    final ids = selectedIds;
     if (ids.isEmpty) return;
     final confirm = await showDialog<bool>(
       context: context,
@@ -155,23 +128,15 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
       ),
     );
     if (confirm != true) return;
-    try {
-      await controller.bulkDeleteSpeakers(ids);
-      if (!mounted) return;
-      _exitSelect();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Deleted ${ids.length} speakers')));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete speakers: $error')),
-      );
-    }
+    await runBulkAction(
+      controller.bulkDeleteSpeakers,
+      success: (deleted) => 'Deleted ${deleted.length} speakers',
+      failure: (error) => 'Could not delete speakers: $error',
+    );
   }
 
   Future<void> _mergeSelected() async {
-    final ids = _selected.toList();
+    final ids = selectedIds;
     if (ids.length < 2) return;
     final selectedSpeakers = controller.speakers
         .where((speaker) => ids.contains(speaker.id))
@@ -192,19 +157,11 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
     );
     if (targetId == null || !mounted) return;
     final sourceIds = ids.where((id) => id != targetId).toList();
-    try {
-      await controller.mergeSpeakers(targetId, sourceIds);
-      if (!mounted) return;
-      _exitSelect();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Combined ${sourceIds.length + 1} speakers')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not combine speakers: $error')),
-      );
-    }
+    await runBulkAction(
+      (_) => controller.mergeSpeakers(targetId, sourceIds),
+      success: (_) => 'Combined ${sourceIds.length + 1} speakers',
+      failure: (error) => 'Could not combine speakers: $error',
+    );
   }
 
   Future<void> _reevaluateSpeakers() async {
@@ -291,7 +248,7 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                 Tooltip(
                   message: 'Re-evaluate and merge matching speakers',
                   child: IconButton.filledTonal(
-                    onPressed: _selecting || _reevaluating
+                    onPressed: selecting || _reevaluating
                         ? null
                         : _reevaluateSpeakers,
                     icon: _reevaluating
@@ -303,13 +260,13 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                if (_selecting)
-                  TextButton(onPressed: _exitSelect, child: const Text('Done'))
+                if (selecting)
+                  TextButton(onPressed: exitSelect, child: const Text('Done'))
                 else
                   TextButton.icon(
                     onPressed: visibleSpeakers.isEmpty
                         ? null
-                        : () => _enterSelect(),
+                        : () => enterSelect(),
                     icon: const Icon(Icons.checklist_rounded, size: 18),
                     label: const Text('Select'),
                   ),
@@ -317,11 +274,11 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          if (_selecting) ...<Widget>[
+          if (selecting) ...<Widget>[
             _SpeakerSelectionBar(
-              count: _selected.length,
+              count: selectedCount,
               onDelete: _deleteSelected,
-              onMerge: _selected.length >= 2 ? _mergeSelected : null,
+              onMerge: selectedCount >= 2 ? _mergeSelected : null,
             ),
             const SizedBox(height: 14),
           ],
@@ -349,13 +306,13 @@ class _SpeakersScreenState extends State<SpeakersScreen> {
                       _SpeakerRow(
                         speaker: visibleSpeakers[index],
                         palette: palette,
-                        selecting: _selecting,
-                        selected: _selected.contains(visibleSpeakers[index].id),
-                        onTap: _selecting
-                            ? () => _toggleSelect(visibleSpeakers[index].id)
+                        selecting: selecting,
+                        selected: isSelected(visibleSpeakers[index].id),
+                        onTap: selecting
+                            ? () => toggleSelect(visibleSpeakers[index].id)
                             : null,
                         onLongPress: () =>
-                            _enterSelect(visibleSpeakers[index].id),
+                            enterSelect(visibleSpeakers[index].id),
                         playing:
                             _playingSpeakerId == visibleSpeakers[index].id &&
                             _player?.state == PlayerState.playing,

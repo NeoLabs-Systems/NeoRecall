@@ -1,6 +1,9 @@
 'use strict';
 
 const DiscordVoiceBot = require('./discord_bot/discord_voice_bot');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('sources.discord');
 
 // One running bot per source id.
 const activeBots = new Map();
@@ -19,9 +22,9 @@ const discordSourceService = {
 
     try {
       await bot.start();
-      console.log(`[DiscordSource] Started source ${source.id}`);
+      logger.info('Started source', { sourceId: source.id });
     } catch (error) {
-      console.error(`[DiscordSource] Failed to start source ${source.id}:`, error.message);
+      logger.error('Failed to start source', { sourceId: source.id, error });
       activeBots.delete(source.id);
       try {
         await bot.stop();
@@ -42,7 +45,7 @@ const discordSourceService = {
     if (bot) {
       await bot.stop();
       activeBots.delete(sourceId);
-      console.log(`[DiscordSource] Stopped source ${sourceId}`);
+      logger.info('Stopped source', { sourceId });
     }
   },
 };

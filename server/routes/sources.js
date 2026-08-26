@@ -5,12 +5,12 @@ const { z } = require('zod');
 const sources = require('../services/sources');
 const { requireAuth } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 
 const router = express.Router();
 
 const pairingService = require('../services/sources/pairing_service');
 
-const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
 // Public endpoint for the Discord JS snippet
 router.post('/discord/pair', express.json(), (req, res, next) => {

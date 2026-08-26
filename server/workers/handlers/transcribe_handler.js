@@ -13,7 +13,13 @@ const deduper = require('../../transcription/token_deduper');
 const matching = require('../../transcription/speaker_matching');
 const speakerPreviews = require('../../services/speakers/speaker_preview_service');
 const { createLogger } = require('../../utils/logger');
+
 const logger = createLogger('transcribe-handler');
+
+// SQLite stores timestamps as ISO text; this reads one back as epoch
+// milliseconds. The Julian-day offset is the kind of constant that is wrong
+// silently, so it is written once and interpolated.
+const epochMs = (column) => `(julianday(${column})-2440587.5)*86400000`;
 
 function captureSpeakerPreviews(chunk, segmentCount) {
   if (!segmentCount) return;
@@ -34,18 +40,18 @@ function absoluteIso(sessionStart, monotonicOffsetMs, relativeMs) {
   return new Date(Date.parse(sessionStart) + monotonicOffsetMs + relativeMs).toISOString();
 }
 
-/// The speaker cluster each audio component was resolving to right before this
-/// chunk, keyed by component name.
-///
-/// Diarization runs independently per chunk, so identity across a chunk
-/// boundary depends entirely on this: the resolver in speaker_matching uses it
-/// to keep a continuous speaker's cluster instead of splintering it the moment
-/// a fresh segmentation drifts below the plain matching threshold. Only the
-/// immediately preceding chunk is consulted — continuity is a claim about an
-/// actual time gap between two segments, not about how many chunks separate
-/// them, so this works the same whether chunks are one second or two minutes
-/// long. An absent or silent previous chunk simply yields no anchor, and
-/// resolution falls back to ordinary matching.
+// The speaker cluster each audio component was resolving to right before this
+// chunk, keyed by component name.
+//
+// Diarization runs independently per chunk, so identity across a chunk
+// boundary depends entirely on this: the resolver in speaker_matching uses it
+// to keep a continuous speaker's cluster instead of splintering it the moment
+// a fresh segmentation drifts below the plain matching threshold. Only the
+// immediately preceding chunk is consulted — continuity is a claim about an
+// actual time gap between two segments, not about how many chunks separate
+// them, so this works the same whether chunks are one second or two minutes
+// long. An absent or silent previous chunk simply yields no anchor, and
+// resolution falls back to ordinary matching.
 function boundaryContinuity(database, chunk) {
   const anchors = new Map();
   if (!chunk.sequence) return anchors;
@@ -60,22 +66,22 @@ function boundaryContinuity(database, chunk) {
 
 function previousSegments(database, chunk) {
   return database.prepare(`SELECT t.text,t.asr_confidence asrConfidence,
-    (julianday(t.started_at)-2440587.5)*86400000 startMs,(julianday(t.ended_at)-2440587.5)*86400000 endMs
+    ${epochMs('t.started_at')} startMs,${epochMs('t.ended_at')} endMs
     FROM transcript_segments t JOIN audio_chunks c ON c.id=t.chunk_id
     WHERE c.source_id=? AND c.sequence<? AND c.sequence>=? ORDER BY t.started_at`)
     .all(chunk.source_id, chunk.sequence, Math.max(0, chunk.sequence - 2));
 }
 
-/// Already-persisted transcript segments from another physical client whose
-/// corrected time range could describe the same utterance. The exact-word
-/// predicate is applied separately; this query only bounds the candidate set.
+// Already-persisted transcript segments from another physical client whose
+// corrected time range could describe the same utterance. The exact-word
+// predicate is applied separately; this query only bounds the candidate set.
 function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs) {
   if (!segments.length) return [];
   const earliest = Math.min(...segments.map((segment) => segment.startMs)) - timeToleranceMs;
   const latest = Math.max(...segments.map((segment) => segment.endMs)) + timeToleranceMs;
   return database.prepare(`SELECT t.text,
-    (julianday(t.started_at)-2440587.5)*86400000 startMs,
-    (julianday(t.ended_at)-2440587.5)*86400000 endMs
+    ${epochMs('t.started_at')} startMs,
+    ${epochMs('t.ended_at')} endMs
     FROM transcript_segments t
     JOIN audio_chunks c ON c.id=t.chunk_id
     JOIN recording_sessions r ON r.id=c.session_id
@@ -216,7 +222,10 @@ async function handle(job, inference) {
   if (!chunk.temporary_path) throw Object.assign(new Error('Server audio is missing and must be uploaded again.'), { code: 'AUDIO_REUPLOAD_REQUIRED', retryable: false });
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
-  const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout });
+  const userSettings = settings.get(chunk.user_id);
+  const vocabulary = settings.transcriptionVocabulary(chunk.user_id);
+  const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
+    vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled });
   // The pipeline's heartbeat. One line per piece of audio saying what came back,
   // which is what makes "it is working, just slowly" distinguishable from "it
   // stopped" without waiting for a memory to appear at the end of the chain.

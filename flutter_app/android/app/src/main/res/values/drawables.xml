@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme "auto" resolves through these aliases, so a launcher redraw follows
+     the system night mode without the app having to push a widget update. -->
+<resources>
+    <item name="widget_action_ghost" type="drawable">@drawable/widget_action_ghost_light</item>
+    <item name="widget_action_ready" type="drawable">@drawable/widget_action_ready_light</item>
+    <item name="widget_action_recording" type="drawable">@drawable/widget_action_recording_light</item>
+    <item name="widget_action_soft" type="drawable">@drawable/widget_action_soft_light</item>
+    <item name="widget_block_off" type="drawable">@drawable/widget_block_off_light</item>
+    <item name="widget_block_on" type="drawable">@drawable/widget_block_on_light</item>
+    <item name="widget_block_today" type="drawable">@drawable/widget_block_today_light</item>
+    <item name="widget_chip_accent" type="drawable">@drawable/widget_chip_accent_light</item>
+    <item name="widget_chip_alt" type="drawable">@drawable/widget_chip_alt_light</item>
+    <item name="widget_chip_danger" type="drawable">@drawable/widget_chip_danger_light</item>
+    <item name="widget_chip_muted" type="drawable">@drawable/widget_chip_muted_light</item>
+    <item name="widget_divider" type="drawable">@drawable/widget_divider_light</item>
+    <item name="widget_panel" type="drawable">@drawable/widget_panel_light</item>
+    <item name="widget_pip_alert" type="drawable">@drawable/widget_pip_alert_light</item>
+    <item name="widget_pip_off" type="drawable">@drawable/widget_pip_off_light</item>
+    <item name="widget_pip_on" type="drawable">@drawable/widget_pip_on_light</item>
+    <item name="widget_row" type="drawable">@drawable/widget_row_light</item>
+    <item name="widget_surface" type="drawable">@drawable/widget_surface_light</item>
+</resources>
