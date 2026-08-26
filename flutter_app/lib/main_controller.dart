@@ -3397,6 +3397,10 @@ class NeoRecallController extends ChangeNotifier {
     if (ids.length < 2) {
       throw StateError('Select at least two memories to merge.');
     }
+    final mergeMax = api.maxMemoryMergeItems;
+    if (mergeMax != null && ids.length > mergeMax) {
+      throw StateError('Select at most $mergeMax memories to merge.');
+    }
     final payload =
         await api.request(
               'POST',

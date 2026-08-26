@@ -13,7 +13,7 @@ const TOPIC_MAX_COUNT = 12;
 // These are grammar-enforced, which makes them the only thing standing between a
 // model and an answer that never ends: the contract otherwise allows
 // an unbounded array, and a model handed a dense transcript will emit one
-// mini-memory per utterance until it runs out of budget — which arrives as a
+// action item per utterance until it runs out of budget — which arrives as a
 // truncated completion, the failure that narrows and eventually quarantines. On
 // a machine generating a few tokens per second, an unbounded answer is also an
 // unbounded wait.
@@ -23,7 +23,7 @@ const TOPIC_MAX_COUNT = 12;
 // as many mini-memories as it deserves while no single request grows without
 // limit. Sized for a window of a few thousand characters: an eight-minute stretch
 // of speech rarely holds more than a couple of distinct occasions, and asking the
-// model to pick its eight best atomic facts is a better instruction than letting
+// model to pick its eight best action items is a better instruction than letting
 // it list forty.
 const MEMORY_MAX_COUNT = 3;
 const MINI_MEMORY_MAX_COUNT = 8;
@@ -97,6 +97,11 @@ const MEMORY_TYPES = Object.freeze([
 const MINI_MEMORY_KINDS = Object.freeze([
   'fact', 'event', 'location', 'person', 'relationship', 'task', 'promise',
 ]);
+// The broader taxonomy remains readable for memories created by older
+// versions, but new consolidation output is deliberately limited to concrete
+// action items. This also gives providers a smaller grammar to follow.
+const GENERATED_MINI_MEMORY_KINDS = Object.freeze(['task', 'promise']);
+const GENERATED_MINI_MEMORY_KIND_SET = new Set(GENERATED_MINI_MEMORY_KINDS);
 const ENTITY_KINDS = Object.freeze(['person', 'organization', 'project', 'location', 'other']);
 // A long conversation is consolidated in windows that each fit the model's
 // context, so an occasion can begin in one window and continue in the next. The
@@ -248,10 +253,11 @@ const consolidationJsonSchema = {
               type: 'object', additionalProperties: false,
               required: ['kind', 'textEn', 'importance', 'confidence', 'dueAt', 'occurredAt', 'status', 'sourceSegmentIds', 'entities'],
               properties: {
-                kind: { type: 'string', enum: [...MINI_MEMORY_KINDS] },
+                kind: { type: 'string', enum: [...GENERATED_MINI_MEMORY_KINDS] },
                 textEn: { type: 'string', minLength: 1 }, importance: importanceJsonSchema,
-                confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema, occurredAt: temporalReferenceJsonSchema,
-                status: { anyOf: [{ type: 'string', enum: ['open', 'completed', 'cancelled'] }, { type: 'null' }] },
+                confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema,
+                occurredAt: { type: 'null' },
+                status: { type: 'string', enum: ['open'] },
                 sourceSegmentIds: sourceIdsJsonSchema, entities: entityReferencesJsonSchema,
               },
             },
@@ -295,12 +301,23 @@ function normalizeTemporalReference(value) {
   return localDateTimeToUtc(value.localDateTime, value.timezone);
 }
 
+function retainActionableMiniMemories(output) {
+  for (const memoryItem of output.memories) {
+    memoryItem.miniMemories = memoryItem.miniMemories.filter(
+      (mini) => GENERATED_MINI_MEMORY_KIND_SET.has(mini.kind)
+        && !['completed', 'cancelled'].includes(mini.status),
+    );
+  }
+  return output;
+}
+
 function normalizeConsolidationTimestamps(output) {
+  retainActionableMiniMemories(output);
   for (const memoryItem of output.memories) {
     for (const mini of memoryItem.miniMemories) {
       mini.dueAt = normalizeTemporalReference(mini.dueAt);
-      mini.occurredAt = normalizeTemporalReference(mini.occurredAt);
-      if (!['task', 'promise'].includes(mini.kind)) mini.status = null;
+      mini.occurredAt = null;
+      mini.status = 'open';
     }
   }
   return output;
@@ -316,6 +333,7 @@ module.exports = {
   conversationInsightRequired,
   MEMORY_TYPES,
   MINI_MEMORY_KINDS,
+  GENERATED_MINI_MEMORY_KINDS,
   ENTITY_KINDS,
   DEFAULT_MEMORY_EMOJI,
   defaultEmojiForType,
@@ -327,4 +345,5 @@ module.exports = {
   ENTITY_MAX_COUNT,
   CONTINUATION_MEMORY_MAX_COUNT,
   CONTINUATION_REASONING_MAX_LENGTH,
+  retainActionableMiniMemories,
 };

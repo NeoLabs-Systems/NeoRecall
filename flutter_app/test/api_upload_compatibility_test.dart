@@ -102,7 +102,10 @@ void main() {
             return http.Response(
               jsonEncode(<String, dynamic>{
                 'capabilities': <String, dynamic>{},
-                'limits': <String, dynamic>{'chunkReceiptBatch': 2},
+                'limits': <String, dynamic>{
+                  'chunkReceiptBatch': 2,
+                  'memoryMergeMaxItems': 100,
+                },
               }),
               200,
             );
@@ -131,6 +134,7 @@ void main() {
       ]);
 
       expect(api.maxChunkReceiptBatch, 2);
+      expect(api.maxMemoryMergeItems, 100);
       expect(requestedBatches, <List<String>>[
         <String>['1', '2'],
         <String>['3', '4'],

@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { consolidationSchema, consolidationJsonSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps } = require('../../server/ai/schemas/consolidation_schema');
+const {
+  consolidationSchema, consolidationJsonSchema, consolidationJsonSchemaFor,
+  normalizeConsolidationTimestamps, GENERATED_MINI_MEMORY_KINDS,
+} = require('../../server/ai/schemas/consolidation_schema');
 const { localTimestamp, prepareConsolidationRequest, restoreReferenceIds } = require('../../server/ai/prompts/consolidate_memories');
 const { anchorMemoryRanges } = require('../../server/services/memories/consolidation_service');
 const { localDateTimeToUtc } = require('../../server/utils/time');
@@ -28,6 +31,9 @@ test('consolidation input uses compact aliases and restores durable IDs', () => 
   }] });
   assert.equal(prepared.windows.length, 1, 'Input that fits needs exactly one request.');
   const messages = prepared.windows[0].messages(null);
+  assert.match(messages[0].content, /concrete responsible person/);
+  assert.match(messages[0].content, /Prefer \[\]/);
+  assert.match(messages[0].content, /unaccepted requests/);
   const payload = JSON.parse(messages[1].content);
   assert.equal(payload.conversations[0].id, 'c1');
   assert.equal(payload.conversations[0].segments[0].id, 's1');
@@ -76,6 +82,19 @@ test('dynamic consolidation schema restricts every transcript reference to compa
   assert.notStrictEqual(schema.properties.conversationSections.items.properties.sourceSegmentIds.items,
     schema.properties.memories.items.properties.sourceSegmentIds.items);
   assert.equal(consolidationJsonSchema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, undefined);
+  assert.deepEqual(
+    schema.properties.memories.items.properties.miniMemories.items.properties.kind.enum,
+    [...GENERATED_MINI_MEMORY_KINDS],
+    'new highlights can only be action items',
+  );
+  assert.deepEqual(
+    schema.properties.memories.items.properties.miniMemories.items.properties.status.enum,
+    ['open'],
+  );
+  assert.equal(
+    schema.properties.memories.items.properties.miniMemories.items.properties.occurredAt.type,
+    'null',
+  );
 });
 
 test('local timestamp context includes daylight-saving offsets', () => {
@@ -91,14 +110,16 @@ test('local wall-clock references convert to UTC without model timezone arithmet
   assert.throws(() => localDateTimeToUtc('2026-03-29T02:30:00', 'Europe/Berlin'));
 });
 
-test('LLM temporal objects and status semantics normalize before persistence', () => {
+test('only actionable LLM highlights survive normalization before persistence', () => {
   const output = { memories: [{ miniMemories: [
     { kind: 'task', dueAt: { localDateTime: '2026-07-16T17:30:00', timezone: 'Europe/Berlin' }, occurredAt: null, status: 'open' },
     { kind: 'fact', dueAt: null, occurredAt: null, status: 'completed' },
+    { kind: 'promise', dueAt: null, occurredAt: null, status: 'completed' },
   ] }] };
   normalizeConsolidationTimestamps(output);
+  assert.equal(output.memories[0].miniMemories.length, 1);
   assert.equal(output.memories[0].miniMemories[0].dueAt, '2026-07-16T15:30:00.000Z');
-  assert.equal(output.memories[0].miniMemories[1].status, null);
+  assert.equal(output.memories[0].miniMemories[0].status, 'open');
 });
 
 test('episodic memory ranges are anchored to cited transcript evidence', () => {

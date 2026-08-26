@@ -400,7 +400,7 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
             eyebrow: 'MEMORIES',
             title: 'Moments that matter',
             description:
-                'Your conversations, distilled into clear memories and highlights — automatically.',
+                'Your conversations, distilled into clear memories and actionable highlights — automatically.',
             trailing: _selecting
                 ? TextButton(onPressed: _exitSelect, child: const Text('Done'))
                 : TextButton.icon(
@@ -490,9 +490,9 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
               const GlassSurface(
                 child: EmptyState(
                   icon: Icons.timeline_outlined,
-                  title: 'No highlights yet',
+                  title: 'No action items yet',
                   message:
-                      'Facts, tasks, promises, and people will appear here as a living timeline.',
+                      'Concrete assignments and commitments will appear here when a conversation creates them.',
                 ),
               )
             else

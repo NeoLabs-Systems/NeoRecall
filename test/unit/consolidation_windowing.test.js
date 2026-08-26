@@ -95,7 +95,7 @@ test('a section a window says it is continuing is folded into the previous one, 
     entities: [{ ref: 'p1', kind: 'person', canonicalNameEn: 'Maria', displayName: null, aliases: [], speakerAlias: null }],
     memories: [{ type: 'lesson', continuesPrevious: false, titleEn: 'Lecture', summaryEn: 'The first half.', emoji: '📚', importance: 7,
       sourceSegmentIds: ['s1', 's2'], topics: ['Physics'], entities: [{ ref: 'p1', role: 'teacher' }],
-      miniMemories: [{ kind: 'fact', textEn: 'Maria teaches the course.', importance: 5, confidence: 0.9, sourceSegmentIds: ['s1'], entities: [] }] }],
+      miniMemories: [{ kind: 'task', textEn: 'Maria will send the course notes.', importance: 5, confidence: 0.9, sourceSegmentIds: ['s1'], entities: [] }] }],
     dailySummary: null,
   }));
 
@@ -104,7 +104,7 @@ test('a section a window says it is continuing is folded into the previous one, 
     entities: [{ ref: 'p1', kind: 'person', canonicalNameEn: 'Maria', displayName: null, aliases: [], speakerAlias: null }],
     memories: [{ type: 'lesson', continuesPrevious: true, titleEn: 'Lecture', summaryEn: 'The whole lecture.', emoji: '📚', importance: 8,
       sourceSegmentIds: ['s3', 's4'], topics: ['Physics', 'Optics'], entities: [{ ref: 'p1', role: 'teacher' }],
-      miniMemories: [{ kind: 'fact', textEn: 'Optics is covered after the break.', importance: 4, confidence: 0.8, sourceSegmentIds: ['s4'], entities: [] }] }],
+      miniMemories: [{ kind: 'promise', textEn: 'Maria promised to share the optics worksheet.', importance: 4, confidence: 0.8, sourceSegmentIds: ['s4'], entities: [] }] }],
     dailySummary: null,
   }));
 

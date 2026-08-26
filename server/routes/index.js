@@ -17,6 +17,7 @@ router.get('/meta', requireAuth, (req, res) => {
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,
       chunkTargetMs: config.chunkTargetMs, chunkOverlapMs: config.chunkOverlapMs, importPartBytes: config.importPartBytes,
       minimumConsolidationIntervalMs: config.minConsolidationIntervalMs,
+      memoryMergeMaxItems: config.memoryMergeMaxItems,
       chunkReceiptBatch: CHUNK_RECEIPT_BATCH_LIMIT },
   });
 });

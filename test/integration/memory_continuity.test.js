@@ -141,8 +141,8 @@ function firstLessonOutput(body) {
     memories: [{ type: 'lesson', continuesPrevious: false, continuesMemoryIds: [],
       titleEn: 'Op-amp integrator lesson', summaryEn: 'The group worked through the integrator circuit.',
       emoji: '⚡', importance: 6, sourceSegmentIds: segmentIds, topics: ['Electronics'], entities: [],
-      miniMemories: [{ kind: 'fact', textEn: 'A 5V reference and 1k resistor limit the current to 5mA.',
-        importance: 6, confidence: 0.9, dueAt: null, occurredAt: null, status: null,
+      miniMemories: [{ kind: 'task', textEn: 'The instructor will send the lesson notes.',
+        importance: 6, confidence: 0.9, dueAt: null, occurredAt: null, status: 'open',
         sourceSegmentIds: [segmentIds[0]], entities: [] }] }],
     dailySummary: null,
   };
@@ -182,8 +182,8 @@ test('a lesson recorded in two stretches becomes one card, not two', async () =>
         continuesMemoryIds: [offeredCandidates[0].id],
         titleEn: 'Op-amp integrator lesson', summaryEn: 'The whole lesson: the integrator circuit and why the simulation disagreed.',
         emoji: '⚡', importance: 7, sourceSegmentIds: segmentIds, topics: ['Electronics'], entities: [],
-        miniMemories: [{ kind: 'fact', textEn: 'The simulation error came from the ideal capacitor model.',
-          importance: 6, confidence: 0.9, dueAt: null, occurredAt: null, status: null,
+        miniMemories: [{ kind: 'promise', textEn: 'The instructor promised to share the corrected simulation.',
+          importance: 6, confidence: 0.9, dueAt: null, occurredAt: null, status: 'open',
           sourceSegmentIds: [segmentIds[0]], entities: [] }] }],
       dailySummary: null,
     };
@@ -204,8 +204,8 @@ test('a lesson recorded in two stretches becomes one card, not two', async () =>
   assert.equal(after[0].started_at, '2026-08-25T08:00:00.000Z', 'it still starts when the lesson started');
   assert.equal(after[0].ended_at, '2026-08-25T08:40:00.000Z', 'and now runs to the end of the new material');
   assert.deepEqual(highlights(context.userId), [
-    'A 5V reference and 1k resistor limit the current to 5mA.',
-    'The simulation error came from the ideal capacitor model.',
+    'The instructor will send the lesson notes.',
+    'The instructor promised to share the corrected simulation.',
   ], 'highlights from both stretches are kept');
   // Both stretches remain attached as evidence.
   const sources = getDatabase().prepare(`SELECT COUNT(*) c FROM memory_sources ms

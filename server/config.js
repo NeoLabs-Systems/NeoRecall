@@ -277,6 +277,10 @@ function getConfig() {
     // recording continuity and transcript meaning still decide whether the
     // model claims any candidate, and no numeric similarity score merges data.
     maxMemoryContinuationCandidates: integer('NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES', 8, { min: 0, max: 32 }),
+    // Manual consolidation is structural work first and an optional prose
+    // rewrite second. Keep the request bounded for database/query safety while
+    // allowing a person to clean up a substantial backlog in one operation.
+    memoryMergeMaxItems: integer('NEORECALL_MEMORY_MERGE_MAX_ITEMS', 100, { min: 2, max: 500 }),
     // Ask is answered by the same external provider. These limits keep one
     // client from queueing more generation than the provider can work through
     // while recordings are still arriving.

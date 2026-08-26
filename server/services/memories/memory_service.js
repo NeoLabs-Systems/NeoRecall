@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit } = require('../../utils/pagination');
 const searchIndex = require('../../embeddings/search_index_service');
@@ -15,7 +16,6 @@ const {
 const ALLOWED_TYPES = new Set(MEMORY_TYPES);
 const BULK_ACTIONS = new Set(['delete', 'pin', 'unpin', 'archive', 'unarchive']);
 const MERGE_MIN = 2;
-const MERGE_MAX = 10;
 const MERGE_REWRITE_PRIORITY = 60;
 
 function presentMemory(row) {
@@ -335,11 +335,12 @@ function dailySummaries(userId, query = {}) {
 
 function loadMemoriesForMerge(userId, ids) {
   const uniqueIds = [...new Set(ids.map(String))];
+  const mergeMax = getConfig().memoryMergeMaxItems;
   if (uniqueIds.length < MERGE_MIN) {
     throw new HttpError(400, 'INVALID_MERGE', `Select at least ${MERGE_MIN} memories to merge.`);
   }
-  if (uniqueIds.length > MERGE_MAX) {
-    throw new HttpError(400, 'INVALID_MERGE', `Merge at most ${MERGE_MAX} memories at once.`);
+  if (uniqueIds.length > mergeMax) {
+    throw new HttpError(400, 'INVALID_MERGE', `Merge at most ${mergeMax} memories at once.`);
   }
   const db = getDatabase();
   const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${uniqueIds.map(() => '?').join(',')})`)

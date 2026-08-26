@@ -51,6 +51,7 @@ class NeoRecallApiClient {
   // pump to an HTTP route's validation details.
   static const int _legacyChunkReceiptBatch = 100;
   int maxChunkReceiptBatch = _legacyChunkReceiptBatch;
+  int? maxMemoryMergeItems;
 
   /// Compression is opt-in only after the authenticated server explicitly
   /// advertises support. This keeps queued audio compatible with older backend
@@ -58,6 +59,7 @@ class NeoRecallApiClient {
   Future<void> discoverServerCapabilities() async {
     supportsGzipAudioUpload = false;
     maxChunkReceiptBatch = _legacyChunkReceiptBatch;
+    maxMemoryMergeItems = null;
     if (token == null) return;
     try {
       final meta = await request('GET', '/api/v1/meta');
@@ -70,6 +72,12 @@ class NeoRecallApiClient {
           : null;
       if (advertisedBatch != null && advertisedBatch > 0) {
         maxChunkReceiptBatch = advertisedBatch;
+      }
+      final advertisedMemoryMergeMax = limits is Map
+          ? (limits['memoryMergeMaxItems'] as num?)?.toInt()
+          : null;
+      if (advertisedMemoryMergeMax != null && advertisedMemoryMergeMax >= 2) {
+        maxMemoryMergeItems = advertisedMemoryMergeMax;
       }
     } catch (_) {
       // Identity uploads are universally compatible and remain the safe
