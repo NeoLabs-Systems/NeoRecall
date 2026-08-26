@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../models/chunk.dart';
 import '../models/recording.dart';
+import '../models/recording_context.dart';
 import 'chunk_store_stub.dart'
     if (dart.library.io) 'chunk_store_io.dart'
     if (dart.library.html) 'chunk_store_web.dart'
@@ -39,6 +40,26 @@ abstract class ChunkStore {
   Future<void> purgeAll();
   Future<int> pendingBytes(String accountId);
   Future<void> close();
+}
+
+/// Durable storage used only by the recording-context feature.
+///
+/// Keeping this separate from [ChunkStore] means audio-only store fakes and
+/// integrations do not have to know about multimodal context.
+abstract interface class RecordingContextStore {
+  Future<void> putContext(RecordingContextItem item, Uint8List? bytes);
+  Future<List<RecordingContextItem>> contextItems(
+    String accountId, {
+    String? sessionId,
+    bool pendingOnly = false,
+  });
+  Future<Uint8List?> readContextBytes(RecordingContextItem item);
+  Future<void> setContextState(
+    String id,
+    LocalContextState state, {
+    String? error,
+  });
+  Future<void> releaseContextBytes(String id);
 }
 
 ChunkStore createChunkStore() => implementation.createChunkStore();

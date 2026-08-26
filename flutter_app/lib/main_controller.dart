@@ -23,6 +23,7 @@ import 'src/devices/omi/offline_sync.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
+import 'src/models/recording_context.dart';
 import 'src/models/speaker.dart';
 import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
@@ -43,6 +44,7 @@ part 'src/controller/auth_controller.dart';
 part 'src/controller/diagnostics_controller.dart';
 part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
+part 'src/controller/context_controller.dart';
 
 enum RecallPage {
   record,
@@ -65,7 +67,8 @@ class NeoRecallController extends ChangeNotifier
         AuthController,
         DeviceSyncController,
         DiagnosticsController,
-        LibraryController {
+        LibraryController,
+        ContextController {
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
@@ -111,6 +114,7 @@ class NeoRecallController extends ChangeNotifier
     'vocabularyCorrectionMinimumLength': 8,
     'vocabularyCorrectionEnabled': true,
     'automaticSpeakerVocabulary': <String>[],
+    'contextOriginalRetentionDays': 7,
   };
 
   static String get _defaultBackendUrl {
@@ -256,7 +260,9 @@ class NeoRecallController extends ChangeNotifier
     await mobile.background.updateLiveStatus(status);
     // Home-screen widgets read the same state the ongoing notification does,
     // so the two surfaces are updated from one place and cannot disagree.
-    await mobile.background.publishWidgetSnapshot(buildHomeWidgetSnapshot(status));
+    await mobile.background.publishWidgetSnapshot(
+      buildHomeWidgetSnapshot(status),
+    );
   }
 
   /// Today's day summary, and only today's.
@@ -282,7 +288,8 @@ class NeoRecallController extends ChangeNotifier
   /// Exposed rather than private so the shaping rules can be exercised directly:
   /// what today covers, which commitments are open, what a widget may see.
   HomeWidgetSnapshot buildHomeWidgetSnapshot([BackgroundLiveStatus? status]) {
-    final live = status ??
+    final live =
+        status ??
         (recorder is MobileRecallRecorder
             ? _buildLiveStatus(recorder as MobileRecallRecorder)
             : null);
@@ -544,6 +551,7 @@ class NeoRecallController extends ChangeNotifier
         runSync: _runDeviceStorageSync,
       );
   double audioLevel = 0;
+  @override
   DateTime? recordingStartedAt;
   RecorderCapability? capability;
   LocalRecordingDeclaration? _activeSession;
@@ -567,6 +575,7 @@ class NeoRecallController extends ChangeNotifier
   bool get authenticated => api.token != null && accountId != null;
   @override
   bool get isRecording => recorder.isRecording;
+  String? get activeRecordingSessionId => _activeSession?.id;
 
   RecordingSchedule get _recordingSchedule => RecordingSchedule(
     enabled: _cachedSettings['recordingScheduleEnabled'] as bool? ?? false,
@@ -734,6 +743,7 @@ class NeoRecallController extends ChangeNotifier
         await sync.initialize();
         _syncInitialized = true;
       }
+      await initializeRecordingContext();
       if (api.token != null && backendIsConfigured) {
         try {
           final payload = await api.request('GET', '/api/v1/auth/me') as Map;
@@ -949,7 +959,10 @@ class NeoRecallController extends ChangeNotifier
     });
     _networkSubscription = networkAvailability().listen((state) {
       online = state.connected;
-      if (state.connected) sync.pump.pump();
+      if (state.connected) {
+        sync.pump.pump();
+        unawaited(syncRecordingContext());
+      }
       unawaited(_refreshPending());
       notifyListeners();
     });
@@ -1125,7 +1138,6 @@ class NeoRecallController extends ChangeNotifier
     }
   }
 
-
   @override
   Future<void> _acceptSession(Map payload) async {
     final session = payload['session'] as Map;
@@ -1151,6 +1163,7 @@ class NeoRecallController extends ChangeNotifier
     await _settings();
     sync.pump.start();
     await _refreshPending();
+    unawaited(syncRecordingContext());
     if (recorder is MobileRecallRecorder) {
       _queueWatchImport((recorder as MobileRecallRecorder).background);
     }
@@ -1545,6 +1558,7 @@ class NeoRecallController extends ChangeNotifier
         sampleRate: capability!.sampleRate,
       );
       await store.putSession(_activeSession!);
+      await activateRecordingContext(sessionId);
       if (_supportsDurableMobileResume) {
         await _preferences!.setString(
           _mobileCaptureIntentKey(recordingAccountId),
@@ -1579,6 +1593,7 @@ class NeoRecallController extends ChangeNotifier
         }
       }
       _activeSession = null;
+      deactivateRecordingContext();
       recordingStartedAt = null;
       audioLevel = 0;
       if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
@@ -1681,6 +1696,7 @@ class NeoRecallController extends ChangeNotifier
         await _preferences!.remove(_mobileCaptureIntentKey(stoppingAccountId));
       }
       _activeSession = null;
+      deactivateRecordingContext();
       recordingStartedAt = null;
       audioLevel = 0;
       // The background battery warning is only meaningful during active capture.
@@ -1791,7 +1807,8 @@ class NeoRecallController extends ChangeNotifier
       try {
         changed = await _applyWidgetAction(action) || changed;
       } catch (exception) {
-        warning = 'A home-screen widget action could not be completed: $exception';
+        warning =
+            'A home-screen widget action could not be completed: $exception';
         ClientDiagnosticLog.instance.record(
           'widget_capture',
           'action_failed',
@@ -2872,7 +2889,6 @@ class NeoRecallController extends ChangeNotifier
   /// stored audio (so a subsequent live subscription can never be cross-fed).
   /// Safe to call when nothing is syncing.
 
-
   void selectPage(RecallPage value) {
     page = value;
     notifyListeners();
@@ -2901,6 +2917,7 @@ class NeoRecallController extends ChangeNotifier
     _syncProgressSub?.cancel();
     deviceStorageSync.dispose();
     sync.close();
+    disposeRecordingContext();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {
       unawaited(_disposeExternalDeviceRuntime());

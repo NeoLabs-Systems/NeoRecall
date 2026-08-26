@@ -19,6 +19,7 @@ import 'src/record/record_controls.dart';
 import 'src/record/source_picker.dart';
 import 'src/devices/audio_device_adapter.dart';
 import 'src/sync/processing_status.dart';
+import 'src/models/recording_context.dart';
 
 bool shouldRequestSystemAudio({
   required bool selected,
@@ -139,6 +140,104 @@ class _RecordScreenState extends State<RecordScreen> {
     );
   }
 
+  Future<void> _addHighlight() async {
+    final sessionId = widget.controller.activeRecordingSessionId;
+    if (sessionId == null) return;
+    await _runContextAction(
+      () => widget.controller.addRecordingHighlight(sessionId),
+    );
+  }
+
+  Future<void> _runContextAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _addNote() async {
+    final sessionId = widget.controller.activeRecordingSessionId;
+    if (sessionId == null) return;
+    final text = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final input = TextEditingController();
+        return AlertDialog(
+          title: const Text('Add a note'),
+          content: TextField(
+            controller: input,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              hintText:
+                  'Names, context, decisions, or anything the transcript may miss…',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, input.text),
+              child: const Text('Save note'),
+            ),
+          ],
+        );
+      },
+    );
+    if (text?.trim().isNotEmpty == true) {
+      await _runContextAction(
+        () => widget.controller.addRecordingNote(sessionId, text!),
+      );
+    }
+  }
+
+  Future<void> _addContextFile({required bool imageOnly}) async {
+    final sessionId = widget.controller.activeRecordingSessionId;
+    if (sessionId == null) return;
+    final selection = await FilePicker.platform.pickFiles(
+      withData: true,
+      type: imageOnly ? FileType.image : FileType.any,
+    );
+    final file = selection?.files.single;
+    if (file?.bytes == null) return;
+    final extension = (file!.extension ?? '').toLowerCase();
+    final contentType = imageOnly
+        ? 'image/${extension == 'jpg'
+              ? 'jpeg'
+              : extension.isEmpty
+              ? 'jpeg'
+              : extension}'
+        : switch (extension) {
+            'pdf' => 'application/pdf',
+            'docx' =>
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt' => 'text/plain',
+            'md' => 'text/markdown',
+            'csv' => 'text/csv',
+            'json' => 'application/json',
+            'png' ||
+            'jpg' ||
+            'jpeg' ||
+            'webp' => 'image/${extension == 'jpg' ? 'jpeg' : extension}',
+            _ => 'application/octet-stream',
+          };
+    await _runContextAction(
+      () => widget.controller.addRecordingFile(
+        sessionId: sessionId,
+        bytes: file.bytes!,
+        name: file.name,
+        contentType: contentType,
+      ),
+    );
+  }
+
   Future<void> _scan() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -218,6 +317,20 @@ class _RecordScreenState extends State<RecordScreen> {
           if (bluetoothPreferred && controller.preferredDeviceIsOfflineFirst)
             OfflineDeviceSyncCard(controller: controller),
         ];
+
+        if (controller.isRecording) {
+          return _ActiveRecordingWorkspace(
+            controller: controller,
+            alerts: alerts,
+            compact: compact,
+            gutter: gutter,
+            onStop: _toggle,
+            onHighlight: _addHighlight,
+            onNote: _addNote,
+            onPhoto: () => _addContextFile(imageOnly: true),
+            onFile: () => _addContextFile(imageOnly: false),
+          );
+        }
 
         final stage = _CaptureStage(
           recording: controller.isRecording,
@@ -544,6 +657,243 @@ class _RecordScreenState extends State<RecordScreen> {
   ];
 }
 
+class _ActiveRecordingWorkspace extends StatelessWidget {
+  const _ActiveRecordingWorkspace({
+    required this.controller,
+    required this.alerts,
+    required this.compact,
+    required this.gutter,
+    required this.onStop,
+    required this.onHighlight,
+    required this.onNote,
+    required this.onPhoto,
+    required this.onFile,
+  });
+
+  final NeoRecallController controller;
+  final List<Widget> alerts;
+  final bool compact;
+  final double gutter;
+  final Future<void> Function() onStop;
+  final Future<void> Function() onHighlight;
+  final Future<void> Function() onNote;
+  final Future<void> Function() onPhoto;
+  final Future<void> Function() onFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final stage = _CaptureStage(
+      recording: true,
+      level: controller.audioLevel,
+      startedAt: controller.recordingStartedAt,
+      processing: controller.processingStatus,
+      showRecordButton: true,
+      onToggle: onStop,
+      onRetry: controller.retryFailedUploads,
+      onUploadWithMobileData: controller.uploadQueuedAudioOnMobileDataOnce,
+      onReview: () => showPendingAudioReviewSheet(context, controller),
+      footnote:
+          'Add context as it happens. Every item is stored locally before it is synchronized.',
+    );
+    final contextPanel = _RecordingContextPanel(
+      items: controller.activeRecordingContext,
+      onHighlight: onHighlight,
+      onNote: onNote,
+      onPhoto: onPhoto,
+      onFile: onFile,
+    );
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(
+        gutter,
+        compact ? AppSpacing.lg : 28,
+        gutter,
+        48,
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1240),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              const ScreenHeader(
+                eyebrow: 'LIVE CAPTURE',
+                title: 'Recording in progress',
+                description:
+                    'Mark important moments and add notes, images, or documents without leaving the recording.',
+              ),
+              for (final alert in alerts) ...<Widget>[
+                alert,
+                const SizedBox(height: AppSpacing.md),
+              ],
+              if (compact) ...<Widget>[
+                stage,
+                const SizedBox(height: AppSpacing.md + 2),
+                contextPanel,
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(flex: 5, child: stage),
+                    const SizedBox(width: AppSpacing.md + 2),
+                    Expanded(flex: 6, child: contextPanel),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingContextPanel extends StatelessWidget {
+  const _RecordingContextPanel({
+    required this.items,
+    required this.onHighlight,
+    required this.onNote,
+    required this.onPhoto,
+    required this.onFile,
+  });
+
+  final List<RecordingContextItem> items;
+  final Future<void> Function() onHighlight;
+  final Future<void> Function() onNote;
+  final Future<void> Function() onPhoto;
+  final Future<void> Function() onFile;
+
+  String _time(int milliseconds) {
+    final duration = Duration(milliseconds: milliseconds);
+    return '${duration.inMinutes.toString().padLeft(2, '0')}:${duration.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    Widget action(
+      String key,
+      IconData icon,
+      String label,
+      Future<void> Function() callback,
+    ) => OutlinedButton.icon(
+      key: ValueKey<String>(key),
+      onPressed: () => unawaited(callback()),
+      icon: Icon(icon),
+      label: Text(label),
+    );
+    return GlassSurface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            'Recording context',
+            style: TextStyle(
+              color: palette.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'These sources help NeoRecall understand what matters and improve the final memory.',
+            style: TextStyle(color: palette.textMuted, height: 1.4),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              action(
+                'recording-context-highlight',
+                Icons.flag_outlined,
+                'Highlight',
+                onHighlight,
+              ),
+              action(
+                'recording-context-note',
+                Icons.edit_note_rounded,
+                'Note',
+                onNote,
+              ),
+              action(
+                'recording-context-photo',
+                Icons.add_a_photo_outlined,
+                'Photo',
+                onPhoto,
+              ),
+              action(
+                'recording-context-file',
+                Icons.attach_file_rounded,
+                'File',
+                onFile,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          if (items.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: palette.bgSecondary.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                'No context added yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: palette.textMuted),
+              ),
+            )
+          else
+            for (final item in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: palette.bgSecondary.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: palette.border),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        _time(item.capturedOffsetMs),
+                        style: TextStyle(
+                          color: palette.accentHover,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          item.noteText ??
+                              item.originalName ??
+                              'Highlighted moment',
+                          style: TextStyle(color: palette.textPrimary),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        item.state == LocalContextState.synced
+                            ? Icons.cloud_done_outlined
+                            : item.state == LocalContextState.failed
+                            ? Icons.cloud_off_outlined
+                            : Icons.cloud_upload_outlined,
+                        size: 17,
+                        color: item.state == LocalContextState.failed
+                            ? palette.danger
+                            : palette.textMuted,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The capture stage: an audio-reactive orb, the live clock, and the primary
 /// record control.
 ///
@@ -719,4 +1069,3 @@ class _CaptureStageState extends State<_CaptureStage>
     );
   }
 }
-

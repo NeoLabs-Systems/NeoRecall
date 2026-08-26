@@ -133,6 +133,13 @@ function absorbClaimed(database, userId, publicIds) {
     copyRelations(database, 'memory_topics', ['memory_id', 'topic'], target.id, memory.id);
     copyRelations(database, 'memory_entities', ['memory_id', 'entity_id', 'role'], target.id, memory.id);
     copyRelations(database, 'memory_sources', ['memory_id', 'conversation_id', 'segment_id'], target.id, memory.id);
+    const contextLinks = database.prepare('SELECT context_item_id,used_by_ai FROM memory_context_sources WHERE memory_id=?').all(memory.id);
+    const insertContext = database.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
+      VALUES (?,?,?) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=MAX(used_by_ai,excluded.used_by_ai)`);
+    for (const item of contextLinks) insertContext.run(target.id, item.context_item_id, item.used_by_ai);
+    database.prepare(`UPDATE recording_context_items SET memory_id=?,
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE memory_id=? AND user_id=?`)
+      .run(target.id, memory.id, userId);
   }
   if (absorbed.length) {
     searchIndex.removeBySources(database, userId, absorbed.map((memory) => ({ kind: 'memory', sourceId: memory.id })));

@@ -13,6 +13,7 @@ const searchIndex = require('../../embeddings/search_index_service');
 const memoryContinuity = require('./memory_continuity_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
+const contextMaterial = require('../context/context_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
 const { createLogger } = require('../../utils/logger');
 
@@ -88,7 +89,8 @@ function failureBackoff(userId) {
 
 function candidateConversations(userId) {
   return material.listByState(userId, ['closed'])
-    .filter((conversation) => material.isComplete(userId, conversation.id));
+    .filter((conversation) => material.isComplete(userId, conversation.id))
+    .filter((conversation) => contextMaterial.sessionComplete(userId, conversation.session_id));
 }
 
 // True when the most recent consolidation could not be validated.
@@ -117,6 +119,7 @@ function buildCandidates(userId) {
     characters += size;
   }
   const audioMs = output.reduce((sum, conversation) => sum + material.durationMs(conversation), 0);
+  contextMaterial.attach(userId, output);
   return { conversations: output, characters, audioMs, narrowed };
 }
 
@@ -375,6 +378,15 @@ function persistMemory(database, { userId, runId, memory, refined, entityIds }) 
   for (const segmentPublicId of memory.sourceSegmentIds) {
     attachSource(memoryId, null, segmentId.get(segmentPublicId, userId).id);
   }
+  const sourceIds = new Set(memory.sourceSegmentIds);
+  const contextIds = refined.inputConversations
+    .filter((conversation) => conversation.segments.some((segment) => sourceIds.has(segment.id)))
+    .flatMap((conversation) => (conversation.contextItems || [])
+      .filter((item) => !item.sourceSegmentId || sourceIds.has(item.sourceSegmentId))
+      .map((item) => item.id));
+  const contextInsert = database.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
+    VALUES (?,?,1) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=1`);
+  for (const contextId of new Set(contextIds)) contextInsert.run(memoryId, contextId);
   const topicInsert = database.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
   for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
   const memoryEntityInsert = database.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
@@ -428,6 +440,7 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
       output.conversationSections,
       conversations,
     );
+    refined.inputConversations = conversations;
     const worthyConversations = refined.conversations.filter((conversation) => conversation.memoryWorthy);
     for (const entity of output.entities) {
       const identity = normalizeIdentity(entity.canonicalNameEn);

@@ -26,6 +26,7 @@ async function handle(job) {
     const importService = require('../../services/ingest/import_service');
     const importsCompleted = importService.reconcileProcessing();
     const importOrphansRemoved = importService.sweepOrphans();
+    const contextOriginalsRemoved = require('../../services/context/context_service').cleanupExpiredOriginals();
     for (const expired of db.prepare("SELECT * FROM imports WHERE state='failed' AND expires_at<?").all(new Date().toISOString())) {
       if (expired.temporary_path) { try { require('node:fs').unlinkSync(expired.temporary_path); } catch (_) {} }
       const session = db.prepare('SELECT id FROM recording_sessions WHERE user_id=? AND client_uuid=?').get(expired.user_id, `import-${expired.id}`);
@@ -37,7 +38,7 @@ async function handle(job) {
       }
       db.prepare("UPDATE imports SET temporary_path=NULL,state='cancelled',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(expired.id);
     }
-    return { finalized, importsCompleted, importOrphansRemoved };
+    return { finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved };
   }
   return { skipped: true };
 }

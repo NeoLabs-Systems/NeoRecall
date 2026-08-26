@@ -88,6 +88,20 @@ function wireResponseFormat(responseFormat) {
   };
 }
 
+function openAiMessages(messages) {
+  return messages.map((message) => !Array.isArray(message.content) ? message : ({
+    ...message,
+    content: message.content.map((part) => part.type === 'input_image'
+      ? { type: 'image_url', image_url: { url: `data:${part.mediaType};base64,${part.data}` } }
+      : part),
+  }));
+}
+
+function containsImage(messages) {
+  return messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part.type === 'input_image'));
+}
+
 // Asks a model not to deliberate before answering. Not standardised, so it is
 // never sent unprompted: a strict API rejects body fields it does not
 // recognise. Sent only after a real truncation, and only if the operator has
@@ -183,7 +197,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
         ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
       },
       body: JSON.stringify({
-        model, messages, response_format: wireResponseFormat(responseFormat) || { type: 'json_object' },
+        model, messages: openAiMessages(messages), response_format: wireResponseFormat(responseFormat) || { type: 'json_object' },
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(extraBody || {}),
       }),
@@ -192,6 +206,11 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     const { payload } = response;
     if (!response.ok) {
       const detail = payload?.error?.message || `The AI endpoint returned HTTP ${response.status}.`;
+      if (containsImage(messages) && [400, 413, 415, 422].includes(response.status)) {
+        throw Object.assign(new Error('The configured model rejected image input.'), {
+          code: 'AI_MEDIA_REJECTED', status: response.status,
+        });
+      }
       if (contextOverflow(response.status, payload, detail)) {
         throw Object.assign(new Error(`The request was longer than the model's context allows: ${detail} Lower LLM_CONTEXT_SIZE to match the endpoint, or lower NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS.`), {
           code: 'AI_CONTEXT_EXCEEDED', status: response.status,
@@ -226,4 +245,4 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
   }
 }
 
-module.exports = { chatJSON, ready, contextOverflow, schemaRejected, wireSchema, wireResponseFormat, NO_THINKING };
+module.exports = { chatJSON, ready, contextOverflow, schemaRejected, wireSchema, wireResponseFormat, openAiMessages, NO_THINKING };

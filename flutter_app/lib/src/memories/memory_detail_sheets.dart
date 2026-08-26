@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../../main_controller.dart';
 import '../../main_theme.dart';
@@ -28,6 +29,81 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
   @override
   Future<Map<String, dynamic>> fetchDetail() =>
       widget.controller.loadMemoryDetail(widget.memory.id);
+
+  List<Map<String, dynamic>> get contextItems => listField('contextItems');
+
+  Future<void> _addNote() async {
+    final input = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Add memory context'),
+        content: TextField(
+          controller: input,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            hintText: 'Add details that should improve this memory…',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, input.text),
+            child: const Text('Add and update'),
+          ),
+        ],
+      ),
+    );
+    if (text?.trim().isEmpty ?? true) return;
+    await widget.controller.addMemoryNoteContext(widget.memory.id, text!);
+    await loadDetail();
+  }
+
+  Future<void> _addFile() async {
+    final selection = await FilePicker.platform.pickFiles(
+      withData: true,
+      type: FileType.any,
+    );
+    final file = selection?.files.single;
+    if (file?.bytes == null) return;
+    final extension = (file!.extension ?? '').toLowerCase();
+    final contentType = switch (extension) {
+      'pdf' => 'application/pdf',
+      'docx' =>
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'txt' => 'text/plain',
+      'md' => 'text/markdown',
+      'csv' => 'text/csv',
+      'json' => 'application/json',
+      'png' ||
+      'jpg' ||
+      'jpeg' ||
+      'webp' => 'image/${extension == 'jpg' ? 'jpeg' : extension}',
+      _ => 'application/octet-stream',
+    };
+    await widget.controller.addMemoryFileContext(
+      widget.memory.id,
+      file.bytes!,
+      file.name,
+      contentType,
+    );
+    await loadDetail();
+  }
+
+  Future<void> _removeContext(String id) async {
+    await widget.controller.deleteMemoryContext(widget.memory.id, id);
+    await loadDetail();
+  }
+
+  Future<void> _retryContext(String id) async {
+    await widget.controller.retryMemoryContext(widget.memory.id, id);
+    await loadDetail();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -247,6 +323,136 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                           ),
                       ],
                       const SizedBox(height: 22),
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              'Context',
+                              style: _sectionStyle(palette),
+                            ),
+                          ),
+                          TextButton.icon(
+                            key: const ValueKey<String>('memory-context-note'),
+                            onPressed: _addNote,
+                            icon: const Icon(Icons.edit_note_rounded, size: 18),
+                            label: const Text('Note'),
+                          ),
+                          TextButton.icon(
+                            key: const ValueKey<String>('memory-context-file'),
+                            onPressed: _addFile,
+                            icon: const Icon(
+                              Icons.attach_file_rounded,
+                              size: 18,
+                            ),
+                            label: const Text('File'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      if (contextItems.isEmpty)
+                        Text(
+                          'No notes or files are attached to this memory.',
+                          style: TextStyle(color: palette.textMuted),
+                        )
+                      else
+                        for (final item in contextItems)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: palette.bgSecondary.withValues(
+                                  alpha: 0.65,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: palette.border),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Icon(
+                                    item['kind'] == 'image'
+                                        ? Icons.image_outlined
+                                        : item['kind'] == 'note'
+                                        ? Icons.edit_note_rounded
+                                        : item['kind'] == 'highlight'
+                                        ? Icons.flag_outlined
+                                        : Icons.description_outlined,
+                                    color: palette.accentHover,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          (item['noteText'] ??
+                                                  item['originalName'] ??
+                                                  'Highlighted moment')
+                                              .toString(),
+                                          style: TextStyle(
+                                            color: palette.textPrimary,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        if ((item['analysisText'] as String?)
+                                                ?.trim()
+                                                .isNotEmpty ==
+                                            true) ...<Widget>[
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            item['analysisText'] as String,
+                                            style: TextStyle(
+                                              color: palette.textSoft,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                        ],
+                                        const SizedBox(height: 5),
+                                        Text(
+                                          item['analysisState'] == 'ready'
+                                              ? (item['usedByAi'] == true
+                                                    ? 'Used by AI'
+                                                    : 'Ready for AI')
+                                              : (item['analysisErrorMessage'] ??
+                                                        item['analysisState'])
+                                                    .toString(),
+                                          style: TextStyle(
+                                            color: palette.textMuted,
+                                            fontSize: 11.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (item['originalAvailable'] == true &&
+                                      (item['analysisState'] == 'failed' ||
+                                          item['analysisState'] == 'skipped'))
+                                    IconButton(
+                                      tooltip: 'Retry analysis',
+                                      onPressed: () =>
+                                          _retryContext(item['id'] as String),
+                                      icon: const Icon(
+                                        Icons.refresh_rounded,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  IconButton(
+                                    tooltip: 'Remove context',
+                                    onPressed: () =>
+                                        _removeContext(item['id'] as String),
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      const SizedBox(height: 22),
                       Text(
                         'From the conversation',
                         style: _sectionStyle(palette),
@@ -322,7 +528,10 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
 
 class MiniDetailSheet extends StatefulWidget {
   const MiniDetailSheet({
-    super.key,required this.controller, required this.mini});
+    super.key,
+    required this.controller,
+    required this.mini,
+  });
 
   final NeoRecallController controller;
   final MiniMemory mini;

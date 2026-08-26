@@ -8,17 +8,18 @@ import 'package:uuid/uuid.dart';
 
 import '../models/chunk.dart';
 import '../models/recording.dart';
+import '../models/recording_context.dart';
 import 'chunk_store.dart';
 
 ChunkStore createChunkStore() => WebChunkStore();
 
-class WebChunkStore implements ChunkStore {
+class WebChunkStore implements ChunkStore, RecordingContextStore {
   Database? _database;
   @override
   Future<void> initialize() async {
     _database = await idbFactoryBrowser.open(
       'neorecall-offline-v1',
-      version: 2,
+      version: 3,
       onUpgradeNeeded: (event) {
         final database = event.database;
         if (!database.objectStoreNames.contains('chunks')) {
@@ -26,6 +27,9 @@ class WebChunkStore implements ChunkStore {
         }
         if (!database.objectStoreNames.contains('sessions')) {
           database.createObjectStore('sessions', keyPath: 'id');
+        }
+        if (!database.objectStoreNames.contains('contexts')) {
+          database.createObjectStore('contexts', keyPath: 'id');
         }
       },
     );
@@ -414,6 +418,89 @@ class WebChunkStore implements ChunkStore {
   }
 
   @override
+  Future<void> putContext(RecordingContextItem item, Uint8List? bytes) async {
+    final transaction = db.transaction('contexts', 'readwrite');
+    final value = <String, dynamic>{...item.toMap(includeBytes: false)};
+    if (bytes != null) value['bytes'] = bytes;
+    await transaction.objectStore('contexts').put(value);
+    await transaction.completed;
+  }
+
+  @override
+  Future<List<RecordingContextItem>> contextItems(
+    String accountId, {
+    String? sessionId,
+    bool pendingOnly = false,
+  }) async {
+    final transaction = db.transaction('contexts', 'readonly');
+    final values = await transaction.objectStore('contexts').getAll();
+    await transaction.completed;
+    final pendingStates = <LocalContextState>{
+      LocalContextState.pending,
+      LocalContextState.uploading,
+      LocalContextState.failed,
+    };
+    final items = values
+        .cast<Map>()
+        .map(
+          (value) =>
+              RecordingContextItem.fromMap(Map<String, dynamic>.from(value)),
+        )
+        .where((item) => item.accountId == accountId)
+        .where((item) => sessionId == null || item.sessionId == sessionId)
+        .where((item) => !pendingOnly || pendingStates.contains(item.state))
+        .toList();
+    items.sort(
+      (left, right) => left.capturedOffsetMs.compareTo(right.capturedOffsetMs),
+    );
+    return items;
+  }
+
+  @override
+  Future<Uint8List?> readContextBytes(RecordingContextItem item) async {
+    final transaction = db.transaction('contexts', 'readonly');
+    final value = await transaction.objectStore('contexts').getObject(item.id);
+    await transaction.completed;
+    final bytes = value is Map ? value['bytes'] : null;
+    if (bytes is Uint8List) return bytes;
+    if (bytes is List) return Uint8List.fromList(bytes.cast<int>());
+    return null;
+  }
+
+  @override
+  Future<void> setContextState(
+    String id,
+    LocalContextState state, {
+    String? error,
+  }) async {
+    final transaction = db.transaction('contexts', 'readwrite');
+    final store = transaction.objectStore('contexts');
+    final value = await store.getObject(id);
+    if (value is Map) {
+      await store.put(<String, dynamic>{
+        ...Map<String, dynamic>.from(value),
+        'state': state.name,
+        'error': error,
+      });
+    }
+    await transaction.completed;
+  }
+
+  @override
+  Future<void> releaseContextBytes(String id) async {
+    final transaction = db.transaction('contexts', 'readwrite');
+    final store = transaction.objectStore('contexts');
+    final value = await store.getObject(id);
+    if (value is Map) {
+      final map = Map<String, dynamic>.from(value)..remove('bytes');
+      map['state'] = LocalContextState.synced.name;
+      map['error'] = null;
+      await store.put(map);
+    }
+    await transaction.completed;
+  }
+
+  @override
   Future<void> close() async {
     db.close();
     _database = null;
@@ -426,5 +513,8 @@ class WebChunkStore implements ChunkStore {
     final sessions = db.transaction('sessions', 'readwrite');
     await sessions.objectStore('sessions').clear();
     await sessions.completed;
+    final contexts = db.transaction('contexts', 'readwrite');
+    await contexts.objectStore('contexts').clear();
+    await contexts.completed;
   }
 }

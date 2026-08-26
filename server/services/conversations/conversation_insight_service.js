@@ -9,6 +9,7 @@ const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const { inputBudgetCharacters } = require('../../ai/context_budget');
 const material = require('./conversation_material_service');
+const contextMaterial = require('../context/context_material_service');
 
 // Live insight for a conversation consolidation will not describe.
 //
@@ -160,6 +161,7 @@ function describedCharacters(allSegments, sent) {
 // continues on the next refresh instead of the request failing.
 function previewInput(userId, conversation, limits, database = getDatabase()) {
   const all = material.material(userId, conversation, database);
+  contextMaterial.attach(userId, [all], database);
   const rolling = conversation.insight_state === PROVISIONAL
     && conversation.insight_covered_through
     && conversation.title_en

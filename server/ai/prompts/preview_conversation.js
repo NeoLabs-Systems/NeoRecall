@@ -25,6 +25,7 @@ Revise the title when the new speech shows the conversation is really about some
 const SHARED_INSTRUCTIONS = `titleEn, summaryEn and topics MUST be English even when the transcript is German or another language. Preserve proper names accurately.
 The title is a concise specific name for this conversation, the kind a person would use to find it again — name the meeting, the lesson, the task or the subject rather than describing the recording.
 The summary is a faithful standalone account of what has been said so far. Do not invent facts, decisions or participants.
+User-supplied contextItems are evidence captured during the conversation. Use ready notes and analyzed files to clarify names, facts and emphasis, while never presenting a document's plans as spoken decisions or completed events. A highlight adds emphasis but no new facts.
 Set memoryWorthy true only when the transcript so far is clearly becoming a substantial occasion a person would open later as its own memory card (a meeting, lesson, multi-turn discussion, decision session, or similar). Set it false for brief exchanges, hellos, logistics, ambient chatter, or anything whose whole value is a single small fact — those are not full memories. An accurate title and summary are required either way.
 Return no prose outside JSON.`;
 

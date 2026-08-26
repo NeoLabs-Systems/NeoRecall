@@ -34,7 +34,9 @@ function anthropicMessages(messages, responseFormat) {
   const system = messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n');
   const conversation = messages.filter((message) => message.role !== 'system').map((message) => ({
     role: message.role === 'assistant' ? 'assistant' : 'user',
-    content: message.content,
+    content: Array.isArray(message.content) ? message.content.map((part) => part.type === 'input_image'
+      ? { type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.data } }
+      : part) : message.content,
   }));
   const schema = responseFormat?.type === 'json_schema' ? responseFormat.json_schema?.schema : null;
   const schemaInstruction = schema
@@ -76,6 +78,12 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
+      const hasImage = messages.some((message) => Array.isArray(message.content)
+        && message.content.some((part) => part.type === 'input_image'));
+      if (hasImage && [400, 413, 415, 422].includes(response.status)) {
+        const error = new Error('The configured model rejected image input.');
+        error.code = 'AI_MEDIA_REJECTED'; error.status = response.status; throw error;
+      }
       const error = new Error(payload?.error?.message || `Anthropic returned HTTP ${response.status}.`);
       error.code = 'AI_HTTP_ERROR'; error.status = response.status; throw error;
     }

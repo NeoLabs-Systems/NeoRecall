@@ -70,6 +70,14 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
           text: segment.text,
         };
       }),
+      contextItems: (conversation.contextItems || []).map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        offsetMs: Math.max(0, Date.parse(item.capturedAt) - conversationStart),
+        sourceName: item.sourceName || null,
+        content: item.content || null,
+        analysisState: item.analysisState,
+      })),
     };
   });
 
@@ -208,6 +216,7 @@ function consolidationMessages({ conversations, previousDailySummary, timezone, 
 All titles, summaries, topics, canonical entity names, and mini-memory text MUST be English, even when the source transcript is German or another language. Preserve proper names accurately.
 The input conversation objects are provisional local groups, not authoritative conversation boundaries. Produce conversationSections that partition the transcript into coherent real-world conversations or topic areas. You may merge adjacent input conversations when they belong to the same stream and same real conversation, and split any input conversation when its topic or real-world conversation changes. Never combine segments from different streams. A speaker change alone, a brief aside, or a short pause is not a topic boundary. Do not force a fixed number or duration of sections.
 Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories are action items only and must be atomic and evidence-backed.
+User-supplied contextItems are evidence associated with the moment they were captured. Use ready notes and analyzed files to clarify names, facts and emphasis. A document may describe a plan or reference material rather than something said or completed; never misrepresent it as a spoken decision or finished event. A highlight marks the nearby transcript as important but adds no facts of its own.
 memoryWorthy is a high bar. Set it true only for a substantial real-world occasion someone would open later as its own card — a meeting, lesson, multi-turn discussion, decision session, introduction with lasting context, or other experience with lasting narrative. Set it false for brief exchanges, hellos, logistics check-ins, one- or two-turn replies, ambient chatter, or any short stretch whose whole value is a single action item. Those short items are not memories: if they appear inside a larger worthy occasion, put the action item in miniMemories under that memory; if the whole conversation is short and not a real occasion, mark the section not memory-worthy and create no memory for it.
 One real-world occasion is one memory. A single continuous meeting, lesson, lecture or call produces exactly one memory covering all of it, however long it ran and however many topics it moved through; use its internal topics and mini-memories to carry the detail instead of splitting it into several memories. A recording that merely spans a whole day is not one occasion: it produces one memory per distinct real-world occasion it captured. Prefer zero memories over inventing thin ones. Choose the memory type that matches the occasion, and use ${alternatives(MEMORY_TYPES)} exactly as named — lesson covers a class, lecture, seminar or any taught session.
 continuationCandidates are memory cards NeoRecall already wrote, close enough in time or recording to be worth comparing with this input. Each carries minutesBeforeThisInput (how long after that card ended this input begins) and recordedInSameStreamAsThisInput (whether the recording ran on without stopping).

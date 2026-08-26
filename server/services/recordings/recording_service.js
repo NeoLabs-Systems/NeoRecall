@@ -44,6 +44,10 @@ function removeDerivedData(database, userId, session) {
         WHERE c.session_id=? AND t.user_id=? AND t.conversation_id IS NOT NULL)
     )`).all(userId, session.id, userId, session.id, userId);
   const memoryIds = memories.map((row) => row.id);
+  const contextOriginals = memoryIds.length
+    ? database.prepare(`SELECT original_path FROM recording_context_items WHERE user_id=?
+      AND memory_id IN (${memoryIds.map(() => '?').join(',')}) AND original_path IS NOT NULL`).all(userId, ...memoryIds)
+    : [];
   const miniIds = memoryIds.length
     ? database.prepare(`SELECT id FROM mini_memories WHERE user_id=? AND memory_id IN (${memoryIds.map(() => '?').join(',')})`).all(userId, ...memoryIds).map((row) => row.id)
     : [];
@@ -67,6 +71,7 @@ function removeDerivedData(database, userId, session) {
   for (const conversationId of conversationIds) database.prepare('DELETE FROM conversations WHERE id=? AND user_id=?').run(conversationId, userId);
   database.prepare(`DELETE FROM entities WHERE user_id=? AND id NOT IN (SELECT entity_id FROM memory_entities)
     AND id NOT IN (SELECT entity_id FROM mini_memory_entities) AND id NOT IN (SELECT entity_id FROM voiceprints WHERE entity_id IS NOT NULL)`).run(userId);
+  return contextOriginals;
 }
 
 function rebuildAffectedVoiceprints(database, userId, sessionId) {
@@ -118,17 +123,28 @@ function remove(userId, id) {
   const session = get(userId, id);
   const db = getDatabase();
   const temporaryFiles = db.prepare('SELECT temporary_path FROM audio_chunks WHERE session_id=? AND user_id=? AND temporary_path IS NOT NULL').all(id, userId);
+  const contextFiles = db.prepare('SELECT original_path FROM recording_context_items WHERE session_id=? AND user_id=? AND original_path IS NOT NULL').all(id, userId);
+  let derivedContextFiles = [];
   db.transaction(() => {
-    removeDerivedData(db, userId, session);
+    derivedContextFiles = removeDerivedData(db, userId, session);
     rebuildAffectedVoiceprints(db, userId, id);
     db.prepare(`UPDATE jobs SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL,
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
       WHERE user_id=? AND status IN ('queued','leased') AND resource_id IN (SELECT id FROM audio_chunks WHERE session_id=?)`).run(userId, id);
+    db.prepare(`UPDATE jobs SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL,
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id=? AND status IN ('queued','leased') AND resource_type='recording_context'
+        AND resource_id IN (SELECT id FROM recording_context_items WHERE session_id=?)`).run(userId, id);
     db.prepare('DELETE FROM recording_sessions WHERE id=? AND user_id=?').run(id, userId);
   })();
   for (const row of temporaryFiles) {
     try { fs.unlinkSync(row.temporary_path); } catch (error) {
       if (error.code !== 'ENOENT') logger.error('Recording was deleted but a temporary audio file needs sweep cleanup', { error, path: row.temporary_path });
+    }
+  }
+  for (const row of [...contextFiles, ...derivedContextFiles]) {
+    try { fs.unlinkSync(row.original_path); } catch (error) {
+      if (error.code !== 'ENOENT') logger.error('Recording was deleted but an attached context file needs sweep cleanup', { error, path: row.original_path });
     }
   }
 }

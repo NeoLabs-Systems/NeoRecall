@@ -17,6 +17,8 @@ function handlerFor(type) {
   if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
   if (type === 'rewrite_merged_memory') return require('./handlers/memory_merge_handler');
+  if (type === 'analyze_context') return require('./handlers/context_analysis_handler');
+  if (type === 'rewrite_memory_context') return require('./handlers/memory_context_rewrite_handler');
   if (['maintenance', 'prune_events'].includes(type)) return require('./handlers/maintenance_handler');
   if (type === 'process_import') return require('./handlers/import_handler');
   if (type === 'backup') return require('./handlers/backup_handler');

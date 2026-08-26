@@ -13,6 +13,8 @@ NeoRecall is designed for explicit, authorized recording. It does not determine 
 - anonymous speaker turns, optional user-named voiceprint centroids, and one
   derived 5–10 second clean voice preview per recurring speaker;
 - conversations, English memories, mini-memories, and daily summaries;
+- user-added recording context, including retained originals and derived text
+  or image descriptions;
 - local search vectors and metadata;
 - operational audit, job, and AI-request records.
 
@@ -23,6 +25,13 @@ intentionally retained audio and exists solely so the user can identify and
 name a recurring speaker. Temporary source files have restrictive permissions,
 and neither they nor any audio are included in a NeoRecall backup, which
 snapshots the database only.
+
+Context originals are different from recording audio: the account intentionally
+attaches them as memory sources. They are retained for seven days by default.
+Each user can choose 1–365 days in Settings; shortening the period applies
+retroactively. Expiry removes the original file but keeps extracted text and AI
+analysis so an existing memory does not silently lose its evidence. Deleting a
+context item removes both its original and its derived content.
 
 ## Backups
 

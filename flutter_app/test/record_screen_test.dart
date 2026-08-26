@@ -53,6 +53,24 @@ void main() {
     expect(find.text('00:03:05'), findsOneWidget);
     expect(find.text('Stop and finalize'), findsOneWidget);
     expect(find.text('Start recording'), findsNothing);
+    expect(find.text('CAPTURE SOURCE'), findsNothing);
+    expect(find.text('CAPTURE SOURCES'), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('recording-context-highlight')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('recording-context-note')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('recording-context-photo')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('recording-context-file')),
+      findsOneWidget,
+    );
     expect(find.text('Uploading to server'), findsOneWidget);
     expect(find.textContaining('3.0 MB protected'), findsOneWidget);
     expect(find.textContaining('1h 12m audio'), findsOneWidget);

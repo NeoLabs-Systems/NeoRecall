@@ -31,7 +31,25 @@ async function accountWithData(username) {
   db.prepare('INSERT INTO speaker_previews (voiceprint_id,user_id,audio,duration_ms,quality) VALUES (?,?,?,?,?)')
     .run(voiceprintId, userId, Buffer.from('audio'), 2000, 0.9);
 
-  return { userId, token, voiceprintId };
+  const deviceId = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
+  const contextId = crypto.randomUUID();
+  const contextPath = path.join(process.env.NEORECALL_HOME, `${contextId}.txt`);
+  const contextBytes = Buffer.from('Private attached context');
+  fs.writeFileSync(contextPath, contextBytes);
+  db.prepare(`INSERT INTO devices (id,user_id,client_uuid,name,platform,kind)
+    VALUES (?,?,?,?,?,'desktop')`).run(deviceId, userId, deviceId, 'Deletion test', 'test');
+  db.prepare(`INSERT INTO recording_sessions
+    (id,user_id,device_id,client_uuid,device_started_at,corrected_started_at,timezone,consent_attested_at,status)
+    VALUES (?,?,?,?,?,?,?,?,'ended')`).run(sessionId, userId, deviceId, sessionId,
+    '2026-08-26T08:00:00.000Z', '2026-08-26T08:00:00.000Z', 'UTC', '2026-08-26T07:59:59.000Z');
+  db.prepare(`INSERT INTO recording_context_items
+    (id,user_id,session_id,kind,captured_offset_ms,captured_at,original_name,content_type,byte_size,sha256,original_path,analysis_state)
+    VALUES (?,?,?,'document',0,?,'private.txt','text/plain',?,?,?,'pending')`)
+    .run(contextId, userId, sessionId, '2026-08-26T08:00:00.000Z', contextBytes.length,
+      crypto.createHash('sha256').update(contextBytes).digest('hex'), contextPath);
+
+  return { userId, token, voiceprintId, contextPath };
 }
 
 // Every table that holds something belonging to one account. If a future
@@ -42,10 +60,11 @@ const OWNED_TABLES = [
   'entities', 'recording_sessions', 'audio_chunks', 'devices', 'jobs',
   'api_keys', 'user_two_factor', 'user_recovery_codes', 'search_documents',
   'diagnostic_request_events', 'processing_metrics',
+  'recording_context_items',
 ];
 
 test('deleting an account erases every row it owns', async () => {
-  const { userId, token } = await accountWithData('deletion-user');
+  const { userId, token, contextPath } = await accountWithData('deletion-user');
   const db = getDatabase();
 
   const before = db.prepare('SELECT COUNT(*) c FROM user_settings WHERE user_id=?').get(userId).c;
@@ -59,6 +78,7 @@ test('deleting an account erases every row it owns', async () => {
     const remaining = db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE user_id=?`).get(userId).c;
     assert.equal(remaining, 0, `${table} still holds rows for the deleted account`);
   }
+  assert.equal(fs.existsSync(contextPath), false, 'the attached context original still exists');
   // The session token must stop working immediately, not at its next expiry.
   await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token}`).expect(401);
 });

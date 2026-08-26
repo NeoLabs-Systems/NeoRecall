@@ -200,6 +200,7 @@ async function deleteAccount(userId, password, code) {
     ...db.prepare('SELECT temporary_path FROM audio_chunks WHERE user_id=? AND temporary_path IS NOT NULL').all(userId),
     ...db.prepare('SELECT temporary_path FROM imports WHERE user_id=? AND temporary_path IS NOT NULL').all(userId),
     ...db.prepare('SELECT p.temporary_path FROM import_parts p JOIN imports i ON i.id=p.import_id WHERE i.user_id=?').all(userId),
+    ...db.prepare('SELECT original_path temporary_path FROM recording_context_items WHERE user_id=? AND original_path IS NOT NULL').all(userId),
   ];
   for (const row of paths) require('../ingest/temp_audio_service').unlinkStrict(row.temporary_path);
   db.transaction(() => {

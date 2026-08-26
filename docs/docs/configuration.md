@@ -15,6 +15,8 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `NEORECALL_PORT` | HTTP port | `4500` |
 | `NEORECALL_TRUST_PROXY` | Trust one reverse-proxy hop | `false` |
 | `MAX_UPLOAD_BYTES` | Maximum live chunk upload | `33554432` |
+| `NEORECALL_CONTEXT_MAX_FILE_BYTES` | Maximum original context-file upload | `33554432` |
+| `NEORECALL_CONTEXT_MAX_ITEMS` | Maximum context items per recording or memory | `200` |
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
 
 ## External inference providers

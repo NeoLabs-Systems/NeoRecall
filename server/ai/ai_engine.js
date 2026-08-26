@@ -11,6 +11,8 @@ const { conversationPreviewMessages } = require('./prompts/preview_conversation'
 const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
+const contextAnalysis = require('./prompts/analyze_context');
+const memoryContextRewrite = require('./prompts/rewrite_memory_context');
 const { inputBudgetCharacters } = require('./context_budget');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
@@ -290,6 +292,75 @@ async function answer(userId, question, context, beforeAttempt) {
   });
 }
 
+async function analyzeContextText(userId, { name, content }) {
+  const config = getConfig();
+  const maximum = Math.max(1, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000);
+  const response = await provider().chatJSON({
+    userId,
+    purpose: 'context_analysis',
+    messages: contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: contextAnalysis.responseFormat,
+  });
+  const description = String(response.value?.descriptionEn || '').trim();
+  if (!description) throw Object.assign(new Error('Context analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  return { description, requestId: response.requestId };
+}
+
+async function analyzeContextImage(userId, { name, mediaType, data }) {
+  const config = getConfig();
+  const response = await provider().chatJSON({
+    userId,
+    purpose: 'context_analysis',
+    messages: contextAnalysis.imageMessages({ name, mediaType, data }),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: contextAnalysis.responseFormat,
+  });
+  const description = String(response.value?.descriptionEn || '').trim();
+  if (!description) throw Object.assign(new Error('Image analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  return { description, requestId: response.requestId };
+}
+
+async function rewriteMemoryWithContext(userId, { memory, segments, contextItems }) {
+  const config = getConfig();
+  const budget = Math.max(2_000, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 3_000);
+  // Context is the reason for the rewrite, so reserve most of the evidence
+  // budget for it. Any unused context room naturally flows to the transcript.
+  const boundedContext = contextWithinBudget(contextItems, Math.floor(budget * 0.6));
+  const contextCharacters = JSON.stringify(boundedContext).length;
+  const boundedSegments = contextWithinBudget(segments, Math.max(1_000, budget - contextCharacters));
+  const response = await provider().chatJSON({
+    userId, purpose: 'memory_context_rewrite',
+    messages: memoryContextRewrite.messages(memory, boundedSegments, boundedContext),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: { type: 'json_schema', json_schema: {
+      name: 'neorecall_memory_context_rewrite', strict: true, schema: memoryContextRewrite.jsonSchema,
+    } },
+  });
+  const parsed = memoryContextRewrite.schema.safeParse(response.value);
+  if (!parsed.success) {
+    markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+    throw Object.assign(new Error('Memory context rewrite did not match the required schema.'), {
+      code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
+    });
+  }
+  const available = new Set(boundedContext.map((item) => item.id));
+  if (parsed.data.sourceContextItemIds.some((id) => !available.has(id))) {
+    markValidationFailed(response.requestId, 'AI_REFERENCE_INVALID');
+    throw Object.assign(new Error('Memory context rewrite cited an unknown context item.'), {
+      code: 'AI_REFERENCE_INVALID', aiRequestId: response.requestId,
+    });
+  }
+  const availableSegments = new Set(boundedSegments.map((segment) => segment.public_id));
+  if (parsed.data.miniMemories.some((mini) => mini.sourceSegmentIds.some((id) => !availableSegments.has(id)))) {
+    markValidationFailed(response.requestId, 'AI_REFERENCE_INVALID');
+    throw Object.assign(new Error('Memory context rewrite cited an unknown transcript segment.'), {
+      code: 'AI_REFERENCE_INVALID', aiRequestId: response.requestId,
+    });
+  }
+  return { value: parsed.data, requestId: response.requestId };
+}
+
 // Rewrite title/summary/emoji/type for a user-initiated multi-memory merge.
 // Small structured output; uses the preview token budget rather than full
 // consolidation, because the answer is a single card of prose.
@@ -324,5 +395,6 @@ async function rewriteMergedMemory(userId, memories) {
 }
 
 module.exports = {
-  consolidate, previewConversation, answer, rewriteMergedMemory, writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
+  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, rewriteMergedMemory,
+  writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };

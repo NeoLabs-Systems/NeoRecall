@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final customVocabulary = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
   bool _savingUploadPolicy = false;
+  int _loadedContextRetentionDays = 7;
 
   List<String> get _customVocabularyTerms {
     final unique = <String, String>{};
@@ -70,6 +71,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           (value['customVocabulary'] as List<dynamic>? ?? const <dynamic>[])
               .map((term) => term.toString())
               .join('\n');
+      _loadedContextRetentionDays =
+          value['contextOriginalRetentionDays'] as int? ?? 7;
       setState(() => settings = value);
     });
     // fetchTwoFactorStatus flips a flag and notifies synchronously; deferring to
@@ -92,6 +95,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> save() async {
     final current = settings;
     if (current == null || _customVocabularyError != null) return;
+    final retention = current['contextOriginalRetentionDays'] as int? ?? 7;
+    if (retention < _loadedContextRetentionDays) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Shorten original-file retention?'),
+          content: Text(
+            'Original context files older than $retention days will be permanently deleted during the next cleanup. Extracted text and AI descriptions remain.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Shorten retention'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     await widget.controller.updateSettings(<String, dynamic>{
       'consolidationIntervalMs': current['consolidationIntervalMs'],
       'timezone': current['timezone'],
@@ -106,7 +132,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'customVocabulary': _customVocabularyTerms,
       'vocabularyCorrectionEnabled':
           current['vocabularyCorrectionEnabled'] as bool? ?? true,
+      'contextOriginalRetentionDays': retention,
     });
+    _loadedContextRetentionDays = retention;
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
@@ -207,7 +235,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     return switch (selectedSection) {
       SettingsSection.general => _generalSettings(),
-      SettingsSection.security => SecuritySection(controller: widget.controller),
+      SettingsSection.security => SecuritySection(
+        controller: widget.controller,
+      ),
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
@@ -459,6 +489,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+      SectionCard(
+        eyebrow: 'RECORDING CONTEXT',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Keep original photos and documents for ${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'After this period NeoRecall deletes the original bytes but keeps extracted text, image descriptions, and source links.',
+              style: TextStyle(color: palette.textSecondary, height: 1.45),
+            ),
+            const SizedBox(height: 14),
+            Slider(
+              key: const ValueKey<String>('context-retention-days'),
+              min: 1,
+              max: 365,
+              divisions: 364,
+              label:
+                  '${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              value: (current['contextOriginalRetentionDays'] as int? ?? 7)
+                  .toDouble(),
+              onChanged: (value) => setState(
+                () => current['contextOriginalRetentionDays'] = value.round(),
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <int>[1, 3, 7, 14, 30, 90, 365]
+                  .map(
+                    (days) => ChoiceChip(
+                      label: Text(days == 365 ? '1 year' : '$days days'),
+                      selected:
+                          (current['contextOriginalRetentionDays'] as int? ??
+                              7) ==
+                          days,
+                      onSelected: (_) => setState(
+                        () => current['contextOriginalRetentionDays'] = days,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+            if ((current['contextOriginalRetentionDays'] as int? ?? 7) <
+                _loadedContextRetentionDays) ...<Widget>[
+              const SizedBox(height: 12),
+              const InlineMessage(
+                message:
+                    'Shortening retention can permanently delete existing originals on the next server cleanup.',
+                icon: Icons.warning_amber_rounded,
+              ),
+            ],
+          ],
+        ),
+      ),
     ]);
   }
 
@@ -573,4 +665,3 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
   }
 }
-

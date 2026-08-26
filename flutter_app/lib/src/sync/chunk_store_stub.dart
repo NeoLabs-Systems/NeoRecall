@@ -1,11 +1,12 @@
 import 'dart:typed_data';
 import '../models/chunk.dart';
 import '../models/recording.dart';
+import '../models/recording_context.dart';
 import 'chunk_store.dart';
 
 ChunkStore createChunkStore() => _UnsupportedChunkStore();
 
-class _UnsupportedChunkStore implements ChunkStore {
+class _UnsupportedChunkStore implements ChunkStore, RecordingContextStore {
   Never _unsupported() => throw UnsupportedError(
     'Durable chunk storage is unavailable on this platform.',
   );
@@ -50,6 +51,26 @@ class _UnsupportedChunkStore implements ChunkStore {
   Future<void> release(String id) async => _unsupported();
   @override
   Future<int> pendingBytes(String accountId) async => _unsupported();
+  @override
+  Future<void> putContext(RecordingContextItem item, Uint8List? bytes) async =>
+      _unsupported();
+  @override
+  Future<List<RecordingContextItem>> contextItems(
+    String accountId, {
+    String? sessionId,
+    bool pendingOnly = false,
+  }) async => _unsupported();
+  @override
+  Future<Uint8List?> readContextBytes(RecordingContextItem item) async =>
+      _unsupported();
+  @override
+  Future<void> setContextState(
+    String id,
+    LocalContextState state, {
+    String? error,
+  }) async => _unsupported();
+  @override
+  Future<void> releaseContextBytes(String id) async => _unsupported();
   @override
   Future<void> close() async {}
 

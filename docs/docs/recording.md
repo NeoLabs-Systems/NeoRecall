@@ -40,6 +40,26 @@ use **Quick capture** from the tray.
 
 NeoRecall shows a first-run recording notice and a persistent recording state. It has no covert mode. Before recording, obtain the consent required in your jurisdiction and organization. Pause immediately when consent changes or sensitive material should not be retained.
 
+## Recording context
+
+Once capture starts, the idle source picker is replaced by one active-recording
+workspace. It contains the single live timer and stop control plus one action
+each for a highlight, typed note, photo, or file. Context is durably queued on
+the device alongside recording metadata, so adding it also works while offline.
+
+Highlights emphasize the nearby transcript. Notes can supply names or details
+the audio may miss. NeoRecall extracts text from plain text, Markdown, CSV,
+JSON, PDF, and DOCX files, and asks a vision-capable configured model to describe
+JPEG, PNG, and WebP images. Other files remain attached and are reported as
+unsupported instead of being discarded. During consolidation, each item is
+associated with the closest transcript moment, so recordings that produce
+several memories do not attach every source to every memory.
+
+The same Context section appears on a finished memory. Adding or removing a
+source there queues an in-place AI rewrite: the memory identity, pin/archive
+state, and explicit importance override remain intact while generated prose and
+mini-memories are replaced atomically.
+
 ## Durable chunks
 
 Capture uses independently decodable WAV chunks, normally 30 seconds long with a short leading overlap. The client keeps every unacknowledged chunk in its local ledger. When connectivity returns it:

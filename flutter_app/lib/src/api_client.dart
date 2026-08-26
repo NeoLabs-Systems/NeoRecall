@@ -9,6 +9,7 @@ import 'diagnostics/client_diagnostic_log.dart';
 import 'models/chunk.dart';
 import 'sync/upload_compression.dart';
 import 'models/recording.dart';
+import 'models/recording_context.dart';
 
 class ApiException implements Exception {
   const ApiException(this.status, this.code, this.message, [this.details]);
@@ -58,6 +59,8 @@ class NeoRecallApiClient {
   static const int _legacyChunkReceiptBatch = 100;
   int maxChunkReceiptBatch = _legacyChunkReceiptBatch;
   int? maxMemoryMergeItems;
+  int? maxContextFileBytes;
+  int? maxContextNoteCharacters;
 
   /// Compression is opt-in only after the authenticated server explicitly
   /// advertises support. This keeps queued audio compatible with older backend
@@ -66,6 +69,8 @@ class NeoRecallApiClient {
     supportsGzipAudioUpload = false;
     maxChunkReceiptBatch = _legacyChunkReceiptBatch;
     maxMemoryMergeItems = null;
+    maxContextFileBytes = null;
+    maxContextNoteCharacters = null;
     if (token == null) return;
     try {
       final meta = await request('GET', '/api/v1/meta');
@@ -85,6 +90,12 @@ class NeoRecallApiClient {
       if (advertisedMemoryMergeMax != null && advertisedMemoryMergeMax >= 2) {
         maxMemoryMergeItems = advertisedMemoryMergeMax;
       }
+      maxContextFileBytes = limits is Map
+          ? (limits['contextMaxFileBytes'] as num?)?.toInt()
+          : null;
+      maxContextNoteCharacters = limits is Map
+          ? (limits['contextNoteMaxCharacters'] as num?)?.toInt()
+          : null;
     } catch (_) {
       // Identity uploads are universally compatible and remain the safe
       // fallback while the server is offline or predates capability discovery.
@@ -292,6 +303,64 @@ class NeoRecallApiClient {
         return uploadChunk(chunk, bytes);
       }
       rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> uploadRecordingContext(
+    RecordingContextItem item,
+    Uint8List? bytes,
+  ) => _uploadContext(
+    '/api/v1/ingest/sessions/${item.sessionId}/context/${item.id}',
+    item,
+    bytes,
+  );
+
+  Future<Map<String, dynamic>> uploadMemoryContext({
+    required String memoryId,
+    required RecordingContextItem item,
+    Uint8List? bytes,
+  }) => _uploadContext(
+    '/api/v1/memories/$memoryId/context/${item.id}',
+    item,
+    bytes,
+  );
+
+  Future<Map<String, dynamic>> _uploadContext(
+    String path,
+    RecordingContextItem item,
+    Uint8List? bytes,
+  ) async {
+    final request = http.MultipartRequest('PUT', _resolve(path));
+    request.headers.addAll(_headers);
+    request.fields.addAll(<String, String>{
+      'kind': item.kind.name,
+      if (item.noteText != null) 'noteText': item.noteText!,
+      if (item.contentType != null) 'contentType': item.contentType!,
+      if (path.contains('/ingest/'))
+        'capturedOffsetMs': '${item.capturedOffsetMs}',
+    });
+    if (bytes != null) {
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: item.originalName ?? item.id,
+        ),
+      );
+    }
+    try {
+      final streamed = await _client.send(request).timeout(uploadTimeout);
+      final response = await http.Response.fromStream(
+        streamed,
+      ).timeout(uploadTimeout);
+      return Map<String, dynamic>.from(_decode(response) as Map);
+    } catch (error) {
+      if (error is ApiException) rethrow;
+      throw const ApiException(
+        0,
+        'CONTEXT_UPLOAD_INTERRUPTED',
+        'The context upload was interrupted. It remains stored locally and will retry.',
+      );
     }
   }
 

@@ -12,6 +12,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart'
 
 import '../models/chunk.dart';
 import '../models/recording.dart';
+import '../models/recording_context.dart';
 import 'chunk_store.dart';
 
 ChunkStore createChunkStore() => IoChunkStore();
@@ -51,9 +52,10 @@ DatabaseFactory _desktopDatabaseFactory() {
   return databaseFactoryFfi;
 }
 
-class IoChunkStore implements ChunkStore {
+class IoChunkStore implements ChunkStore, RecordingContextStore {
   Database? _database;
   late Directory _audioDirectory;
+  late Directory _contextDirectory;
 
   @override
   Future<void> initialize() async {
@@ -62,6 +64,8 @@ class IoChunkStore implements ChunkStore {
     final root = Directory(p.join(support.path, 'NeoRecall'))
       ..createSync(recursive: true);
     _audioDirectory = Directory(p.join(root.path, 'pending_audio'))
+      ..createSync(recursive: true);
+    _contextDirectory = Directory(p.join(root.path, 'pending_context'))
       ..createSync(recursive: true);
     Future<void> createSessions(Database database) => database.execute(
       '''CREATE TABLE IF NOT EXISTS sessions (
@@ -75,6 +79,12 @@ class IoChunkStore implements ChunkStore {
         database.execute('''CREATE TABLE IF NOT EXISTS capture_partials (
         sourceId TEXT PRIMARY KEY, chunkJson TEXT NOT NULL, filePath TEXT NOT NULL,
         updatedAt TEXT NOT NULL)''');
+    Future<void> createContexts(Database database) => database.execute(
+      '''CREATE TABLE IF NOT EXISTS contexts (
+        id TEXT PRIMARY KEY, accountId TEXT NOT NULL, sessionId TEXT NOT NULL, kind TEXT NOT NULL,
+        capturedOffsetMs INTEGER NOT NULL, noteText TEXT, originalName TEXT, contentType TEXT,
+        byteSize INTEGER, sha256 TEXT, filePath TEXT, state TEXT NOT NULL, error TEXT, createdAt TEXT NOT NULL)''',
+    );
     final factory = Platform.isAndroid || Platform.isIOS
         ? mobile_sqlite.databaseFactory
         : _desktopDatabaseFactory();
@@ -82,7 +92,7 @@ class IoChunkStore implements ChunkStore {
       _database = await factory.openDatabase(
         p.join(root.path, 'offline.sqlite3'),
         options: OpenDatabaseOptions(
-          version: 6,
+          version: 7,
           onCreate: (database, _) async {
             await database.execute('''CREATE TABLE chunks (
         id TEXT PRIMARY KEY, sessionId TEXT NOT NULL, sourceId TEXT NOT NULL, sequence INTEGER NOT NULL,
@@ -92,6 +102,7 @@ class IoChunkStore implements ChunkStore {
         receipt TEXT, error TEXT, UNIQUE(sourceId,sequence))''');
             await createSessions(database);
             await createCapturePartials(database);
+            await createContexts(database);
           },
           onUpgrade: (database, oldVersion, _) async {
             if (oldVersion < 2) {
@@ -112,6 +123,7 @@ class IoChunkStore implements ChunkStore {
                 "ALTER TABLE sessions ADD COLUMN accountId TEXT NOT NULL DEFAULT ''",
               );
             }
+            if (oldVersion < 7) await createContexts(database);
           },
         ),
       );
@@ -499,6 +511,105 @@ class IoChunkStore implements ChunkStore {
   }
 
   @override
+  Future<void> putContext(RecordingContextItem item, Uint8List? bytes) async {
+    String? filePath = item.filePath;
+    if (bytes != null) {
+      final partial = File(
+        p.join(_contextDirectory.path, '${item.id}.partial'),
+      );
+      final file = File(p.join(_contextDirectory.path, item.id));
+      final handle = await partial.open(mode: FileMode.writeOnly);
+      try {
+        await handle.writeFrom(bytes);
+        await handle.flush();
+      } finally {
+        await handle.close();
+      }
+      await partial.rename(file.path);
+      filePath = file.path;
+    }
+    await db.insert(
+      'contexts',
+      item.copyWith(filePath: filePath).toMap(includeBytes: false),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  @override
+  Future<List<RecordingContextItem>> contextItems(
+    String accountId, {
+    String? sessionId,
+    bool pendingOnly = false,
+  }) async {
+    final conditions = <String>['accountId=?'];
+    final args = <Object?>[accountId];
+    if (sessionId != null) {
+      conditions.add('sessionId=?');
+      args.add(sessionId);
+    }
+    if (pendingOnly) {
+      conditions.add("state IN ('pending','uploading','failed')");
+    }
+    return (await db.query(
+          'contexts',
+          where: conditions.join(' AND '),
+          whereArgs: args,
+          orderBy: 'capturedOffsetMs,createdAt',
+        ))
+        .map(
+          (row) => RecordingContextItem.fromMap(Map<String, dynamic>.from(row)),
+        )
+        .toList();
+  }
+
+  @override
+  Future<Uint8List?> readContextBytes(RecordingContextItem item) async {
+    if (item.filePath == null) return null;
+    final file = File(item.filePath!);
+    return await file.exists() ? file.readAsBytes() : null;
+  }
+
+  @override
+  Future<void> setContextState(
+    String id,
+    LocalContextState state, {
+    String? error,
+  }) async {
+    await db.update(
+      'contexts',
+      <String, Object?>{'state': state.name, 'error': error},
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  @override
+  Future<void> releaseContextBytes(String id) async {
+    final rows = await db.query(
+      'contexts',
+      columns: <String>['filePath'],
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    final filePath = rows.isEmpty ? null : rows.first['filePath'] as String?;
+    if (filePath != null) {
+      final file = File(filePath);
+      if (await file.exists()) await file.delete();
+    }
+    await db.update(
+      'contexts',
+      <String, Object?>{
+        'filePath': null,
+        'state': LocalContextState.synced.name,
+        'error': null,
+      },
+      where: 'id=?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  @override
   Future<void> close() async {
     await _database?.close();
     _database = null;
@@ -510,6 +621,7 @@ class IoChunkStore implements ChunkStore {
     await _database!.delete('chunks');
     await _database!.delete('sessions');
     await _database!.delete('capture_partials');
+    await _database!.delete('contexts');
     if (_audioDirectory.existsSync()) {
       for (final entity in _audioDirectory.listSync()) {
         try {
@@ -517,6 +629,15 @@ class IoChunkStore implements ChunkStore {
         } catch (_) {
           // A file held open by a finishing write is retried by the caller's
           // directory sweep; one stuck file must not abort the rest.
+        }
+      }
+    }
+    if (_contextDirectory.existsSync()) {
+      for (final entity in _contextDirectory.listSync()) {
+        try {
+          entity.deleteSync(recursive: true);
+        } catch (_) {
+          // Best-effort sweep, matching pending audio cleanup above.
         }
       }
     }
