@@ -17,7 +17,7 @@ class DevicesScreen extends StatelessWidget {
           eyebrow: 'DEVICES',
           title: 'Capture endpoints',
           description:
-              'Review registered browsers and desktop clients, clock measurements, last sync, and revocation state.',
+              'Review registered clients and appliances, clock measurements, last sync, and revocation state.',
         ),
         const SizedBox(height: 24),
         DevicesPanel(controller: controller),
@@ -50,22 +50,53 @@ class DevicesPanel extends StatelessWidget {
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final device = controller.devices[index];
+        final revoked = device['revoked_at'] != null;
         return GlassSurface(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: <Widget>[
               Icon(
-                device['kind'] == 'browser' ? Icons.language : Icons.computer,
-                color: palette.accent,
+                switch (device['kind']) {
+                  'browser' => Icons.language,
+                  'appliance' => Icons.speaker_group_outlined,
+                  _ => Icons.computer,
+                },
+                color: revoked ? palette.textMuted : palette.accent,
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      device['name'] as String,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          device['name'] as String,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        if (revoked) ...<Widget>[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: palette.danger.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'REVOKED',
+                              style: TextStyle(
+                                color: palette.danger,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
                       '${device['platform']} · ${device['last_heartbeat_at'] ?? 'not recently connected'}',
@@ -82,9 +113,9 @@ class DevicesPanel extends StatelessWidget {
                 ),
               IconButton(
                 tooltip: 'Revoke device',
-                onPressed: device['revoked_at'] == null
-                    ? () => controller.revokeDevice(device['id'] as String)
-                    : null,
+                onPressed: revoked
+                    ? null
+                    : () => controller.revokeDevice(device['id'] as String),
                 icon: const Icon(Icons.delete_outline),
               ),
             ],
