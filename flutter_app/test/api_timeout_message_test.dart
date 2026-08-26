@@ -44,4 +44,66 @@ void main() {
     expect('$error', isNot(contains('Future not completed')));
     expect('$error', contains('did not respond in time'));
   });
+
+  test(
+    'a proxy outage with a plain-text body reports server availability',
+    () async {
+      final api = NeoRecallApiClient(
+        baseUrl: 'https://recall.example',
+        client: MockClient(
+          (request) async => http.Response('proxy tunnel unavailable', 530),
+        ),
+      );
+
+      final error = await api
+          .request('GET', '/health')
+          .then<Object?>((_) => null, onError: (Object error) => error);
+
+      expect(error, isA<ApiException>());
+      final failure = error! as ApiException;
+      expect(failure.status, 530);
+      expect(failure.code, 'HTTP_ERROR');
+      expect(failure.message, contains('server is unavailable'));
+      expect(failure.message, contains('HTTP 530'));
+      expect(failure.message, isNot(contains('Request failed')));
+    },
+  );
+
+  test('a transport failure reports that the server is unreachable', () async {
+    final api = NeoRecallApiClient(
+      baseUrl: 'https://recall.example',
+      client: MockClient((request) async {
+        throw http.ClientException('Connection failed', request.url);
+      }),
+    );
+
+    final error = await api
+        .request('POST', '/api/v1/auth/login', body: <String, String>{})
+        .then<Object?>((_) => null, onError: (Object error) => error);
+
+    expect(error, isA<ApiException>());
+    final failure = error! as ApiException;
+    expect(failure.status, 0);
+    expect(failure.code, 'SERVER_UNREACHABLE');
+    expect(failure.message, contains('could not connect'));
+    expect(failure.message, isNot(contains('ClientException')));
+  });
+
+  test('a malformed successful response is identified as invalid', () async {
+    final api = NeoRecallApiClient(
+      baseUrl: 'https://recall.example',
+      client: MockClient(
+        (request) async => http.Response('<html></html>', 200),
+      ),
+    );
+
+    final error = await api
+        .request('GET', '/health')
+        .then<Object?>((_) => null, onError: (Object error) => error);
+
+    expect(error, isA<ApiException>());
+    final failure = error! as ApiException;
+    expect(failure.code, 'INVALID_SERVER_RESPONSE');
+    expect(failure.message, contains('HTTP 200'));
+  });
 }

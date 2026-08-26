@@ -31,6 +31,12 @@ ApiException _requestTimedOut() => const ApiException(
   'The server did not respond in time. Check that it is running and reachable, then try again.',
 );
 
+ApiException _serverUnreachable() => const ApiException(
+  0,
+  'SERVER_UNREACHABLE',
+  'NeoRecall could not connect to the server. Check that it is online and that this device can reach it.',
+);
+
 class NeoRecallApiClient {
   NeoRecallApiClient({
     required String baseUrl,
@@ -97,17 +103,15 @@ class NeoRecallApiClient {
   }
 
   Future<Uint8List> speakerPreview(String speakerId) async {
-    late http.Response response;
-    try {
-      response = await _client
-          .get(
-            _resolve('/api/v1/speakers/$speakerId/preview'),
-            headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
-          )
-          .timeout(requestTimeout);
-    } on TimeoutException {
-      throw _requestTimedOut();
-    }
+    final path = '/api/v1/speakers/$speakerId/preview';
+    final response = await _waitForResponse(
+      _client.get(
+        _resolve(path),
+        headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
+      ),
+      method: 'GET',
+      path: path,
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
     }
@@ -136,23 +140,11 @@ class NeoRecallApiClient {
       default:
         throw ArgumentError.value(method, 'method');
     }
-    late http.Response response;
-    try {
-      response = await responseFuture.timeout(requestTimeout);
-    } catch (error) {
-      ClientDiagnosticLog.instance.record(
-        'network',
-        'request_failed',
-        level: 'error',
-        details: <String, Object?>{
-          'method': method,
-          'path': _diagnosticPath(path),
-          'error': error.toString(),
-        },
-      );
-      if (error is TimeoutException) throw _requestTimedOut();
-      rethrow;
-    }
+    final response = await _waitForResponse(
+      responseFuture,
+      method: method,
+      path: path,
+    );
     if (response.statusCode >= 400) {
       ClientDiagnosticLog.instance.record(
         'network',
@@ -168,6 +160,29 @@ class NeoRecallApiClient {
     return _decode(response);
   }
 
+  Future<http.Response> _waitForResponse(
+    Future<http.Response> responseFuture, {
+    required String method,
+    required String path,
+  }) async {
+    try {
+      return await responseFuture.timeout(requestTimeout);
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'network',
+        'request_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'method': method,
+          'path': _diagnosticPath(path),
+          'error': error.toString(),
+        },
+      );
+      if (error is TimeoutException) throw _requestTimedOut();
+      throw _serverUnreachable();
+    }
+  }
+
   String _diagnosticPath(String path) => path.replaceAll(
     RegExp(
       r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
@@ -177,13 +192,30 @@ class NeoRecallApiClient {
   );
 
   dynamic _decode(http.Response response) {
-    final payload = response.body.isEmpty ? null : jsonDecode(response.body);
+    dynamic payload;
+    if (response.body.isNotEmpty) {
+      try {
+        payload = jsonDecode(response.body);
+      } on FormatException {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          throw ApiException(
+            response.statusCode,
+            'INVALID_SERVER_RESPONSE',
+            'The server returned a response NeoRecall could not read (HTTP ${response.statusCode}).',
+          );
+        }
+      }
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final error = payload is Map ? payload['error'] as Map? : null;
+      final errorValue = payload is Map ? payload['error'] : null;
+      final error = errorValue is Map ? errorValue : null;
+      final fallback = response.statusCode >= 500
+          ? 'The NeoRecall server is unavailable (HTTP ${response.statusCode}). Try again shortly or check the server.'
+          : 'The NeoRecall server rejected the request (HTTP ${response.statusCode}).';
       throw ApiException(
         response.statusCode,
         error?['code'] as String? ?? 'HTTP_ERROR',
-        error?['message'] as String? ?? 'Request failed.',
+        error?['message'] as String? ?? fallback,
         error?['details'],
       );
     }
