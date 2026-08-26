@@ -16,6 +16,7 @@ function handlerFor(type) {
   if (type === 'detect_boundaries') return require('./handlers/boundary_handler');
   if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
+  if (type === 'rewrite_merged_memory') return require('./handlers/memory_merge_handler');
   if (['maintenance', 'prune_events'].includes(type)) return require('./handlers/maintenance_handler');
   if (type === 'process_import') return require('./handlers/import_handler');
   throw Object.assign(new Error(`Unknown job type: ${type}`), { code: 'UNKNOWN_JOB_TYPE', retryable: false });
@@ -62,14 +63,21 @@ function markChunkFailure(job, error, willRetry) {
   }
 }
 
-async function run({ inference, signal }) {
+async function run({ inference, isInferenceReady = () => true, signal }) {
   const workerId = `${os.hostname()}-${process.pid}-${crypto.randomUUID()}`;
   let currentJob = null;
-  const heartbeatTimer = setInterval(() => heartbeat(workerId, currentJob?.id), 5_000);
+  const heartbeatTimer = setInterval(
+    () => heartbeat(workerId, currentJob?.id, isInferenceReady() ? 'ready' : 'not_ready'),
+    5_000,
+  );
   heartbeat(workerId, null, 'starting');
   try {
     while (!signal.aborted) {
-      currentJob = jobs.claimNext(workerId);
+      // Keep non-ASR work moving, but do not lease a transcription job until
+      // the inference child has confirmed its models are usable. Leasing it
+      // would burn attempts and can eventually make the server delete its only
+      // audio copy even though no inference was ever possible.
+      currentJob = jobs.claimNext(workerId, undefined, isInferenceReady());
       if (!currentJob) { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const leaseTimer = setInterval(() => jobs.renewLease(currentJob.id, workerId), 30_000);
       try {

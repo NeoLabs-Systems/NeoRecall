@@ -48,6 +48,16 @@ class BackgroundCaptureService : Service() {
         requestGracefulStop()
         return START_STICKY
       }
+      ACTION_UPDATE_STATUS -> {
+        if (holds.isEmpty()) holds = persistedHolds()
+        if (holds.isNotEmpty()) {
+          getSystemService(NotificationManager::class.java).notify(
+            NOTIFICATION_ID,
+            buildNotification(holds),
+          )
+        }
+        return START_STICKY
+      }
       else -> {
         val requested = intent?.getStringArrayListExtra(EXTRA_HOLDS)?.toSet()
           // A null Intent means Android recreated the service after reclaiming
@@ -57,12 +67,8 @@ class BackgroundCaptureService : Service() {
           stopHost()
           return START_NOT_STICKY
         }
-        val title = intent?.getStringExtra(EXTRA_TITLE)
-        val text = intent?.getStringExtra(EXTRA_TEXT)
         applyHolds(
           requested,
-          title = title ?: persisted().getString(KEY_TITLE, null),
-          text = text ?: persisted().getString(KEY_TEXT, null),
           startedFromBackgroundBoot = intent?.getBooleanExtra(EXTRA_FROM_BOOT, false) == true,
         )
       }
@@ -72,8 +78,6 @@ class BackgroundCaptureService : Service() {
 
   private fun applyHolds(
     requested: Set<String>,
-    title: String?,
-    text: String?,
     startedFromBackgroundBoot: Boolean,
   ) {
     explicitlyStopped = false
@@ -86,9 +90,9 @@ class BackgroundCaptureService : Service() {
     var effective = bootSafe
     var microphoneUnavailable = startedFromBackgroundBoot && bootSafe != requested
 
-    if (!enterForeground(effective, title, text)) {
+    if (!enterForeground(effective)) {
       val reduced = effective - MICROPHONE_HOLDS
-      if (reduced.isEmpty() || !enterForeground(reduced, title, text)) {
+      if (reduced.isEmpty() || !enterForeground(reduced)) {
         notifyHost("NeoRecall could not start its background host on this device.")
         stopHost()
         return
@@ -102,10 +106,11 @@ class BackgroundCaptureService : Service() {
     persisted().edit()
       .putBoolean(KEY_RUNNING, true)
       .putStringSet(KEY_HOLDS, effective)
-      .putString(KEY_TITLE, title)
-      .putString(KEY_TEXT, text)
       .putBoolean(KEY_MICROPHONE_UNAVAILABLE, microphoneUnavailable)
-      .apply()
+      // This is the recovery ledger for a process kill. Commit the tiny update
+      // before returning so an immediate reclaim cannot lose the active holds.
+      .commit()
+    RecordWidgetProvider.updateAll(this)
     if (microphoneUnavailable) {
       notifyHost(
         "Phone-microphone recording cannot resume without the app open. Bluetooth capture and sync are running.",
@@ -114,9 +119,9 @@ class BackgroundCaptureService : Service() {
   }
 
   /** Returns false when the platform refuses the requested service types. */
-  private fun enterForeground(requested: Set<String>, title: String?, text: String?): Boolean {
+  private fun enterForeground(requested: Set<String>): Boolean {
     if (requested.isEmpty()) return false
-    val notification = buildNotification(requested, title, text)
+    val notification = buildNotification(requested)
     return try {
       val types = serviceTypes(requested)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && types != 0) {
@@ -138,6 +143,9 @@ class BackgroundCaptureService : Service() {
     if (requested.any { it in CONNECTED_DEVICE_HOLDS }) {
       types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
     }
+    if (requested.contains(HOLD_AUDIO_UPLOAD)) {
+      types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+    }
     return types
   }
 
@@ -149,7 +157,8 @@ class BackgroundCaptureService : Service() {
       .putBoolean(KEY_RUNNING, false)
       .putStringSet(KEY_HOLDS, emptySet())
       .putBoolean(KEY_MICROPHONE_UNAVAILABLE, false)
-      .apply()
+      .commit()
+    RecordWidgetProvider.updateAll(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
   }
@@ -206,12 +215,19 @@ class BackgroundCaptureService : Service() {
       setShowBadge(false)
     }
     manager.createNotificationChannel(channel)
+    manager.createNotificationChannel(
+      NotificationChannel(
+        ALERT_CHANNEL_ID,
+        "NeoRecall attention",
+        NotificationManager.IMPORTANCE_HIGH,
+      ).apply {
+        description = "Important recording conditions that need your attention"
+      },
+    )
   }
 
   private fun buildNotification(
     requested: Set<String>,
-    title: String?,
-    text: String?,
   ): Notification {
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
     val contentIntent = PendingIntent.getActivity(
@@ -230,25 +246,49 @@ class BackgroundCaptureService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val capturing = requested.any { it in CAPTURE_HOLDS }
-    return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle(
-        title ?: if (capturing) "NeoRecall is recording" else "NeoRecall stays connected",
-      )
-      .setContentText(
-        text ?: when {
+    val state = persisted()
+    val title = state.getString(KEY_STATUS_TITLE, null)
+      ?: if (capturing) "NeoRecall is recording" else "NeoRecall stays connected"
+    val detail = state.getString(KEY_STATUS_DETAIL, null)
+      ?: when {
           capturing -> "Audio is being captured"
           requested.contains(HOLD_WEARABLE_SYNC) -> "Syncing recordings from your device"
+          requested.contains(HOLD_AUDIO_UPLOAD) -> "Uploading protected recordings"
           else -> "Your device stays linked so recordings sync on their own"
-        },
-      )
+        }
+    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+      .setContentTitle(title)
+      .setContentText(detail)
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
+      // Android 16+ promotes eligible ongoing notifications into Live Updates
+      // (lock-screen card + status-bar chip). AndroidX safely ignores this on
+      // older releases, where the same object remains the FGS notification.
+      .setRequestPromotedOngoing(true)
+      .setShortCriticalText(state.getString(KEY_STATUS_SHORT_LABEL, null))
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setContentIntent(contentIntent)
       .addAction(0, "Stop", stopPending)
       .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-      .build()
+    val startedAt = state.getLong(KEY_STATUS_RECORDING_STARTED_AT, 0L)
+    if (state.getString(KEY_STATUS_PHASE, null) == "recording" && startedAt > 0L) {
+      builder.setWhen(startedAt).setUsesChronometer(true).setShowWhen(true)
+    }
+    val progress = state.getInt(KEY_STATUS_PROGRESS, -1)
+    if (progress in 0..100) {
+      builder.setStyle(
+        NotificationCompat.ProgressStyle()
+          .setProgress(progress)
+          .setStyledByProgress(true),
+      )
+    } else {
+      builder.setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+    }
+    state.getString(KEY_STATUS_ISSUE, null)?.takeIf { it.isNotBlank() }?.let {
+      builder.setSubText(it)
+    }
+    return builder.build()
   }
 
   override fun onDestroy() {
@@ -267,32 +307,57 @@ class BackgroundCaptureService : Service() {
     if (isRunning(this) && holds.isNotEmpty()) {
       val restart = Intent(applicationContext, BackgroundCaptureService::class.java)
         .putStringArrayListExtra(EXTRA_HOLDS, ArrayList(holds))
-        .putExtra(EXTRA_TITLE, persisted().getString(KEY_TITLE, null))
-        .putExtra(EXTRA_TEXT, persisted().getString(KEY_TEXT, null))
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        applicationContext.startForegroundService(restart)
-      } else {
-        applicationContext.startService(restart)
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          applicationContext.startForegroundService(restart)
+        } else {
+          applicationContext.startService(restart)
+        }
+      } catch (_: Throwable) {
+        // Android 12+ may reject a redundant background start. The currently
+        // running START_STICKY service and its persisted holds remain valid.
       }
     }
     super.onTaskRemoved(rootIntent)
   }
 
+  /** Android 15 bounds data-sync foreground-service time. Release that claim
+   * cleanly if the platform budget is exhausted instead of letting the process
+   * crash; capture/wearable holds, when present, continue independently. */
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+      fgsType and ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC != 0 &&
+      holds.contains(HOLD_AUDIO_UPLOAD)
+    ) {
+      val remaining = holds - HOLD_AUDIO_UPLOAD
+      notifyHost(
+        "Android paused the extended background upload. Protected audio remains queued and will resume automatically.",
+      )
+      if (remaining.isEmpty()) stopHost() else applyHolds(remaining, false)
+      return
+    }
+    stopHost()
+  }
+
   companion object {
     const val CHANNEL_ID = "neorecall_capture"
+    const val ALERT_CHANNEL_ID = "neorecall_attention"
     const val NOTIFICATION_ID = 45001
+    const val ALERT_NOTIFICATION_ID = 45002
     const val EXTRA_HOLDS = "holds"
-    const val EXTRA_TITLE = "title"
-    const val EXTRA_TEXT = "text"
     const val EXTRA_FROM_BOOT = "fromBoot"
     const val ACTION_STOP = "systems.neolabs.neorecall.STOP_CAPTURE"
     const val ACTION_REQUEST_STOP =
       "systems.neolabs.neorecall.REQUEST_STOP_CAPTURE"
+    const val ACTION_UPDATE_STATUS =
+      "systems.neolabs.neorecall.UPDATE_CAPTURE_STATUS"
 
     const val HOLD_MICROPHONE = "microphoneCapture"
     const val HOLD_WEARABLE_CAPTURE = "wearableCapture"
     const val HOLD_WEARABLE_LINK = "wearableLink"
     const val HOLD_WEARABLE_SYNC = "wearableSync"
+    const val HOLD_AUDIO_UPLOAD = "audioUpload"
 
     /** Holds that stream audio, i.e. the ones the notification calls recording. */
     private val CAPTURE_HOLDS = setOf(HOLD_MICROPHONE, HOLD_WEARABLE_CAPTURE)
@@ -303,7 +368,8 @@ class BackgroundCaptureService : Service() {
      * device is excluded on purpose — a round-the-clock wake lock for an idle
      * link would cost battery for nothing.
      */
-    private val WAKE_LOCK_HOLDS = CAPTURE_HOLDS + HOLD_WEARABLE_SYNC
+    private val WAKE_LOCK_HOLDS =
+      CAPTURE_HOLDS + HOLD_WEARABLE_SYNC + HOLD_AUDIO_UPLOAD
     private val MICROPHONE_HOLDS = setOf(HOLD_MICROPHONE)
     private val CONNECTED_DEVICE_HOLDS =
       setOf(HOLD_WEARABLE_CAPTURE, HOLD_WEARABLE_LINK, HOLD_WEARABLE_SYNC)
@@ -312,9 +378,15 @@ class BackgroundCaptureService : Service() {
     private const val PREFS = "neorecall_background_capture"
     private const val KEY_RUNNING = "running"
     private const val KEY_HOLDS = "holds"
-    private const val KEY_TITLE = "title"
-    private const val KEY_TEXT = "text"
     private const val KEY_MICROPHONE_UNAVAILABLE = "microphoneUnavailable"
+    private const val KEY_STATUS_PHASE = "statusPhase"
+    private const val KEY_STATUS_TITLE = "statusTitle"
+    private const val KEY_STATUS_DETAIL = "statusDetail"
+    private const val KEY_STATUS_SHORT_LABEL = "statusShortLabel"
+    private const val KEY_STATUS_RECORDING_STARTED_AT = "statusRecordingStartedAt"
+    private const val KEY_STATUS_PROGRESS = "statusProgress"
+    private const val KEY_STATUS_ISSUE = "statusIssue"
+    private const val KEY_STORAGE_ALERT_ACTIVE = "storageAlertActive"
 
     private fun prefs(context: Context) =
       context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -331,14 +403,10 @@ class BackgroundCaptureService : Service() {
     fun requestHolds(
       context: Context,
       holds: List<String>,
-      title: String?,
-      text: String?,
       fromBoot: Boolean = false,
     ) {
       val intent = Intent(context, BackgroundCaptureService::class.java)
         .putStringArrayListExtra(EXTRA_HOLDS, ArrayList(holds))
-        .putExtra(EXTRA_TITLE, title)
-        .putExtra(EXTRA_TEXT, text)
         .putExtra(EXTRA_FROM_BOOT, fromBoot)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(intent)
@@ -361,16 +429,106 @@ class BackgroundCaptureService : Service() {
         prefs(context).edit()
           .putBoolean(KEY_RUNNING, false)
           .putBoolean(KEY_MICROPHONE_UNAVAILABLE, true)
-          .apply()
+          .commit()
         return
       }
       requestHolds(
         context,
         restorable,
-        prefs(context).getString(KEY_TITLE, null),
-        prefs(context).getString(KEY_TEXT, null),
         fromBoot = true,
       )
+    }
+
+    fun updateLiveStatus(context: Context, status: Map<*, *>) {
+      val phase = status["phase"] as? String
+      val title = status["title"] as? String
+      val detail = status["detail"] as? String
+      val issue = status["issue"] as? String
+      val shortLabel = status["shortLabel"] as? String
+      val startedAt = (status["recordingStartedAtMs"] as? Number)?.toLong() ?: 0L
+      val progress = (status["progress"] as? Number)?.toDouble()
+        ?.coerceIn(0.0, 1.0)?.times(100)?.toInt() ?: -1
+      prefs(context).edit()
+        .putString(KEY_STATUS_PHASE, phase)
+        .putString(KEY_STATUS_TITLE, title)
+        .putString(KEY_STATUS_DETAIL, detail)
+        .putString(KEY_STATUS_SHORT_LABEL, shortLabel)
+        .putString(KEY_STATUS_ISSUE, issue)
+        .putLong(KEY_STATUS_RECORDING_STARTED_AT, startedAt)
+        .putInt(KEY_STATUS_PROGRESS, progress)
+        .apply()
+      reconcileStorageAlert(context, phase == "storageFull", title, detail)
+      if (isRunning(context)) {
+        runCatching {
+          context.startService(
+            Intent(context, BackgroundCaptureService::class.java)
+              .setAction(ACTION_UPDATE_STATUS),
+          )
+        }
+      }
+    }
+
+    fun clearLiveStatus(context: Context) {
+      prefs(context).edit()
+        .remove(KEY_STATUS_PHASE)
+        .remove(KEY_STATUS_TITLE)
+        .remove(KEY_STATUS_DETAIL)
+        .remove(KEY_STATUS_SHORT_LABEL)
+        .remove(KEY_STATUS_ISSUE)
+        .remove(KEY_STATUS_RECORDING_STARTED_AT)
+        .remove(KEY_STATUS_PROGRESS)
+        .apply()
+      reconcileStorageAlert(context, false, null, null)
+    }
+
+    private fun reconcileStorageAlert(
+      context: Context,
+      active: Boolean,
+      title: String?,
+      detail: String?,
+    ) {
+      val state = prefs(context)
+      val manager = context.getSystemService(NotificationManager::class.java)
+      if (!active) {
+        if (state.getBoolean(KEY_STORAGE_ALERT_ACTIVE, false)) {
+          manager.cancel(ALERT_NOTIFICATION_ID)
+          state.edit().putBoolean(KEY_STORAGE_ALERT_ACTIVE, false).apply()
+        }
+        return
+      }
+      if (state.getBoolean(KEY_STORAGE_ALERT_ACTIVE, false)) return
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        manager.createNotificationChannel(
+          NotificationChannel(
+            ALERT_CHANNEL_ID,
+            "NeoRecall attention",
+            NotificationManager.IMPORTANCE_HIGH,
+          ).apply {
+            description = "Important recording conditions that need your attention"
+          },
+        )
+      }
+      val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+      val contentIntent = PendingIntent.getActivity(
+        context,
+        2,
+        launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      manager.notify(
+        ALERT_NOTIFICATION_ID,
+        NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+          .setSmallIcon(android.R.drawable.stat_notify_error)
+          .setContentTitle(title ?: "NeoRecall needs storage")
+          .setContentText(detail ?: "Free device storage to resume recording.")
+          .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+          .setCategory(NotificationCompat.CATEGORY_ERROR)
+          .setPriority(NotificationCompat.PRIORITY_HIGH)
+          .setAutoCancel(true)
+          .setContentIntent(contentIntent)
+          .build(),
+      )
+      state.edit().putBoolean(KEY_STORAGE_ALERT_ACTIVE, true).apply()
     }
   }
 }

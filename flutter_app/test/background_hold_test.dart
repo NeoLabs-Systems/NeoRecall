@@ -1,7 +1,35 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/background/background_hold.dart';
+import 'package:neorecall/src/background/background_live_status.dart';
 
 void main() {
+  test('live status serializes one cross-platform notification contract', () {
+    final startedAt = DateTime.utc(2026, 8, 25, 8);
+    final status = BackgroundLiveStatus(
+      phase: BackgroundLivePhase.recording,
+      title: 'Recording from Phone microphone',
+      detail: 'Recording safely',
+      recordingStartedAt: startedAt,
+      progress: 0.5,
+      pendingBytes: 2048,
+      pendingAudioSeconds: 12,
+      etaSeconds: 30,
+    );
+
+    expect(status.toMap(), <String, Object?>{
+      'phase': 'recording',
+      'shortLabel': 'REC',
+      'title': 'Recording from Phone microphone',
+      'detail': 'Recording safely',
+      'recordingStartedAtMs': startedAt.millisecondsSinceEpoch,
+      'progress': 0.5,
+      'pendingBytes': 2048,
+      'pendingAudioSeconds': 12,
+      'etaSeconds': 30,
+      'issue': null,
+    });
+  });
+
   test('a request maps holds onto the platform capabilities they need', () {
     const microphoneOnly = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{BackgroundHold.microphoneCapture},
@@ -33,6 +61,13 @@ void main() {
     expect(syncing.needsConnectedDevice, isTrue);
     expect(linkOnly.needsWakeLock, isFalse);
 
+    const uploading = BackgroundRuntimeRequest(
+      holds: <BackgroundHold>{BackgroundHold.audioUpload},
+    );
+    expect(uploading.isCapturing, isFalse);
+    expect(uploading.needsConnectedDevice, isFalse);
+    expect(uploading.needsWakeLock, isTrue);
+
     const combined = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{
         BackgroundHold.microphoneCapture,
@@ -63,10 +98,11 @@ void main() {
     expect(first, second);
     expect(first.hashCode, second.hashCode);
     expect(
-      first == const BackgroundRuntimeRequest(
-        holds: <BackgroundHold>{BackgroundHold.microphoneCapture},
-        deviceLabel: 'Omi',
-      ),
+      first ==
+          const BackgroundRuntimeRequest(
+            holds: <BackgroundHold>{BackgroundHold.microphoneCapture},
+            deviceLabel: 'Omi',
+          ),
       isFalse,
     );
   });
@@ -101,6 +137,11 @@ void main() {
     );
     expect(syncing.notificationTitle, 'NeoRecall stays connected');
     expect(syncing.notificationText, 'Syncing recordings from HeyPocket');
+
+    const uploading = BackgroundRuntimeRequest(
+      holds: <BackgroundHold>{BackgroundHold.audioUpload},
+    );
+    expect(uploading.notificationText, 'Uploading protected recordings');
 
     // Without a device name the text stays truthful instead of showing "null".
     const unnamed = BackgroundRuntimeRequest(

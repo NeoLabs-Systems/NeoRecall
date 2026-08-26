@@ -12,7 +12,7 @@ function modelConfig() {
   return {
     segmentation: { pyannote: { model: path.join(paths().models, 'diarization', 'pyannote-segmentation-3.0.int8.onnx') }, numThreads: config.sherpaThreads, provider: 'cpu', debug: 0 },
     embedding: { model: embeddingModel, numThreads: config.sherpaThreads, provider: 'cpu', debug: 0 },
-    clustering: { numClusters: -1, threshold: config.speakerClusterThreshold },
+    clustering: { numClusters: -1, threshold: config.diarizationClusterDistance },
     minDurationOn: config.diarizationMinimumOnSeconds, minDurationOff: config.diarizationMinimumOffSeconds,
   };
 }
@@ -37,13 +37,47 @@ function embeddingForSpan(samples, startSeconds, endSeconds) {
   return model.compute(stream, false);
 }
 
+// One fingerprint per voice per chunk, pooled from everything that voice said
+// in it, weighted by turn duration so a longer turn counts for more.
+function poolBySpeaker(turns) {
+  const bySpeaker = new Map();
+  for (const turn of turns) {
+    if (!turn.embedding) continue;
+    if (!bySpeaker.has(turn.speaker)) bySpeaker.set(turn.speaker, []);
+    bySpeaker.get(turn.speaker).push(turn);
+  }
+  const pooled = new Map();
+  for (const [speaker, list] of bySpeaker) {
+    const dimensions = list[0].embedding.length;
+    const total = new Float32Array(dimensions);
+    let weight = 0;
+    for (const turn of list) {
+      const duration = Math.max(1, turn.endMs - turn.startMs);
+      weight += duration;
+      for (let index = 0; index < dimensions; index += 1) total[index] += turn.embedding[index] * duration;
+    }
+    for (let index = 0; index < dimensions; index += 1) total[index] /= weight;
+    pooled.set(speaker, { embedding: total, speechMs: weight });
+  }
+  return pooled;
+}
+
 function diarize(samples) {
   if (!getConfig().diarizationEnabled) return [];
   const { diarizer: model } = getModels();
-  return model.process(samples).map((turn) => ({
+  const turns = model.process(samples).map((turn) => ({
     startMs: Math.round(turn.start * 1000), endMs: Math.round(turn.end * 1000), speaker: turn.speaker,
     embedding: embeddingForSpan(samples, turn.start, turn.end),
   }));
+  const pooled = poolBySpeaker(turns);
+  return turns.map((turn) => {
+    const voice = pooled.get(turn.speaker);
+    return voice
+      // speechMs is how much speech the fingerprint was built from, which is what
+      // decides whether it is trustworthy — not the length of this one turn.
+      ? { ...turn, embedding: voice.embedding, speechMs: voice.speechMs }
+      : { ...turn, speechMs: 0 };
+  });
 }
 
-module.exports = { diarize, embeddingForSpan };
+module.exports = { diarize, embeddingForSpan, poolBySpeaker };

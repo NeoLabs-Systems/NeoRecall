@@ -10,8 +10,8 @@ const crypto = require('node:crypto');
 const request = require('supertest');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-live-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
-process.env.AI_DEFAULT_MODEL = 'test/model';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_MODEL = 'test/model';
 process.env.NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS = '10';
 process.env.NEORECALL_CONVERSATION_PREVIEW_REFRESH_CHARACTERS = '10';
 process.env.NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS = '0';
@@ -21,12 +21,14 @@ const { getDatabase, closeDatabase } = require('../../server/db/database');
 const boundaryHandler = require('../../server/workers/handlers/boundary_handler');
 const insights = require('../../server/services/conversations/conversation_insight_service');
 const consolidation = require('../../server/services/memories/consolidation_service');
+const processingSettings = require('../../server/services/settings/processing_settings_service');
+const { getConfig } = require('../../server/config');
 
 const app = createApp();
-let openRouter;
+let modelEndpoint;
 
 test.after(() => {
-  openRouter?.close();
+  modelEndpoint?.close();
   closeDatabase();
   fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true });
 });
@@ -84,7 +86,7 @@ test('an open conversation keeps its identity and its live insight while recordi
   assert.equal(first.state, 'open');
 
   // A preview writes a provisional insight for the conversation as it stands.
-  openRouter = http.createServer((req, res) => {
+  modelEndpoint = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
@@ -97,8 +99,8 @@ test('an open conversation keeps its identity and its live insight while recordi
       }) } }] }));
     });
   });
-  await new Promise((resolve) => openRouter.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${openRouter.address().port}`;
+  await new Promise((resolve) => modelEndpoint.listen(0, '127.0.0.1', resolve));
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${modelEndpoint.address().port}`;
 
   const previewed = await insights.execute(recording.userId, first.id);
   assert.equal(previewed.superseded, false);
@@ -187,6 +189,11 @@ test('a conversation the model cannot partition is isolated and then quarantined
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
   const [older, newer] = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
   assert.ok(older && newer && older !== newer);
+  // Narrowing is only observable when a run is allowed to carry more than one
+  // conversation, which is not the shipped default any more — a local model does
+  // its best work on one occasion at a time. The batching path still exists for
+  // an operator who raises the limit, so the test configures it explicitly.
+  processingSettings.update({ maxConsolidationConversations: 12 });
   assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [older, newer]);
 
   // After a validation failure the next run carries a single conversation, so
@@ -207,41 +214,43 @@ test('a conversation the model cannot partition is isolated and then quarantined
 
   // Memory generation continues with the conversations that are still valid.
   assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [newer]);
+  processingSettings.update({ maxConsolidationConversations: getConfig().maxConsolidationConversations });
 });
 
-test('a recording of a minute or less never reaches a language model', async () => {
+test('the audio floor is off by default and still enforced when an operator sets one', async () => {
   const recording = await recordingUser('short-user');
   const db = getDatabase();
-  // Fifty seconds of dense speech: far past every character threshold, and past
-  // the waiting-material sweep that exists to consolidate whatever never
-  // reaches them. Only the audio floor stands between this and a request.
+  // Fifty seconds of dense speech. This used to be refused outright, because a
+  // hosted model charged per request and a short recording could not justify
+  // one. The model now runs on this machine, so the recording is worth
+  // describing as soon as it ends — what keeps it off the timeline as a memory
+  // card is the separate evidence floor, not a floor on reaching the model.
   appendChunk(recording, 0, [{ startedAt: iso(-3_650_000), endedAt: iso(-3_600_000), text: 'Kurze Notiz. '.repeat(400) }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
 
   const conversation = db.prepare('SELECT * FROM conversations WHERE user_id=?').get(recording.userId);
   assert.equal(Date.parse(conversation.ended_at) - Date.parse(conversation.started_at), 50_000);
+  assert.equal(getConfig().minAiAudioMs, 0, 'The shipped default no longer withholds short material from the model.');
 
-  const candidates = consolidation.buildCandidates(recording.userId);
-  assert.equal(candidates.conversations.length, 1);
-  assert.ok(candidates.characters > 1_500, 'The fixture must clear the character threshold for this to prove anything.');
+  const allowed = consolidation.eligibility(recording.userId);
+  assert.equal(allowed.eligible, true);
+  assert.equal(allowed.conversations.length, 1);
 
-  const blocked = consolidation.eligibility(recording.userId);
-  assert.equal(blocked.eligible, false);
-  assert.equal(blocked.reason, 'insufficient_audio');
-  assert.equal(blocked.requiredAudioMs, 60_000);
-  // Even asking directly queues nothing: the floor is not a heuristic.
-  assert.equal(consolidation.request(recording.userId, { manual: true }).queued, undefined);
-  assert.equal(db.prepare('SELECT COUNT(*) count FROM consolidation_runs WHERE user_id=?').get(recording.userId).count, 0);
-  // And it is never previewed either, however much text it holds.
-  assert.equal(insights.due(recording.userId).length, 0);
-
-  // Once genuinely longer material arrives, the request it justifies carries the
-  // short conversation along — including it costs nothing extra.
-  appendChunk(recording, 1, [{ startedAt: iso(-3_000_000), endedAt: iso(-2_880_000), text: 'Das eigentliche Meeting. '.repeat(200) }]);
-  await boundaryHandler.handle({ user_id: recording.userId });
-  db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
-  const together = consolidation.eligibility(recording.userId);
-  assert.equal(together.eligible, true);
-  assert.equal(together.conversations.length, 2);
+  // The floor is still a hard gate, not a heuristic, for an operator whose
+  // machine cannot keep up with its own recordings.
+  processingSettings.update({ minAiAudioMs: 60_000 });
+  try {
+    const blocked = consolidation.eligibility(recording.userId);
+    assert.equal(blocked.eligible, false);
+    assert.equal(blocked.reason, 'insufficient_audio');
+    assert.equal(blocked.requiredAudioMs, 60_000);
+    // Even asking directly queues nothing.
+    assert.equal(consolidation.request(recording.userId, { manual: true }).queued, undefined);
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM consolidation_runs WHERE user_id=?').get(recording.userId).count, 0);
+    // And it is never previewed either, however much text it holds.
+    assert.equal(insights.due(recording.userId).length, 0);
+  } finally {
+    processingSettings.update({ minAiAudioMs: getConfig().minAiAudioMs });
+  }
 });

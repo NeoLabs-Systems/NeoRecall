@@ -47,6 +47,12 @@ test('transcription jobs wait for the previous source sequence to become termina
   const firstId = crypto.randomUUID();
   insertChunk.run(firstId, userId, sessionId, sourceId, 0, crypto.randomUUID(), '0'.repeat(64), '2026-07-13T10:00:00.000Z', 0, '/tmp/first.wav');
   jobs.enqueue({ userId, resourceType: 'audio_chunk', resourceId: firstId, type: 'transcribe_chunk', priority: 100 }, db);
+  const maintenanceId = jobs.enqueue({ type: 'maintenance', priority: 0 }, db);
+  const whileInferenceUnavailable = jobs.claimNext('non-asr-worker', undefined, false);
+  assert.equal(whileInferenceUnavailable.id, maintenanceId, 'non-ASR work remains claimable');
+  assert.equal(whileInferenceUnavailable.type, 'maintenance');
+  assert.equal(jobs.complete(maintenanceId, 'non-asr-worker'), true);
+
   const firstJob = jobs.claimNext('ordering-worker');
   assert.equal(firstJob.resource_id, firstId);
   db.prepare("UPDATE audio_chunks SET state='transcribed',temporary_path=NULL WHERE id=?").run(firstId);

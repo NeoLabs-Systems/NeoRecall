@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const request = require('supertest');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-ingest-'));
@@ -31,7 +32,8 @@ test('idempotent upload becomes terminal only after transcript commit and audio 
   const audio = wav(); const digest = crypto.createHash('sha256').update(audio).digest('hex'); const idempotencyKey = crypto.randomUUID();
   const upload = () => request(app).put(`/api/v1/ingest/sessions/${sessionId}/sources/${sourceId}/chunks/0`).set(auth)
     .set('Idempotency-Key', idempotencyKey).set('X-Chunk-Sha256', digest).set('X-Chunk-Duration-Ms', '16000').set('X-Chunk-Overlap-Ms', '0')
-    .set('X-Channel-Layout', 'mono').set('X-Monotonic-Offset-Ms', '0').set('X-Device-Started-At', '2026-07-13T10:00:00.000Z').set('X-Audio-Container', 'wav').attach('audio', audio, 'chunk.wav');
+    .set('X-Channel-Layout', 'mono').set('X-Monotonic-Offset-Ms', '0').set('X-Device-Started-At', '2026-07-13T10:00:00.000Z').set('X-Audio-Container', 'wav')
+    .set('X-Audio-Content-Encoding', 'gzip').attach('audio', zlib.gzipSync(audio), 'chunk.wav.gz');
   const first = await upload().expect(202); const chunkId = first.body.receipt.chunkId;
   const duplicate = await upload().expect(200); assert.equal(duplicate.body.receipt.chunkId, chunkId);
   const chunk = getDatabase().prepare('SELECT * FROM audio_chunks WHERE id=?').get(chunkId); assert.ok(fs.existsSync(chunk.temporary_path));

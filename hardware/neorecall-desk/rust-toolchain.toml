@@ -1,0 +1,4 @@
+[toolchain]
+channel = "1.82.0"
+targets = ["armv7-unknown-linux-gnueabihf"]
+components = ["rustfmt", "clippy"]

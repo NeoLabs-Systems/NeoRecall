@@ -1,16 +1,22 @@
 'use strict';
 
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
+const processingSettings = require('../settings/processing_settings_service');
+const vectors = require('../../transcription/speaker_embeddings');
+const { shouldReplacePreview } = require('./speaker_preview_service');
 
 function list(userId) {
+  const { speakerDisplayMinimumPreviewMs } = getConfig();
   return getDatabase().prepare(`SELECT v.id,v.display_name,v.embedding_model,v.sample_count,v.matching_enabled,v.created_at,v.updated_at,
     (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count,
     (SELECT SUM(end_ms - start_ms) FROM speaker_turns st WHERE st.voiceprint_id=v.id) total_duration_ms,
     p.duration_ms preview_duration_ms
     FROM voiceprints v
-    LEFT JOIN speaker_previews p ON p.voiceprint_id=v.id
-    WHERE v.user_id=? ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId);
+    JOIN speaker_previews p ON p.voiceprint_id=v.id
+    WHERE v.user_id=? AND p.duration_ms>=?
+    ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId, speakerDisplayMinimumPreviewMs);
 }
 
 function getOwned(userId, id) {
@@ -49,7 +55,15 @@ function merge(userId, targetId, sourceId) {
   db.transaction(() => {
     const targetPreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(targetId);
     const sourcePreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(sourceId);
-    if (sourcePreview && (!targetPreview || sourcePreview.quality > targetPreview.quality)) {
+    const sourceSelection = sourcePreview && {
+      durationMs: sourcePreview.duration_ms,
+      quality: sourcePreview.quality,
+    };
+    if (sourcePreview && shouldReplacePreview(
+      targetPreview,
+      sourceSelection,
+      getConfig().speakerDisplayMinimumPreviewMs,
+    )) {
       db.prepare(`INSERT INTO speaker_previews
         (voiceprint_id,user_id,audio,content_type,duration_ms,quality,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?)
@@ -66,6 +80,99 @@ function merge(userId, targetId, sourceId) {
     db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(sourceId, userId);
   })();
   return getOwned(userId, targetId);
+}
+
+function mergeMany(userId, targetId, sourceIds) {
+  const uniqueSources = [...new Set(sourceIds)].filter((id) => id !== targetId);
+  if (uniqueSources.length === 0) throw new HttpError(400, 'INVALID_MERGE', 'Select at least one other speaker to combine.');
+  let result;
+  for (const sourceId of uniqueSources) result = merge(userId, targetId, sourceId);
+  return result;
+}
+
+function sameExplicitIdentity(first, second) {
+  const firstName = first.display_name?.trim();
+  const secondName = second.display_name?.trim();
+  return !firstName || !secondName || firstName === secondName;
+}
+
+function rankedPeers(row, rows) {
+  const centroid = vectors.fromBuffer(row.centroid_embedding);
+  return rows
+    .filter((candidate) => candidate.id !== row.id
+      && candidate.embedding_model === row.embedding_model
+      && candidate.embedding_dimensions === row.embedding_dimensions)
+    .map((candidate) => ({
+      row: candidate,
+      score: vectors.cosine(centroid, vectors.fromBuffer(candidate.centroid_embedding)),
+    }))
+    .sort((left, right) => right.score - left.score);
+}
+
+function reevaluationPairs(rows, { voiceMatchThreshold, voiceMatchMargin }) {
+  const matches = new Map();
+  for (const row of rows) {
+    const ranked = rankedPeers(row, rows);
+    const best = ranked[0];
+    const runnerUp = ranked[1];
+    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold
+      && (!runnerUp || best.score - runnerUp.score >= voiceMatchMargin)) {
+      matches.set(row.id, best);
+    }
+  }
+  const pairs = [];
+  for (const row of rows) {
+    const match = matches.get(row.id);
+    if (!match || matches.get(match.row.id)?.row.id !== row.id || row.id > match.row.id) continue;
+    pairs.push({ first: row, second: match.row, score: match.score });
+  }
+  return pairs.sort((left, right) => right.score - left.score);
+}
+
+function preferredMergeTarget(first, second) {
+  const firstNamed = Boolean(first.display_name?.trim());
+  const secondNamed = Boolean(second.display_name?.trim());
+  if (firstNamed !== secondNamed) return firstNamed ? first : second;
+  if (first.sample_count !== second.sample_count) return first.sample_count > second.sample_count ? first : second;
+  return first.created_at <= second.created_at ? first : second;
+}
+
+function reevaluate(userId) {
+  const db = getDatabase();
+  const limits = processingSettings.get();
+  return db.transaction(() => {
+    const merges = [];
+    while (true) {
+      const rows = db.prepare(`SELECT * FROM voiceprints
+        WHERE user_id=? AND matching_enabled=1 AND centroid_embedding IS NOT NULL`).all(userId);
+      const pairs = reevaluationPairs(rows, limits);
+      if (pairs.length === 0) break;
+      for (const pair of pairs) {
+        const target = preferredMergeTarget(pair.first, pair.second);
+        const source = target.id === pair.first.id ? pair.second : pair.first;
+        merge(userId, target.id, source.id);
+        merges.push({ targetId: target.id, sourceId: source.id, similarity: pair.score });
+      }
+    }
+    return {
+      mergedCount: merges.length,
+      remainingCount: db.prepare('SELECT COUNT(*) count FROM voiceprints WHERE user_id=?').get(userId).count,
+      merges,
+    };
+  })();
+}
+
+function bulkRemove(userId, ids) {
+  const uniqueIds = [...new Set(ids)];
+  const db = getDatabase();
+  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${uniqueIds.map(() => '?').join(',')})`)
+    .all(userId, ...uniqueIds);
+  if (rows.length !== uniqueIds.length) throw new HttpError(404, 'NOT_FOUND', 'One or more speakers were not found.');
+  db.transaction(() => {
+    const stmt = db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?');
+    for (const id of uniqueIds) stmt.run(id, userId);
+  })();
+  return { action: 'delete', count: uniqueIds.length, ids: uniqueIds };
 }
 
 function assign(userId, voiceprintId, turnIds) {
@@ -87,4 +194,14 @@ function remove(userId, id) {
   return { success: true };
 }
 
-module.exports = { list, update, merge, assign, remove };
+module.exports = {
+  list,
+  update,
+  merge,
+  mergeMany,
+  reevaluate,
+  assign,
+  remove,
+  bulkRemove,
+  reevaluationPairs,
+};

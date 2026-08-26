@@ -7,9 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0D96316CE9761F6CD9706D98 /* NeoRecallLiveStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E515DFA06E34B2EAD589EAA /* NeoRecallLiveStatus.swift */; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
+		2770A4E71D01E45F8427E9DD /* NeoRecallLiveStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E515DFA06E34B2EAD589EAA /* NeoRecallLiveStatus.swift */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
+		3F338485EA6CAA71E59ABEF0 /* NeoRecallLiveStatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C82D51C468437852515E9EE /* NeoRecallLiveStatusWidget.swift */; };
+		5FA2D0CA941B51BAA8F9D03E /* NeoRecallLiveStatus.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E5D46022E8CBDACC39C77D72 /* NeoRecallLiveStatus.appex */; };
+		743ED17E125EC1D30798801E /* LiveStatusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF0285B368BC88AC302403F /* LiveStatusCoordinator.swift */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		7F3612ED1EE6359CBC821A71 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6A2BD32E98621B075E6BB8F7 /* Pods_RunnerTests.framework */; };
 		873640C8153950D82EE0C78D /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3A28F19C0AD8682E42DD9F99 /* Pods_Runner.framework */; };
@@ -26,9 +31,27 @@
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
 		};
+		8784D1FD46CC995126847D71 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D69730E6B0A3AC429F4A2CA4;
+			remoteInfo = NeoRecallLiveStatus;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		23955069AC042977085110BE /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5FA2D0CA941B51BAA8F9D03E /* NeoRecallLiveStatus.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9705A1C41CF9048500538489 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -57,6 +80,7 @@
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
+		7C82D51C468437852515E9EE /* NeoRecallLiveStatusWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NeoRecallLiveStatusWidget.swift; sourceTree = "<group>"; };
 		86FE4FA975F27D475FAB8D1F /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
 		9740EEB31CF90195004384FC /* Generated.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
@@ -65,6 +89,10 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		9E515DFA06E34B2EAD589EAA /* NeoRecallLiveStatus.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NeoRecallLiveStatus.swift; sourceTree = "<group>"; };
+		B194CB1776CBBDB4A8E922AB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		E5D46022E8CBDACC39C77D72 /* NeoRecallLiveStatus.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NeoRecallLiveStatus.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EEF0285B368BC88AC302403F /* LiveStatusCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiveStatusCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +101,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				7F3612ED1EE6359CBC821A71 /* Pods_RunnerTests.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6D947A5ED7CBBFE6A24BF57C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -109,6 +144,15 @@
 			path = Pods;
 			sourceTree = "<group>";
 		};
+		8A09F11B0F130DB50DD695FD /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				9E515DFA06E34B2EAD589EAA /* NeoRecallLiveStatus.swift */,
+			);
+			name = Shared;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		9740EEB11CF90186004384FC /* Flutter */ = {
 			isa = PBXGroup;
 			children = (
@@ -129,6 +173,8 @@
 				331C8082294A63A400263BE5 /* RunnerTests */,
 				4781522A892CBE69A4EC0A24 /* Pods */,
 				EAAE224BB503D0D131F3C9E2 /* Frameworks */,
+				8A09F11B0F130DB50DD695FD /* Shared */,
+				ED349B173FB0E23C996FD1D2 /* NeoRecallLiveStatus */,
 			);
 			sourceTree = "<group>";
 		};
@@ -137,6 +183,7 @@
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
+				E5D46022E8CBDACC39C77D72 /* NeoRecallLiveStatus.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -152,6 +199,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				EEF0285B368BC88AC302403F /* LiveStatusCoordinator.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -161,8 +209,26 @@
 			children = (
 				3A28F19C0AD8682E42DD9F99 /* Pods_Runner.framework */,
 				6A2BD32E98621B075E6BB8F7 /* Pods_RunnerTests.framework */,
+				EF4BB7A522746616A98532AE /* iOS */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		ED349B173FB0E23C996FD1D2 /* NeoRecallLiveStatus */ = {
+			isa = PBXGroup;
+			children = (
+				7C82D51C468437852515E9EE /* NeoRecallLiveStatusWidget.swift */,
+			);
+			name = NeoRecallLiveStatus;
+			path = NeoRecallLiveStatus;
+			sourceTree = "<group>";
+		};
+		EF4BB7A522746616A98532AE /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				B194CB1776CBBDB4A8E922AB /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -200,15 +266,34 @@
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				8E96629D74D45324BFFA9F2D /* [CP] Embed Pods Frameworks */,
 				6337A987C83CFC4475CE2382 /* [CP] Copy Pods Resources */,
+				23955069AC042977085110BE /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D8C3B442AEC45BEA973A82EE /* PBXTargetDependency */,
 			);
 			name = Runner;
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D69730E6B0A3AC429F4A2CA4 /* NeoRecallLiveStatus */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8FF08B795DE292DEDE995581 /* Build configuration list for PBXNativeTarget "NeoRecallLiveStatus" */;
+			buildPhases = (
+				7B9D8DC632DDDF739CB08DF5 /* Sources */,
+				6D947A5ED7CBBFE6A24BF57C /* Frameworks */,
+				44C4D34AF5E6CDCE89FDF1A8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = NeoRecallLiveStatus;
+			productName = NeoRecallLiveStatus;
+			productReference = E5D46022E8CBDACC39C77D72 /* NeoRecallLiveStatus.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -245,12 +330,20 @@
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
+				D69730E6B0A3AC429F4A2CA4 /* NeoRecallLiveStatus */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		331C807F294A63A400263BE5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		44C4D34AF5E6CDCE89FDF1A8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -391,12 +484,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7B9D8DC632DDDF739CB08DF5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3F338485EA6CAA71E59ABEF0 /* NeoRecallLiveStatusWidget.swift in Sources */,
+				2770A4E71D01E45F8427E9DD /* NeoRecallLiveStatus.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		97C146EA1CF9000F007C117D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
+				743ED17E125EC1D30798801E /* LiveStatusCoordinator.swift in Sources */,
+				0D96316CE9761F6CD9706D98 /* NeoRecallLiveStatus.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -407,6 +511,12 @@
 			isa = PBXTargetDependency;
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
+		};
+		D8C3B442AEC45BEA973A82EE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = NeoRecallLiveStatus;
+			target = D69730E6B0A3AC429F4A2CA4 /* NeoRecallLiveStatus */;
+			targetProxy = 8784D1FD46CC995126847D71 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -430,6 +540,29 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		16E10DE5B3B58F2ADA2F6B62 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9740EEB31CF90195004384FC /* Generated.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 66H3V9ZF4K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NeoRecallLiveStatus/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "systems.neolabs.neorecall.live-status";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Profile;
+		};
 		249021D3217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -553,6 +686,29 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
 			};
 			name = Profile;
+		};
+		89899093C6794A1C999F87D3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9740EEB31CF90195004384FC /* Generated.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 66H3V9ZF4K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NeoRecallLiveStatus/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "systems.neolabs.neorecall.live-status";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
 		};
 		97C147031CF9000F007C117D /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -710,6 +866,28 @@
 			};
 			name = Release;
 		};
+		C59CBB9F590D755A100E4214 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9740EEB31CF90195004384FC /* Generated.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 66H3V9ZF4K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NeoRecallLiveStatus/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "systems.neolabs.neorecall.live-status";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -719,6 +897,16 @@
 				331C8088294A63A400263BE5 /* Debug */,
 				331C8089294A63A400263BE5 /* Release */,
 				331C808A294A63A400263BE5 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8FF08B795DE292DEDE995581 /* Build configuration list for PBXNativeTarget "NeoRecallLiveStatus" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				89899093C6794A1C999F87D3 /* Release */,
+				C59CBB9F590D755A100E4214 /* Debug */,
+				16E10DE5B3B58F2ADA2F6B62 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

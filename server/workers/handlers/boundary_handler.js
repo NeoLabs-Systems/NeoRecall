@@ -5,6 +5,9 @@ const processingSettings = require('../../services/settings/processing_settings_
 const boundary = require('../../services/conversations/boundary_service');
 const membership = require('../../services/conversations/conversation_membership_service');
 const vectors = require('../../transcription/speaker_embeddings');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('conversations');
 
 function blocksForSegments(database, segments) {
   return segments.map((segment) => {
@@ -52,6 +55,7 @@ async function handle(job) {
     WHERE t.user_id=? AND t.conversation_id IS NULL`).all(job.user_id);
   let created = 0;
   let continued = 0;
+  let closed = 0;
   db.transaction(() => {
     for (const { session_id: sessionId } of sessions) {
       const open = db.prepare(`SELECT c.* FROM conversations c WHERE c.user_id=? AND c.state='open'
@@ -94,10 +98,16 @@ async function handle(job) {
       // any more, so remove the empty shell rather than leave it open forever.
       if (open && !anchorClaimed) db.prepare('DELETE FROM conversations WHERE id=? AND user_id=?').run(open.id, job.user_id);
     }
-    db.prepare(`UPDATE conversations SET state='closed',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE user_id=? AND state='open' AND ended_at<=?`).run(job.user_id, new Date(Date.now() - config.conversationQuietCloseMs).toISOString());
+    closed = db.prepare(`UPDATE conversations SET state='closed',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id=? AND state='open' AND ended_at<=?`).run(job.user_id, new Date(Date.now() - config.conversationQuietCloseMs).toISOString()).changes;
   })();
-  return { created, continued };
+  // Only when something moved. Boundary detection runs whenever new speech
+  // arrives and usually has nothing to do, so an unconditional line would say
+  // "nothing happened" all day and drown out the times it did.
+  if (created || continued || closed) {
+    logger.info('Grouped speech into conversations', { userId: job.user_id, started: created, extended: continued, finished: closed });
+  }
+  return { created, continued, closed };
 }
 
 module.exports = { handle, blocksForSegments, persistGroup };

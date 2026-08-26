@@ -2,11 +2,38 @@
 
 const { z } = require('zod');
 const { localDateTimeToUtc } = require('../../utils/time');
+const { dailySummarySchema, dailySummaryJsonSchema } = require('./daily_summary_schema');
 
 const TITLE_MAX_LENGTH = 160;
 const SUMMARY_MAX_LENGTH = 2_000;
 const TOPIC_MAX_LENGTH = 100;
 const TOPIC_MAX_COUNT = 12;
+// How much one consolidation request may return.
+//
+// These are grammar-enforced, which makes them the only thing standing between a
+// model and an answer that never ends: the contract otherwise allows
+// an unbounded array, and a model handed a dense transcript will emit one
+// action item per utterance until it runs out of budget — which arrives as a
+// truncated completion, the failure that narrows and eventually quarantines. On
+// a machine generating a few tokens per second, an unbounded answer is also an
+// unbounded wait.
+//
+// They bound a *window*, not an occasion. A long conversation is read in several
+// windows and their results are merged, so a three-hour lecture still accumulates
+// as many mini-memories as it deserves while no single request grows without
+// limit. Sized for a window of a few thousand characters: an eight-minute stretch
+// of speech rarely holds more than a couple of distinct occasions, and asking the
+// model to pick its eight best action items is a better instruction than letting
+// it list forty.
+const MEMORY_MAX_COUNT = 3;
+const MINI_MEMORY_MAX_COUNT = 8;
+const ENTITY_MAX_COUNT = 16;
+const ENTITY_REFERENCE_MAX_COUNT = 8;
+// Existing cards one output memory may identify as fragments of its occasion.
+// Candidate retrieval uses the configurable context limit; this grammar cap is
+// the final safety bound for providers that enforce JSON Schema during decoding.
+const CONTINUATION_MEMORY_MAX_COUNT = 32;
+const CONTINUATION_REASONING_MAX_LENGTH = 400;
 // A single consumer-facing emoji (may be multi-codepoint, e.g. 👨‍👩‍👧‍👦).
 const EMOJI_MAX_LENGTH = 16;
 const DEFAULT_MEMORY_EMOJI = Object.freeze({
@@ -22,6 +49,23 @@ const DEFAULT_MEMORY_EMOJI = Object.freeze({
 
 function defaultEmojiForType(type) {
   return DEFAULT_MEMORY_EMOJI[type] || DEFAULT_MEMORY_EMOJI.other;
+}
+
+/// A display bound on prose the model wrote, enforced by trimming rather than by
+/// rejection.
+///
+/// These limits exist so a title fits a card and a summary fits a panel; nothing
+/// downstream is unsafe when a summary runs long. A provider may be constrained
+/// by a sampling grammar that can express "a string" but not "a string of at
+/// most two thousand characters", so an over-long field is the one contract
+/// violation it can still commit — and failing the whole consolidation over a
+/// summary that was fifty characters too generous would discard a correct answer
+/// and eventually quarantine the conversation. The ellipsis keeps the trim
+/// visible instead of making the text look like it simply stopped.
+function boundedText(maximum) {
+  return z.string().min(1).transform((value) => (
+    value.length > maximum ? `${value.slice(0, maximum - 1).trimEnd()}…` : value
+  ));
 }
 const sourceIds = z.array(z.string().min(1)).min(1);
 const aliases = z.preprocess((value) => {
@@ -53,7 +97,18 @@ const MEMORY_TYPES = Object.freeze([
 const MINI_MEMORY_KINDS = Object.freeze([
   'fact', 'event', 'location', 'person', 'relationship', 'task', 'promise',
 ]);
+// The broader taxonomy remains readable for memories created by older
+// versions, but new consolidation output is deliberately limited to concrete
+// action items. This also gives providers a smaller grammar to follow.
+const GENERATED_MINI_MEMORY_KINDS = Object.freeze(['task', 'promise']);
+const GENERATED_MINI_MEMORY_KIND_SET = new Set(GENERATED_MINI_MEMORY_KINDS);
 const ENTITY_KINDS = Object.freeze(['person', 'organization', 'project', 'location', 'other']);
+// A long conversation is consolidated in windows that each fit the model's
+// context, so an occasion can begin in one window and continue in the next. The
+// model marks the section — and the memory built from it — that carries on where
+// the previous window stopped, and the engine folds the two into one. Without
+// it, a three-hour lecture would arrive as one memory per window.
+const continuesPrevious = z.boolean().default(false);
 const miniMemory = z.object({
   kind: z.enum(MINI_MEMORY_KINDS),
   textEn: z.string().min(1), importance: z.number().min(1).max(10), confidence: z.number().min(0).max(1),
@@ -63,33 +118,42 @@ const miniMemory = z.object({
 });
 const memory = z.object({
   type: z.enum(MEMORY_TYPES),
-  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH), summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH),
+  continuesPrevious,
+  // Answered before the claim itself: a short statement of what makes this the
+  // same occasion as a candidate, or what makes it a different one. Deciding
+  // out loud measurably improves the decision, and it is what makes a wrong
+  // merge explainable afterwards instead of a mystery.
+  // Trimmed rather than rejected: the wire schema drops length bounds so the
+  // grammar stays compilable, and a long-winded reason must never be the thing
+  // that fails a whole consolidation.
+  continuationReasoning: boundedText(CONTINUATION_REASONING_MAX_LENGTH).nullable().default(null),
+  continuesMemoryIds: z.array(z.string().min(1)).max(CONTINUATION_MEMORY_MAX_COUNT)
+    .refine((ids) => new Set(ids).size === ids.length, 'Continuation memory ids must be unique.').default([]),
+  titleEn: boundedText(TITLE_MAX_LENGTH), summaryEn: boundedText(SUMMARY_MAX_LENGTH),
   // One emoji that visually categorizes the occasion for the consumer list.
   emoji: z.string().min(1).max(EMOJI_MAX_LENGTH),
   importance: z.number().min(1).max(10),
-  sourceSegmentIds: sourceIds, topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
+  sourceSegmentIds: sourceIds, topics: z.array(boundedText(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
   entities: z.array(entityReference).default([]), miniMemories: z.array(miniMemory).default([]),
 });
 // What NeoRecall shows for a conversation. Consolidation derives it for a final,
 // evidence-partitioned section; the live preview derives the same shape for a
 // conversation that is still recording, so both write the same columns.
 const conversationInsightFields = {
-  titleEn: z.string().min(1).max(TITLE_MAX_LENGTH),
-  summaryEn: z.string().min(1).max(SUMMARY_MAX_LENGTH),
+  titleEn: boundedText(TITLE_MAX_LENGTH),
+  summaryEn: boundedText(SUMMARY_MAX_LENGTH),
   memoryWorthy: z.boolean(),
-  topics: z.array(z.string().min(1).max(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
+  topics: z.array(boundedText(TOPIC_MAX_LENGTH)).max(TOPIC_MAX_COUNT).default([]),
 };
-const conversationSection = z.object({ ...conversationInsightFields, sourceSegmentIds: sourceIds });
+const conversationSection = z.object({ ...conversationInsightFields, continuesPrevious, sourceSegmentIds: sourceIds });
 
 const consolidationSchema = z.object({
   conversationSections: z.array(conversationSection).min(1),
   entities: z.array(entity).default([]),
   memories: z.array(memory).default([]),
-  dailySummary: z.object({
-    localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    timezone: z.string().min(1),
-    summaryEn: z.string().min(1),
-  }).nullable(),
+  // Written by its own request after the windows are merged, because no single
+  // window sees the day. A window always returns null here.
+  dailySummary: dailySummarySchema.nullable(),
 });
 
 const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
@@ -104,12 +168,19 @@ const entityReferenceJsonSchema = {
   type: 'object', additionalProperties: false, required: ['ref', 'role'],
   properties: { ref: { type: 'string', minLength: 1 }, role: { type: 'string', minLength: 1 } },
 };
+const entityReferencesJsonSchema = { type: 'array', maxItems: ENTITY_REFERENCE_MAX_COUNT, items: entityReferenceJsonSchema };
 const sourceIdsJsonSchema = { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } };
 const topicsJsonSchema = {
   type: 'array', maxItems: TOPIC_MAX_COUNT,
   items: { type: 'string', minLength: 1, maxLength: TOPIC_MAX_LENGTH },
 };
 const conversationInsightRequired = Object.freeze(['titleEn', 'summaryEn', 'memoryWorthy', 'topics']);
+// Enumerated rather than bounded so the constraint survives translation into a
+// provider response contract: a model should only emit a value the
+// schema accepts, where a `minimum`/`maximum` pair has no grammar equivalent and
+// would only be caught after the answer was already written.
+const importanceJsonSchema = { type: 'number', enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
+const continuesPreviousJsonSchema = { type: 'boolean' };
 const conversationInsightJsonProperties = Object.freeze({
   titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
   summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
@@ -125,12 +196,16 @@ const consolidationJsonSchema = {
       type: 'array', minItems: 1,
       items: {
         type: 'object', additionalProperties: false,
-        required: [...conversationInsightRequired, 'sourceSegmentIds'],
-        properties: { ...conversationInsightJsonProperties, sourceSegmentIds: sourceIdsJsonSchema },
+        required: [...conversationInsightRequired, 'continuesPrevious', 'sourceSegmentIds'],
+        properties: {
+          ...conversationInsightJsonProperties,
+          continuesPrevious: continuesPreviousJsonSchema,
+          sourceSegmentIds: sourceIdsJsonSchema,
+        },
       },
     },
     entities: {
-      type: 'array',
+      type: 'array', maxItems: ENTITY_MAX_COUNT,
       items: {
         type: 'object', additionalProperties: false,
         required: ['ref', 'kind', 'canonicalNameEn', 'displayName', 'aliases', 'speakerAlias'],
@@ -139,7 +214,7 @@ const consolidationJsonSchema = {
           kind: { type: 'string', enum: [...ENTITY_KINDS] },
           canonicalNameEn: { type: 'string', minLength: 1 }, displayName: nullableString,
           aliases: {
-            type: 'array',
+            type: 'array', maxItems: ENTITY_REFERENCE_MAX_COUNT,
             items: {
               type: 'object', additionalProperties: false, required: ['value', 'language'],
               properties: { value: { type: 'string', minLength: 1 }, language: nullableString },
@@ -150,56 +225,73 @@ const consolidationJsonSchema = {
       },
     },
     memories: {
-      type: 'array',
+      type: 'array', maxItems: MEMORY_MAX_COUNT,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['type', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
+        required: ['type', 'continuesPrevious', 'continuationReasoning', 'continuesMemoryIds', 'titleEn', 'summaryEn', 'emoji', 'importance', 'sourceSegmentIds', 'topics', 'entities', 'miniMemories'],
         properties: {
           type: { type: 'string', enum: [...MEMORY_TYPES] },
+          continuesPrevious: continuesPreviousJsonSchema,
+          // Ordered before the claim on purpose: a constrained decoder emits
+          // these fields in schema order, so the reason is written while the
+          // answer is still open rather than justified after the fact.
+          continuationReasoning: { type: ['string', 'null'], maxLength: CONTINUATION_REASONING_MAX_LENGTH },
+          continuesMemoryIds: {
+            type: 'array', maxItems: CONTINUATION_MEMORY_MAX_COUNT,
+            items: { type: 'string', minLength: 1 },
+          },
           titleEn: { type: 'string', minLength: 1, maxLength: TITLE_MAX_LENGTH },
           summaryEn: { type: 'string', minLength: 1, maxLength: SUMMARY_MAX_LENGTH },
           emoji: { type: 'string', minLength: 1, maxLength: EMOJI_MAX_LENGTH },
-          importance: { type: 'number', minimum: 1, maximum: 10 },
+          importance: importanceJsonSchema,
           sourceSegmentIds: sourceIdsJsonSchema,
           topics: topicsJsonSchema,
-          entities: { type: 'array', items: entityReferenceJsonSchema },
+          entities: entityReferencesJsonSchema,
           miniMemories: {
-            type: 'array',
+            type: 'array', maxItems: MINI_MEMORY_MAX_COUNT,
             items: {
               type: 'object', additionalProperties: false,
               required: ['kind', 'textEn', 'importance', 'confidence', 'dueAt', 'occurredAt', 'status', 'sourceSegmentIds', 'entities'],
               properties: {
-                kind: { type: 'string', enum: [...MINI_MEMORY_KINDS] },
-                textEn: { type: 'string', minLength: 1 }, importance: { type: 'number', minimum: 1, maximum: 10 },
-                confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema, occurredAt: temporalReferenceJsonSchema,
-                status: { anyOf: [{ type: 'string', enum: ['open', 'completed', 'cancelled'] }, { type: 'null' }] },
-                sourceSegmentIds: sourceIdsJsonSchema, entities: { type: 'array', items: entityReferenceJsonSchema },
+                kind: { type: 'string', enum: [...GENERATED_MINI_MEMORY_KINDS] },
+                textEn: { type: 'string', minLength: 1 }, importance: importanceJsonSchema,
+                confidence: { type: 'number', minimum: 0, maximum: 1 }, dueAt: temporalReferenceJsonSchema,
+                occurredAt: { type: 'null' },
+                status: { type: 'string', enum: ['open'] },
+                sourceSegmentIds: sourceIdsJsonSchema, entities: entityReferencesJsonSchema,
               },
             },
           },
         },
       },
     },
-    dailySummary: {
-      anyOf: [{ type: 'null' }, {
-        type: 'object', additionalProperties: false,
-        required: ['localDate', 'timezone', 'summaryEn'],
-        properties: {
-          localDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-          timezone: { type: 'string', minLength: 1 },
-          summaryEn: { type: 'string', minLength: 1 },
-        },
-      }],
-    },
+    dailySummary: { anyOf: [{ type: 'null' }, dailySummaryJsonSchema] },
   },
 };
 
-function consolidationJsonSchemaFor(segmentIds) {
+function consolidationJsonSchemaFor(segmentIds, continuationMemoryIds = []) {
   const schema = JSON.parse(JSON.stringify(consolidationJsonSchema));
   schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum = segmentIds;
   const memorySchema = schema.properties.memories.items;
   memorySchema.properties.sourceSegmentIds.items.enum = segmentIds;
   memorySchema.properties.miniMemories.items.properties.sourceSegmentIds.items.enum = segmentIds;
+  if (continuationMemoryIds.length) {
+    // With candidates on the table the reason is not optional. Left nullable, a
+    // small model takes the cheap path and answers without deciding — which is
+    // exactly the failure this field exists to prevent.
+    memorySchema.properties.continuationReasoning = {
+      type: 'string', minLength: 1, maxLength: CONTINUATION_REASONING_MAX_LENGTH,
+    };
+    memorySchema.properties.continuesMemoryIds.maxItems = Math.min(
+      CONTINUATION_MEMORY_MAX_COUNT,
+      continuationMemoryIds.length,
+    );
+    memorySchema.properties.continuesMemoryIds.items.enum = continuationMemoryIds;
+  } else {
+    // Nothing to continue: neither a claim nor a reason for one.
+    memorySchema.properties.continuesMemoryIds.maxItems = 0;
+    memorySchema.properties.continuationReasoning = { type: 'null' };
+  }
   return schema;
 }
 
@@ -209,12 +301,23 @@ function normalizeTemporalReference(value) {
   return localDateTimeToUtc(value.localDateTime, value.timezone);
 }
 
+function retainActionableMiniMemories(output) {
+  for (const memoryItem of output.memories) {
+    memoryItem.miniMemories = memoryItem.miniMemories.filter(
+      (mini) => GENERATED_MINI_MEMORY_KIND_SET.has(mini.kind)
+        && !['completed', 'cancelled'].includes(mini.status),
+    );
+  }
+  return output;
+}
+
 function normalizeConsolidationTimestamps(output) {
+  retainActionableMiniMemories(output);
   for (const memoryItem of output.memories) {
     for (const mini of memoryItem.miniMemories) {
       mini.dueAt = normalizeTemporalReference(mini.dueAt);
-      mini.occurredAt = normalizeTemporalReference(mini.occurredAt);
-      if (!['task', 'promise'].includes(mini.kind)) mini.status = null;
+      mini.occurredAt = null;
+      mini.status = 'open';
     }
   }
   return output;
@@ -230,10 +333,17 @@ module.exports = {
   conversationInsightRequired,
   MEMORY_TYPES,
   MINI_MEMORY_KINDS,
+  GENERATED_MINI_MEMORY_KINDS,
   ENTITY_KINDS,
   DEFAULT_MEMORY_EMOJI,
   defaultEmojiForType,
   TITLE_MAX_LENGTH,
   SUMMARY_MAX_LENGTH,
   EMOJI_MAX_LENGTH,
+  MEMORY_MAX_COUNT,
+  MINI_MEMORY_MAX_COUNT,
+  ENTITY_MAX_COUNT,
+  CONTINUATION_MEMORY_MAX_COUNT,
+  CONTINUATION_REASONING_MAX_LENGTH,
+  retainActionableMiniMemories,
 };

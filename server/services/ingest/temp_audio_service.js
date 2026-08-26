@@ -45,7 +45,9 @@ function sweep() {
     if (result.state === 'transcribed' || result.state === 'silent') removed += 1;
   }
   removed += require('./import_service').reconcileProcessing();
-  logger.info('Temporary audio sweep completed', { removed });
+  // This runs every minute. A no-op is the healthy steady state and should not
+  // drown useful service logs; retain an info entry only when cleanup acted.
+  if (removed > 0) logger.info('Temporary audio sweep completed', { removed });
   return removed;
 }
 

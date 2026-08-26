@@ -7,6 +7,9 @@ import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/recording/audio_frame.dart';
 import 'package:neorecall/src/recording/recorder.dart';
+import 'package:neorecall/src/sync/processing_status.dart';
+import 'package:neorecall/src/sync/pending_audio_preview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The record screen animates and samples audio levels only while recording, so
 /// the live state needs its own coverage: the idle screen must settle, the live
@@ -19,12 +22,20 @@ void main() {
   );
 
   NeoRecallController recordingController() {
-    final controller = NeoRecallController(recorder: _FakeRecorder())
+    final controller = _PlaybackController(recorder: _FakeRecorder())
       ..recordingStartedAt = DateTime.now().toUtc().subtract(
         const Duration(minutes: 3, seconds: 5),
       )
       ..audioLevel = 0.7
-      ..pendingAudioBytes = 3 * 1048576;
+      ..pendingAudioBytes = 3 * 1048576
+      ..processingLedgerStatus = const ProcessingStatusSnapshot(
+        pendingBytes: 3 * 1048576,
+        pendingAudioDuration: Duration(hours: 1, minutes: 12),
+        phoneQueued: 2,
+        uploading: 1,
+        totalPending: 3,
+        eta: Duration(minutes: 2),
+      );
     return controller;
   }
 
@@ -42,13 +53,107 @@ void main() {
     expect(find.text('00:03:05'), findsOneWidget);
     expect(find.text('Stop and finalize'), findsOneWidget);
     expect(find.text('Start recording'), findsNothing);
-    expect(find.textContaining('3.0 MB awaiting'), findsOneWidget);
+    expect(find.text('Uploading to server'), findsOneWidget);
+    expect(find.textContaining('3.0 MB protected'), findsOneWidget);
+    expect(find.textContaining('1h 12m audio'), findsOneWidget);
+    expect(find.textContaining('ETA about 2 min'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     // Tearing the screen down must cancel the sampler; a leaked periodic timer
     // fails the test binding at the end of the test.
     await tester.pumpWidget(wrap(const SizedBox.shrink()));
     await tester.pump();
+  });
+
+  testWidgets('processing status expands into the full interactive pipeline', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = recordingController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('No watch backlog'), findsOneWidget);
+    expect(
+      tester
+          .widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade))
+          .crossFadeState,
+      CrossFadeState.showFirst,
+    );
+
+    await tester.ensureVisible(find.text('Uploading to server'));
+    await tester.tap(find.text('Uploading to server'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(
+      tester
+          .widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade))
+          .crossFadeState,
+      CrossFadeState.showSecond,
+    );
+    expect(find.text('Watch transfer'), findsOneWidget);
+    expect(find.text('Stored on phone'), findsOneWidget);
+    expect(find.text('Server upload'), findsOneWidget);
+    expect(find.text('Server transcription'), findsOneWidget);
+    expect(find.text('Safe completion'), findsOneWidget);
+    expect(find.text('Review queued audio'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    final reviewButton = find.byKey(
+      const ValueKey<String>('pending-audio-review'),
+    );
+    tester.widget<OutlinedButton>(reviewButton).onPressed!.call();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(
+      find.text('Local playback only · upload continues normally'),
+      findsOneWidget,
+    );
+    expect(find.text('On this device'), findsOneWidget);
+    expect(find.textContaining('part'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+    await tester.pump();
+  });
+
+  testWidgets('Wi-Fi wait exposes a one-time mobile-data upload action', (
+    tester,
+  ) async {
+    final controller = recordingController()
+      ..processingLedgerStatus = const ProcessingStatusSnapshot(
+        pendingBytes: 1048576,
+        phoneQueued: 1,
+        totalPending: 1,
+        waitingForUnmeteredNetwork: true,
+        issues: <ProcessingIssue>[
+          ProcessingIssue(
+            message:
+                'Waiting for Wi-Fi because mobile-data uploads are disabled.',
+          ),
+        ],
+      );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final action = find.byKey(
+      const ValueKey<String>('upload-with-mobile-data'),
+    );
+    expect(action, findsOneWidget);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+    await tester.pump();
+
+    expect(
+      (controller as _PlaybackController).mobileDataUploadRequested,
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a silent source still reads as live for hours', (tester) async {
@@ -88,6 +193,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('phone microphone hides the offline wearable sync card', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController();
+    await controller.audioDeviceSessions.bindAccount('account-1');
+    controller.audioDeviceSessions.preferredDevice =
+        const AudioDeviceDescriptor(
+          adapterId: 'omi_family',
+          deviceKey: 'pocket-1',
+          displayName: 'Pocket recorder',
+          transport: 'bluetooth_le',
+          metadata: <String, Object?>{'type': 'heyPocket'},
+        );
+    controller.preferBluetoothCapture = true;
+    controller.preferredDeviceLabel = 'Pocket recorder';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    expect(find.text('Pocket recorder records on its own'), findsOneWidget);
+
+    final phoneMicrophone = find.text('Phone microphone');
+    await tester.ensureVisible(phoneMicrophone);
+    await tester.tap(phoneMicrophone);
+    await tester.pumpAndSettle();
+    expect(find.text('Pocket recorder records on its own'), findsNothing);
+    expect(controller.preferBluetoothCapture, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   // flutter_test reports Android by default, so every other test here exercises
   // the two-option mobile picker. Desktop gets a third source and, once wide
   // enough, a two-column layout — neither of which mobile ever renders.
@@ -107,6 +243,11 @@ void main() {
       expect(find.text('Bluetooth device'), findsOneWidget);
       expect(find.text('Phone microphone'), findsNothing);
       expect(find.text('CAPTURE SOURCES'), findsOneWidget);
+      expect(
+        find.byIcon(Icons.check_circle_rounded),
+        findsNWidgets(2),
+        reason: 'microphone and device audio should both start selected',
+      );
 
       // Bluetooth is not selected until asked for, and selecting it reveals the
       // device setup affordances.
@@ -150,10 +291,44 @@ void main() {
   }
 }
 
+class _PlaybackController extends NeoRecallController {
+  _PlaybackController({required super.recorder});
+
+  bool mobileDataUploadRequested = false;
+
+  @override
+  Future<void> uploadQueuedAudioOnMobileDataOnce() async {
+    mobileDataUploadRequested = true;
+  }
+
+  @override
+  Future<List<PendingAudioRecording>> loadPendingAudioRecordings() async =>
+      <PendingAudioRecording>[
+        PendingAudioRecording(
+          id: 'session:source',
+          startedAt: DateTime.utc(2026, 8, 25, 7, 30),
+          duration: const Duration(minutes: 1, seconds: 12),
+          byteSize: 3 * 1048576,
+          stage: PendingAudioPlaybackStage.onDevice,
+          parts: const <PendingAudioPart>[
+            PendingAudioPart(
+              id: 'part-1',
+              duration: Duration(minutes: 1, seconds: 12),
+              mimeType: 'audio/wav',
+            ),
+          ],
+        ),
+      ];
+
+  @override
+  Future<Uint8List> readPendingAudioPart(String partId) async => Uint8List(44);
+}
+
 /// Reports an active recording without touching any platform channel.
 class _FakeRecorder implements RecallRecorder {
   @override
-  Stream<RecordedAudioChunk> get chunks => const Stream<RecordedAudioChunk>.empty();
+  Stream<RecordedAudioChunk> get chunks =>
+      const Stream<RecordedAudioChunk>.empty();
   @override
   Stream<RecordedAudioChunk> get partials =>
       const Stream<RecordedAudioChunk>.empty();

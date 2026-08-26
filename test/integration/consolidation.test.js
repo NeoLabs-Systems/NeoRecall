@@ -10,8 +10,8 @@ const crypto = require('node:crypto');
 const request = require('supertest');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-consolidation-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
-process.env.AI_DEFAULT_MODEL = 'test/model';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_MODEL = 'test/model';
 process.env.NEORECALL_MIN_NEW_MATERIAL_CHARS = '1';
 process.env.NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS = '3600000';
 process.env.NEORECALL_MIN_MEMORY_EVIDENCE_MS = '0';
@@ -23,19 +23,28 @@ const app = createApp();
 let server;
 test.after(() => { server?.close(); closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true }); });
 
-test('one outbound request creates English memories and a durable interval gate', async () => {
+test('one consolidation pass creates English memories and a durable interval gate', async () => {
   let outbound = 0; let outboundBody;
   const segmentPublicId = crypto.randomUUID();
   const secondSegmentPublicId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
   server = http.createServer((req, res) => {
-    outbound += 1;
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
-      outboundBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ id: 'generation-test', usage: { prompt_tokens: 100, completion_tokens: 50, cost: 0.001 }, choices: [{ message: { content: JSON.stringify({
+      // The day's summary is its own small request, made once after the
+      // transcript has been read; the transcript pass is the one under test.
+      if (body.messages[0].content.includes('running summary of one day')) {
+        res.end(JSON.stringify({ id: 'daily-summary-test', usage: {}, choices: [{ message: { content: JSON.stringify({
+          summaryEn: 'The release plan was discussed and assigned to Alex.',
+        }) } }] }));
+        return;
+      }
+      outbound += 1;
+      outboundBody = body;
+      res.end(JSON.stringify({ id: 'generation-test', usage: { prompt_tokens: 100, completion_tokens: 50 }, choices: [{ message: { content: JSON.stringify({
       conversationSections: [
         { titleEn: 'Release planning', summaryEn: 'Alex accepted responsibility for the release plan.', memoryWorthy: true,
           topics: ['Release planning'], sourceSegmentIds: ['s1'] },
@@ -47,12 +56,12 @@ test('one outbound request creates English memories and a durable interval gate'
         sourceSegmentIds: ['s1'],
         topics: ['Release planning'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [{ kind: 'promise', textEn: 'Alex promised to prepare the release plan.',
           importance: 8, confidence: 0.95, dueAt: null, occurredAt: '2026-07-13T10:04:00.000Z', status: 'open', sourceSegmentIds: ['s1'], entities: [{ ref: 'person-1', role: 'promisor' }] }] }],
-      dailySummary: { localDate: '2026-07-13', timezone: 'UTC', summaryEn: 'The release plan was discussed and assigned to Alex.' },
+      dailySummary: null,
       }) } }] }));
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
   const registration = await request(app).post('/api/v1/auth/register').send({ username: 'memory-user', password: 'a long and unique password' });
   const userId = registration.body.user.id; const db = getDatabase();
   const device = crypto.randomUUID(); const session = crypto.randomUUID(); const source = crypto.randomUUID(); const chunk = crypto.randomUUID();
@@ -74,7 +83,6 @@ test('one outbound request creates English memories and a durable interval gate'
   assert.equal(outboundBody.response_format.type, 'json_schema');
   assert.equal(outboundBody.response_format.json_schema.strict, true);
   assert.deepEqual(outboundBody.response_format.json_schema.schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
-  assert.equal(outboundBody.provider.require_parameters, true);
   // The completion budget is always sent; its size is configuration, not contract.
   assert.equal(outboundBody.max_tokens, require('../../server/config').getConfig().aiConsolidationMaxOutputTokens);
   assert.equal(outboundBody.messages[1].content.includes(conversationId), false);
@@ -112,18 +120,25 @@ test('a self-introduction identified during consolidation names the voiceprint a
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ id: 'generation-identity-test', usage: { prompt_tokens: 50, completion_tokens: 25, cost: 0.0005 }, choices: [{ message: { content: JSON.stringify({
+      if (body.messages[0].content.includes('running summary of one day')) {
+        res.end(JSON.stringify({ id: 'daily-summary-identity', usage: {}, choices: [{ message: { content: JSON.stringify({
+          summaryEn: 'Alex introduced himself.',
+        }) } }] }));
+        return;
+      }
+      res.end(JSON.stringify({ id: 'generation-identity-test', usage: { prompt_tokens: 50, completion_tokens: 25 }, choices: [{ message: { content: JSON.stringify({
         conversationSections: [{ titleEn: 'Introduction', summaryEn: 'Alex introduced himself.', memoryWorthy: true, topics: ['Introduction'], sourceSegmentIds: ['s1'] }],
         entities: [{ ref: 'person-1', kind: 'person', canonicalNameEn: 'Alex', displayName: 'Alex', aliases: [], speakerAlias: 'speaker1' }],
         memories: [{ type: 'introduction', titleEn: 'Alex introduces himself', summaryEn: 'Alex said his name is Alex.', emoji: '👋', importance: 3,
           sourceSegmentIds: ['s1'], topics: ['Introduction'], entities: [{ ref: 'person-1', role: 'participant' }], miniMemories: [] }],
-        dailySummary: { localDate: '2026-07-15', timezone: 'UTC', summaryEn: 'Alex introduced himself.' },
+        dailySummary: null,
       }) } }] }));
     });
   });
   await new Promise((resolve) => identityServer.listen(0, '127.0.0.1', resolve));
-  process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${identityServer.address().port}`;
+  process.env.AI_API_BASE_URL = `http://127.0.0.1:${identityServer.address().port}`;
   try {
     const registration = await request(app).post('/api/v1/auth/register').send({ username: 'identity-user', password: 'a long and unique password' });
     const userId = registration.body.user.id; const db = getDatabase();

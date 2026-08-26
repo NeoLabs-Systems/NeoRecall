@@ -104,16 +104,36 @@ jobs:
       - name: Create draft GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.beta_version.outputs.release_tag }}
+          RELEASE_SHA: ${{ steps.capture_release_sha.outputs.release_sha }}
         run: |
-          gh release create "${{ steps.beta_version.outputs.release_tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --target "${{ steps.capture_release_sha.outputs.release_sha }}" \
-            --title "Beta ${{ steps.beta_version.outputs.release_tag }}" \
-            --generate-notes \
-            --draft \
-            --prerelease \
-            --latest=false
+          set -euo pipefail
+          # The release tag was already pushed. A transient `gh release
+          # create` failure here must not permanently burn this version
+          # number, so retry with backoff and treat an already-existing
+          # release (e.g. from a prior attempt of this same step, or a
+          # workflow re-run) as success instead of erroring out.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $RELEASE_TAG already exists; reusing it."
+              exit 0
+            fi
+            if gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$RELEASE_SHA" \
+              --title "Beta $RELEASE_TAG" \
+              --generate-notes \
+              --draft \
+              --prerelease \
+              --latest=false; then
+              exit 0
+            fi
+            echo "gh release create failed (attempt ${attempt}); retrying..."
+            sleep $((attempt * 5))
+          done
+          echo "::error::Failed to create GitHub release $RELEASE_TAG after 5 attempts."
+          exit 1
 
   build-apps:
     name: Build app binaries
@@ -167,10 +187,17 @@ jobs:
 
   publish-app-assets:
     name: Complete GitHub prerelease
+    # Only the release job (tag + draft release) is required. build-apps is
+    # intentionally not checked: it fans out into independent per-platform
+    # jobs, and _publish-app-assets.yml already tolerates partial platform
+    # failures, only hard-failing if zero assets came through. publish-package
+    # (npm) is unrelated to the GitHub release/binaries and must not be able
+    # to strand a draft release with working binaries — we still wait for it
+    # to finish (via `needs`) so it isn't racing the release, but an npm
+    # publish failure no longer blocks flipping the draft to published.
     if: >-
       always() &&
-      needs.release.result == 'success' &&
-      needs.publish-package.result == 'success'
+      needs.release.result == 'success'
     needs:
       - release
       - build-apps

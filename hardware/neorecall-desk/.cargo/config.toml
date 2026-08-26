@@ -1,0 +1,11 @@
+# Cross-compilation config for the armv7 Pi Zero 2 W target (Raspberry Pi OS
+# Lite 32-bit). Building natively on the device is not viable (512 MB RAM);
+# see Risk R5 in docs/RISKS.md. Host development and `cargo test` for the
+# platform-independent crates (nrd-config, nrd-ledger, nrd-proto, and the
+# DSP-only parts of nrd-audio) work unmodified on any host triple.
+
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+
+[env]
+PKG_CONFIG_ALLOW_CROSS = "1"

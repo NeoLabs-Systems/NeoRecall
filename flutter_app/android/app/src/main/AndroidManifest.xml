@@ -1,11 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Android 16+ Live Updates. This is a declaration-only permission; users
+         still retain per-app control over promoted ongoing notifications. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
@@ -35,7 +40,18 @@
             android:name=".BackgroundCaptureService"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="microphone|connectedDevice" />
+            android:foregroundServiceType="microphone|connectedDevice|dataSync" />
+        <service
+            android:name=".PhoneWearDataListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/neorecall/watch/recordings/" />
+            </intent-filter>
+        </service>
         <receiver
             android:name=".BootCompletedReceiver"
             android:exported="true"
@@ -45,6 +61,17 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
                 <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".RecordWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/neorecall_record_widget_info"/>
         </receiver>
         <activity
             android:name=".MainActivity"

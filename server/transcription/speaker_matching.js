@@ -23,30 +23,43 @@ function stickyVoiceprintForCluster(database, { userId, clusterId }) {
     GROUP BY v.id ORDER BY assignment_count DESC,last_assignment_at DESC LIMIT 1`).get(clusterId, userId) || null;
 }
 
-/// Resolves the speaker cluster (a session-scoped voice identity) an embedding
-/// belongs to, creating one if none matches confidently.
-///
-/// Diarization runs independently on every chunk, so a continuous speaker
-/// crossing a chunk boundary is re-segmented from scratch: nothing about the
-/// voice changed, but the fresh embedding can drift below the plain matching
-/// threshold. `continuity` — the cluster active at the end of the previous
-/// chunk for this same audio component, and the gap since it — lets that
-/// cluster win at a relaxed bar instead of splintering into a new one. It only
-/// ever breaks a near-tie: a continuity candidate is accepted only when no
-/// other cluster clearly scores higher, so a real speaker change right at the
-/// boundary still resolves on its own merits.
-///
-/// Outside continuity, a match additionally needs a margin over the runner-up.
-/// A single fixed threshold with no margin occasionally lets a distinct new
-/// speaker's embedding score just above it against some unrelated existing
-/// cluster purely by chance, silently reassigning their speech to someone else;
-/// the margin is what closes that gap, mirroring cross-recording voice
-/// matching below.
-function resolveCluster(database, { userId, sessionId, embedding, continuity = null }) {
+// Folds one cluster into another when they turn out to be one voice. Everything
+// pointing at the absorbed cluster is repointed first; the row is removed last.
+function mergeClusters(database, { userId, target, source }) {
+  const targetCentroid = vectors.fromBuffer(target.centroid_embedding);
+  const sourceCentroid = vectors.fromBuffer(source.centroid_embedding);
+  const total = target.sample_count + source.sample_count;
+  const centroid = new Float32Array(targetCentroid.length);
+  for (let i = 0; i < centroid.length; i += 1) {
+    centroid[i] = (targetCentroid[i] * target.sample_count + sourceCentroid[i] * source.sample_count) / total;
+  }
+  database.prepare('UPDATE transcript_segments SET speaker_cluster_id=? WHERE speaker_cluster_id=? AND user_id=?').run(target.id, source.id, userId);
+  database.prepare('UPDATE speaker_turns SET cluster_id=? WHERE cluster_id=? AND user_id=?').run(target.id, source.id, userId);
+  // A conversation may already list both halves; the primary key forbids a
+  // duplicate row, so the redundant one is dropped rather than repointed.
+  database.prepare(`UPDATE OR REPLACE conversation_speakers SET cluster_id=? WHERE cluster_id=?`).run(target.id, source.id);
+  database.prepare(`UPDATE speaker_clusters SET centroid_embedding=?,sample_count=?,
+    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(storeVector(centroid), total, target.id);
+  database.prepare('DELETE FROM speaker_clusters WHERE id=? AND user_id=?').run(source.id, userId);
+  return database.prepare('SELECT * FROM speaker_clusters WHERE id=?').get(target.id);
+}
+
+// Resolves the speaker cluster (a session-scoped voice identity) an embedding
+// belongs to, creating one if none matches confidently. `continuity` lets the
+// cluster active at the end of the previous chunk win at a relaxed bar, so a
+// speaker crossing a chunk boundary isn't split by re-segmentation. The margin
+// check only applies against a runner-up below the threshold; two clusters
+// that both match strongly are merged instead, since that means one voice was
+// split earlier rather than a genuine ambiguity.
+function resolveCluster(database, { userId, sessionId, embedding, continuity = null, durationMs = null }) {
   const config = processingSettings.get();
+  // Speech too short to fingerprint may join a voice that already exists, but
+  // it may not invent one or drag a centroid toward its own noise.
+  const reliable = durationMs === null || durationMs >= config.speakerMinimumTurnMs;
   const rows = database.prepare('SELECT * FROM speaker_clusters WHERE user_id=? AND session_id=? AND centroid_embedding IS NOT NULL').all(userId, sessionId);
   const ranked = vectors.rank(embedding, rows);
   const best = ranked[0];
+  const runnerUp = ranked[1];
   let cluster = null;
   if (continuity && continuity.clusterId && continuity.gapMs <= config.speakerContinuityGapMs) {
     const anchor = ranked.find((item) => item.row.id === continuity.clusterId);
@@ -55,12 +68,19 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
       cluster = anchor.row;
     }
   }
-  if (!cluster) {
-    const runnerUp = ranked[1];
-    cluster = best && best.score >= config.speakerClusterThreshold
-      && (!runnerUp || best.score - runnerUp.score >= config.speakerClusterMargin) ? best.row : null;
+  if (!cluster && best && best.score >= config.speakerClusterThreshold) {
+    const contested = runnerUp && runnerUp.score < config.speakerClusterThreshold
+      && best.score - runnerUp.score < config.speakerClusterMargin;
+    if (!contested) cluster = best.row;
+  }
+  if (cluster && runnerUp && runnerUp.score >= config.speakerClusterThreshold && runnerUp.row.id !== cluster.id) {
+    const alike = vectors.cosine(vectors.fromBuffer(cluster.centroid_embedding), vectors.fromBuffer(runnerUp.row.centroid_embedding));
+    if (alike >= config.speakerClusterMergeThreshold) {
+      cluster = mergeClusters(database, { userId, target: cluster, source: runnerUp.row });
+    }
   }
   if (!cluster) {
+    if (!reliable) return null;
     const ordinal = database.prepare('SELECT COALESCE(MAX(local_ordinal),0)+1 ordinal FROM speaker_clusters WHERE session_id=?').get(sessionId).ordinal;
     const id = crypto.randomUUID();
     database.prepare(`INSERT INTO speaker_clusters
@@ -68,6 +88,7 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
       VALUES (?,?,?,?,?,?,?,1)`).run(id, userId, sessionId, ordinal, storeVector(embedding), modelName, embedding.length);
     return database.prepare('SELECT * FROM speaker_clusters WHERE id=?').get(id);
   }
+  if (!reliable) return cluster;
   const centroid = vectors.updateCentroid(vectors.fromBuffer(cluster.centroid_embedding), cluster.sample_count, embedding);
   database.prepare(`UPDATE speaker_clusters SET centroid_embedding=?,sample_count=sample_count+1,
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(storeVector(centroid), cluster.id);
@@ -102,4 +123,4 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) 
   return { ...voiceprint, centroid_embedding: storeVector(centroid), sample_count: voiceprint.sample_count + 1 };
 }
 
-module.exports = { resolveCluster, resolveVoiceprint, stickyVoiceprintForCluster, modelName };
+module.exports = { resolveCluster, resolveVoiceprint, stickyVoiceprintForCluster, mergeClusters, modelName };

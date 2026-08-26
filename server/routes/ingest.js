@@ -10,6 +10,7 @@ const { validate } = require('../middleware/validate');
 const { HttpError } = require('../middleware/error_handler');
 const { getConfig } = require('../config');
 const { isIanaTimezone } = require('../utils/time');
+const { CHUNK_RECEIPT_BATCH_LIMIT } = require('../services/ingest/limits');
 
 const router = express.Router();
 const storage = multer.diskStorage({
@@ -64,15 +65,17 @@ router.put('/sessions/:id/sources/:sourceId/chunks/:sequence', upload.single('au
     overlapMs: Number(req.get('X-Chunk-Overlap-Ms') || 0), channelLayout: req.get('X-Channel-Layout') || 'mono',
     monotonicOffsetMs: Number(req.get('X-Monotonic-Offset-Ms')), deviceStartedAt: req.get('X-Device-Started-At'),
     container, codec: req.get('X-Audio-Codec') || 'pcm_s16le',
+    contentEncoding: req.get('X-Audio-Content-Encoding') || 'identity',
     isFinal: req.get('X-Final-Chunk') === 'true',
   };
+  if (!['identity', 'gzip'].includes(input.contentEncoding)) throw new HttpError(400, 'INVALID_AUDIO_ENCODING', 'Unsupported audio content encoding.');
   if (![input.durationMs, input.overlapMs, input.monotonicOffsetMs].every(Number.isInteger) || !input.deviceStartedAt) throw new HttpError(400, 'INVALID_CHUNK_METADATA', 'Chunk timing headers are invalid or incomplete.');
   const receipt = await service.acceptChunk(req.auth.userId, req.params.id, req.params.sourceId, sequence, input, req.file);
   res.status(receipt.state === 'uploaded' && !receipt.duplicate ? 202 : 200).json({ receipt });
 }));
 
-router.post('/chunks/status', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(500) })), (req, res) => res.json({ receipts: service.status(req.auth.userId, req.body.chunkIds) }));
-router.post('/chunks/released', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(500) })), (req, res) => res.json({ released: service.released(req.auth.userId, req.body.chunkIds) }));
+router.post('/chunks/status', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(CHUNK_RECEIPT_BATCH_LIMIT) })), (req, res) => res.json({ receipts: service.status(req.auth.userId, req.body.chunkIds) }));
+router.post('/chunks/released', validate(z.object({ chunkIds: z.array(z.string().uuid()).min(1).max(CHUNK_RECEIPT_BATCH_LIMIT) })), (req, res) => res.json({ released: service.released(req.auth.userId, req.body.chunkIds) }));
 router.get('/stream', (_req, _res, next) => next(new HttpError(501, 'FEATURE_NOT_ENABLED', 'Wearable streaming is not enabled in v1.')));
 
 module.exports = router;

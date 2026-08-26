@@ -1,12 +1,13 @@
 'use strict';
 
-// One finished recording, end to end, against the real speech models:
+// One finished recording, end to end, against stubbed external providers:
 // audio -> durable receipt -> transcript -> search -> memory -> cited Ask.
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { assert, runScenario, wavDurationMs } = require('./lib/e2e_harness');
 
 const fixture = path.resolve(process.env.NEORECALL_E2E_AUDIO || path.join(__dirname, '..', 'test', 'fixtures', 'de_en_two_speakers.wav'));
@@ -19,10 +20,17 @@ async function main() {
     sourceModels,
     timeoutMs,
     env: {
-      // The fixture is eighteen seconds of speech; the floor that keeps a
-      // short real recording away from a model would block this run.
+      // Pinned rather than inherited: the fixture is eighteen seconds of
+      // speech, and the audio floor an operator may raise must not decide
+      // whether this run reaches a model.
       NEORECALL_MIN_AI_AUDIO_MS: '0',
       NEORECALL_MIN_NEW_MATERIAL_CHARS: '1',
+      // The fixture is eighteen seconds of speech, and the evidence floors exist
+      // to keep exactly that off the timeline as its own memory card. Lowering
+      // them is what lets this run reach the memory path at all; what the floors
+      // themselves do is covered by test/unit/memory_worthiness_floors.test.js.
+      NEORECALL_MIN_MEMORY_EVIDENCE_MS: '0',
+      NEORECALL_MIN_MEMORY_EVIDENCE_CHARS: '0',
       NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS: '3600000',
       NEORECALL_CONVERSATION_QUIET_CLOSE_MS: '1000',
       // A finished-recording run must not race a live preview for the same
@@ -37,10 +45,25 @@ async function main() {
       password: `E2E-${crypto.randomBytes(18).toString('base64url')}`,
     });
     const token = registration.session.token;
+    const defaults = await api('GET', '/api/v1/settings', token);
+    assert(defaults.settings.uploadOnlyOnUnmetered === true,
+      'Wi-Fi/unmetered-only upload was not enabled by default.');
+    assert(defaults.settings.recordingScheduleEnabled === false,
+      'Recording did not default to a 24/7 schedule.');
+    const configured = await api('PUT', '/api/v1/settings', token, {
+      uploadOnlyOnUnmetered: false,
+      recordingScheduleEnabled: true,
+      recordingStartMinute: 8 * 60,
+      recordingEndMinute: 23 * 60,
+    });
+    assert(configured.settings.recordingStartMinute === 480 && configured.settings.recordingEndMinute === 1380,
+      'Recording schedule settings did not persist end to end.');
     const deviceId = crypto.randomUUID(); const sessionId = crypto.randomUUID(); const sourceId = crypto.randomUUID();
     const startedAt = new Date(Date.now() - 10 * 60_000).toISOString();
     const bytes = fs.readFileSync(fixture);
     const duration = wavDurationMs(bytes);
+    const compressed = zlib.gzipSync(bytes);
+    assert(compressed.length < bytes.length, 'The E2E WAV fixture did not compress for transport.');
     await api('POST', '/api/v1/devices', token, { id: deviceId, clientUuid: deviceId, name: 'E2E recorder', platform: process.platform, kind: 'desktop' });
     await api('POST', '/api/v1/ingest/sessions', token, {
       id: sessionId, deviceId, clientUuid: sessionId, startedAt, timezone: 'UTC', consentAttestedAt: startedAt,
@@ -48,14 +71,14 @@ async function main() {
     });
     const digest = crypto.createHash('sha256').update(bytes).digest('hex');
     const form = new FormData();
-    form.append('audio', new Blob([bytes], { type: 'audio/wav' }), 'e2e.wav');
+    form.append('audio', new Blob([compressed], { type: 'application/gzip' }), 'e2e.wav.gz');
     const upload = await fetch(`${baseUrl}/api/v1/ingest/sessions/${sessionId}/sources/${sourceId}/chunks/0`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID(), 'X-Chunk-Sha256': digest,
         'X-Chunk-Duration-Ms': String(duration), 'X-Chunk-Overlap-Ms': '0', 'X-Channel-Layout': 'mono',
         'X-Monotonic-Offset-Ms': '0', 'X-Device-Started-At': startedAt, 'X-Audio-Container': 'wav',
-        'X-Audio-Codec': 'pcm_s16le', 'X-Final-Chunk': 'true',
+        'X-Audio-Codec': 'pcm_s16le', 'X-Audio-Content-Encoding': 'gzip', 'X-Final-Chunk': 'true',
       },
       body: form,
     });
@@ -74,6 +97,10 @@ async function main() {
     assert(receipt.persistedAt && receipt.serverAudioDeletedAt && receipt.transcriptSha256, 'Terminal receipt lacks durable deletion proof.');
     const transcript = await api('GET', `/api/v1/recordings/${sessionId}/transcript`, token);
     assert(transcript.items?.length && transcript.items.some((item) => item.language), 'Original-language transcript segments were not persisted.');
+    // The fixture is two people talking, so a segment with no speaker means
+    // local diarization silently stopped joining to the transcript.
+    assert(transcript.items.some((item) => item.speaker_cluster_id),
+      'Transcript segments carry no speaker; local diarization did not reach the persisted transcript.');
 
     say('waiting for token-free boundaries and the hybrid search index');
     await poll('closed conversation', () => api('GET', '/api/v1/conversations?state=closed', token), (value) => value.items?.length > 0);
@@ -101,7 +128,7 @@ async function main() {
     let gated = false;
     try { await api('POST', '/api/v1/memories/consolidations', token, {}); } catch (error) { gated = error.status === 429; }
     assert(gated && mock.count() === calls, 'Second consolidation was not blocked before an outbound request.');
-    process.stdout.write('NeoRecall E2E passed: audio -> durable receipt -> transcript -> search -> memory -> cited Ask.\n');
+    process.stdout.write('NeoRecall E2E passed: settings -> gzip audio -> durable receipt -> transcript -> search -> memory -> cited Ask.\n');
   });
 }
 

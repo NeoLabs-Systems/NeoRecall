@@ -14,6 +14,9 @@ class _UnsupportedChunkStore implements ChunkStore {
   @override
   Future<void> put(AudioChunk chunk, Uint8List bytes) async => _unsupported();
   @override
+  Future<bool> hasMatchingChunk(String id, String sha256) async =>
+      _unsupported();
+  @override
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes) async =>
       _unsupported();
   @override
@@ -34,6 +37,8 @@ class _UnsupportedChunkStore implements ChunkStore {
       _unsupported();
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) async => _unsupported();
+  @override
+  Future<int> storedBytes(AudioChunk chunk) async => _unsupported();
   @override
   Future<void> setState(
     String id,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,6 +7,7 @@ import 'package:crypto/crypto.dart';
 
 import 'diagnostics/client_diagnostic_log.dart';
 import 'models/chunk.dart';
+import 'sync/upload_compression.dart';
 import 'models/recording.dart';
 
 class ApiException implements Exception {
@@ -17,6 +19,23 @@ class ApiException implements Exception {
   @override
   String toString() => message;
 }
+
+/// A request that ran out of time, said in the reader's terms.
+///
+/// Dart reports a lapsed deadline as "Future not completed", which is true of
+/// the code and meaningless to the person waiting. Every screen shows what the
+/// client throws, so the translation belongs here rather than in each caller.
+ApiException _requestTimedOut() => const ApiException(
+  0,
+  'REQUEST_TIMEOUT',
+  'The server did not respond in time. Check that it is running and reachable, then try again.',
+);
+
+ApiException _serverUnreachable() => const ApiException(
+  0,
+  'SERVER_UNREACHABLE',
+  'NeoRecall could not connect to the server. Check that it is online and that this device can reach it.',
+);
 
 class NeoRecallApiClient {
   NeoRecallApiClient({
@@ -32,6 +51,45 @@ class NeoRecallApiClient {
   final http.Client _client;
   final Duration requestTimeout;
   final Duration uploadTimeout;
+  bool supportsGzipAudioUpload = false;
+  // Older servers predate an advertised receipt-query limit. A conservative
+  // fallback keeps those deployments compatible without coupling the upload
+  // pump to an HTTP route's validation details.
+  static const int _legacyChunkReceiptBatch = 100;
+  int maxChunkReceiptBatch = _legacyChunkReceiptBatch;
+  int? maxMemoryMergeItems;
+
+  /// Compression is opt-in only after the authenticated server explicitly
+  /// advertises support. This keeps queued audio compatible with older backend
+  /// deployments that hash the multipart payload before restoring gzip.
+  Future<void> discoverServerCapabilities() async {
+    supportsGzipAudioUpload = false;
+    maxChunkReceiptBatch = _legacyChunkReceiptBatch;
+    maxMemoryMergeItems = null;
+    if (token == null) return;
+    try {
+      final meta = await request('GET', '/api/v1/meta');
+      final capabilities = meta is Map ? meta['capabilities'] : null;
+      final limits = meta is Map ? meta['limits'] : null;
+      supportsGzipAudioUpload =
+          capabilities is Map && capabilities['gzipAudioUpload'] == true;
+      final advertisedBatch = limits is Map
+          ? (limits['chunkReceiptBatch'] as num?)?.toInt()
+          : null;
+      if (advertisedBatch != null && advertisedBatch > 0) {
+        maxChunkReceiptBatch = advertisedBatch;
+      }
+      final advertisedMemoryMergeMax = limits is Map
+          ? (limits['memoryMergeMaxItems'] as num?)?.toInt()
+          : null;
+      if (advertisedMemoryMergeMax != null && advertisedMemoryMergeMax >= 2) {
+        maxMemoryMergeItems = advertisedMemoryMergeMax;
+      }
+    } catch (_) {
+      // Identity uploads are universally compatible and remain the safe
+      // fallback while the server is offline or predates capability discovery.
+    }
+  }
 
   Map<String, String> get _headers => <String, String>{
     'Accept': 'application/json',
@@ -45,12 +103,15 @@ class NeoRecallApiClient {
   }
 
   Future<Uint8List> speakerPreview(String speakerId) async {
-    final response = await _client
-        .get(
-          _resolve('/api/v1/speakers/$speakerId/preview'),
-          headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
-        )
-        .timeout(requestTimeout);
+    final path = '/api/v1/speakers/$speakerId/preview';
+    final response = await _waitForResponse(
+      _client.get(
+        _resolve(path),
+        headers: <String, String>{..._headers, 'Accept': 'audio/wav'},
+      ),
+      method: 'GET',
+      path: path,
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
     }
@@ -79,22 +140,11 @@ class NeoRecallApiClient {
       default:
         throw ArgumentError.value(method, 'method');
     }
-    late http.Response response;
-    try {
-      response = await responseFuture.timeout(requestTimeout);
-    } catch (error) {
-      ClientDiagnosticLog.instance.record(
-        'network',
-        'request_failed',
-        level: 'error',
-        details: <String, Object?>{
-          'method': method,
-          'path': _diagnosticPath(path),
-          'error': error.toString(),
-        },
-      );
-      rethrow;
-    }
+    final response = await _waitForResponse(
+      responseFuture,
+      method: method,
+      path: path,
+    );
     if (response.statusCode >= 400) {
       ClientDiagnosticLog.instance.record(
         'network',
@@ -110,6 +160,29 @@ class NeoRecallApiClient {
     return _decode(response);
   }
 
+  Future<http.Response> _waitForResponse(
+    Future<http.Response> responseFuture, {
+    required String method,
+    required String path,
+  }) async {
+    try {
+      return await responseFuture.timeout(requestTimeout);
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'network',
+        'request_failed',
+        level: 'error',
+        details: <String, Object?>{
+          'method': method,
+          'path': _diagnosticPath(path),
+          'error': error.toString(),
+        },
+      );
+      if (error is TimeoutException) throw _requestTimedOut();
+      throw _serverUnreachable();
+    }
+  }
+
   String _diagnosticPath(String path) => path.replaceAll(
     RegExp(
       r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
@@ -119,13 +192,30 @@ class NeoRecallApiClient {
   );
 
   dynamic _decode(http.Response response) {
-    final payload = response.body.isEmpty ? null : jsonDecode(response.body);
+    dynamic payload;
+    if (response.body.isNotEmpty) {
+      try {
+        payload = jsonDecode(response.body);
+      } on FormatException {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          throw ApiException(
+            response.statusCode,
+            'INVALID_SERVER_RESPONSE',
+            'The server returned a response NeoRecall could not read (HTTP ${response.statusCode}).',
+          );
+        }
+      }
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final error = payload is Map ? payload['error'] as Map? : null;
+      final errorValue = payload is Map ? payload['error'] : null;
+      final error = errorValue is Map ? errorValue : null;
+      final fallback = response.statusCode >= 500
+          ? 'The NeoRecall server is unavailable (HTTP ${response.statusCode}). Try again shortly or check the server.'
+          : 'The NeoRecall server rejected the request (HTTP ${response.statusCode}).';
       throw ApiException(
         response.statusCode,
         error?['code'] as String? ?? 'HTTP_ERROR',
-        error?['message'] as String? ?? 'Request failed.',
+        error?['message'] as String? ?? fallback,
         error?['details'],
       );
     }
@@ -136,6 +226,10 @@ class NeoRecallApiClient {
     AudioChunk chunk,
     Uint8List bytes,
   ) async {
+    final upload = await prepareAudioUpload(
+      bytes,
+      allowCompression: supportsGzipAudioUpload,
+    );
     final request = http.MultipartRequest(
       'PUT',
       _resolve(
@@ -153,41 +247,84 @@ class NeoRecallApiClient {
       'X-Device-Started-At': chunk.startedAt.toUtc().toIso8601String(),
       'X-Audio-Container': chunk.container,
       'X-Audio-Codec': chunk.codec,
+      if (upload.contentEncoding != null)
+        'X-Audio-Content-Encoding': upload.contentEncoding!,
       if (chunk.isFinal) 'X-Final-Chunk': 'true',
     });
     request.files.add(
       http.MultipartFile.fromBytes(
         'audio',
-        bytes,
+        upload.bytes,
         filename: '${chunk.id}.${chunk.container}',
       ),
     );
-    final streamed = await _client.send(request).timeout(uploadTimeout);
-    final response = await http.Response.fromStream(
-      streamed,
-    ).timeout(uploadTimeout);
-    return Map<String, dynamic>.from(_decode(response) as Map);
+    late http.Response response;
+    try {
+      final streamed = await _client.send(request).timeout(uploadTimeout);
+      response = await http.Response.fromStream(
+        streamed,
+      ).timeout(uploadTimeout);
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'network',
+        'audio_upload_failed',
+        level: 'warning',
+        details: <String, Object?>{
+          'path': _diagnosticPath(request.url.path),
+          'errorType': error.runtimeType.toString(),
+        },
+      );
+      throw const ApiException(
+        0,
+        'UPLOAD_CONNECTION_INTERRUPTED',
+        'The connection was interrupted while uploading. It will retry automatically.',
+      );
+    }
+    try {
+      return Map<String, dynamic>.from(_decode(response) as Map);
+    } on ApiException catch (error) {
+      if (error.code == 'HASH_MISMATCH' && upload.contentEncoding == 'gzip') {
+        // A mixed-version deployment may advertise gzip at one node while an
+        // older ingest node still verifies the compressed multipart bytes.
+        // The local preflight already verified the original bytes, so retrying
+        // this idempotent PUT once with identity encoding is safe.
+        supportsGzipAudioUpload = false;
+        return uploadChunk(chunk, bytes);
+      }
+      rethrow;
+    }
   }
 
   Future<List<Map<String, dynamic>>> chunkStatuses(List<String> ids) async {
-    final payload =
-        await request(
-              'POST',
-              '/api/v1/ingest/chunks/status',
-              body: <String, dynamic>{'chunkIds': ids},
-            )
-            as Map;
-    return (payload['receipts'] as List)
-        .cast<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList();
+    final receipts = <Map<String, dynamic>>[];
+    for (var offset = 0; offset < ids.length; offset += maxChunkReceiptBatch) {
+      final end = (offset + maxChunkReceiptBatch).clamp(0, ids.length);
+      final payload =
+          await request(
+                'POST',
+                '/api/v1/ingest/chunks/status',
+                body: <String, dynamic>{'chunkIds': ids.sublist(offset, end)},
+              )
+              as Map;
+      receipts.addAll(
+        (payload['receipts'] as List).cast<Map>().map(
+          Map<String, dynamic>.from,
+        ),
+      );
+    }
+    return receipts;
   }
 
-  Future<void> releaseChunks(List<String> ids) async => request(
-    'POST',
-    '/api/v1/ingest/chunks/released',
-    body: <String, dynamic>{'chunkIds': ids},
-  );
+  Future<void> releaseChunks(List<String> ids) async {
+    for (var offset = 0; offset < ids.length; offset += maxChunkReceiptBatch) {
+      final end = (offset + maxChunkReceiptBatch).clamp(0, ids.length);
+      await request(
+        'POST',
+        '/api/v1/ingest/chunks/released',
+        body: <String, dynamic>{'chunkIds': ids.sublist(offset, end)},
+      );
+    }
+  }
 
   Future<void> measureDeviceClock(String deviceId) async {
     final clientSentAt = DateTime.now().toUtc();
@@ -382,11 +519,19 @@ class NeoRecallApiClient {
           filename: '$filename.part-$part',
         ),
       );
-      _decode(
-        await http.Response.fromStream(
+      late http.Response partResponse;
+      try {
+        partResponse = await http.Response.fromStream(
           await _client.send(partRequest).timeout(uploadTimeout),
-        ).timeout(uploadTimeout),
-      );
+        ).timeout(uploadTimeout);
+      } on TimeoutException {
+        throw const ApiException(
+          0,
+          'UPLOAD_CONNECTION_INTERRUPTED',
+          'The connection was interrupted while uploading. Try the import again.',
+        );
+      }
+      _decode(partResponse);
     }
     await request('POST', '/api/v1/imports/$id/complete');
   }

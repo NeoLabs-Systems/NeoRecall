@@ -8,10 +8,15 @@ const settings = require('../settings/settings_service');
 const processingSettings = require('../settings/processing_settings_service');
 const jobs = require('../jobs/job_service');
 const ai = require('../../ai/ai_engine');
+const aiProviders = require('../../ai/provider_registry');
 const searchIndex = require('../../embeddings/search_index_service');
+const memoryContinuity = require('./memory_continuity_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('memories');
 
 // Failures that mean the model could not produce a valid answer for this exact
 // input. Resending the same conversations reproduces them, so they drive the
@@ -22,8 +27,13 @@ const speakerIdentity = require('../speakers/speaker_identity_service');
 // budget, and carrying fewer conversations next time is exactly the right
 // response. If a single conversation still cannot fit, quarantine eventually
 // stops the bleeding and the operator raises AI_CONSOLIDATION_MAX_OUTPUT_TOKENS.
+//
+// A request that overran the context belongs here for the same reason. Windowing
+// keeps ordinary input inside it, so reaching this means one indivisible piece of
+// evidence — a single recognized utterance — is larger than the whole window, and
+// resending it reproduces the failure exactly.
 const VALIDATION_FAILURE_CODES = Object.freeze([
-  'AI_REFERENCE_INVALID', 'AI_SCHEMA_INVALID', 'AI_TEMPORAL_INVALID', 'AI_OUTPUT_TRUNCATED',
+  'AI_REFERENCE_INVALID', 'AI_SCHEMA_INVALID', 'AI_TEMPORAL_INVALID', 'AI_OUTPUT_TRUNCATED', 'AI_CONTEXT_EXCEEDED',
 ]);
 
 function localDate(iso, timezone) {
@@ -34,6 +44,46 @@ function localDate(iso, timezone) {
 
 function lastOutbound(userId) {
   return getDatabase().prepare("SELECT sent_at FROM ai_requests WHERE user_id=? AND purpose='consolidation' AND sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1").get(userId);
+}
+
+/// How long to wait after a run that failed, growing with each failure in a row.
+///
+/// Without this, a consolidation that fails for a reason nothing about the input
+/// can fix — an endpoint that is down, a model name that does not exist, a
+/// context set larger than the server allows — is attempted again on the very
+/// next scheduler tick, and the one after that. Observed on a real installation:
+/// three language-model requests a minute, every minute, all failing, for hours.
+/// It produces nothing, fills the request log so the actual first failure cannot
+/// be found, and hammers an endpoint that is already unwell.
+///
+/// It backs off rather than giving up, because most of these causes are
+/// temporary and the recording is still waiting to become a memory. One minute,
+/// then two, four, eight, up to half an hour — so an outage costs a handful of
+/// attempts instead of hundreds, and recovery still happens on its own within
+/// half an hour of the cause being fixed. Asking by hand ignores it entirely.
+const FAILURE_BACKOFF_BASE_MS = 60_000;
+const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
+
+function failureBackoff(userId) {
+  const rows = getDatabase().prepare(`SELECT state,error_code,error_message,completed_at
+    FROM consolidation_runs WHERE user_id=? ORDER BY reserved_at DESC LIMIT 16`).all(userId);
+  let consecutive = 0;
+  let latest = null;
+  for (const row of rows) {
+    if (row.state !== 'failed') break;
+    if (!latest) latest = row;
+    consecutive += 1;
+  }
+  if (!consecutive || !latest?.completed_at) return null;
+  const delay = Math.min(FAILURE_BACKOFF_MAX_MS, FAILURE_BACKOFF_BASE_MS * 2 ** (consecutive - 1));
+  const retryAt = Date.parse(latest.completed_at) + delay;
+  if (Date.now() >= retryAt) return null;
+  return {
+    consecutiveFailures: consecutive,
+    retryAt: new Date(retryAt).toISOString(),
+    errorCode: latest.error_code || null,
+    errorMessage: latest.error_message || null,
+  };
 }
 
 function candidateConversations(userId) {
@@ -70,16 +120,18 @@ function buildCandidates(userId) {
   return { conversations: output, characters, audioMs, narrowed };
 }
 
-function eligibility(userId) {
+function eligibility(userId, { ignoreBackoff = false } = {}) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
-  if (!config.openRouterApiKey || !config.aiDefaultModel) return { eligible: false, reason: 'openrouter_not_configured' };
+  if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
   const active = getDatabase().prepare("SELECT id FROM consolidation_runs WHERE user_id=? AND state IN ('reserved','running')").get(userId);
   if (active) return { eligible: false, reason: 'already_running', runId: active.id };
   const interval = Math.max(settings.get(userId).consolidationIntervalMs, config.minConsolidationIntervalMs);
   const previous = lastOutbound(userId);
   const nextEligibleAt = previous ? new Date(Date.parse(previous.sent_at) + interval).toISOString() : new Date(0).toISOString();
   if (Date.parse(nextEligibleAt) > Date.now()) return { eligible: false, reason: 'interval', nextEligibleAt };
+  const backoff = ignoreBackoff ? null : failureBackoff(userId);
+  if (backoff) return { eligible: false, reason: 'recent_failure', ...backoff };
   const candidates = buildCandidates(userId);
   if (!candidates.conversations.length) {
     return { eligible: false, reason: 'insufficient_material', materialCharacters: 0, requiredCharacters: processingConfig.minNewMaterialChars };
@@ -119,7 +171,7 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
   if (!conversationIds.length) return { quarantined: [] };
   const db = getDatabase();
   const limit = processingSettings.get().consolidationMaxFailures;
-  return db.transaction(() => {
+  db.transaction(() => {
     const quarantined = [];
     for (const conversationId of conversationIds) {
       const row = db.prepare(`UPDATE conversations SET consolidation_failures=consolidation_failures+1,
@@ -140,13 +192,18 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
 }
 
 function request(userId, { manual = false } = {}) {
-  const state = eligibility(userId);
+  let state = eligibility(userId);
+  // Someone who presses the button has decided to try now, and is watching the
+  // result — the backoff exists to stop unattended retries, not to refuse them.
+  if (!state.eligible && state.reason === 'recent_failure' && manual) {
+    state = eligibility(userId, { ignoreBackoff: true });
+  }
   if (!state.eligible) {
     if (manual && state.reason === 'interval') {
       const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(state.nextEligibleAt) - Date.now()) / 1000));
       throw new HttpError(429, 'CONSOLIDATION_INTERVAL', 'The consolidation interval has not elapsed.', { retryAfterSeconds, nextEligibleAt: state.nextEligibleAt });
     }
-    if (manual && state.reason === 'openrouter_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'OpenRouter and AI_DEFAULT_MODEL must be configured.');
+    if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The external language-model provider is not configured. Choose a provider and model in the admin dashboard or `.env`.');
     return state;
   }
   const id = crypto.randomUUID();
@@ -203,8 +260,14 @@ function applyMemoryWorthinessFloors(output, conversations, floors = processingS
   if (minMs <= 0 && minChars <= 0) return output;
 
   const stats = segmentEvidenceStats(conversations);
+  const continuationSegmentIds = new Set((output.memories || [])
+    .filter((memory) => memory.continuesMemoryIds?.length)
+    .flatMap((memory) => memory.sourceSegmentIds));
   for (const section of output.conversationSections) {
     if (!section.memoryWorthy) continue;
+    // Extending a substantial existing occasion does not create the thin
+    // standalone card these floors are meant to prevent.
+    if (section.sourceSegmentIds.some((id) => continuationSegmentIds.has(id))) continue;
     const evidence = evidenceForSegmentIds(section.sourceSegmentIds, stats);
     if (evidence.durationMs < minMs || evidence.characters < minChars) {
       section.memoryWorthy = false;
@@ -263,7 +326,89 @@ function anchorMemoryRanges(output, conversations) {
   return output;
 }
 
-function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map()) {
+function persistMemory(database, { userId, runId, memory, refined, entityIds }) {
+  const continuity = memoryContinuity.absorbClaimed(database, userId, memory.continuesMemoryIds);
+  const startedAt = continuity && Date.parse(continuity.startedAt) < Date.parse(memory.startedAt)
+    ? continuity.startedAt : memory.startedAt;
+  const endedAt = continuity && Date.parse(continuity.endedAt) > Date.parse(memory.endedAt)
+    ? continuity.endedAt : memory.endedAt;
+  let memoryId;
+  if (continuity) {
+    memoryId = continuity.target.id;
+    // The summary always describes the whole occasion, including what the new
+    // material added. Wording the reader chose by hand is theirs and stays, and
+    // so does whether the card is pinned or put away: extending an occasion is
+    // not a reason to undo a decision someone made about it.
+    const edited = Boolean(continuity.target.prose_edited_at);
+    database.prepare(`UPDATE memories SET type=?,title_en=?,summary_en=?,emoji=?,importance=?,
+      started_at=?,ended_at=?,pinned=?,archived=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id=? AND user_id=?`).run(
+      edited ? continuity.target.type : memory.type,
+      edited ? continuity.target.title_en : memory.titleEn,
+      memory.summaryEn,
+      edited ? continuity.target.emoji : memory.emoji,
+      memory.importance,
+      startedAt, endedAt, continuity.pinned, continuity.archived, memoryId, userId,
+    );
+  } else {
+    const result = database.prepare(`INSERT INTO memories
+      (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, memory.type, memory.titleEn, memory.summaryEn,
+      memory.emoji, memory.importance, memory.startedAt, memory.endedAt, runId);
+    memoryId = Number(result.lastInsertRowid);
+  }
+
+  // A card that is extended already carries evidence, and memory_sources leaves
+  // one of its reference columns NULL — which a UNIQUE index does not treat as
+  // a duplicate. Attaching the same line twice would show it twice.
+  const sourceInsert = database.prepare(`INSERT INTO memory_sources (memory_id,conversation_id,segment_id)
+    SELECT ?,?,? WHERE NOT EXISTS (SELECT 1 FROM memory_sources
+      WHERE memory_id=? AND conversation_id IS ? AND segment_id IS ?)`);
+  const attachSource = (memoryIdValue, conversationId, segmentIdValue) => sourceInsert.run(
+    memoryIdValue, conversationId, segmentIdValue, memoryIdValue, conversationId, segmentIdValue,
+  );
+  const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(
+    (segmentPublicId) => refined.segmentConversationIds.get(segmentPublicId),
+  ))];
+  for (const conversationId of sourceConversationIds) attachSource(memoryId, conversationId, null);
+  const segmentId = database.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?');
+  for (const segmentPublicId of memory.sourceSegmentIds) {
+    attachSource(memoryId, null, segmentId.get(segmentPublicId, userId).id);
+  }
+  const topicInsert = database.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
+  for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
+  const memoryEntityInsert = database.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
+  for (const item of memory.entities) memoryEntityInsert.run(memoryId, entityIds.get(item.ref), item.role);
+  for (const mini of memory.miniMemories) {
+    const miniResult = database.prepare(`INSERT INTO mini_memories
+      (public_id,user_id,memory_id,kind,text_en,importance,confidence,due_at,occurred_at,status)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, memoryId, mini.kind, mini.textEn, mini.importance, mini.confidence,
+      mini.dueAt || null, mini.occurredAt || null, mini.status || (['task', 'promise'].includes(mini.kind) ? 'open' : null));
+    const miniId = Number(miniResult.lastInsertRowid);
+    const miniSourceInsert = database.prepare('INSERT INTO mini_memory_sources (mini_memory_id,segment_id) VALUES (?,?)');
+    for (const segmentPublicId of mini.sourceSegmentIds) miniSourceInsert.run(miniId, segmentId.get(segmentPublicId, userId).id);
+    const miniEntityInsert = database.prepare('INSERT OR IGNORE INTO mini_memory_entities (mini_memory_id,entity_id,role) VALUES (?,?,?)');
+    for (const item of mini.entities) miniEntityInsert.run(miniId, entityIds.get(item.ref), item.role);
+    searchIndex.upsertDocument({ userId, kind: 'mini_memory', sourceId: miniId, body: mini.textEn,
+      occurredAt: mini.occurredAt || memory.startedAt, importance: mini.importance }, database);
+  }
+  const indexed = database.prepare('SELECT title_en,importance,importance_override FROM memories WHERE id=?').get(memoryId);
+  searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: indexed.title_en,
+    body: memory.summaryEn, occurredAt: startedAt,
+    importance: Number(indexed.importance_override ?? indexed.importance) }, database);
+  return { continued: Boolean(continuity), absorbed: continuity?.absorbed.length || 0 };
+}
+
+function persist(userId, runId, output, conversations, aiRequestId, speakerClusters = new Map(), continuationCandidates = []) {
+  // Claims are settled first: the evidence floors waive themselves for material
+  // that extends an existing occasion, and a claim that cannot be acted on must
+  // not buy that waiver.
+  const droppedClaims = memoryContinuity.resolveClaims(output.memories, continuationCandidates);
+  if (droppedClaims.unknown || droppedClaims.duplicate) {
+    logger.warn('Ignored continuation claims that could not be acted on', {
+      userId, runId, ...droppedClaims,
+    });
+  }
   applyMemoryWorthinessFloors(output, conversations);
   validateReferences(output, conversations);
   anchorMemoryRanges(output, conversations);
@@ -275,7 +420,7 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
     throw Object.assign(new Error('Memory-worthy material requires a daily summary update.'), { code: 'AI_REFERENCE_INVALID' });
   }
   const entityIds = new Map();
-  db.transaction(() => {
+  return db.transaction(() => {
     const refined = refinement.applyConversationSections(
       db,
       userId,
@@ -301,45 +446,29 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
     // entity graph, at no extra AI cost. Never throws — an unresolved alias or a
     // cluster with no voiceprint yet is simply skipped.
     speakerIdentity.linkEntitiesToSpeakers(db, userId, output.entities, entityIds, speakerClusters);
+    let continuedMemories = 0;
+    let absorbedMemories = 0;
     for (const memory of output.memories) {
-      const publicId = crypto.randomUUID();
-      const result = db.prepare(`INSERT INTO memories
-        (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(publicId, userId, memory.type, memory.titleEn, memory.summaryEn,
-        memory.emoji, memory.importance, memory.startedAt, memory.endedAt, runId);
-      const memoryId = Number(result.lastInsertRowid);
-      const sourceInsert = db.prepare('INSERT OR IGNORE INTO memory_sources (memory_id,conversation_id,segment_id) VALUES (?,?,?)');
-      const sourceConversationIds = [...new Set(memory.sourceSegmentIds.map(
-        (segmentPublicId) => refined.segmentConversationIds.get(segmentPublicId),
-      ))];
-      for (const conversationId of sourceConversationIds) sourceInsert.run(memoryId, conversationId, null);
-      for (const segmentPublicId of memory.sourceSegmentIds) {
-        sourceInsert.run(memoryId, null, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
+      const result = persistMemory(db, { userId, runId, memory, refined, entityIds });
+      if (result.continued) {
+        continuedMemories += 1;
+        // Why this occasion was treated as one that was already under way. The
+        // sentence can quote the recording, so it stays at debug level with the
+        // rest of the detail an operator turns on deliberately.
+        logger.debug('Extended an occasion already written up', {
+          runId, userId, absorbed: result.absorbed, reason: memory.continuationReasoning || null,
+        });
       }
-      const topicInsert = db.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
-      for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
-      const memoryEntityInsert = db.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
-      for (const item of memory.entities) memoryEntityInsert.run(memoryId, entityIds.get(item.ref), item.role);
-      for (const mini of memory.miniMemories) {
-        const miniPublicId = crypto.randomUUID();
-        const miniResult = db.prepare(`INSERT INTO mini_memories
-          (public_id,user_id,memory_id,kind,text_en,importance,confidence,due_at,occurred_at,status)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`).run(miniPublicId, userId, memoryId, mini.kind, mini.textEn, mini.importance, mini.confidence,
-          mini.dueAt || null, mini.occurredAt || null, mini.status || (['task', 'promise'].includes(mini.kind) ? 'open' : null));
-        const miniId = Number(miniResult.lastInsertRowid);
-        const miniSourceInsert = db.prepare('INSERT INTO mini_memory_sources (mini_memory_id,segment_id) VALUES (?,?)');
-        for (const segmentPublicId of mini.sourceSegmentIds) miniSourceInsert.run(miniId, db.prepare('SELECT id FROM transcript_segments WHERE public_id=? AND user_id=?').get(segmentPublicId, userId).id);
-        const miniEntityInsert = db.prepare('INSERT OR IGNORE INTO mini_memory_entities (mini_memory_id,entity_id,role) VALUES (?,?,?)');
-        for (const item of mini.entities) miniEntityInsert.run(miniId, entityIds.get(item.ref), item.role);
-        searchIndex.upsertDocument({ userId, kind: 'mini_memory', sourceId: miniId, body: mini.textEn, occurredAt: mini.occurredAt || memory.startedAt, importance: mini.importance }, db);
-      }
-      searchIndex.upsertDocument({ userId, kind: 'memory', sourceId: memoryId, title: memory.titleEn, body: memory.summaryEn, occurredAt: memory.startedAt, importance: memory.importance }, db);
+      absorbedMemories += result.absorbed;
     }
     if (output.dailySummary) {
-      if (output.dailySummary.timezone !== userSettings.timezone) throw Object.assign(new Error('Daily summary timezone differs from the user setting.'), { code: 'AI_REFERENCE_INVALID' });
+      // Which day this covers, and in which timezone, are derived from the
+      // evidence rather than read back from the model. The server already knows
+      // both from the conversations it selected, so asking a model to restate
+      // them only created a way for the answer to disagree with the input — and
+      // that disagreement used to fail an otherwise correct consolidation.
       const newestWorthyConversation = worthyConversations.reduce((latest, conversation) => !latest || Date.parse(conversation.endedAt) > Date.parse(latest.endedAt) ? conversation : latest, null);
       const expectedDate = localDate(newestWorthyConversation.endedAt, userSettings.timezone);
-      if (output.dailySummary.localDate !== expectedDate) throw Object.assign(new Error('Daily summary local date is inconsistent with its coverage.'), { code: 'AI_REFERENCE_INVALID' });
       const existing = db.prepare('SELECT * FROM daily_summaries WHERE user_id=? AND local_date=? AND timezone=?').get(userId, expectedDate, userSettings.timezone);
       const currentDayConversations = worthyConversations.filter((conversation) => localDate(conversation.endedAt, userSettings.timezone) === expectedDate);
       const coverageStartedAt = [existing?.coverage_started_at, ...currentDayConversations.map((conversation) => conversation.startedAt)]
@@ -366,8 +495,11 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
       VALUES (?,'consolidation.completed','consolidation_run',?,?,?)`).run(userId, runId, JSON.stringify({
       runId,
       memories: output.memories.length,
+      continuedMemories,
+      absorbedMemories,
       conversations: refined.conversations.length,
     }), new Date(Date.now() + 24 * 60 * 60_000).toISOString());
+    return { continuedMemories, absorbedMemories };
   })();
 }
 
@@ -402,9 +534,28 @@ async function execute(runId, reservedConversationIds = null) {
     const summaryTargetDate = localDate(conversations.at(-1).endedAt, userSettings.timezone);
     const previous = db.prepare('SELECT * FROM daily_summaries WHERE user_id=? AND local_date=? AND timezone=?')
       .get(run.user_id, summaryTargetDate, userSettings.timezone) || null;
-    const response = await ai.consolidate(run.user_id, { conversations, previousDailySummary: previous, timezone: userSettings.timezone });
+    logger.info('Writing up recordings', {
+      runId, userId: run.user_id, conversations: conversations.length,
+      characters: conversations.reduce((sum, conversation) => sum + conversation.segments.reduce((n, segment) => n + String(segment.text || '').length, 0), 0),
+    });
+    const startedAt = Date.now();
+    const continuationCandidates = memoryContinuity.findCandidates(run.user_id, conversations, db);
+    const response = await ai.consolidate(run.user_id, {
+      conversations,
+      continuationCandidates,
+      previousDailySummary: previous,
+      timezone: userSettings.timezone,
+    });
     aiRequestId = response.requestId;
-    persist(run.user_id, runId, response.value, conversations, response.requestId, response.speakerClusters);
+    const persisted = persist(run.user_id, runId, response.value, conversations, response.requestId,
+      response.speakerClusters, continuationCandidates);
+    logger.info('Recordings written up', {
+      runId, userId: run.user_id, seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      windows: response.windows, memories: response.value.memories.length,
+      continuedMemories: persisted.continuedMemories,
+      absorbedMemories: persisted.absorbedMemories,
+      sections: response.value.conversationSections.length,
+    });
     return { runId, memories: response.value.memories.length };
   } catch (error) {
     if (aiRequestId && error.code === 'AI_REFERENCE_INVALID') {
@@ -414,8 +565,23 @@ async function execute(runId, reservedConversationIds = null) {
     db.prepare(`UPDATE consolidation_runs SET state='failed',ai_request_id=?,error_code=?,error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
       .run(error.aiRequestId || null, error.code || 'CONSOLIDATION_FAILED', String(error.message || '').slice(0, 2000), runId);
     if (VALIDATION_FAILURE_CODES.includes(error.code)) {
-      recordValidationFailure(run.user_id, conversations.map((conversation) => conversation.id), error.code);
+      const { quarantined } = recordValidationFailure(run.user_id, conversations.map((conversation) => conversation.id), error.code);
+      if (quarantined.length) {
+        // Set aside deliberately, and worth saying loudly: these conversations
+        // stop becoming memories until someone intervenes.
+        logger.warn('Conversations set aside after repeated failures', {
+          userId: run.user_id, conversations: quarantined.length, errorCode: error.code,
+        });
+      }
     }
+    logger.warn('Writing up recordings failed', {
+      runId, userId: run.user_id, errorCode: error.code || 'CONSOLIDATION_FAILED',
+      conversations: conversations.length,
+      // Whether it will be retried on its own, which is the first thing anyone
+      // reading this wants to know.
+      retriedAutomatically: !VALIDATION_FAILURE_CODES.includes(error.code),
+      reason: String(error.message || '').slice(0, 400),
+    });
     throw error;
   }
 }
@@ -426,7 +592,7 @@ function latest(userId) {
 }
 
 module.exports = {
-  eligibility, request, execute, latest, validateReferences, applyMemoryWorthinessFloors,
+  eligibility, request, execute, latest, failureBackoff, validateReferences, applyMemoryWorthinessFloors,
   anchorMemoryRanges, localDate,
-  recordValidationFailure, buildCandidates, VALIDATION_FAILURE_CODES,
+  recordValidationFailure, buildCandidates, persist, VALIDATION_FAILURE_CODES,
 };

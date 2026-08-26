@@ -14,15 +14,24 @@ migrate();
 
 let child;
 const pending = new Map();
+let inferenceReady = false;
 const INFERENCE_RESTART_BASE_MS = 1_000;
 const INFERENCE_RESTART_MAX_MS = 30_000;
 const INFERENCE_HEALTHY_UPTIME_MS = 60_000;
 let inferenceBackoffMs = INFERENCE_RESTART_BASE_MS;
 function spawnInferenceHost() {
   const startedAt = Date.now();
+  inferenceReady = false;
   child = fork(path.join(__dirname, 'inference_host.js'), [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   child.on('message', (message) => {
-    if (message.type === 'ready') logger.info('Inference host readiness', { ready: message.ready, error: message.error });
+    if (message.type === 'ready') {
+      const ready = message.ready === true;
+      // Only log on change; the host polls readiness every few seconds.
+      if (ready !== inferenceReady) {
+        logger.info('Inference host readiness changed', { ready, error: message.error });
+      }
+      inferenceReady = ready;
+    }
     const entry = pending.get(message.requestId);
     if (!entry) return;
     pending.delete(message.requestId);
@@ -30,6 +39,7 @@ function spawnInferenceHost() {
     else entry.reject(Object.assign(new Error(message.error.message), message.error));
   });
   child.on('exit', (code, signal) => {
+    inferenceReady = false;
     for (const entry of pending.values()) entry.reject(Object.assign(new Error('Inference host exited.'), { code: 'INFERENCE_HOST_EXITED' }));
     pending.clear();
     if (controller.signal.aborted) return;
@@ -61,4 +71,14 @@ const controller = new AbortController();
 spawnInferenceHost();
 scheduler.start();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { controller.abort(); scheduler.stop(); child?.kill('SIGTERM'); });
-runner.run({ inference, signal: controller.signal }).catch((error) => { logger.error('Worker stopped unexpectedly', { error }); process.exitCode = 1; });
+// Written once at start-up so the top of any log answers "what is this pointed
+// at" without a database query. Never fatal: a server that cannot describe its
+// configuration should still try to run with it.
+try {
+  logger.info('Inference providers', require('../services/settings/provider_settings_service').describeForLog());
+} catch (error) {
+  logger.warn('Could not read the inference provider configuration', { error: error.message });
+}
+
+runner.run({ inference, isInferenceReady: () => inferenceReady, signal: controller.signal })
+  .catch((error) => { logger.error('Worker stopped unexpectedly', { error }); process.exitCode = 1; });

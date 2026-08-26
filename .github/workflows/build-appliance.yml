@@ -1,0 +1,69 @@
+name: Build NeoRecall Desk
+
+# Builds and tests the NeoRecall Desk appliance's platform-independent Rust
+# crates (nrd-config, nrd-ledger, nrd-proto, nrd-audio, nrd-power) on every
+# change to its folder. These crates have no PipeWire/BlueZ/Slint/hardware
+# dependency and run unmodified on the CI host -- see
+# hardware/neorecall-desk/README.md for why the workspace is scoped this way
+# and what still needs the armv7 cross-compilation container (Risk R5) once
+# the hardware-bound crates (nrd-audio's PipeWire graph, nrd-ui, nrd-setup)
+# are added.
+
+on:
+  push:
+    branches: [beta, main]
+    paths:
+      - hardware/neorecall-desk/**
+      - .github/workflows/build-appliance.yml
+  pull_request:
+    branches: [beta, main]
+    paths:
+      - hardware/neorecall-desk/**
+      - .github/workflows/build-appliance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-appliance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: hardware/neorecall-desk
+
+jobs:
+  test:
+    name: Build and test the host-portable crates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            hardware/neorecall-desk/target
+          key: appliance-cargo-${{ runner.os }}-${{ hashFiles('hardware/neorecall-desk/Cargo.lock') }}
+          restore-keys: appliance-cargo-${{ runner.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace

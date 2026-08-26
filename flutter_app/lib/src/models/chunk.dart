@@ -15,6 +15,31 @@ enum LocalChunkState {
   needsAttention,
 }
 
+/// True only when a server receipt proves that the transcript is durable and
+/// the server has already deleted its copy of the audio.
+///
+/// Keeping this validation beside the chunk model lets both the upload pump and
+/// the storage backends enforce the release invariant independently. A malformed
+/// or partial receipt therefore cannot delete local audio even if one layer is
+/// called incorrectly.
+bool provesSafeAudioRelease(Map<String, dynamic>? receipt) {
+  if (receipt == null) return false;
+  final state = receipt['state'];
+  if (state != 'transcribed' && state != 'silent') return false;
+
+  bool nonEmptyString(Object? value) =>
+      value is String && value.trim().isNotEmpty;
+  bool timestamp(Object? value) {
+    if (!nonEmptyString(value)) return false;
+    return DateTime.tryParse(value as String) != null;
+  }
+
+  return timestamp(receipt['persistedAt']) &&
+      timestamp(receipt['serverAudioDeletedAt']) &&
+      nonEmptyString(receipt['chunkId']) &&
+      nonEmptyString(receipt['transcriptSha256']);
+}
+
 class AudioChunk {
   const AudioChunk({
     required this.id,

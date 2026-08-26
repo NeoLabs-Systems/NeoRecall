@@ -24,8 +24,9 @@ class SourcePlatformCopy {
 }
 
 enum SourceCategory {
-  /// Discord voice + Meet / Zoom / Teams notetaker bots — same product surface.
+  /// Sources that capture audio while a call is active.
   liveCapture,
+
   /// Wearable / import accounts (PLAUD).
   import,
 }
@@ -42,24 +43,11 @@ const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
     connectLabel: 'Setup',
   ),
   SourcePlatformCopy(
-    id: 'meeting',
-    name: 'Meetings',
-    icon: Icons.video_call_outlined,
-    description:
-        'Joins Google Meet, Zoom, or Microsoft Teams as a notetaker bot and records live audio during the call.',
-    auth: 'manual',
-    category: SourceCategory.liveCapture,
-    connectLabel: 'Join a meeting',
-    prerequisites: <String>[
-      'Paste a Meet, Zoom, or Teams meeting link',
-      'Optional: connect your account so the bot is admitted (not as a guest)',
-    ],
-  ),
-  SourcePlatformCopy(
     id: 'plaud',
     name: 'PLAUD',
     icon: Icons.cloud_sync_outlined,
-    description: 'Import recordings from your PLAUD wearable via your PLAUD account.',
+    description:
+        'Import recordings from your PLAUD wearable via your PLAUD account.',
     auth: 'manual',
     category: SourceCategory.import,
     connectLabel: 'Setup',

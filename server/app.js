@@ -28,11 +28,18 @@ function createApp() {
     try {
       getDatabase().prepare('SELECT 1').get();
       const worker = getDatabase().prepare('SELECT * FROM worker_heartbeats ORDER BY heartbeat_at DESC LIMIT 1').get();
-      const workerReady = Boolean(worker && Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
+      const workerReady = Boolean(worker && worker.model_state === 'ready' &&
+        Date.now() - Date.parse(worker.heartbeat_at) < 20_000);
       const modelReady = await require('./transcription/provider_registry').getProvider().ready();
-      const ready = workerReady && modelReady && isVectorReady();
+      // Reported and gated on, because a server that transcribes but cannot
+      // write a memory looks healthy while quietly producing nothing a user
+      // came for. `neorecall setup` installs the weights; this is what says so
+      // when it did not.
+      const languageModelReady = require('./ai/provider_registry').ready();
+      const ready = workerReady && modelReady && languageModelReady && isVectorReady();
       res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', database: true,
-        worker: workerReady, models: modelReady, vector: isVectorReady(), vectorVersion: expectedVecVersion });
+        worker: workerReady, models: modelReady, languageModel: languageModelReady,
+        vector: isVectorReady(), vectorVersion: expectedVecVersion });
     } catch (error) { next(error); }
   });
   app.use(require('./routes/oauth'));

@@ -102,34 +102,51 @@ class SourcePlatformCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         copy.description,
-                        style: TextStyle(color: palette.textSecondary, fontSize: 13),
+                        style: TextStyle(
+                          color: palette.textSecondary,
+                          fontSize: 13,
+                        ),
                       ),
                       if (accountEmail != null && accountEmail!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
                           accountEmail!,
-                          style: TextStyle(color: palette.textMuted, fontSize: 12),
+                          style: TextStyle(
+                            color: palette.textMuted,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                       if (lastSyncAt != null && lastSyncAt!.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
                           'Last synced ${_friendlyTime(lastSyncAt!)}',
-                          style: TextStyle(color: palette.textMuted, fontSize: 12),
+                          style: TextStyle(
+                            color: palette.textMuted,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                       if (hasError) ...[
                         const SizedBox(height: 6),
                         Text(
                           error!,
-                          style: TextStyle(color: Colors.red.shade400, fontSize: 12),
+                          style: TextStyle(
+                            color: Colors.red.shade400,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
-                      if (!available && !isConnected && unavailableReason != null) ...[
+                      if (!available &&
+                          !isConnected &&
+                          unavailableReason != null) ...[
                         const SizedBox(height: 6),
                         Text(
                           unavailableReason!,
-                          style: TextStyle(color: palette.textMuted, fontSize: 12),
+                          style: TextStyle(
+                            color: palette.textMuted,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ],
@@ -152,27 +169,42 @@ class SourcePlatformCard extends StatelessWidget {
                     onReconnect: hasError ? onReconnect : null,
                   )
                 else if (available)
-                  ElevatedButton(
-                    onPressed: onConnect,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: palette.accent,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 112),
+                    child: ElevatedButton(
+                      onPressed: onConnect,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: palette.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: Text(
+                        copy.connectLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    child: Text(copy.connectLabel),
                   ),
               ],
             ),
             if (!isConnected && prerequisites.isNotEmpty) ...[
               const SizedBox(height: 10),
               Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(
+                  context,
+                ).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 4),
                   title: Text(
                     'How it works',
-                    style: TextStyle(color: palette.textSecondary, fontSize: 13),
+                    style: TextStyle(
+                      color: palette.textSecondary,
+                      fontSize: 13,
+                    ),
                   ),
                   children: [
                     for (final item in prerequisites)
@@ -181,11 +213,18 @@ class SourcePlatformCard extends StatelessWidget {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('•  ', style: TextStyle(color: palette.textMuted)),
+                            Text(
+                              '•  ',
+                              style: TextStyle(color: palette.textMuted),
+                            ),
                             Expanded(
                               child: Text(
                                 item,
-                                style: TextStyle(color: palette.textMuted, fontSize: 12.5, height: 1.35),
+                                style: TextStyle(
+                                  color: palette.textMuted,
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                ),
                               ),
                             ),
                           ],
@@ -196,7 +235,11 @@ class SourcePlatformCard extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
                           'NeoRecall imports cloud recordings after the platform finishes them — it does not join the live call.',
-                          style: TextStyle(color: palette.textMuted, fontSize: 12.5, height: 1.35),
+                          style: TextStyle(
+                            color: palette.textMuted,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
                         ),
                       ),
                   ],

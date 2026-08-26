@@ -27,13 +27,23 @@ and are excluded from backups.
 
 Transcript persistence and audio removal are intentionally separate crash-safe phases. A terminal receipt is issued only after transcript rows are durable under SQLite `synchronous=FULL` and the temporary audio path has been removed. A crash between phases leaves the client copy intact while the startup sweeper completes server cleanup.
 
-## Voiceprints and OpenRouter
+## Voiceprints
 
 Recurring speaker matching stores biometric-like embeddings and the clean
 preview per user. It can be disabled without disabling anonymous diarization.
 Users can listen to, name, merge, or correct recurring identities.
 
-Only eligible memory consolidation and explicit Ask operations send text to OpenRouter. Audio is never sent. Ask sends retrieved text context and returns cited sources. OpenRouter access can be disabled completely by leaving its credentials unset.
+## Where text goes
+
+NeoRecall sends uploaded audio to the configured transcription provider. It sends
+transcript text and retrieved context to the configured language-model provider
+for memory consolidation, live previews, summaries, and Ask. Either provider may
+be a hosted API or a compatible service deployed elsewhere on a private network;
+NeoRecall cannot infer the privacy policy of that endpoint.
+
+Embeddings and search remain on the NeoRecall host. Provider API keys supplied
+through the admin dashboard are encrypted at rest and never returned to clients.
+Ask sends only its retrieved text context and returns cited sources.
 
 ## Account isolation
 

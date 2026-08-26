@@ -17,8 +17,23 @@ test.after(() => { closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recu
 test('user settings validate timezones and preserve the environment interval floor', async () => {
   const registered = await request(app).post('/api/v1/auth/register').send({ username: 'settings-user', password: 'a long and unique password' }).expect(201);
   const auth = { Authorization: `Bearer ${registered.body.session.token}` };
-  const updated = await request(app).put('/api/v1/settings').set(auth).send({ consolidationIntervalMs: 1000, timezone: 'Europe/Berlin', chunkTargetMs: 30000, chunkOverlapMs: 2000 }).expect(200);
+  const initial = await request(app).get('/api/v1/settings').set(auth).expect(200);
+  assert.equal(initial.body.settings.uploadOnlyOnUnmetered, true);
+  assert.equal(initial.body.settings.recordingScheduleEnabled, false);
+  const updated = await request(app).put('/api/v1/settings').set(auth).send({
+    consolidationIntervalMs: 1000,
+    timezone: 'Europe/Berlin',
+    chunkTargetMs: 30000,
+    chunkOverlapMs: 2000,
+    uploadOnlyOnUnmetered: false,
+    recordingScheduleEnabled: true,
+    recordingStartMinute: 8 * 60,
+    recordingEndMinute: 23 * 60,
+  }).expect(200);
   assert.equal(updated.body.settings.consolidationIntervalMs, 1000);
   assert.equal(updated.body.settings.effectiveConsolidationIntervalMs, 3600000);
+  assert.equal(updated.body.settings.uploadOnlyOnUnmetered, false);
+  assert.equal(updated.body.settings.recordingStartMinute, 480);
   await request(app).put('/api/v1/settings').set(auth).send({ timezone: 'Not/A_Timezone' }).expect(400);
+  await request(app).put('/api/v1/settings').set(auth).send({ recordingStartMinute: 1440 }).expect(400);
 });

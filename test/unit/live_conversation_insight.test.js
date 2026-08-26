@@ -133,8 +133,8 @@ function migratedDatabase() {
     );
     INSERT INTO users (id) VALUES ('user-1');
     INSERT INTO ai_requests (id,user_id,purpose,provider,model,state,reserved_at)
-      VALUES ('request-1','user-1','consolidation','openrouter','test/model','succeeded','2026-07-13T10:00:00Z'),
-             ('request-2','user-1','ask','openrouter','test/model','succeeded','2026-07-13T10:05:00Z');
+      VALUES ('request-1','user-1','consolidation','openai','test/model','succeeded','2026-07-13T10:00:00Z'),
+             ('request-2','user-1','ask','openai','test/model','succeeded','2026-07-13T10:05:00Z');
     INSERT INTO consolidation_runs (id,ai_request_id) VALUES ('run-1','request-1');
     INSERT INTO ask_quota_events (ai_request_id) VALUES ('request-2');
     INSERT INTO conversations (id,user_id,started_at,ended_at,state,boundary_method,boundary_version,refined_at)
@@ -177,9 +177,9 @@ test('the rebuild widens the request purpose without dropping requests or their 
   assert.equal(db.pragma('foreign_key_check').length, 0);
 
   db.prepare(`INSERT INTO ai_requests (id,user_id,purpose,provider,model,state,reserved_at)
-    VALUES ('request-3','user-1','conversation_preview','openrouter','test/model','sent','2026-07-13T10:10:00Z')`).run();
+    VALUES ('request-3','user-1','conversation_preview','openai','test/model','sent','2026-07-13T10:10:00Z')`).run();
   assert.throws(() => db.prepare(`INSERT INTO ai_requests (id,user_id,purpose,provider,model,state,reserved_at)
-    VALUES ('request-4','user-1','something_else','openrouter','test/model','sent','2026-07-13T10:11:00Z')`).run(), /CHECK constraint/);
+    VALUES ('request-4','user-1','something_else','openai','test/model','sent','2026-07-13T10:11:00Z')`).run(), /CHECK constraint/);
   db.close();
 });
 

@@ -3,6 +3,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { getConfig } = require('../config');
+const { CHUNK_RECEIPT_BATCH_LIMIT } = require('../services/ingest/limits');
 
 const router = express.Router();
 router.get('/meta', requireAuth, (req, res) => {
@@ -10,11 +11,14 @@ router.get('/meta', requireAuth, (req, res) => {
   res.json({
     product: 'NeoRecall', version: require('../../package.json').version,
     user: req.user,
-    capabilities: { localTranscription: true, diarization: config.diarizationEnabled, semanticSearch: true,
-      displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true },
+    capabilities: { localTranscription: false, diarization: false, semanticSearch: true,
+      displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true,
+      gzipAudioUpload: true },
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,
       chunkTargetMs: config.chunkTargetMs, chunkOverlapMs: config.chunkOverlapMs, importPartBytes: config.importPartBytes,
-      minimumConsolidationIntervalMs: config.minConsolidationIntervalMs },
+      minimumConsolidationIntervalMs: config.minConsolidationIntervalMs,
+      memoryMergeMaxItems: config.memoryMergeMaxItems,
+      chunkReceiptBatch: CHUNK_RECEIPT_BATCH_LIMIT },
   });
 });
 router.use('/auth', require('./auth'));
@@ -34,5 +38,10 @@ router.use('/search', require('./search'));
 router.use('/settings', require('./settings'));
 router.use('/events', require('./events'));
 router.use('/diagnostics', require('./diagnostics'));
+// Answers "I recorded all day — where did it go?" for the person who recorded it.
+router.get('/processing-status', requireAuth, (req, res, next) => {
+  require('../services/status/processing_status_service').forUser(req.auth.userId)
+    .then((value) => res.json(value)).catch(next);
+});
 router.use('/sources', require('./sources'));
 module.exports = router;

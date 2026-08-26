@@ -1,0 +1,130 @@
+# Shipped hardware/tunable profile for the reference NeoRecall Desk build:
+# Raspberry Pi Zero 2 W + Waveshare WM8960 Audio HAT + ELEGOO 480x320
+# SPI/XPT2046 resistive touch display. This file is the product's config
+# defaults layer — see nrd-config's crate docs for the full layering order.
+#
+# USB identity: id_vendor 0x1209 is the pid.codes open-source shared Vendor
+# ID (https://pid.codes), intended for exactly this kind of hobbyist/small-run
+# hardware. id_product below is a PLACEHOLDER and has NOT been registered
+# with pid.codes — before this device is built for anyone other than the
+# developer, request a real PID via https://pid.codes/1209/ (a short PR
+# against their repo) and put the assigned value here. Never ship with an
+# unregistered PID in the 0x1209 space, and never use a PID owned by another
+# vendor. This is the one config field that gates commercial/wide release —
+# see the "USB VID/PID" note in the project plan.
+
+schema_version = 1
+profile = "pi-zero2w-wm8960-elegoo480x320"
+
+[support]
+kernel_min = "6.1.0"
+kernel_max = "6.11.99"
+os_ids = ["raspbian", "debian"]
+os_versions = ["12", "13"]
+required_modules = ["dwc2", "libcomposite", "usb_f_uac2", "snd_soc_wm8960"]
+
+[hardware.usb_gadget]
+name = "neorecall"
+id_vendor = 0x1209
+id_product = 0x0001
+bcd_device = 0x0100
+manufacturer = "NeoRecall"
+product = "NeoRecall Audio"
+serial_source = "cpuserial"
+max_power_ma = 500
+
+[hardware.usb_gadget.uac2]
+c_chmask = 3
+c_srate = 48000
+c_ssize = 2
+p_chmask = 0
+
+[hardware.wm8960]
+card_alias = "wm8960soundcard"
+playback_volume_control = "Speaker"
+capture_volume_control = "Capture"
+max_playback_percent = 85
+startup_playback_percent = 60
+amp_mute_controls = ["Speaker Playback ZC Switch", "Speaker Playback Volume"]
+button_gpio_disabled = true
+
+[hardware.display]
+drm_card = "/dev/dri/card0"
+width = 480
+height = 320
+rotation = 0
+touch_device_hint = "ADS7846 Touchscreen"
+touch_irq_gpio = 17
+
+[audio]
+capture_rate = 48000
+upload_rate = 16000
+upload_format = "pcm_s16le"
+upload_layout = "mono"
+quantum = 2048
+ring_capacity_ms = 4000
+ui_refresh_hz = 10
+
+[audio.resampler]
+taps = 64
+
+[audio.aec]
+enabled = true
+module = "libpipewire-module-echo-cancel"
+library = "aec/libspa-aec-webrtc"
+analog_gain_controller = false
+noise_suppression = true
+high_pass_filter = true
+echo_canceller = true
+max_cpu_percent = 45
+disable_on_output = ["bluetooth_a2dp"]
+
+[chunk]
+target_ms = 30000
+overlap_ms = 1500
+min_ms_floor = 5000
+max_ms_ceiling = 120000
+max_upload_bytes_ceiling = 33554432
+overlap_max_ratio = 0.25
+max_session_ms = 43200000
+
+[storage]
+root = "/var/lib/neorecall-device"
+reserve_bytes = 536870912
+soft_ratio = 0.80
+hard_ratio = 0.93
+fsync_dir_on_rename = true
+
+[network]
+base_url = ""
+allow_insecure_tls = false
+connect_timeout_ms = 10000
+request_timeout_ms = 45000
+upload_timeout_floor_ms = 60000
+idle_interval_ms = 30000
+drain_interval_ms = 1000
+upload_concurrency = 2
+poll_batch = 500
+gap_batch = 1000
+backoff_base_ms = 2000
+backoff_max_ms = 300000
+backoff_jitter_ratio = 0.25
+reupload_budget = 3
+heartbeat_interval_ms = 300000
+
+[device]
+kind = "appliance"
+platform = "raspberrypi-zero2w"
+name_default = "NeoRecall Desk"
+scopes = ["ingest:write", "devices:write", "devices:read"]
+optional_scopes = ["settings:read"]
+
+[power]
+poll_interval_ms = 1000
+throttle_source = "/sys/devices/platform/soc/soc:firmware/get_throttled"
+undervoltage_bit = 0
+freq_capped_bit = 1
+throttled_bit = 2
+soft_temp_bit = 3
+mute_on = ["undervoltage_now", "throttled_now"]
+recovery_debounce_ms = 15000

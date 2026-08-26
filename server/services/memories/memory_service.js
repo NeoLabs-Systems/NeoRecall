@@ -1,11 +1,14 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit } = require('../../utils/pagination');
 const searchIndex = require('../../embeddings/search_index_service');
 const ai = require('../../ai/ai_engine');
+const aiProviders = require('../../ai/provider_registry');
+const jobs = require('../jobs/job_service');
 const {
   defaultEmojiForType, MEMORY_TYPES, TITLE_MAX_LENGTH, SUMMARY_MAX_LENGTH,
 } = require('../../ai/schemas/consolidation_schema');
@@ -13,7 +16,7 @@ const {
 const ALLOWED_TYPES = new Set(MEMORY_TYPES);
 const BULK_ACTIONS = new Set(['delete', 'pin', 'unpin', 'archive', 'unarchive']);
 const MERGE_MIN = 2;
-const MERGE_MAX = 10;
+const MERGE_REWRITE_PRIORITY = 60;
 
 function presentMemory(row) {
   if (!row) return row;
@@ -120,6 +123,9 @@ function update(userId, id, changes) {
     const emoji = String(changes.emoji).trim();
     if (!emoji || emoji.length > 16) throw new HttpError(400, 'INVALID_EMOJI', 'Emoji must be 1–16 characters.');
   }
+  // Wording the reader chose is marked as theirs, so a later run that extends
+  // the same occasion adds to the card without renaming it back.
+  const editsProse = changes.type !== undefined || changes.titleEn !== undefined || changes.emoji !== undefined;
   getDatabase().prepare(`UPDATE memories SET
     type=COALESCE(?,type),
     title_en=COALESCE(?,title_en),
@@ -127,6 +133,7 @@ function update(userId, id, changes) {
     importance_override=?,
     pinned=COALESCE(?,pinned),
     archived=COALESCE(?,archived),
+    prose_edited_at=CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE prose_edited_at END,
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
     WHERE id=? AND user_id=?`)
     .run(
@@ -136,6 +143,7 @@ function update(userId, id, changes) {
       changes.importanceOverride === undefined ? memory.importance_override : changes.importanceOverride,
       changes.pinned === undefined ? null : Number(changes.pinned),
       changes.archived === undefined ? null : Number(changes.archived),
+      Number(editsProse),
       memory.id,
       userId,
     );
@@ -327,11 +335,12 @@ function dailySummaries(userId, query = {}) {
 
 function loadMemoriesForMerge(userId, ids) {
   const uniqueIds = [...new Set(ids.map(String))];
+  const mergeMax = getConfig().memoryMergeMaxItems;
   if (uniqueIds.length < MERGE_MIN) {
     throw new HttpError(400, 'INVALID_MERGE', `Select at least ${MERGE_MIN} memories to merge.`);
   }
-  if (uniqueIds.length > MERGE_MAX) {
-    throw new HttpError(400, 'INVALID_MERGE', `Merge at most ${MERGE_MAX} memories at once.`);
+  if (uniqueIds.length > mergeMax) {
+    throw new HttpError(400, 'INVALID_MERGE', `Merge at most ${mergeMax} memories at once.`);
   }
   const db = getDatabase();
   const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${uniqueIds.map(() => '?').join(',')})`)
@@ -385,29 +394,21 @@ function deterministicMergeProse(memories) {
   return { type, titleEn, summaryEn, emoji };
 }
 
-async function composeMergedProse(userId, memories) {
-  const config = getConfig();
-  const fallback = deterministicMergeProse(memories);
-  if (!config.openRouterApiKey || !config.aiDefaultModel) {
-    return { prose: fallback, rewritten: false, requestId: null };
-  }
-  try {
-    const response = await ai.rewriteMergedMemory(userId, memories);
-    return {
-      prose: {
-        type: response.value.type,
-        titleEn: response.value.titleEn.trim().slice(0, TITLE_MAX_LENGTH),
-        summaryEn: response.value.summaryEn.trim().slice(0, SUMMARY_MAX_LENGTH),
-        emoji: response.value.emoji.trim().slice(0, 16) || fallback.emoji,
-      },
-      rewritten: true,
-      requestId: response.requestId,
-    };
-  } catch (error) {
-    // A failed rewrite must not block the structural merge — the user asked to
-    // combine memories, not to wait for a perfect caption.
-    return { prose: fallback, rewritten: false, requestId: error.aiRequestId || null, rewriteError: error.code || error.message };
-  }
+function rewriteInput(memories) {
+  return memories.map((memory) => ({
+    type: memory.type,
+    title_en: memory.title_en,
+    summary_en: memory.summary_en,
+    emoji: memory.emoji,
+    started_at: memory.started_at,
+    ended_at: memory.ended_at,
+    topics: memory.topics,
+    miniMemories: memory.miniMemories.map((mini) => ({
+      kind: mini.kind,
+      text_en: mini.text_en,
+      status: mini.status,
+    })),
+  }));
 }
 
 function applyStructuralMerge(userId, memories, prose) {
@@ -504,26 +505,98 @@ function applyStructuralMerge(userId, memories, prose) {
   };
 }
 
-/// Merge two or more memories into one: union of evidence and highlights, with
-/// a freshly written title/summary/emoji (LLM when configured, otherwise a
-/// deterministic join).
-async function merge(userId, { ids }) {
+function queueMergedProseRewrite(userId, structural, memories) {
+  if (!aiProviders.ready()) return null;
+  const target = getDatabase().prepare(`SELECT type,title_en,summary_en,emoji,updated_at
+    FROM memories WHERE public_id=? AND user_id=?`)
+    .get(structural.targetPublicId, userId);
+  if (!target) return null;
+  return jobs.enqueue({
+    userId,
+    resourceType: 'memory',
+    // Every merge gets its own durable rewrite. Reusing the target memory as
+    // the job resource would collapse a second merge into the first active job.
+    resourceId: crypto.randomUUID(),
+    type: 'rewrite_merged_memory',
+    priority: MERGE_REWRITE_PRIORITY,
+    payload: {
+      targetPublicId: structural.targetPublicId,
+      expectedUpdatedAt: target.updated_at,
+      expectedProse: {
+        type: target.type,
+        titleEn: target.title_en,
+        summaryEn: target.summary_en,
+        emoji: target.emoji,
+      },
+      memories: rewriteInput(memories),
+    },
+  });
+}
+
+/// Apply the optional prose polish only if the merged card has not changed
+/// since it was queued. A rename or a later merge always wins over stale AI.
+async function rewriteMergedProse(userId, payload) {
+  const db = getDatabase();
+  const current = db.prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?')
+    .get(payload.targetPublicId, userId);
+  const expected = payload.expectedProse;
+  if (!current || !expected || current.updated_at !== payload.expectedUpdatedAt
+    || current.type !== expected.type || current.title_en !== expected.titleEn
+    || current.summary_en !== expected.summaryEn || current.emoji !== expected.emoji) {
+    return { updated: false };
+  }
+
+  const response = await ai.rewriteMergedMemory(userId, payload.memories);
+  const prose = {
+    type: response.value.type,
+    titleEn: response.value.titleEn.trim().slice(0, TITLE_MAX_LENGTH),
+    summaryEn: response.value.summaryEn.trim().slice(0, SUMMARY_MAX_LENGTH),
+    emoji: response.value.emoji.trim().slice(0, 16) || current.emoji || defaultEmojiForType(response.value.type),
+  };
+  const updated = db.transaction(() => {
+    const changed = db.prepare(`UPDATE memories SET type=?,title_en=?,summary_en=?,emoji=?,
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE public_id=? AND user_id=? AND updated_at=?
+        AND type=? AND title_en=? AND summary_en=? AND emoji IS ?`)
+      .run(prose.type, prose.titleEn, prose.summaryEn, prose.emoji,
+        payload.targetPublicId, userId, payload.expectedUpdatedAt,
+        expected.type, expected.titleEn, expected.summaryEn, expected.emoji).changes;
+    if (!changed) return false;
+    const memory = db.prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?')
+      .get(payload.targetPublicId, userId);
+    searchIndex.upsertDocument({
+      userId,
+      kind: 'memory',
+      sourceId: memory.id,
+      title: prose.titleEn,
+      body: prose.summaryEn,
+      occurredAt: memory.started_at,
+      importance: Number(memory.importance_override ?? memory.importance),
+    }, db);
+    return true;
+  })();
+  return { updated, aiRequestId: response.requestId };
+}
+
+/// Merge evidence and highlights immediately. Optional AI prose polishing is a
+/// durable worker job, so a slow model never holds the user's request open.
+function merge(userId, { ids }) {
   if (!Array.isArray(ids)) throw new HttpError(400, 'INVALID_IDS', 'Provide memory ids to merge.');
   const memories = loadMemoriesForMerge(userId, ids);
-  const composition = await composeMergedProse(userId, memories);
-  const structural = applyStructuralMerge(userId, memories, composition.prose);
+  const structural = applyStructuralMerge(userId, memories, deterministicMergeProse(memories));
+  const rewriteJobId = queueMergedProseRewrite(userId, structural, memories);
   const detail = memoryDetail(userId, structural.targetPublicId);
   return {
     memory: detail,
     absorbedIds: structural.absorbedPublicIds,
-    rewritten: composition.rewritten,
-    aiRequestId: composition.requestId,
-    rewriteError: composition.rewriteError || null,
+    rewritten: false,
+    rewriteQueued: rewriteJobId !== null,
+    rewriteJobId,
   };
 }
 
 module.exports = {
-  memoryDetail, list, update, remove, bulk, merge,
+  memoryDetail, list, update, remove, bulk, merge, rewriteMergedProse,
   listMini, miniDetail, updateMini, removeMini, dailySummaries,
   presentMemory, defaultEmojiForType, deterministicMergeProse,
 };

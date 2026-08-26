@@ -27,11 +27,13 @@ class DeviceSessionController {
       StreamController<String>.broadcast();
   final StreamController<DeviceControlEvent> _controlEvents =
       StreamController<DeviceControlEvent>.broadcast();
-  final StreamController<bool> _linkIntents = StreamController<bool>.broadcast();
+  final StreamController<bool> _linkIntents =
+      StreamController<bool>.broadcast();
   StreamSubscription<DeviceTransportState>? _stateSub;
   StreamSubscription<DeviceControlEvent>? _controlSub;
   Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
+
   /// The connect attempt currently in flight, if any.
   ///
   /// Attempts are serialised rather than dropped: a tap that arrived while a
@@ -140,7 +142,18 @@ class DeviceSessionController {
 
   Future<void> setPreferBluetooth(bool value) async {
     preferBluetooth = value;
-    await _persist();
+    if (!value) {
+      // Phone capture means the wearable is no longer a standing runtime
+      // dependency. Cancel both the current link and any delayed reconnect so
+      // a stale device cannot keep producing timeout banners in this mode.
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      await disconnect();
+    }
+    // The source picker can be rendered briefly while account restoration is
+    // still completing. Apply the runtime choice immediately, but never write
+    // an unscoped preference that could leak across accounts.
+    if (_accountId != null) await _persist();
     _notifyLinkIntent();
   }
 
@@ -218,6 +231,7 @@ class DeviceSessionController {
       }
       if (autoReconnect &&
           !_disconnecting &&
+          linkDesired &&
           value == DeviceTransportState.disconnected &&
           preferredDevice != null) {
         _scheduleReconnect();
@@ -245,17 +259,26 @@ class DeviceSessionController {
       );
       state = DeviceTransportState.faulted;
       _states.add(state);
-      _messages.add('Connect failed: $error');
-      if (autoReconnect && scheduleReconnect) _scheduleReconnect();
+      _messages.add(
+        error is TimeoutException
+            ? 'Bluetooth connection timed out. Make sure ${device.displayName} is nearby, awake, and not connected to another phone.'
+            : 'Could not connect to ${device.displayName}. Check the device and try again.',
+      );
+      if (autoReconnect && scheduleReconnect && linkDesired) {
+        _scheduleReconnect();
+      }
       return false;
     }
   }
 
   void _scheduleReconnect() {
+    if (!linkDesired || _disconnecting) return;
     if (_reconnectTimer?.isActive ?? false) return;
     final delay = reconnectPolicy.delayForAttempt(_reconnectAttempt);
     _reconnectAttempt += 1;
     _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
+      if (!linkDesired || _disconnecting) return;
       unawaited(connectPreferred());
     });
   }

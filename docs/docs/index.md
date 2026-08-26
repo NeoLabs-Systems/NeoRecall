@@ -7,9 +7,11 @@ sidebar_label: Overview
 # NeoRecall documentation
 
 NeoRecall is a self-hosted audio memory service. It records from web, desktop,
-and wearable clients, transcribes and diarizes speech locally, and builds
-searchable memory without sending the continuous audio path through a paid
-model.
+and wearable clients, keeps its durable database and search index on the server
+you install, and sends inference to transcription and language-model services
+you configure separately. It never downloads or runs a speech-recognition or
+language model; the only inference it does itself is detecting speech and telling
+voices apart, which no such service can hand back.
 
 NeoRecall is beta software. Install it on a machine you administer and read
 the privacy guide before recording anyone else.
@@ -28,6 +30,9 @@ Open `http://localhost:4500` and `/app/` when setup finishes. Continue with:
 - [Install and complete the first run](installation.md)
 - [Understand privacy and consent](privacy-and-consent.md)
 - [Configure the server](configuration.md)
+
+Configure both inference providers before recording; the server intentionally
+has no bundled transcription or generation fallback.
 
 ## 🧭 User guide
 

@@ -8,9 +8,12 @@ import 'package:window_manager/window_manager.dart';
 
 import 'main_auth.dart';
 import 'main_controller.dart';
+import 'main_floating.dart';
 import 'main_shared.dart';
 import 'main_shell.dart';
 import 'main_theme.dart';
+import 'src/desktop/meeting_detector.dart';
+import 'src/desktop/window_coordinator.dart';
 import 'src/devices/audio_codec_decoder.dart';
 
 Future<void> main() async {
@@ -21,12 +24,7 @@ Future<void> main() async {
           defaultTargetPlatform == TargetPlatform.windows)) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
-      const WindowOptions(
-        size: Size(1180, 780),
-        minimumSize: Size(760, 560),
-        center: true,
-        title: 'NeoRecall',
-      ),
+      DesktopWindowCoordinator.initialOptions,
       () async {
         await windowManager.show();
         await windowManager.focus();
@@ -47,6 +45,14 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   late final NeoRecallController controller = NeoRecallController()
     ..addListener(_changed);
   bool _trayRecording = false;
+  bool _floatingMode = false;
+  bool _desktopExperienceReady = false;
+  bool _configuringWindow = false;
+  bool _meetingEnded = false;
+  MeetingActivity? _meetingActivity;
+  MeetingDetector? _meetingDetector;
+  StreamSubscription<MeetingActivity>? _meetingSubscription;
+  final DesktopWindowCoordinator _window = const DesktopWindowCoordinator();
   bool get _desktop =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.macOS ||
@@ -71,11 +77,17 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   }
 
   void _changed() {
+    final recordingStopped = _trayRecording && !controller.isRecording;
+    if (recordingStopped && _meetingEnded) {
+      _meetingActivity = null;
+      _meetingEnded = false;
+    }
     if (mounted) setState(() {});
     if (_desktop && _trayRecording != controller.isRecording) {
       _trayRecording = controller.isRecording;
       _updateTray();
     }
+    if (_desktop) unawaited(_syncDesktopExperience());
   }
 
   Future<void> _initializeDesktopShell() async {
@@ -86,8 +98,88 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   }
 
   Future<void> _showWindow() async {
-    await windowManager.show();
-    await windowManager.focus();
+    if (controller.authenticated) {
+      await _enterFloatingMode();
+    } else {
+      await _window.show();
+    }
+  }
+
+  Future<void> _hideWindow() => _window.hide();
+
+  Future<void> _syncDesktopExperience() async {
+    if (_configuringWindow || !controller.initialized) return;
+    if (!controller.authenticated) {
+      if (_desktopExperienceReady) {
+        _desktopExperienceReady = false;
+        await _meetingSubscription?.cancel();
+        _meetingSubscription = null;
+        await _meetingDetector?.dispose();
+        _meetingDetector = null;
+        await _openLibrary(selectNotes: false);
+      }
+      return;
+    }
+    if (_desktopExperienceReady) return;
+    _desktopExperienceReady = true;
+    _meetingDetector = createMeetingDetector();
+    _meetingSubscription = _meetingDetector!.activities.listen(
+      _onMeetingActivity,
+    );
+    await _meetingDetector!.start();
+    await _enterFloatingMode();
+  }
+
+  void _onMeetingActivity(MeetingActivity activity) {
+    if (!mounted) return;
+    if (activity.type == MeetingActivityType.started) {
+      setState(() {
+        _meetingActivity = activity;
+        _meetingEnded = false;
+      });
+      if (!controller.isRecording) {
+        unawaited(_enterFloatingMode(activate: false));
+      }
+      return;
+    }
+    if (_meetingActivity?.application == activity.application) {
+      if (controller.isRecording) {
+        setState(() => _meetingEnded = true);
+        unawaited(_enterFloatingMode(activate: false));
+      } else {
+        setState(() {
+          _meetingActivity = null;
+          _meetingEnded = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _enterFloatingMode({bool activate = true}) async {
+    if (!_desktop || !controller.authenticated || _configuringWindow) return;
+    _configuringWindow = true;
+    try {
+      if (mounted && !_floatingMode) setState(() => _floatingMode = true);
+      await _window.showFloating(activate: activate);
+    } finally {
+      _configuringWindow = false;
+    }
+  }
+
+  Future<void> _openLibrary({bool selectNotes = true}) async {
+    if (!_desktop || _configuringWindow) return;
+    _configuringWindow = true;
+    try {
+      if (selectNotes && controller.page == RecallPage.record) {
+        controller.selectPage(RecallPage.timeline);
+      }
+      if (mounted && _floatingMode) setState(() => _floatingMode = false);
+      await _window.showLibrary(
+        WidgetsBinding.instance.platformDispatcher.platformBrightness,
+      );
+    } finally {
+      _configuringWindow = false;
+    }
   }
 
   Future<void> _updateTray() async {
@@ -101,7 +193,8 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     await trayManager.setContextMenu(
       Menu(
         items: <MenuItem>[
-          MenuItem(label: 'Open NeoRecall', onClick: (_) => _showWindow()),
+          MenuItem(label: 'Quick capture', onClick: (_) => _showWindow()),
+          MenuItem(label: 'Open notes library', onClick: (_) => _openLibrary()),
           if (controller.isRecording)
             MenuItem(
               label: 'Stop recording',
@@ -129,6 +222,8 @@ class _NeoRecallAppState extends State<NeoRecallApp>
       windowManager.removeListener(this);
       trayManager.removeListener(this);
     }
+    unawaited(_meetingSubscription?.cancel());
+    unawaited(_meetingDetector?.dispose());
     controller.removeListener(_changed);
     controller.dispose();
     super.dispose();
@@ -136,13 +231,9 @@ class _NeoRecallAppState extends State<NeoRecallApp>
 
   @override
   void onWindowClose() async {
-    if (controller.isRecording) {
-      await windowManager.hide();
-      return;
-    }
-    await windowManager.setPreventClose(false);
-    await trayManager.destroy();
-    await windowManager.destroy();
+    // Keep the tray process alive so meeting detection and upload recovery keep
+    // working after the visible window closes.
+    await _window.hide();
   }
 
   @override
@@ -158,7 +249,18 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     home: !controller.initialized
         ? const _NeoRecallSplashView()
         : controller.authenticated && !controller.requiresBackendUrlSetup
-        ? NeoRecallShell(controller: controller)
+        ? _desktop && _floatingMode
+              ? FloatingCaptureWindow(
+                  controller: controller,
+                  meetingActivity: _meetingActivity,
+                  meetingEnded: _meetingEnded,
+                  onOpenLibrary: () => _openLibrary(),
+                  onHide: () => _hideWindow(),
+                  onConsentVisibilityChanged: (visible) => visible
+                      ? _window.showConsentSurface()
+                      : _window.showFloating(),
+                )
+              : NeoRecallShell(controller: controller)
         : NeoRecallAuthScreen(controller: controller),
   );
 }

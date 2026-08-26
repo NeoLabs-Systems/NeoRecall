@@ -20,6 +20,11 @@ enum BackgroundHold {
   /// the duration of a transfer: unlike [wearableLink] it keeps the CPU awake,
   /// so a long BLE drain and its upload are not stretched across sleep cycles.
   wearableSync,
+
+  /// A durable phone-side queue is actively uploading. This is separate from
+  /// capture and wearable sync so uploads after recording stops still own an
+  /// Android data-sync foreground service and wake lock for the drain only.
+  audioUpload,
 }
 
 extension BackgroundHoldWire on BackgroundHold {
@@ -31,6 +36,7 @@ extension BackgroundHoldWire on BackgroundHold {
     BackgroundHold.wearableCapture => 'wearableCapture',
     BackgroundHold.wearableLink => 'wearableLink',
     BackgroundHold.wearableSync => 'wearableSync',
+    BackgroundHold.audioUpload => 'audioUpload',
   };
 }
 
@@ -89,20 +95,18 @@ class BackgroundRuntimeRequest {
   /// A device that is merely linked deliberately does not qualify — holding a
   /// wake lock around the clock for an idle link would cost battery for nothing.
   bool get needsWakeLock =>
-      isCapturing || holds.contains(BackgroundHold.wearableSync);
+      isCapturing ||
+      holds.contains(BackgroundHold.wearableSync) ||
+      holds.contains(BackgroundHold.audioUpload);
 
   /// Sorted so an unchanged request always produces an identical wire payload.
   List<String> get wireHolds =>
       holds.map((hold) => hold.wireName).toList(growable: false)..sort();
 
-  String get notificationTitle =>
-      isCapturing ? 'NeoRecall is recording' : 'NeoRecall stays connected';
-
-  String get notificationText {
+  String get statusDetail {
     final device = deviceLabel?.trim();
     final label = device == null || device.isEmpty ? 'your device' : device;
-    if (needsMicrophone &&
-        holds.contains(BackgroundHold.wearableCapture)) {
+    if (needsMicrophone && holds.contains(BackgroundHold.wearableCapture)) {
       return 'Capturing $label and the phone microphone';
     }
     if (holds.contains(BackgroundHold.wearableCapture)) {
@@ -112,11 +116,21 @@ class BackgroundRuntimeRequest {
     if (holds.contains(BackgroundHold.wearableSync)) {
       return 'Syncing recordings from $label';
     }
+    if (holds.contains(BackgroundHold.audioUpload)) {
+      return 'Uploading protected recordings';
+    }
     if (holds.contains(BackgroundHold.wearableLink)) {
       return '$label stays linked so recordings sync on their own';
     }
     return 'NeoRecall is idle';
   }
+
+  /// Compatibility accessors for callers that still need a compact fallback.
+  /// Native hosts no longer receive these independently; live UI uses the
+  /// structured [BackgroundLiveStatus] payload instead.
+  String get notificationTitle =>
+      isCapturing ? 'NeoRecall is recording' : 'NeoRecall stays connected';
+  String get notificationText => statusDetail;
 
   BackgroundRuntimeRequest copyWith({
     Set<BackgroundHold>? holds,
@@ -134,10 +148,7 @@ class BackgroundRuntimeRequest {
       other.holds.containsAll(holds);
 
   @override
-  int get hashCode => Object.hash(
-    deviceLabel,
-    Object.hashAllUnordered(holds),
-  );
+  int get hashCode => Object.hash(deviceLabel, Object.hashAllUnordered(holds));
 
   @override
   String toString() =>

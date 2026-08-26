@@ -2,6 +2,8 @@ package systems.neolabs.neorecall
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
@@ -24,8 +26,6 @@ class BackgroundCaptureChannel(private val context: Context) {
               BackgroundCaptureService.requestHolds(
                 context,
                 holds,
-                call.argument<String>("title"),
-                call.argument<String>("text"),
               )
             }
             result.success(true)
@@ -35,6 +35,19 @@ class BackgroundCaptureChannel(private val context: Context) {
         }
         "stopBackgroundCapture" -> {
           stopHost()
+          result.success(true)
+        }
+        "updateLiveStatus" -> {
+          val status = call.arguments as? Map<*, *>
+          if (status == null) {
+            result.error("INVALID_LIVE_STATUS", "Status payload is missing.", null)
+          } else {
+            BackgroundCaptureService.updateLiveStatus(context, status)
+            result.success(true)
+          }
+        }
+        "clearLiveStatus" -> {
+          BackgroundCaptureService.clearLiveStatus(context)
           result.success(true)
         }
         "backgroundRuntimeState" -> {
@@ -49,9 +62,78 @@ class BackgroundCaptureChannel(private val context: Context) {
             ),
           )
         }
+        "networkRuntimeState" -> result.success(networkRuntimeState())
+        "takePendingWidgetPhoneRecordingRequest" -> {
+          val pending = widgetPreferences().getBoolean(
+            KEY_WIDGET_PHONE_RECORDING_PENDING,
+            false,
+          )
+          if (pending) {
+            widgetPreferences().edit()
+              .putBoolean(KEY_WIDGET_PHONE_RECORDING_PENDING, false)
+              .commit()
+            RecordWidgetProvider.updateAll(context)
+          }
+          result.success(pending)
+        }
+        "takePendingWatchRecordings" -> try {
+          result.success(PhoneWearTransferManager.get(context).pending())
+        } catch (error: Exception) {
+          result.error("WATCH_INBOX_FAILED", error.message, null)
+        }
+        "markWatchRecordingImported" -> {
+          PhoneWearTransferManager.get(context).markImported(
+            requireNotNull(call.argument<String>("recordingId")),
+          )
+          result.success(true)
+        }
+        "acknowledgeWatchRecording" -> try {
+          result.success(
+            PhoneWearTransferManager.get(context).acknowledge(
+              requireNotNull(call.argument<String>("recordingId")),
+              requireNotNull(call.argument<Map<String, Any?>>("receipt")),
+            ),
+          )
+        } catch (error: Exception) {
+          result.error("WATCH_ACK_FAILED", error.message, null)
+        }
         else -> result.notImplemented()
       }
     }
+  }
+
+  /**
+   * Records the widget action before notifying Dart, so a cold Flutter engine
+   * or an Activity/engine attachment race cannot lose the user's tap.
+   */
+  fun requestWidgetPhoneRecording() {
+    widgetPreferences().edit()
+      .putBoolean(KEY_WIDGET_PHONE_RECORDING_PENDING, true)
+      .commit()
+    RecordWidgetProvider.updateAll(context)
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod("widgetPhoneRecordingRequested", null)
+      }
+    }
+  }
+
+  private fun widgetPreferences() =
+    context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+
+  private fun networkRuntimeState(): Map<String, Boolean> {
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+    val connected = capabilities?.let {
+      it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    } == true
+    return mapOf(
+      "connected" to connected,
+      "unmetered" to (connected && capabilities?.hasCapability(
+        NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+      ) == true),
+    )
   }
 
   private fun stopHost() {
@@ -81,7 +163,34 @@ class BackgroundCaptureChannel(private val context: Context) {
     }
   }
 
+  fun notifyWatchRecordingAvailable() {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) channel.invokeMethod("watchRecordingAvailable", null)
+    }
+  }
+
+  fun notifyWatchTransferStarted() {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) channel.invokeMethod("watchTransferStarted", null)
+    }
+  }
+
+  fun notifyWatchTransferFinished(error: String? = null) {
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod("watchTransferFinished", mapOf("error" to error))
+      }
+    }
+  }
+
   companion object {
     const val CHANNEL = "systems.neolabs.neorecall/background_capture"
+    private const val WIDGET_PREFS = "neorecall_record_widget"
+    private const val KEY_WIDGET_PHONE_RECORDING_PENDING =
+      "phoneRecordingPending"
+
+    fun isWidgetPhoneRecordingPending(context: Context): Boolean =
+      context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(KEY_WIDGET_PHONE_RECORDING_PENDING, false)
   }
 }

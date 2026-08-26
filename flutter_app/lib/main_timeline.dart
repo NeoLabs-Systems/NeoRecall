@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_processing_status.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
+import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
 
 class TimelineScreen extends StatefulWidget {
@@ -19,46 +21,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   NeoRecallController get controller => widget.controller;
 
-  Map<String, dynamic>? _conversation(String? id) {
-    if (id == null) return null;
-    for (final conversation in controller.conversations) {
-      if (conversation['id'] == id) return conversation;
-    }
-    return null;
-  }
-
-  List<_TimelineGroup> get _groups {
-    final ordered = [...controller.transcript]
-      ..sort((left, right) => right.startedAt.compareTo(left.startedAt));
-    final groups = <String, _TimelineGroup>{};
-    for (final segment in ordered) {
-      final local = segment.startedAt.toLocal();
-      final day = DateTime(local.year, local.month, local.day);
-      final key = segment.conversationId == null
-          ? 'loose:${segment.id}'
-          : '${day.toIso8601String()}:${segment.conversationId}';
-      groups.putIfAbsent(
-        key,
-        () => _TimelineGroup(
-          key: key,
-          day: day,
-          conversationId: segment.conversationId,
-          segments: <TranscriptSegment>[],
-        ),
-      );
-      groups[key]!.segments.add(segment);
-    }
-    for (final group in groups.values) {
-      group.segments.sort(
-        (left, right) => left.startedAt.compareTo(right.startedAt),
-      );
-    }
-    return groups.values.toList();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final groups = _groups;
+    final moments = widget.controller.moments;
+    // Day headers are drawn from the moments themselves; a moment never spans
+    // a day boundary in a way that matters here, so its start decides.
+    DateTime dayOf(TimelineMoment moment) {
+      final local = moment.startedAt.toLocal();
+      return DateTime(local.year, local.month, local.day);
+    }
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
@@ -69,21 +40,36 @@ class _TimelineScreenState extends State<TimelineScreen> {
             title: 'Your day, at a glance',
             description:
                 'A compact stream of conversations. Expand only the moments you want to read in full.',
-            trailing: groups.isEmpty
+            trailing: moments.isEmpty
                 ? null
                 : _TimelineCount(
-                    conversations: groups.length,
-                    segments: controller.transcript.length,
+                    conversations: moments.length,
+                    segments: moments.fold<int>(
+                      0,
+                      (total, moment) => total + moment.segmentCount,
+                    ),
                   ),
           ),
           const SizedBox(height: 18),
-          if (groups.isEmpty)
-            const GlassSurface(
+          ProcessingStatusCard(
+            issues: controller.processingIssues,
+            audioStillOnDevice: controller.audioStillOnDevice,
+          ),
+          if (moments.isEmpty)
+            // Only claim there is nothing here when there is genuinely nothing
+            // here. If something is holding recordings up, the card above has
+            // already said so, and telling someone who recorded all day to
+            // "start a recording" is the message that makes them think their
+            // audio was lost.
+            GlassSurface(
               child: EmptyState(
                 icon: Icons.view_timeline_outlined,
-                title: 'No transcript yet',
-                message:
-                    'Start a recording or import audio. Persisted segments will appear here.',
+                title: controller.processingIssues.isEmpty
+                    ? 'No transcript yet'
+                    : 'Nothing to show yet',
+                message: controller.processingIssues.isEmpty
+                    ? 'Start a recording or import audio. Persisted segments will appear here.'
+                    : 'Your recordings are safe. They will appear here once the above is sorted out.',
               ),
             )
           else
@@ -91,36 +77,51 @@ class _TimelineScreenState extends State<TimelineScreen> {
               padding: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  for (
-                    var index = 0;
-                    index < groups.length;
-                    index++
-                  ) ...<Widget>[
+                  for (var index = 0; index < moments.length; index++) ...<Widget>[
                     if (index == 0 ||
-                        groups[index - 1].day != groups[index].day)
+                        dayOf(moments[index - 1]) != dayOf(moments[index]))
                       _DayHeader(
-                        day: groups[index].day,
-                        groupCount: groups
-                            .where((group) => group.day == groups[index].day)
+                        day: dayOf(moments[index]),
+                        groupCount: moments
+                            .where((moment) => dayOf(moment) == dayOf(moments[index]))
                             .length,
                       ),
                     _TimelineEntry(
-                      group: groups[index],
-                      conversation: _conversation(groups[index].conversationId),
-                      expanded: _expanded.contains(groups[index].key),
+                      moment: moments[index],
+                      expanded: _expanded.contains(moments[index].key),
                       lastInDay:
-                          index == groups.length - 1 ||
-                          groups[index + 1].day != groups[index].day,
-                      onToggle: () => setState(() {
-                        if (!_expanded.add(groups[index].key)) {
-                          _expanded.remove(groups[index].key);
+                          index == moments.length - 1 ||
+                          dayOf(moments[index + 1]) != dayOf(moments[index]),
+                      busy: controller.reprocessingMomentId == moments[index].id,
+                      onReprocess: moments[index].canReprocess
+                          ? () => controller.reprocessMoment(moments[index].id!)
+                          : null,
+                      loadedSegments:
+                          controller.momentTranscripts[moments[index].id],
+                      loadingSegments: controller.loadingMomentTranscripts
+                          .contains(moments[index].id),
+                      onToggle: () {
+                        setState(() {
+                          if (!_expanded.add(moments[index].key)) {
+                            _expanded.remove(moments[index].key);
+                          }
+                        });
+                        if (_expanded.contains(moments[index].key)) {
+                          controller.openMomentTranscript(moments[index]);
                         }
-                      }),
+                      },
                     ),
                   ],
                 ],
               ),
             ),
+          // A long history does not fit in one page, and the reader needs to
+          // know where in it they are standing rather than watching a list
+          // grow without end.
+          if (controller.hasOlderMoments || controller.hasNewerMoments) ...<Widget>[
+            const SizedBox(height: 20),
+            _TimelinePager(controller: controller),
+          ],
         ],
       ),
     );
@@ -195,23 +196,39 @@ class _DayHeader extends StatelessWidget {
 
 class _TimelineEntry extends StatelessWidget {
   const _TimelineEntry({
-    required this.group,
-    required this.conversation,
+    required this.moment,
     required this.expanded,
     required this.lastInDay,
+    required this.busy,
     required this.onToggle,
+    this.loadedSegments,
+    this.loadingSegments = false,
+    this.onReprocess,
   });
 
-  final _TimelineGroup group;
-  final Map<String, dynamic>? conversation;
+  final TimelineMoment moment;
   final bool expanded;
   final bool lastInDay;
+  final bool busy;
   final VoidCallback onToggle;
+  final List<TranscriptSegment>? loadedSegments;
+  final bool loadingSegments;
+  final VoidCallback? onReprocess;
+
+  /// Where this moment stands, in the reader's terms. Null when it simply
+  /// stands finished and there is nothing to say.
+  String? _statusLabel() {
+    if (moment.isPending) return 'Being sorted';
+    if (moment.isSetAside) return 'Waiting on a summary';
+    // Waiting for the model is one state, whether this is the first write-up
+    // or a repeat: nothing on the record distinguishes them, so the label does
+    // not claim to.
+    if (moment.awaitsWriteUp) return 'Summary on the way';
+    return null;
+  }
 
   String _durationLabel() {
-    final duration = group.segments.last.endedAt.difference(
-      group.segments.first.startedAt,
-    );
+    final duration = moment.endedAt.difference(moment.startedAt);
     if (duration.inHours > 0) {
       return '${duration.inHours}h ${duration.inMinutes.remainder(60)}m';
     }
@@ -222,35 +239,29 @@ class _TimelineEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final first = group.segments.first;
-    final last = group.segments.last;
-    final speakers = group.segments
+    // The page carries a preview; the full transcript arrives when the moment
+    // is opened.
+    final segments = loadedSegments ?? moment.segments;
+    final speakers = segments
         .map((segment) => segment.speaker ?? 'Unassigned')
         .toSet()
         .toList();
-    final visible = expanded ? group.segments : group.segments.take(2).toList();
-    final remaining = group.segments.length - visible.length;
-    final state = conversation?['state']?.toString();
-    // A conversation that is still being recorded carries a provisional insight
-    // so it can be read before it ends; the title and summary are refined once
-    // it closes and becomes a memory. A closed conversation can also hold a
-    // provisional insight — that is a description, not a live recording, so it
-    // gets no badge.
-    final provisional = state == 'open' && conversation?['insight_state']?.toString() == 'provisional';
-    final generatedTitle = conversation?['title_en']?.toString().trim();
-    final generatedSummary = conversation?['summary_en']?.toString().trim();
-    final topics = ((conversation?['topics'] as List?) ?? const <dynamic>[])
-        .map((topic) => topic.toString())
-        .where((topic) => topic.trim().isNotEmpty)
-        .take(3)
-        .toList();
+    final visible = expanded ? segments : segments.take(2).toList();
+    final hidden = (moment.segmentCount - visible.length).clamp(0, moment.segmentCount);
+    // A conversation that is still being recorded carries a provisional
+    // account of itself so it can be read before it ends; it is refined once
+    // the conversation closes.
+    final provisional = moment.isLive && moment.insightState == 'provisional';
+    final generatedTitle = moment.titleEn?.trim();
+    final generatedSummary = moment.summaryEn?.trim();
+    final topics = moment.topics.take(3).toList();
     final compact = MediaQuery.sizeOf(context).width < 680;
 
     final timeLabel = TimeOfDay.fromDateTime(
-      first.startedAt.toLocal(),
+      moment.startedAt.toLocal(),
     ).format(context);
     final endLabel = TimeOfDay.fromDateTime(
-      last.endedAt.toLocal(),
+      moment.endedAt.toLocal(),
     ).format(context);
 
     return Container(
@@ -331,11 +342,11 @@ class _TimelineEntry extends StatelessWidget {
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            group.conversationId == null
-                                ? 'Unsorted transcript'
+                            moment.isPending
+                                ? 'Just recorded'
                                 : generatedTitle?.isNotEmpty == true
                                 ? generatedTitle!
-                                : 'Conversation${state == null ? '' : ' · $state'}',
+                                : 'Conversation',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -347,6 +358,13 @@ class _TimelineEntry extends StatelessWidget {
                         if (provisional) ...<Widget>[
                           const SizedBox(width: 6),
                           _LiveInsightBadge(palette: palette),
+                        ],
+                        if (!provisional && _statusLabel() != null) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _MomentStatus(
+                            label: _statusLabel()!,
+                            palette: palette,
+                          ),
                         ],
                         if (compact)
                           Text(
@@ -364,7 +382,7 @@ class _TimelineEntry extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${group.segments.length}',
+                          '${moment.segmentCount}',
                           style: TextStyle(
                             color: palette.textMuted,
                             fontSize: 11,
@@ -437,25 +455,93 @@ class _TimelineEntry extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (remaining > 0 || expanded) ...<Widget>[
+                    if (expanded && loadingSegments) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: <Widget>[
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Loading the rest of this moment',
+                            style: TextStyle(
+                              color: palette.textMuted,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (expanded &&
+                        !loadingSegments &&
+                        segments.length < moment.segmentCount) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
+                        style: TextStyle(
+                          color: palette.textMuted,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                    if (hidden > 0 || expanded) ...<Widget>[
                       const SizedBox(height: 5),
-                      TextButton.icon(
-                        onPressed: onToggle,
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                        ),
-                        icon: Icon(
-                          expanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          size: 17,
-                        ),
-                        label: Text(
-                          expanded
-                              ? 'Show less'
-                              : '$remaining more ${remaining == 1 ? 'segment' : 'segments'}',
-                        ),
+                      Row(
+                        children: <Widget>[
+                          TextButton.icon(
+                            onPressed: onToggle,
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                            ),
+                            icon: Icon(
+                              expanded
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              size: 17,
+                            ),
+                            label: Text(
+                              expanded
+                                  ? 'Show less'
+                                  : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
+                            ),
+                          ),
+                          const Spacer(),
+                          // Offered only once a moment is open: it acts on what
+                          // the reader is looking at, and it is not something to
+                          // trip over while scanning the day.
+                          if (expanded && onReprocess != null)
+                            TextButton.icon(
+                              onPressed: busy ? null : onReprocess,
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                              icon: busy
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.auto_awesome, size: 15),
+                              label: Text(
+                                busy
+                                    ? 'Writing up'
+                                    : moment.hasWriteUp
+                                    ? 'Write up again'
+                                    : 'Write up now',
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ],
@@ -610,16 +696,74 @@ class _TranscriptLine extends StatelessWidget {
   }
 }
 
-class _TimelineGroup {
-  _TimelineGroup({
-    required this.key,
-    required this.day,
-    required this.conversationId,
-    required this.segments,
-  });
+/// Moves through the timeline a page at a time, newest first.
+class _TimelinePager extends StatelessWidget {
+  const _TimelinePager({required this.controller});
 
-  final String key;
-  final DateTime day;
-  final String? conversationId;
-  final List<TranscriptSegment> segments;
+  final NeoRecallController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = controller.isPagingMoments;
+    return GlassSurface(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: <Widget>[
+          TextButton.icon(
+            onPressed: busy || !controller.hasNewerMoments
+                ? null
+                : controller.showNewerMoments,
+            icon: const Icon(Icons.chevron_left),
+            label: const Text('Newer'),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Text(
+              'Page ${controller.momentPage + 1}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+          TextButton.icon(
+            onPressed: busy || !controller.hasOlderMoments
+                ? null
+                : controller.showOlderMoments,
+            icon: const Icon(Icons.chevron_right),
+            label: const Text('Older'),
+            iconAlignment: IconAlignment.end,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A short note on a moment's state, next to its title.
+class _MomentStatus extends StatelessWidget {
+  const _MomentStatus({required this.label, required this.palette});
+
+  final String label;
+  final NeoRecallPalette palette;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: palette.bgSecondary,
+      border: Border.all(color: palette.border),
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        color: palette.textMuted,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }

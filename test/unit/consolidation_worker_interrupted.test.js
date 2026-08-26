@@ -8,8 +8,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.NEORECALL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'neorecall-worker-interrupted-'));
-process.env.OPENROUTER_API_KEY = 'test-key';
-process.env.AI_DEFAULT_MODEL = 'test/model';
+process.env.AI_PROVIDER = 'openai_compatible';
+process.env.AI_API_BASE_URL = 'http://127.0.0.1:1';
+process.env.AI_API_MODEL = 'test/model';
 
 const { migrate } = require('../../server/db/migrate');
 const { getDatabase, closeDatabase } = require('../../server/db/database');

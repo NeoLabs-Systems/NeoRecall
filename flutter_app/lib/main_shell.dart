@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_memories.dart';
+import 'main_navigation.dart';
 import 'main_record.dart';
 import 'main_search.dart';
 import 'main_settings.dart';
@@ -15,25 +16,6 @@ class NeoRecallShell extends StatelessWidget {
   const NeoRecallShell({super.key, required this.controller});
 
   final NeoRecallController controller;
-
-  static const items = <(RecallPage, IconData, String)>[
-    (RecallPage.record, Icons.radio_button_checked_rounded, 'Record'),
-    (RecallPage.timeline, Icons.timeline_rounded, 'Timeline'),
-    (RecallPage.memories, Icons.auto_awesome_outlined, 'Memories'),
-    (RecallPage.search, Icons.search_rounded, 'Search'),
-    (RecallPage.speakers, Icons.record_voice_over_outlined, 'Speakers'),
-    (RecallPage.sources, Icons.input_rounded, 'Sources'),
-  ];
-
-  String get _pageTitle => switch (controller.page) {
-    RecallPage.record => 'Record',
-    RecallPage.timeline => 'Timeline',
-    RecallPage.memories => 'Memories',
-    RecallPage.search => 'Search',
-    RecallPage.speakers => 'Speakers',
-    RecallPage.sources => 'Sources',
-    RecallPage.devices || RecallPage.settings => 'Settings',
-  };
 
   Widget _screen() => switch (controller.page) {
     RecallPage.record => RecordScreen(controller: controller),
@@ -54,7 +36,7 @@ class NeoRecallShell extends StatelessWidget {
     return AmbientBackdrop(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 1080;
+          final wide = constraints.maxWidth >= 920;
           final content = AnimatedSwitcher(
             duration: const Duration(milliseconds: 260),
             switchInCurve: Curves.easeOutCubic,
@@ -96,7 +78,7 @@ class NeoRecallShell extends StatelessWidget {
               titleSpacing: 0,
               leadingWidth: 46,
               title: Text(
-                _pageTitle,
+                neoRecallPageTitle(controller.page),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -150,15 +132,13 @@ class _Sidebar extends StatelessWidget {
       decoration: BoxDecoration(
         color: palette.bgSecondary.withValues(alpha: 0.96),
         border: Border(right: BorderSide(color: palette.border)),
-        boxShadow: drawer
-            ? null
-            : <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 24,
-                  offset: const Offset(4, 0),
-                ),
-              ],
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 24,
+            offset: const Offset(4, 0),
+          ),
+        ],
       ),
       child: Column(
         children: <Widget>[
@@ -177,13 +157,6 @@ class _Sidebar extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: palette.accent.withValues(alpha: 0.05),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
               ),
               child: Row(
                 children: <Widget>[
@@ -208,7 +181,7 @@ class _Sidebar extends StatelessWidget {
                           'CONTROL SURFACE',
                           style: sectionEyebrowStyle(
                             palette,
-                          ).copyWith(fontSize: 9.5, letterSpacing: 1.8),
+                          ).copyWith(color: palette.textMuted, fontSize: 9.5),
                         ),
                       ],
                     ),
@@ -219,32 +192,25 @@ class _Sidebar extends StatelessWidget {
           ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               children: <Widget>[
-                for (final item in NeoRecallShell.items)
+                for (final item in neoRecallNavigationItems)
                   _SidebarButton(
-                    selected: controller.page == item.$1,
-                    icon: item.$2,
-                    label: item.$3,
-                    onTap: () => _select(context, item.$1),
+                    selected: controller.page == item.page,
+                    icon: item.icon,
+                    label: item.label,
+                    onTap: () => _select(context, item.page),
                   ),
               ],
             ),
           ),
           Container(
-            margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+            margin: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+            padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(color: palette.border),
               color: palette.bgCard.withValues(alpha: 0.72),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
             ),
             child: Row(
               children: <Widget>[
@@ -331,7 +297,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final radius = BorderRadius.circular(14);
+    final radius = BorderRadius.circular(11);
     return Padding(
       padding: const EdgeInsets.only(bottom: 3),
       child: MouseRegion(
@@ -345,7 +311,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
               decoration: BoxDecoration(
                 borderRadius: radius,
                 color: widget.selected
@@ -353,6 +319,16 @@ class _SidebarButtonState extends State<_SidebarButton> {
                     : hovering
                     ? palette.bgTertiary.withValues(alpha: 0.66)
                     : Colors.transparent,
+                gradient: widget.selected
+                    ? LinearGradient(
+                        colors: <Color>[
+                          palette.accent.withValues(alpha: 0.10),
+                          palette.bgCard.withValues(alpha: 0.96),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
                 border: Border.all(
                   color: widget.selected
                       ? palette.borderLight
@@ -363,38 +339,21 @@ class _SidebarButtonState extends State<_SidebarButton> {
                 boxShadow: widget.selected
                     ? <BoxShadow>[
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 12,
-                          offset: const Offset(0, 3),
+                          color: palette.accent.withValues(alpha: 0.05),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
                         ),
                       ]
                     : null,
               ),
               child: Row(
                 children: <Widget>[
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(11),
-                      color: widget.selected
-                          ? palette.accent.withValues(alpha: 0.12)
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: widget.selected
-                            ? palette.accent.withValues(alpha: 0.22)
-                            : Colors.transparent,
-                      ),
-                    ),
-                    child: Icon(
-                      widget.icon,
-                      size: 18,
-                      color: widget.selected
-                          ? palette.accent
-                          : palette.textMuted,
-                    ),
+                  Icon(
+                    widget.icon,
+                    size: 19,
+                    color: widget.selected ? palette.accent : palette.textMuted,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 11),
                   Expanded(
                     child: Text(
                       widget.label,
@@ -402,7 +361,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
                         color: widget.selected
                             ? palette.textPrimary
                             : palette.textSecondary,
-                        fontSize: 13,
+                        fontSize: 13.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -485,7 +444,8 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusPill(
           icon: Icons.cloud_off_rounded,
           color: palette.textMuted,
-          message: 'Offline — capture continues; uploads resume when reconnected.',
+          message:
+              'Offline — capture continues; uploads resume when reconnected.',
         ),
       );
     }

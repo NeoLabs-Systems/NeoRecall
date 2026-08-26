@@ -58,8 +58,9 @@ class NeoRecallPalette {
   Color get accentStrong => accentHover;
   Color get accentSoft => accentMuted;
   Color get error => danger;
-  Color get glassFill => bgCard.withValues(alpha: 0.86);
-  Color get glassBorder => borderLight;
+  bool get isDark => bgPrimary.computeLuminance() < 0.5;
+  Color get glassFill => bgCard.withValues(alpha: isDark ? 0.82 : 0.9);
+  Color get glassBorder => Colors.white.withValues(alpha: isDark ? 0.11 : 0.24);
   Color get borderStrong => borderLight;
   Gradient get backgroundGradient => LinearGradient(
     colors: <Color>[
@@ -95,15 +96,15 @@ const NeoRecallPalette _darkPalette = NeoRecallPalette(
   accentHover: Color(0xFFEAC272),
   accentAlt: Color(0xFF84BA87),
   accentMuted: Color(0x24E1B052),
-  secondary: Color(0xFFD98AA6),
+  secondary: Color(0xFFDE8A78),
   border: Color(0x14E0F0E0),
   borderLight: Color(0x24E0F0E0),
   success: Color(0xFF74C07C),
-  warning: Color(0xFFE1B052),
+  warning: Color(0xFFD9A24B),
   danger: Color(0xFFDE8A78),
   info: Color(0xFF6FB0A4),
   onAccent: Color(0xFF0E1511),
-  shadow: Color(0xA0000000),
+  shadow: Color(0x2E000000),
 );
 
 const NeoRecallPalette _lightPalette = NeoRecallPalette(
@@ -118,15 +119,15 @@ const NeoRecallPalette _lightPalette = NeoRecallPalette(
   accentHover: Color(0xFFC8943F),
   accentAlt: Color(0xFF5E6B4C),
   accentMuted: Color(0x24B07D2B),
-  secondary: Color(0xFFA8506E),
+  secondary: Color(0xFFAE473C),
   border: Color(0x1A1C2117),
   borderLight: Color(0x291C2117),
   success: Color(0xFF527C4F),
   warning: Color(0xFF9A6B1E),
   danger: Color(0xFFAE473C),
   info: Color(0xFF2F7D6E),
-  onAccent: Color(0xFFFDFCF8),
-  shadow: Color(0x241C2117),
+  onAccent: Color(0xFFFFFFFF),
+  shadow: Color(0x1F000000),
 );
 
 NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
@@ -148,7 +149,7 @@ TextStyle displayTitleStyle(NeoRecallPalette palette, {double size = 28}) =>
       color: palette.textPrimary,
       fontWeight: FontWeight.w700,
       fontSize: size,
-      letterSpacing: -0.8,
+      letterSpacing: -0.9,
       height: 1.08,
     );
 
@@ -157,8 +158,8 @@ TextStyle heroTitleStyle(NeoRecallPalette palette, {double size = 24}) =>
       color: palette.textPrimary,
       fontWeight: FontWeight.w800,
       fontSize: size,
-      letterSpacing: -1.0,
-      height: 1.1,
+      letterSpacing: -0.8,
+      height: 1.08,
     );
 
 List<BoxShadow> softPanelShadow(NeoRecallPalette palette) => <BoxShadow>[

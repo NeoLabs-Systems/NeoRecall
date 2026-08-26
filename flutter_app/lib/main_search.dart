@@ -41,7 +41,7 @@ class _SearchScreenState extends State<SearchScreen> {
           eyebrow: 'SEARCH',
           title: 'Recall naturally',
           description:
-              'Every query runs free local keyword and semantic retrieval. Ask is an explicit, separately rate-limited OpenRouter action.',
+              'Every query runs local keyword and semantic retrieval. Ask writes an answer over the results, which takes a moment longer.',
         ),
         const SizedBox(height: 24),
         TextField(

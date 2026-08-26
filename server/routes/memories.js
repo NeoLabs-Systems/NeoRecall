@@ -21,7 +21,9 @@ router.post('/bulk', requireScope('memories:write'), validate(z.object({
 });
 
 router.post('/merge', requireScope('memories:write'), validate(z.object({
-  ids: z.array(z.string().min(1)).min(2).max(10),
+  // Count validation belongs to the service so callers receive its actionable
+  // limit message instead of the validation middleware's generic response.
+  ids: z.array(z.string().min(1)),
 })), async (req, res, next) => {
   try { res.json(await service.merge(req.auth.userId, req.body)); } catch (error) { next(error); }
 });

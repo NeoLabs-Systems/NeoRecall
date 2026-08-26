@@ -5,7 +5,7 @@ title: Installation
 
 # Install NeoRecall
 
-NeoRecall requires Node.js 20 or newer, a supported 64-bit host, and enough free space for the local speech models. The supported v1 server target is a single machine with at least four modern CPU cores and 8 GB RAM.
+NeoRecall requires Node.js 20 or newer and a supported 64-bit host. It does not install or run speech-recognition or language-model weights. Before processing recordings, configure a hosted provider or separately deploy compatible transcription and language-model endpoints.
 
 ## npm and the user service
 
@@ -18,7 +18,7 @@ neorecall setup
 neorecall start
 ```
 
-`setup` creates `~/.neorecall`, runs database migrations, downloads every pinned model from `models/manifest.json`, verifies SHA-256 checksums, and probes sherpa-onnx, ffmpeg, sqlite-vec, and the 384-dimensional embedding model. Normal startup never downloads a model.
+`setup` creates `~/.neorecall`, runs database migrations, downloads and verifies the small models NeoRecall runs itself — multilingual search embeddings, a voice-activity detector, and speaker diarization, about 165 MB in total — and probes ffmpeg and sqlite-vec. Speech recognition and language models are never downloaded or started; configure those services through `.env` or the admin dashboard after installation.
 
 Open `http://localhost:4500` after `neorecall status` reports a running service. Use a reverse proxy with TLS before exposing the server outside a trusted network.
 
@@ -30,7 +30,7 @@ docker compose run --rm neorecall node bin/neorecall.js setup
 docker compose up -d
 ```
 
-The compose volume contains the database, models, logs, and temporary processing files. Supply OpenRouter configuration through a local `.env`; credentials are not included in the image.
+The compose volume contains the database, local search model, logs, and temporary processing files. Provider credentials come from a local `.env` or encrypted admin settings; no credentials are baked into the image.
 
 ## Service commands
 

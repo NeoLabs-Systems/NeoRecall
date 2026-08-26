@@ -3,6 +3,7 @@
 const express = require('express');
 const { z } = require('zod');
 const auth = require('../services/auth/auth_service');
+const webauthn = require('../services/auth/webauthn_service');
 const { requireAuth, requireSession } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { slidingWindow } = require('../middleware/rate_limit');
@@ -10,6 +11,10 @@ const { slidingWindow } = require('../middleware/rate_limit');
 const router = express.Router();
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 const context = (req) => ({ ipAddress: req.ip, userAgent: req.get('User-Agent') });
+const relyingParty = (req) => webauthn.resolveRelyingParty({
+  origin: req.get('Origin'),
+  selfOrigin: `${req.protocol}://${req.get('host')}`,
+});
 
 router.post('/register', slidingWindow({ windowMs: 60_000, limit: 10 }), validate(z.object({
   username: z.string().min(3).max(64), email: z.string().email().optional().nullable(), password: z.string().min(12).max(1024),
@@ -18,6 +23,19 @@ router.post('/register', slidingWindow({ windowMs: 60_000, limit: 10 }), validat
 router.post('/login', slidingWindow({ windowMs: 60_000, limit: 10 }), validate(z.object({
   account: z.string().min(1).max(320), password: z.string().max(1024), twoFactorCode: z.string().max(64).optional(),
 })), asyncRoute(async (req, res) => res.json(await auth.login(req.body, context(req)))));
+
+router.post('/webauthn/options', slidingWindow({ windowMs: 60_000, limit: 20 }), validate(z.object({
+  account: z.string().max(320).optional(),
+})), asyncRoute(async (req, res) => res.json(await webauthn.beginAuthentication({ account: req.body.account, rp: relyingParty(req) }))));
+
+router.post('/webauthn/verify', slidingWindow({ windowMs: 60_000, limit: 20 }), validate(z.object({
+  challengeId: z.string().min(1).max(64), response: z.object({}).passthrough(), twoFactorCode: z.string().max(64).optional(),
+})), asyncRoute(async (req, res) => res.json(await webauthn.completeAuthentication({
+  challengeId: req.body.challengeId,
+  response: req.body.response,
+  twoFactorCode: req.body.twoFactorCode,
+  rp: relyingParty(req),
+}, context(req)))));
 
 router.use(requireAuth);
 router.get('/me', (req, res) => res.json({ user: req.user }));

@@ -49,6 +49,7 @@ test('the advertised maximum import part is uploadable and larger declarations a
   const registration = await request(app).post('/api/v1/auth/register').send({ username: 'part-limit-user', password: 'another long unique password' }).expect(201);
   const auth = { Authorization: `Bearer ${registration.body.session.token}` };
   const meta = await request(app).get('/api/v1/meta').set(auth).expect(200);
+  assert.equal(meta.body.capabilities.gzipAudioUpload, true);
   assert.equal(meta.body.limits.importPartBytes, 65536);
   const bytes = Buffer.alloc(65536, 7);
   const digest = crypto.createHash('sha256').update(bytes).digest('hex');

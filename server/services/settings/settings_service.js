@@ -13,12 +13,19 @@ const schema = z.object({
   diarizationEnabled: z.boolean().optional(),
   chunkTargetMs: z.number().int().optional(),
   chunkOverlapMs: z.number().int().optional(),
+  uploadOnlyOnUnmetered: z.boolean().optional(),
+  recordingScheduleEnabled: z.boolean().optional(),
+  recordingStartMinute: z.number().int().min(0).max(1439).optional(),
+  recordingEndMinute: z.number().int().min(0).max(1439).optional(),
 });
 
 const keyMap = Object.freeze({
   consolidationIntervalMs: 'consolidation_interval_ms', timezone: 'timezone',
   recurringSpeakerMatching: 'recurring_speaker_matching', diarizationEnabled: 'diarization_enabled',
   chunkTargetMs: 'chunk_target_ms', chunkOverlapMs: 'chunk_overlap_ms',
+  uploadOnlyOnUnmetered: 'upload_only_on_unmetered',
+  recordingScheduleEnabled: 'recording_schedule_enabled',
+  recordingStartMinute: 'recording_start_minute', recordingEndMinute: 'recording_end_minute',
 });
 
 function defaults() {
@@ -30,6 +37,13 @@ function defaults() {
     diarizationEnabled: config.diarizationEnabled,
     chunkTargetMs: config.chunkTargetMs,
     chunkOverlapMs: config.chunkOverlapMs,
+    // Mobile capture should preserve the user's data allowance unless they
+    // explicitly opt in. Android's unmetered capability is more accurate than
+    // merely checking for a Wi-Fi transport (a hotspot can still be metered).
+    uploadOnlyOnUnmetered: true,
+    recordingScheduleEnabled: false,
+    recordingStartMinute: 0,
+    recordingEndMinute: 0,
   };
 }
 
@@ -43,6 +57,8 @@ function get(userId) {
   result.effectiveConsolidationIntervalMs = Math.max(result.consolidationIntervalMs, config.minConsolidationIntervalMs);
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;
+  // Derived, not chosen: a fact about this installation's local voice-analysis models.
+  result.speakerIdentityAvailable = require('../../transcription/local_analysis').available();
   return result;
 }
 

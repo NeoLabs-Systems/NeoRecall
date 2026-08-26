@@ -12,12 +12,14 @@ const pages = {
   overview: ['Overview', 'System health, queue state and retained data.'],
   users: ['Users', 'Accounts and their isolated recording activity.'],
   jobs: ['Jobs', 'Background processing, retries and terminal failures.'],
-  ai: ['AI requests', 'Remote analysis usage and cost.'],
+  ai: ['AI requests', 'Language model usage.'],
   audit: ['Audit log', 'Security-sensitive administrative changes.'],
+  providers: ['Providers', 'External language-model and transcription services.'],
   processing: ['Processing', 'Live diarization, deduplication and consolidation thresholds.'],
   security: ['Security', 'Admin authentication and access control.'],
 };
 let toastTimer;
+let providerSettingsData;
 
 async function api(path, options = {}) {
   const response = await fetch(`/admin/api/v1${path}`, {
@@ -70,7 +72,10 @@ function showPage(name, updateHash = true) {
 const settingLabels = {
   voiceMatchThreshold: 'Voice match threshold',
   voiceMatchMargin: 'Voice runner-up margin',
-  speakerClusterThreshold: 'Speaker cluster threshold',
+  speakerClusterThreshold: 'Speaker match threshold (higher = more speakers)',
+  speakerClusterMergeThreshold: 'Merge two speakers when this alike',
+  speakerMinimumTurnMs: 'Shortest speech that may create a speaker (ms)',
+  diarizationClusterDistance: 'Diarization grouping distance (higher = fewer speakers)',
   speakerClusterMargin: 'Speaker cluster runner-up margin',
   speakerContinuityGapMs: 'Speaker continuity gap (ms)',
   speakerClusterContinuityThreshold: 'Speaker continuity threshold',
@@ -98,24 +103,145 @@ function renderSettings(settings) {
     .join('');
 }
 
+function providerElement(workload, field) {
+  return document.querySelector(`#${workload}-${field}`);
+}
+
+const NO_THINKING = { chat_template_kwargs: { enable_thinking: false } };
+function thinkingDisabled(extraBody) {
+  return extraBody?.chat_template_kwargs?.enable_thinking === false;
+}
+
+function renderProviderWorkload(workload, settings, catalog) {
+  const provider = providerElement(workload, 'provider');
+  provider.innerHTML = catalog.map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</option>`).join('');
+  provider.value = settings.provider;
+  providerElement(workload, 'model').value = settings.model || '';
+  providerElement(workload, 'base-url').value = settings.baseUrl || '';
+  providerElement(workload, 'api-key').value = '';
+  providerElement(workload, 'clear-key').checked = false;
+  providerElement(workload, 'key-status').textContent = settings.apiKeyConfigured
+    ? `A key is configured from ${settings.apiKeySource}. Leave this field blank to keep it.`
+    : 'No API key is configured.';
+  if (workload === 'llm') {
+    providerElement(workload, 'extra-body').value = settings.extraBody ? JSON.stringify(settings.extraBody, null, 2) : '';
+    providerElement(workload, 'no-thinking').checked = thinkingDisabled(settings.extraBody);
+  }
+  if (workload === 'transcription') {
+    providerElement(workload, 'language').value = settings.language || '';
+    providerElement(workload, 'response-format').value = settings.responseFormat || '';
+  }
+}
+
+function renderProviderSettings(settings) {
+  providerSettingsData = settings;
+  renderProviderWorkload('llm', settings.llm, settings.catalogs.llm);
+  renderProviderWorkload('transcription', settings.transcription, settings.catalogs.transcription);
+}
+
+function providerDraft(workload) {
+  return {
+    workload,
+    provider: providerElement(workload, 'provider').value,
+    baseUrl: providerElement(workload, 'base-url').value.trim() || null,
+    ...(providerElement(workload, 'api-key').value.trim() ? { apiKey: providerElement(workload, 'api-key').value.trim() } : {}),
+  };
+}
+
+// Renders each leg of the end-to-end test as a line someone can act on.
+function renderProviderTest(result) {
+  const element = document.querySelector('#provider-test-result');
+  const line = (label, value) => {
+    const mark = value.ok ? '✓' : '✗';
+    const took = value.ms === undefined ? '' : ` (${(value.ms / 1000).toFixed(1)}s)`;
+    const detail = value.ok
+      ? (value.text ? `"${value.text}"` : value.answer ? `answered "${value.answer}"` : value.voices !== undefined ? `${value.voices} voices over ${value.turns} turns` : 'ok')
+      : value.error;
+    const named = value.provider ? ` [${value.provider}${value.model ? ` · ${value.model}` : ''}]` : '';
+    return `${mark} ${label}${named}${took}\n    ${detail}`;
+  };
+  element.textContent = [
+    line('Transcription', result.transcription),
+    line('Speaker identity', result.speakerIdentity),
+    line('Language model', result.llm),
+  ].join('\n\n');
+  element.hidden = false;
+}
+
+async function discoverProviderModels(workload, { quiet = false } = {}) {
+  const status = providerElement(workload, 'model-status');
+  const list = providerElement(workload, 'model-options');
+  status.textContent = 'Fetching available models…';
+  try {
+    const result = await api('/provider-settings/models', { method: 'POST', body: JSON.stringify(providerDraft(workload)) });
+    list.innerHTML = result.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join('');
+    status.textContent = result.automatic
+      ? 'This provider selects its transcription model automatically.'
+      : `${result.models.length} available model${result.models.length === 1 ? '' : 's'} loaded.`;
+  } catch (error) {
+    status.textContent = error.message;
+    if (!quiet) throw error;
+  }
+}
+
+function providerPayload(workload) {
+  const value = {
+    provider: providerElement(workload, 'provider').value,
+    model: providerElement(workload, 'model').value.trim() || null,
+    baseUrl: providerElement(workload, 'base-url').value.trim() || null,
+    clearApiKey: providerElement(workload, 'clear-key').checked,
+  };
+  const key = providerElement(workload, 'api-key').value.trim();
+  if (key) value.apiKey = key;
+  if (workload === 'llm') value.extraBody = llmExtraBody();
+  if (workload === 'transcription') {
+    value.language = providerElement(workload, 'language').value.trim() || null;
+    value.responseFormat = providerElement(workload, 'response-format').value.trim() || null;
+  }
+  return value;
+}
+
+function llmExtraBody() {
+  const raw = providerElement('llm', 'extra-body').value.trim();
+  let parsed = null;
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch (error) {
+      throw new Error(`Extra request JSON is not valid JSON: ${error.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Extra request JSON must be a JSON object, for example {"chat_template_kwargs":{"enable_thinking":false}}.');
+    }
+  }
+  const disable = providerElement('llm', 'no-thinking').checked;
+  if (disable) return { ...(parsed || {}), ...NO_THINKING, chat_template_kwargs: { ...(parsed?.chat_template_kwargs || {}), enable_thinking: false } };
+  if (!parsed) return null;
+  if (!thinkingDisabled(parsed)) return parsed;
+  const { enable_thinking: _removed, ...rest } = parsed.chat_template_kwargs;
+  const kwargs = Object.keys(rest).length ? { chat_template_kwargs: rest } : {};
+  const { chat_template_kwargs: _dropped, ...others } = parsed;
+  const merged = { ...others, ...kwargs };
+  return Object.keys(merged).length ? merged : null;
+}
+
 function renderEmpty(columns, message) {
   return `<tr><td colspan="${columns}"><div class="empty">${escapeHtml(message)}</div></td></tr>`;
 }
 
 async function load({ announce = false } = {}) {
   document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData, tfStatus] = await Promise.all([
+  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus] = await Promise.all([
     api('/stats'),
     api('/users'),
     api('/jobs?limit=50'),
     api('/ai-requests?limit=50'),
     api('/audit?limit=50'),
     api('/processing-settings'),
+    api('/provider-settings'),
     api('/settings/2fa'),
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
   const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
-  const aiCost = stats.ai.reduce((sum, row) => sum + Number(row.cost_usd || 0), 0);
+  const aiTokens = stats.ai.reduce((sum, row) => sum + Number(row.prompt_tokens || 0) + Number(row.completion_tokens || 0), 0);
   const tiles = [
     ['Users', stats.users, 'ok'],
     ['Recordings', stats.recordings, 'ok'],
@@ -124,7 +250,7 @@ async function load({ announce = false } = {}) {
     ['Temporary audio', `${(stats.temporaryAudioBytes / 1048576).toFixed(1)} MB`, stats.temporaryAudioBytes ? 'warn' : 'ok'],
     ['Cleanup pending', stats.cleanupPending, stats.cleanupPending ? 'warn' : 'ok'],
     ['Vector index', stats.vector.ready ? `Ready · ${stats.vector.version}` : 'Unavailable', stats.vector.ready ? 'ok' : 'fail'],
-    ['AI cost', `$${aiCost.toFixed(4)}`, 'ok'],
+    ['AI tokens', aiTokens.toLocaleString(), 'ok'],
   ];
   document.querySelector('#status').innerHTML = tiles.map(([label, value, state]) => `<article class="status-tile"><span class="status-dot ${state}"></span><div><div class="status-label">${escapeHtml(label)}</div><div class="status-detail">${escapeHtml(value)}</div></div></article>`).join('');
   document.querySelector('#workers').textContent = stats.workers.length
@@ -134,13 +260,16 @@ async function load({ announce = false } = {}) {
     ? stats.processing.map((metric) => `<span>${escapeHtml(metric.metric)} · ${Number(metric.average).toFixed(3)} ${escapeHtml(metric.unit)} avg</span>`).join('')
     : '<span>No processing samples yet</span>';
   document.querySelector('#users').innerHTML = userData.users.length ? userData.users.map((user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`).join('') : renderEmpty(6, 'No accounts found.');
-  document.querySelector('#jobs').innerHTML = jobData.jobs.length ? jobData.jobs.map((job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`).join('') : renderEmpty(5, 'No jobs found.');
-  document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td>$${Number(entry.cost_usd || 0).toFixed(5)}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(6, 'No AI requests found.');
+  document.querySelector('#jobs').innerHTML = jobData.jobs.length ? jobData.jobs.map((job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td class="reason" title="${escapeHtml(job.last_error_message || '')}">${escapeHtml(job.last_error_code || job.last_error_message || '')}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`).join('') : renderEmpty(6, 'No jobs found.');
+  document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td class="reason">${escapeHtml(entry.error_code || '')}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(6, 'No AI requests found.');
   document.querySelector('#audit').innerHTML = auditData.entries.length ? auditData.entries.map((entry) => `<tr><td>${escapeHtml(entry.actor_type)}${entry.actor_id ? `<small>${escapeHtml(entry.actor_id.slice(0, 8))}</small>` : ''}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml([entry.resource_type, entry.resource_id].filter(Boolean).join(' · '))}</td><td>${dateLabel(entry.created_at)}</td></tr>`).join('') : renderEmpty(4, 'No audit entries found.');
   const jobBadge = document.querySelector('#job-badge');
   jobBadge.hidden = failed === 0;
   jobBadge.textContent = String(failed);
   renderSettings(settingsData.settings);
+  renderProviderSettings(providerData.settings);
+  discoverProviderModels('llm', { quiet: true });
+  discoverProviderModels('transcription', { quiet: true });
   renderSecurity(tfStatus); // 2fa status
   document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   if (announce) showToast('Admin data refreshed');
@@ -215,10 +344,69 @@ document.addEventListener('click', async (event) => {
       await handleTwoFactorDisable();
     } else if (button?.dataset.tfAction === 'recovery') {
       await handleTwoFactorRecovery();
+    } else if (button?.dataset.discoverModels) {
+      await discoverProviderModels(button.dataset.discoverModels);
     }
   } catch (error) {
     showError(error);
   }
+});
+
+for (const workload of ['llm', 'transcription']) {
+  providerElement(workload, 'provider').addEventListener('change', () => {
+    const entry = providerSettingsData.catalogs[workload].find((candidate) => candidate.id === providerElement(workload, 'provider').value);
+    providerElement(workload, 'base-url').value = entry?.defaultBaseUrl || '';
+    providerElement(workload, 'model').value = entry?.defaultModel || '';
+    providerElement(workload, 'key-status').textContent = 'Enter a key for this provider, or leave blank to reuse its saved or environment key.';
+    if (workload === 'transcription') providerElement(workload, 'response-format').value = entry?.defaultResponseFormat || '';
+    discoverProviderModels(workload, { quiet: true });
+  });
+}
+
+document.querySelector('#save-provider-settings').addEventListener('click', async () => {
+  try {
+    const result = await api('/provider-settings', { method: 'PUT', body: JSON.stringify({
+      llm: providerPayload('llm'),
+      transcription: providerPayload('transcription'),
+    }) });
+    renderProviderSettings(result.settings);
+    await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
+    showToast('Provider settings saved');
+  } catch (error) { showError(error); }
+});
+
+document.querySelector('#llm-no-thinking').addEventListener('change', () => {
+  const next = llmExtraBody();
+  providerElement('llm', 'extra-body').value = next ? JSON.stringify(next, null, 2) : '';
+});
+
+document.querySelector('#test-providers').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const element = document.querySelector('#provider-test-result');
+  button.disabled = true;
+  const previous = button.textContent;
+  // A real transcription of an eighteen-second sample plus a model round trip
+  // takes long enough that an unchanged button looks broken.
+  button.textContent = 'Testing…';
+  element.hidden = false;
+  element.textContent = 'Sending a sample recording to the transcription service and one request to the language model…';
+  try {
+    renderProviderTest(await api('/provider-settings/test', { method: 'POST' }));
+  } catch (error) {
+    element.textContent = `✗ The test could not be run\n    ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = previous;
+  }
+});
+
+document.querySelector('#reset-provider-settings').addEventListener('click', async () => {
+  try {
+    const result = await api('/provider-settings', { method: 'DELETE' });
+    renderProviderSettings(result.settings);
+    await Promise.allSettled([discoverProviderModels('llm', { quiet: true }), discoverProviderModels('transcription', { quiet: true })]);
+    showToast('Using .env provider values');
+  } catch (error) { showError(error); }
 });
 
 document.querySelector('#save-settings').addEventListener('click', async () => {

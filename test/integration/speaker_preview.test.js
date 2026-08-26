@@ -46,6 +46,19 @@ test('speaker preview extraction emits a finite mono WAV', () => {
   assert.ok(audio.length < 170_000);
 });
 
+test('a full preview replaces a cleaner but incomplete preview', () => {
+  assert.equal(previews.shouldReplacePreview(
+    { duration_ms: 5_000, quality: 1 },
+    { durationMs: 10_000, quality: 0.8 },
+    10_000,
+  ), true);
+  assert.equal(previews.shouldReplacePreview(
+    { duration_ms: 10_000, quality: 0.9 },
+    { durationMs: 10_000, quality: 0.8 },
+    10_000,
+  ), false);
+});
+
 test('stored previews remain account-scoped', () => {
   const database = getDatabase();
   migrate(database);

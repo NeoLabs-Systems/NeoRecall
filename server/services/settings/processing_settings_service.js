@@ -9,6 +9,9 @@ const schema = z.object({
   voiceMatchThreshold: z.number().min(-1).max(1).optional(),
   voiceMatchMargin: z.number().min(0).max(2).optional(),
   speakerClusterThreshold: z.number().min(-1).max(1).optional(),
+  speakerClusterMergeThreshold: z.number().min(-1).max(1).optional(),
+  speakerMinimumTurnMs: z.number().int().min(0).max(60_000).optional(),
+  diarizationClusterDistance: z.number().min(0).max(2).optional(),
   speakerClusterMargin: z.number().min(0).max(2).optional(),
   speakerContinuityGapMs: z.number().int().min(0).max(60_000).optional(),
   speakerClusterContinuityThreshold: z.number().min(-1).max(1).optional(),
@@ -34,6 +37,7 @@ const schema = z.object({
   minMemoryEvidenceChars: z.number().int().min(0).max(1_000_000).optional(),
   maxConsolidationInputChars: z.number().int().min(1_000).max(2_000_000).optional(),
   maxConsolidationConversations: z.number().int().min(1).max(200).optional(),
+  maxMemoryContinuationCandidates: z.number().int().min(0).max(32).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),
   consolidationMaxFailures: z.number().int().min(1).max(100).optional(),
 }).strict();
