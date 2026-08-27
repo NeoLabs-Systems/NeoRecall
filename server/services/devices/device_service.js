@@ -24,8 +24,20 @@ function register(userId, input) {
   return serialize(db.prepare('SELECT * FROM devices WHERE id=?').get(id));
 }
 
+// A device without a screen can only report "I am recording" over its own live
+// link, which is gone the moment the phone walks out of range. Deriving it from
+// the session table instead means the device list stays truthful from anywhere.
+// Additive only: no migration, no route change, no new endpoint.
+const ACTIVE_SESSION = `SELECT %s FROM recording_sessions s
+  WHERE s.device_id=d.id AND s.user_id=d.user_id AND s.status='active'
+  ORDER BY s.corrected_started_at DESC LIMIT 1`;
+
 function list(userId) {
-  return getDatabase().prepare('SELECT * FROM devices WHERE user_id=? ORDER BY created_at DESC').all(userId).map(serialize);
+  const rows = getDatabase().prepare(`SELECT d.*,
+      (${ACTIVE_SESSION.replace('%s', 's.id')}) AS active_session_id,
+      (${ACTIVE_SESSION.replace('%s', 's.corrected_started_at')}) AS active_session_started_at
+    FROM devices d WHERE d.user_id=? ORDER BY d.created_at DESC`).all(userId);
+  return rows.map(serialize);
 }
 
 function get(userId, id) {

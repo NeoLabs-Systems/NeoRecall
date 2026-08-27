@@ -111,10 +111,19 @@ void main() {
     const link = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{BackgroundHold.wearableLink},
       deviceLabel: 'HeyPocket',
+      deviceConnected: true,
     );
     expect(link.notificationTitle, 'NeoRecall stays connected');
     expect(link.notificationText, contains('HeyPocket'));
     expect(link.notificationText, contains('sync'));
+
+    const reconnecting = BackgroundRuntimeRequest(
+      holds: <BackgroundHold>{BackgroundHold.wearableLink},
+      deviceLabel: 'PK01_BLUE',
+    );
+    expect(reconnecting.notificationTitle, 'NeoRecall is reconnecting');
+    expect(reconnecting.notificationText, 'Waiting for PK01_BLUE to reconnect');
+    expect(reconnecting.notificationText, isNot(contains('stays linked')));
 
     const wearable = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{BackgroundHold.wearableCapture},

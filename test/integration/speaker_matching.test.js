@@ -229,3 +229,48 @@ test('pooling weights a long turn more heavily than a short one', () => {
   assert.equal(voice.speechMs, 3_500);
   assert.ok(voice.embedding[0] > voice.embedding[1] * 5, 'the long turn dominates the fingerprint');
 });
+
+test('clusters resolved to one recurring voice share a label and collapse into one session identity', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const sourceId = crypto.randomUUID(); const chunkId = crypto.randomUUID(); const conversationId = crypto.randomUUID();
+  const voiceprintId = crypto.randomUUID();
+  db.prepare("INSERT INTO recording_sources (id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format) VALUES (?,?,?,'microphone','mono',16000,'pcm_s16le')")
+    .run(sourceId, sessionId, sourceId);
+  db.prepare(`INSERT INTO audio_chunks
+    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
+    VALUES (?,?,?,?,0,?,'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',1,'wav','pcm_s16le','mono','2026-07-14T10:00:00.000Z',0,10000,'processing')`)
+    .run(chunkId, userId, sessionId, sourceId, chunkId);
+  db.prepare(`INSERT INTO conversations (id,user_id,started_at,ended_at,state,boundary_method,boundary_version)
+    VALUES (?,?,?,?,'open','test','1')`).run(conversationId, userId, '2026-07-14T10:00:00.000Z', '2026-07-14T10:00:10.000Z');
+  const firstCluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: new Float32Array([1, 0]) });
+  const secondCluster = seedCluster(db, { userId, sessionId, ordinal: 2, embedding: new Float32Array([0.99, 0.01]) });
+  db.prepare(`INSERT INTO voiceprints
+    (id,user_id,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
+    VALUES (?,?,?, ?,2,2)`).run(voiceprintId, userId, bytes(new Float32Array([1, 0])), matching.modelName);
+  const turn = db.prepare(`INSERT INTO speaker_turns
+    (id,user_id,chunk_id,cluster_id,voiceprint_id,start_ms,end_ms,embedding,embedding_model,embedding_dimensions)
+    VALUES (?,?,?,?,?,?,?,?,?,2)`);
+  turn.run(crypto.randomUUID(), userId, chunkId, firstCluster, voiceprintId, 0, 5000,
+    bytes(new Float32Array([1, 0])), matching.modelName);
+  turn.run(crypto.randomUUID(), userId, chunkId, secondCluster, voiceprintId, 5000, 10000,
+    bytes(new Float32Array([0.99, 0.01])), matching.modelName);
+  const segment = db.prepare(`INSERT INTO transcript_segments
+    (public_id,user_id,chunk_id,conversation_id,speaker_cluster_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text)
+    VALUES (?,?,?,?,?,'combined',?,?,?,?,?)`);
+  segment.run(crypto.randomUUID(), userId, chunkId, conversationId, firstCluster,
+    '2026-07-14T10:00:00.000Z', '2026-07-14T10:00:05.000Z', 0, 5000, 'First stretch.');
+  segment.run(crypto.randomUUID(), userId, chunkId, conversationId, secondCluster,
+    '2026-07-14T10:00:05.000Z', '2026-07-14T10:00:10.000Z', 5000, 10000, 'Second stretch.');
+
+  const membership = require('../../server/services/conversations/conversation_membership_service');
+  membership.rebuildConversationSpeakers(db, userId, conversationId);
+  const labels = db.prepare('SELECT local_label FROM conversation_speakers WHERE conversation_id=? ORDER BY cluster_id')
+    .all(conversationId).map((row) => row.local_label);
+  assert.deepEqual(labels, ['Speaker 1', 'Speaker 1'], 'one recurring person is not numbered once per cluster');
+
+  assert.equal(matching.collapseSessionClustersByVoiceprint(db, { userId, sessionId }), 1);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE session_id=?').get(sessionId).count, 1);
+  assert.equal(db.prepare('SELECT COUNT(DISTINCT speaker_cluster_id) count FROM transcript_segments WHERE conversation_id=?')
+    .get(conversationId).count, 1, 'all transcript evidence follows the surviving cluster');
+});

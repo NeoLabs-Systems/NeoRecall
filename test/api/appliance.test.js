@@ -96,3 +96,36 @@ test('DELETE /api-keys/self on an already-revoked key returns 404', async () => 
   // The key is now revoked and can no longer authenticate to call /self again.
   await request(app).delete('/api/v1/api-keys/self').set(keyAuth).expect(401);
 });
+
+test('the device list says whether an appliance is recording right now', async () => {
+  const auth = await registerUser('appliance-recording-state');
+  const device = await request(app).post('/api/v1/devices').set(auth).send({
+    clientUuid: crypto.randomUUID(), name: 'NeoRecall Desk', platform: 'raspberrypi', kind: 'appliance',
+  }).expect(201);
+
+  const idle = await request(app).get('/api/v1/devices').set(auth).expect(200);
+  const before = idle.body.devices.find((d) => d.id === device.body.id);
+  assert.equal(before.active_session_id, null);
+  assert.equal(before.active_session_started_at, null);
+
+  const startedAt = new Date().toISOString();
+  const session = await request(app).post('/api/v1/ingest/sessions').set(auth).send({
+    deviceId: device.body.id, clientUuid: crypto.randomUUID(), startedAt, timezone: 'Europe/Berlin',
+    consentAttestedAt: startedAt,
+    sources: [{ clientUuid: crypto.randomUUID(), kind: 'combined', channelLayout: 'mono', sampleRate: 16000, sampleFormat: 'pcm_s16le' }],
+  }).expect(201);
+
+  // A screenless device cannot report this itself once the phone is out of
+  // Bluetooth range, so the list has to carry it.
+  const recording = await request(app).get('/api/v1/devices').set(auth).expect(200);
+  const during = recording.body.devices.find((d) => d.id === device.body.id);
+  assert.equal(during.active_session_id, session.body.session.id);
+  assert.ok(during.active_session_started_at);
+
+  await request(app).patch(`/api/v1/ingest/sessions/${session.body.session.id}`).set(auth).send({
+    endedAt: new Date().toISOString(), status: 'ended',
+  }).expect(200);
+
+  const stopped = await request(app).get('/api/v1/devices').set(auth).expect(200);
+  assert.equal(stopped.body.devices.find((d) => d.id === device.body.id).active_session_id, null);
+});

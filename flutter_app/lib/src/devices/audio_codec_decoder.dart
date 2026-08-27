@@ -34,7 +34,9 @@ Future<bool> _initializeOpus() async {
   try {
     _opusCodecLoadFuture ??= opus_codec.load();
     initOpus(
-      await _opusCodecLoadFuture!.timeout(wearableAudioCodecInitializationTimeout),
+      await _opusCodecLoadFuture!.timeout(
+        wearableAudioCodecInitializationTimeout,
+      ),
     );
     _opusInitializationError = null;
     _opusInitialized = true;
@@ -155,8 +157,9 @@ class WearableAudioDecoder {
         // stream decoder buffers, downmixes, and resamples to mono PCM16 @
         // sampleRate. A null result means bytes were buffered toward the next
         // frame, not an error, so no warning is set.
-        return (_mp3 ??= Mp3StreamDecoder(targetSampleRate: sampleRate))
-            .addChunk(payload);
+        return (_mp3 ??= Mp3StreamDecoder(
+          targetSampleRate: sampleRate,
+        )).addChunk(payload);
       case WearableAudioCodec.aac:
         lastWarning =
             'AAC wearable frames are received but not decoded in this build yet.';

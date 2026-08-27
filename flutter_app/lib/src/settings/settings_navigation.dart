@@ -49,8 +49,8 @@ class SettingsNavigation extends StatelessWidget {
     _SettingsNavigationItem(
       section: SettingsSection.devices,
       icon: Icons.devices_other_outlined,
-      label: 'Devices',
-      description: 'Capture endpoints',
+      label: 'Account devices',
+      description: 'Sessions and access',
     ),
   ];
 

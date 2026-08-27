@@ -1,0 +1,27 @@
+[Unit]
+Description=NeoRecall Desk appliance
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+# A *user* unit, because PipeWire and WirePlumber are user services and the
+# appliance has to share their graph. Lingering is enabled for the neorecall
+# account at image build time, so this session exists from boot with nobody
+# logged in.
+# Refuse to run in anybody else's session. These are user units, and enabling a
+# user unit is easy to do for *every* account by accident; the result is a second
+# supervisor competing for the button, the codec and the Bluetooth adapter while
+# the first one still believes it is alone. One appliance, one owner.
+ConditionUser=neorecall
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/lib/neorecall-desk/venv/bin/neorecall-desk
+
+# Never give up on its own. An appliance that stays down after a crash is an
+# appliance that quietly stopped recording, and nobody is watching a console.
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

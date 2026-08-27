@@ -86,9 +86,9 @@ class ProcessingStatusCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   issue['action']!.toString(),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: tint,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: tint),
                 ),
               ],
             ],

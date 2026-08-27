@@ -52,8 +52,12 @@ class OfflineWavAssembler {
     final byteRate = sampleRate * blockAlign;
     final out = BytesBuilder();
     void ascii(String value) => out.add(value.codeUnits);
-    void u32(int v) =>
-        out.add(<int>[v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF]);
+    void u32(int v) => out.add(<int>[
+      v & 0xFF,
+      (v >> 8) & 0xFF,
+      (v >> 16) & 0xFF,
+      (v >> 24) & 0xFF,
+    ]);
     void u16(int v) => out.add(<int>[v & 0xFF, (v >> 8) & 0xFF]);
 
     ascii('RIFF');

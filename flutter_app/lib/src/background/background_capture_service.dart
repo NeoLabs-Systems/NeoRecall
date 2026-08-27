@@ -87,6 +87,17 @@ abstract class BackgroundCaptureService {
   Stream<BackgroundCaptureEvent> get events;
 }
 
+/// Optional Android capability kept separate from the cross-platform runtime
+/// contract, so desktop/iOS hosts and small test fakes do not pretend to manage
+/// an Android system setting.
+abstract interface class BatteryOptimizationControl {
+  Future<bool> batteryOptimizationExempt();
+
+  /// Opens Android's package-specific exemption confirmation. The result is
+  /// re-read when the app resumes because the system owns that dialog.
+  Future<void> requestBatteryOptimizationExemption();
+}
+
 enum BackgroundCaptureEventType {
   message,
   stopRequested,
@@ -267,7 +278,8 @@ class PlatformManagedBackgroundCaptureService
   }
 }
 
-class AndroidBackgroundCaptureService implements BackgroundCaptureService {
+class AndroidBackgroundCaptureService
+    implements BackgroundCaptureService, BatteryOptimizationControl {
   static const MethodChannel _channel = MethodChannel(
     'systems.neolabs.neorecall/background_capture',
   );
@@ -355,6 +367,21 @@ class AndroidBackgroundCaptureService implements BackgroundCaptureService {
   Future<BackgroundRuntimeState> refreshState() async {
     await _readState();
     return _state;
+  }
+
+  @override
+  Future<bool> batteryOptimizationExempt() async {
+    try {
+      return await _channel.invokeMethod<bool>('batteryOptimizationExempt') ??
+          false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> requestBatteryOptimizationExemption() async {
+    await _channel.invokeMethod<bool>('requestBatteryOptimizationExemption');
   }
 
   @override

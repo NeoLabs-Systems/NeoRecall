@@ -177,7 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             eyebrow: 'SETTINGS',
             title: 'Settings',
             description:
-                'Recording, memory, speakers, and capture devices in one place.',
+                'Recording, memory, speakers, and account access in one place.',
             trailing: FilledButton.icon(
               onPressed:
                   widget.controller.loading ||
@@ -241,8 +241,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
-      SettingsSection.devices => DevicesPanel(controller: widget.controller),
+      SettingsSection.devices => _devicesSettings(),
     };
+  }
+
+  Widget _devicesSettings() {
+    final palette = neoRecallPaletteOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Signed-in devices',
+                    style: TextStyle(
+                      color: palette.textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    'Review access or revoke an old client. Set up, connect, and control capture hardware from Record.',
+                    style: TextStyle(
+                      color: palette.textMuted,
+                      fontSize: 12.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            TextButton.icon(
+              onPressed: () => widget.controller.selectPage(RecallPage.record),
+              icon: const Icon(Icons.mic_none_rounded, size: 18),
+              label: const Text('Open Record'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Expanded(child: DevicesPanel(controller: widget.controller)),
+      ],
+    );
   }
 
   Widget _sectionList(List<Widget> children) {

@@ -1,2 +1,7 @@
-/target/
-**/target/
+.image-build/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+image/stage-neorecall/01-appliance/files/appliance/

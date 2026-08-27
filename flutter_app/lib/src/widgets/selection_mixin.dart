@@ -64,6 +64,7 @@ mixin SelectionMixin<T extends StatefulWidget> on State<T> {
     }
   }
 
-  void _show(String message) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  void _show(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
 }

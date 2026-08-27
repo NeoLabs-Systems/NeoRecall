@@ -213,6 +213,47 @@ test('a lesson recorded in two stretches becomes one card, not two', async () =>
   assert.equal(sources, 4);
 });
 
+test('a seven-minute recorder restart still offers the earlier occasion for merging', async () => {
+  const context = await account('continuity-recorder-restart');
+  recordStretch(context, {
+    startedAt: '2026-08-25T08:00:00.000Z', endedAt: '2026-08-25T08:20:00.000Z',
+    lines: ['We begin the integrator design review.', 'The capacitor value is still open.'],
+  });
+  respond = firstLessonOutput;
+  await consolidate(context.userId);
+  const [firstCard] = cards(context.userId);
+
+  // A new recording session starts seven minutes later. The old hard-gap based
+  // retrieval excluded this card before the model could decide anything.
+  recordStretch(context, {
+    startedAt: '2026-08-25T08:27:00.000Z', endedAt: '2026-08-25T08:42:00.000Z',
+    lines: ['Continuing the same review, we settle the capacitor value.', 'We check the resulting time constant.'],
+  });
+  let offered = [];
+  respond = (body) => {
+    const input = JSON.parse(body.messages[1].content);
+    offered = input.continuationCandidates;
+    const segmentIds = body.response_format.json_schema.schema
+      .properties.memories.items.properties.sourceSegmentIds.items.enum;
+    return {
+      conversationSections: [{ titleEn: 'Integrator design review', summaryEn: 'The same review continued.',
+        memoryWorthy: true, continuesPrevious: false, topics: ['Electronics'], sourceSegmentIds: segmentIds }],
+      entities: [],
+      memories: [{ type: 'project_discussion', continuesPrevious: false,
+        continuationReasoning: 'The speakers explicitly continue the same review after a brief recorder restart.',
+        continuesMemoryIds: [input.continuationCandidates[0].id],
+        titleEn: 'Integrator design review', summaryEn: 'The review covered the capacitor value and resulting time constant.',
+        emoji: '🔌', importance: 7, sourceSegmentIds: segmentIds, topics: ['Electronics'], entities: [], miniMemories: [] }],
+      dailySummary: null,
+    };
+  };
+  await consolidate(context.userId);
+
+  assert.equal(offered.length, 1, 'cross-session material within the configurable lookback reaches the model');
+  assert.equal(cards(context.userId).length, 1);
+  assert.equal(cards(context.userId)[0].public_id, firstCard.public_id);
+});
+
 test('a separate occasion on the same subject stays its own card', async () => {
   const context = await account('continuity-separate');
   const stream = crypto.randomUUID();

@@ -16,6 +16,38 @@ void main() {
     messenger.setMockMethodCallHandler(channel, null);
   });
 
+  test('battery optimization uses the native exemption flow', () async {
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      switch (call.method) {
+        case 'backgroundRuntimeState':
+          return <String, Object?>{
+            'running': false,
+            'holds': <String>[],
+            'foreground': true,
+            'microphoneUnavailable': false,
+          };
+        case 'batteryOptimizationExempt':
+          return false;
+        case 'requestBatteryOptimizationExemption':
+          return true;
+        case 'stopBackgroundCapture':
+          return true;
+      }
+      return null;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+
+    expect(await service.batteryOptimizationExempt(), isFalse);
+    await service.requestBatteryOptimizationExemption();
+
+    expect(calls, contains('batteryOptimizationExempt'));
+    expect(calls, contains('requestBatteryOptimizationExemption'));
+    await service.dispose();
+  });
+
   test('a persisted widget tap is claimed exactly once', () async {
     var pending = true;
     messenger.setMockMethodCallHandler(channel, (call) async {

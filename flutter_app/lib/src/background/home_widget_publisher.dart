@@ -224,7 +224,8 @@ class HomeWidgetPublisher {
     final due = mini.dueAt;
     if (due == null) return false;
     final start = _floor(now);
-    return !due.isBefore(start) && due.isBefore(start.add(const Duration(days: 1)));
+    return !due.isBefore(start) &&
+        due.isBefore(start.add(const Duration(days: 1)));
   }
 
   DateTime _floor(DateTime value) =>

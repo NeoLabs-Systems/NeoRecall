@@ -3,6 +3,30 @@ import 'package:flutter/material.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 
+/// The drag handle at the top of a bottom sheet.
+///
+/// Three sheets had written out the same 36x4 pill with the same 16-pixel gap
+/// under it. Keeping it here is what stops the fourth one being 32x3.
+class SheetHandle extends StatelessWidget {
+  const SheetHandle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return Center(
+      child: Container(
+        width: 36,
+        height: 4,
+        margin: const EdgeInsets.only(bottom: AppSpacing.md),
+        decoration: BoxDecoration(
+          color: palette.border,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+        ),
+      ),
+    );
+  }
+}
+
 class GlassSurface extends StatelessWidget {
   const GlassSurface({
     super.key,

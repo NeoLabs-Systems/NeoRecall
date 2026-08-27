@@ -65,7 +65,6 @@ mixin DeviceSyncController on ChangeNotifier {
     }
   }
 
-
   Future<void> _stopDeviceStorageSyncForCapture(
     AudioDeviceAdapter adapter,
   ) async {

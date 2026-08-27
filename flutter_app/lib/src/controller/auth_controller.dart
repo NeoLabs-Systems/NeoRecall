@@ -25,6 +25,7 @@ mixin AuthController on ChangeNotifier {
     void Function()? onTwoFactor,
   });
   Future<void> refreshAll({bool silent});
+
   /// Adopts a freshly issued session across the whole app (token, cached
   /// settings, device bindings, sync). Lives on the controller because it
   /// touches far more than authentication.
@@ -220,7 +221,9 @@ mixin AuthController on ChangeNotifier {
       });
   String _readableError(Object error) {
     final text = error.toString();
-    if (text.contains('INVALID_PASSWORD')) return 'That password is not correct.';
+    if (text.contains('INVALID_PASSWORD')) {
+      return 'That password is not correct.';
+    }
     if (text.contains('INVALID_TWO_FACTOR')) {
       return 'That authentication code is not valid. Codes expire quickly — try the current one.';
     }

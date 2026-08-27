@@ -248,13 +248,13 @@ class BackgroundCaptureService : Service() {
     val capturing = requested.any { it in CAPTURE_HOLDS }
     val state = persisted()
     val title = state.getString(KEY_STATUS_TITLE, null)
-      ?: if (capturing) "NeoRecall is recording" else "NeoRecall stays connected"
+      ?: if (capturing) "NeoRecall is recording" else "NeoRecall background sync"
     val detail = state.getString(KEY_STATUS_DETAIL, null)
       ?: when {
           capturing -> "Audio is being captured"
           requested.contains(HOLD_WEARABLE_SYNC) -> "Syncing recordings from your device"
           requested.contains(HOLD_AUDIO_UPLOAD) -> "Uploading protected recordings"
-          else -> "Your device stays linked so recordings sync on their own"
+          else -> "Wearable connection and recording sync remain available"
         }
     val builder = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)

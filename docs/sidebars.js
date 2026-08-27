@@ -8,7 +8,7 @@ module.exports = {
       type: 'category',
       label: '🧭 User Guide',
       collapsed: false,
-      items: ['installation', 'recording', 'configuration', 'privacy-and-consent', 'troubleshooting'],
+      items: ['installation', 'recording', 'desk-appliance', 'configuration', 'privacy-and-consent', 'troubleshooting'],
     },
     {
       type: 'category',

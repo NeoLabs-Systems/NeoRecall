@@ -1,4 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "NeoRecall_Wearable")(type "KiCad")(uri "${KIPRJMOD}/lib/NeoRecall_Wearable.kicad_sym")(options "")(descr "NeoRecall Wearable v1 symbols"))
-)

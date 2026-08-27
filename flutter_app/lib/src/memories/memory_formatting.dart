@@ -53,4 +53,3 @@ String formatDateTime(DateTime value) =>
 
 String formatFullDateTime(DateTime value) =>
     '${formatDay(value)} · ${formatTime(value)}';
-

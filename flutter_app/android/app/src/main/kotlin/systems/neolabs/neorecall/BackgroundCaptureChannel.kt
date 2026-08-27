@@ -65,6 +65,27 @@ class BackgroundCaptureChannel(private val context: Context) {
           )
         }
         "networkRuntimeState" -> result.success(networkRuntimeState())
+        "batteryOptimizationExempt" -> result.success(
+          BatteryOptimization.isExempt(context),
+        )
+        "requestBatteryOptimizationExemption" -> {
+          val foreground =
+            (context.applicationContext as? NeoRecallApplication)?.hasVisibleActivity == true
+          if (!foreground) {
+            result.error(
+              "BATTERY_REQUEST_BACKGROUND",
+              "Open NeoRecall before requesting the battery exemption.",
+              null,
+            )
+          } else {
+            try {
+              BatteryOptimization.requestExemption(context)
+              result.success(true)
+            } catch (error: Exception) {
+              result.error("BATTERY_REQUEST_FAILED", error.message, null)
+            }
+          }
+        }
         "takePendingWidgetPhoneRecordingRequest" -> {
           val pending = widgetPreferences().getBoolean(
             KEY_WIDGET_PHONE_RECORDING_PENDING,

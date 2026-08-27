@@ -475,7 +475,6 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
       details: <String, Object?>{'reason': error.toString()},
     );
   }
-
 }
 
 class OmiGlassConnector extends OmiConnector {
@@ -483,5 +482,4 @@ class OmiGlassConnector extends OmiConnector {
 
   @override
   WearableAudioCodec get fallbackCodec => WearableAudioCodec.opus;
-
 }

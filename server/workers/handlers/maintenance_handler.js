@@ -2,6 +2,9 @@
 
 const { getDatabase } = require('../../db/database');
 const summaries = require('../../services/memories/daily_summary_service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('maintenance');
 
 async function handle(job) {
   const db = getDatabase();
@@ -27,6 +30,21 @@ async function handle(job) {
     const importsCompleted = importService.reconcileProcessing();
     const importOrphansRemoved = importService.sweepOrphans();
     const contextOriginalsRemoved = require('../../services/context/context_service').cleanupExpiredOriginals();
+    let speakerProfilesMerged = 0;
+    const userSettings = require('../../services/settings/settings_service');
+    const speakers = require('../../services/speakers/speaker_service');
+    for (const user of db.prepare('SELECT id FROM users WHERE disabled_at IS NULL').all()) {
+      if (!userSettings.get(user.id).recurringSpeakerMatching) continue;
+      try {
+        speakerProfilesMerged += speakers.reevaluate(user.id).mergedCount;
+      } catch (error) {
+        // Profile reconciliation is derived cleanup. One malformed legacy row
+        // must not prevent receipts, imports, summaries, or retention work.
+        logger.warn('Recurring speaker maintenance failed', {
+          userId: user.id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
+        });
+      }
+    }
     for (const expired of db.prepare("SELECT * FROM imports WHERE state='failed' AND expires_at<?").all(new Date().toISOString())) {
       if (expired.temporary_path) { try { require('node:fs').unlinkSync(expired.temporary_path); } catch (_) {} }
       const session = db.prepare('SELECT id FROM recording_sessions WHERE user_id=? AND client_uuid=?').get(expired.user_id, `import-${expired.id}`);
@@ -38,7 +56,7 @@ async function handle(job) {
       }
       db.prepare("UPDATE imports SET temporary_path=NULL,state='cancelled',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(expired.id);
     }
-    return { finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved };
+    return { finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved, speakerProfilesMerged };
   }
   return { skipped: true };
 }

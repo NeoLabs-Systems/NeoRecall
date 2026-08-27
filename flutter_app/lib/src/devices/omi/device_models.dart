@@ -1,10 +1,5 @@
 /// Device types supported by the Omi connector port.
-enum WearableDeviceType {
-  omi,
-  omiGlass,
-  heyPocket,
-  custom,
-}
+enum WearableDeviceType { omi, omiGlass, heyPocket, custom }
 
 enum WearableAudioCodec { pcm8, pcm16, opus, opusFs320, aac, lc3, mp3, unknown }
 
@@ -45,6 +40,24 @@ class DiscoveredWearable {
   final int rssi;
   final List<String> serviceUuids;
 
+  /// Advertised-name selectors used only when a platform omits service UUIDs.
+  /// The final identity decision is still repeated after discovery, so a broad
+  /// native scan callback cannot leak unrelated BLE peripherals into the UI.
+  static const List<String> heyPocketNamePrefixes = <String>[
+    'HeyPocket',
+    'PKT01',
+    'PK01',
+    'Pocket',
+  ];
+
+  static bool hasHeyPocketName(String name) {
+    final lower = name.trim().toLowerCase();
+    return lower.startsWith('heypocket') ||
+        lower.startsWith('pkt01') ||
+        lower.startsWith('pk01') ||
+        lower == 'pocket';
+  }
+
   static WearableDeviceType classify({
     required String name,
     required List<String> serviceUuids,
@@ -53,10 +66,7 @@ class DiscoveredWearable {
     bool has(String uuid) =>
         serviceUuids.any((value) => value.toLowerCase() == uuid.toLowerCase());
 
-    if (has(WearableDeviceUuids.heyPocketService) ||
-        lower.contains('heypocket') ||
-        lower.startsWith('pkt01') ||
-        lower.startsWith('pocket')) {
+    if (has(WearableDeviceUuids.heyPocketService) || hasHeyPocketName(name)) {
       return WearableDeviceType.heyPocket;
     }
     if (lower.startsWith('openglass') || lower.startsWith('omiglass')) {

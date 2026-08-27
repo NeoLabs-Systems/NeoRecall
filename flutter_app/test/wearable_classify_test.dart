@@ -39,6 +39,20 @@ void main() {
       ),
       WearableDeviceType.heyPocket,
     );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'PK01_BLUE',
+        serviceUuids: const <String>[],
+      ),
+      WearableDeviceType.heyPocket,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'PocketBook Reader',
+        serviceUuids: const <String>[],
+      ),
+      WearableDeviceType.custom,
+    );
   });
 
   test(

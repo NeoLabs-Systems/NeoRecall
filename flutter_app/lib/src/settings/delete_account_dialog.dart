@@ -130,9 +130,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
                 obscureText: true,
                 autofocus: true,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Your password',
-                ),
+                decoration: const InputDecoration(labelText: 'Your password'),
               ),
               if (widget.twoFactorEnabled) ...<Widget>[
                 const SizedBox(height: 12),
@@ -143,7 +141,8 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Authenticator code',
-                    helperText: 'A current code, or one of your recovery codes.',
+                    helperText:
+                        'A current code, or one of your recovery codes.',
                   ),
                 ),
               ],
@@ -186,7 +185,10 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
                         Expanded(
                           child: Text(
                             _error!,
-                            style: TextStyle(color: palette.danger, height: 1.4),
+                            style: TextStyle(
+                              color: palette.danger,
+                              height: 1.4,
+                            ),
                           ),
                         ),
                       ],
@@ -259,10 +261,7 @@ class _ErasedList extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item,
-                      style: TextStyle(
-                        color: palette.textPrimary,
-                        height: 1.4,
-                      ),
+                      style: TextStyle(color: palette.textPrimary, height: 1.4),
                     ),
                   ),
                 ],

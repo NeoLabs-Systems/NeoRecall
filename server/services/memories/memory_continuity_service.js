@@ -13,20 +13,37 @@ function sourceSessionIds(database, memoryId) {
     WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL`).all(memoryId).map((row) => row.session_id);
 }
 
+// Stable recurring-speaker identities attached to a card's transcript. Cluster
+// ids restart with a recording session, while a voiceprint deliberately spans
+// sessions; only the latter can provide cross-recording continuity evidence.
+function sourceSpeakerIdentities(database, memoryId) {
+  return database.prepare(`SELECT DISTINCT st.voiceprint_id id
+    FROM memory_sources ms
+    JOIN transcript_segments ts ON ts.id=ms.segment_id
+    JOIN speaker_turns st ON st.chunk_id=ts.chunk_id
+      AND st.cluster_id=ts.speaker_cluster_id
+      AND st.start_ms<=ts.chunk_start_ms
+      AND st.end_ms>=ts.chunk_end_ms
+    JOIN voiceprints v ON v.id=st.voiceprint_id AND v.matching_enabled=1
+    WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL AND st.voiceprint_id IS NOT NULL`)
+    .all(memoryId).map((row) => row.id);
+}
+
 // Existing cards the consolidation model may decide the new material continues.
 //
 // Candidate selection only keeps the prompt bounded; it never decides a merge.
 // Same-stream cards remain eligible across provisional boundaries, while cards
-// from another recording stream are eligible only across the same configured
-// hard gap used by conversation detection. The model receives timestamps,
-// stream overlap and semantics and makes the actual same-occasion decision.
+// from another recording stream use their own configurable lookback. A capture
+// restart is not a conversational boundary and must not inherit the much
+// shorter hard-gap threshold. The model receives timestamps, stream overlap,
+// recurring speakers and semantics and makes the actual same-occasion decision.
 function findCandidates(userId, conversations, database = getDatabase(), options = processingSettings.get()) {
   if (!conversations.length || options.maxMemoryContinuationCandidates <= 0) return [];
   const inputSessionIds = [...new Set(conversations.map((conversation) => conversation.sessionId).filter(Boolean))];
   const firstStartedAt = conversations.reduce((earliest, conversation) => (
     !earliest || Date.parse(conversation.startedAt) < Date.parse(earliest) ? conversation.startedAt : earliest
   ), null);
-  const recentCutoff = new Date(Date.parse(firstStartedAt) - options.conversationHardGapMs).toISOString();
+  const recentCutoff = new Date(Date.parse(firstStartedAt) - options.memoryContinuationLookbackMs).toISOString();
   const sameStreamClause = inputSessionIds.length ? ` OR EXISTS (
     SELECT 1 FROM memory_sources ms
     JOIN transcript_segments ts ON ts.id=ms.segment_id
@@ -59,6 +76,7 @@ function findCandidates(userId, conversations, database = getDatabase(), options
       WHERE memory_id=? AND user_id=? ORDER BY importance DESC,id DESC LIMIT ?`)
       .all(row.id, userId, MINI_MEMORY_MAX_COUNT),
     sessionIds: sourceSessionIds(database, row.id),
+    speakerIdentities: sourceSpeakerIdentities(database, row.id),
   }));
 }
 
@@ -161,4 +179,4 @@ function absorbClaimed(database, userId, publicIds) {
   };
 }
 
-module.exports = { findCandidates, resolveClaims, absorbClaimed };
+module.exports = { findCandidates, resolveClaims, absorbClaimed, sourceSpeakerIdentities };

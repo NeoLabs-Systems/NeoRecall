@@ -9,8 +9,7 @@ import '../../main_theme.dart';
 import 'record_controls.dart';
 
 class ImportCard extends StatelessWidget {
-  const ImportCard({
-    super.key,required this.busy, required this.onPressed});
+  const ImportCard({super.key, required this.busy, required this.onPressed});
 
   final bool busy;
   final VoidCallback? onPressed;
@@ -93,8 +92,7 @@ class ImportCard extends StatelessWidget {
 }
 
 class OfflineDeviceSyncCard extends StatefulWidget {
-  const OfflineDeviceSyncCard({
-    super.key,required this.controller});
+  const OfflineDeviceSyncCard({super.key, required this.controller});
   final NeoRecallController controller;
   @override
   State<OfflineDeviceSyncCard> createState() => _OfflineDeviceSyncCardState();

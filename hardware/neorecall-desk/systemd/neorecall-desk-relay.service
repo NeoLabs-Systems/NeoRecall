@@ -1,0 +1,23 @@
+[Unit]
+Description=NeoRecall Desk audio relay
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+# Refuse to run in anybody else's session. These are user units, and enabling a
+# user unit is easy to do for *every* account by accident; the result is a second
+# supervisor competing for the button, the codec and the Bluetooth adapter while
+# the first one still believes it is alone. One appliance, one owner.
+ConditionUser=neorecall
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/neorecall-desk/venv/bin/neorecall-desk-relay
+
+# The relay is what makes the box useful even to somebody who never sets up
+# NeoRecall, so it keeps trying. The delay gives the audio graph time to publish
+# the WM8960 and the USB gadget after a boot.
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

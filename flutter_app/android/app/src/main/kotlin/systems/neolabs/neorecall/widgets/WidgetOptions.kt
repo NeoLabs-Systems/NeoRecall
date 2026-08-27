@@ -53,7 +53,6 @@ internal data class WidgetOption(
 internal enum class WidgetKind(
   val id: String,
   val providerClass: Class<out NeoRecallAppWidget>,
-  val renderer: WidgetRenderer,
   val title: String,
   val subtitle: String,
   val options: List<WidgetOption>,
@@ -61,7 +60,6 @@ internal enum class WidgetKind(
   RECORD(
     id = "record",
     providerClass = RecordWidgetProvider::class.java,
-    renderer = RecordWidgetRenderer,
     title = "Recorder",
     subtitle = "Start and stop persistent capture, with the elapsed time on the button.",
     options = listOf(
@@ -81,7 +79,6 @@ internal enum class WidgetKind(
   STATUS(
     id = "status",
     providerClass = StatusWidgetProvider::class.java,
-    renderer = StatusWidgetRenderer,
     title = "Capture status",
     subtitle = "What capture and processing are doing, in the same words as the notification.",
     options = listOf(
@@ -100,7 +97,6 @@ internal enum class WidgetKind(
   HIGHLIGHTS(
     id = "highlights",
     providerClass = HighlightsWidgetProvider::class.java,
-    renderer = HighlightsWidgetRenderer,
     title = "Commitments",
     subtitle = "Tasks and promises picked out of your conversations. Tick one without opening the app.",
     options = listOf(
@@ -130,7 +126,6 @@ internal enum class WidgetKind(
   MEMORIES(
     id = "memories",
     providerClass = MemoriesWidgetProvider::class.java,
-    renderer = MemoriesWidgetRenderer,
     title = "Memories",
     subtitle = "What your conversations turned into. Tap one to open it.",
     options = listOf(
@@ -160,7 +155,6 @@ internal enum class WidgetKind(
   TODAY(
     id = "today",
     providerClass = TodayWidgetProvider::class.java,
-    renderer = TodayWidgetRenderer,
     title = "Today",
     subtitle = "One headline number against the week behind it.",
     options = listOf(
@@ -179,6 +173,23 @@ internal enum class WidgetKind(
     ),
   ),
   ;
+
+  /**
+   * Resolve renderers only after enum construction is complete.
+   *
+   * The scrolling renderers need their [WidgetKind] for options and theming.
+   * Eagerly storing their singleton in the enum constructor therefore creates
+   * a static-initialization cycle (`WidgetKind` -> renderer -> `WidgetKind`),
+   * which Android turns into an unrecoverable startup crash.
+   */
+  val renderer: WidgetRenderer
+    get() = when (this) {
+      RECORD -> RecordWidgetRenderer
+      STATUS -> StatusWidgetRenderer
+      HIGHLIGHTS -> HighlightsWidgetRenderer
+      MEMORIES -> MemoriesWidgetRenderer
+      TODAY -> TodayWidgetRenderer
+    }
 
   fun option(context: Context, appWidgetId: Int, key: String): String {
     val option = options.firstOrNull { it.key == key } ?: return ""

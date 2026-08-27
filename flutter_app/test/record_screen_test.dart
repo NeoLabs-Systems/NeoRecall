@@ -242,6 +242,45 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the Desk is one of the sources, not a section of its own', (
+    tester,
+  ) async {
+    // Reported after the first real setup: the page read as two products in one
+    // card — a picker for "this app", and below it a parallel block for the
+    // Desk with its own heading, its own status and its own device rows. The
+    // Desk is another answer to "where does this recording come from", so it
+    // belongs in the same list as the phone and a wearable.
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController();
+    addTearDown(controller.dispose);
+    controller.devices = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'desk-1',
+        'kind': 'appliance',
+        'name': 'NeoRecall Desk',
+        'platform': 'appliance',
+        'revoked_at': null,
+      },
+    ];
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+
+    // A peer in the picker...
+    expect(find.text('Records the room on its own'), findsOneWidget);
+    // ...and the phone is where the page starts, because it always works.
+    expect(find.textContaining('Nothing to connect'), findsOneWidget);
+
+    // Choosing it swaps the detail underneath rather than adding a second block.
+    final Finder deskOption = find.text('NeoRecall Desk').first;
+    await tester.ensureVisible(deskOption);
+    await tester.pumpAndSettle();
+    await tester.tap(deskOption);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nothing to connect'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   // flutter_test reports Android by default, so every other test here exercises
   // the two-option mobile picker. Desktop gets a third source and, once wide
   // enough, a two-column layout — neither of which mobile ever renders.
@@ -258,9 +297,9 @@ void main() {
 
       expect(find.text('Microphone'), findsOneWidget);
       expect(find.text('Device audio'), findsOneWidget);
-      expect(find.text('Bluetooth device'), findsOneWidget);
+      expect(find.text('Wearable'), findsOneWidget);
       expect(find.text('Phone microphone'), findsNothing);
-      expect(find.text('CAPTURE SOURCES'), findsOneWidget);
+      expect(find.text('WHERE TO RECORD'), findsOneWidget);
       expect(
         find.byIcon(Icons.check_circle_rounded),
         findsNWidgets(2),
@@ -269,12 +308,12 @@ void main() {
 
       // Bluetooth is not selected until asked for, and selecting it reveals the
       // device setup affordances.
-      await tester.tap(find.text('Bluetooth device'));
+      await tester.tap(find.text('Wearable'));
       await tester.pumpAndSettle();
       expect(find.text('Scan for wearables'), findsOneWidget);
       expect(
         find.text(
-          'Connect a supported Bluetooth device before starting this source.',
+          'Connect a supported streaming wearable before starting this source.',
         ),
         findsOneWidget,
       );

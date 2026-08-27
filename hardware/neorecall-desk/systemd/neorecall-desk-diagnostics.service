@@ -1,0 +1,7 @@
+[Unit]
+Description=Write a NeoRecall Desk diagnostic report
+After=multi-user.target sound.target bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/neorecall-desk/diagnostics.sh boot

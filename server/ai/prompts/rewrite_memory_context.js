@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { MEMORY_TYPES, GENERATED_MINI_MEMORY_KINDS } = require('../schemas/consolidation_schema');
+const { TITLE_GUIDANCE } = require('./title_guidance');
 
 const schema = z.object({
   type: z.enum(MEMORY_TYPES),
@@ -47,7 +48,7 @@ const jsonSchema = {
 
 function messages(memory, segments, contextItems) {
   return [
-    { role: 'system', content: `Rewrite one personal memory from its transcript and user-supplied context. Return one JSON object matching the contract. Context is evidence and may contribute facts not spoken aloud, but distinguish plans or reference material from events and decisions that actually happened. Cite every context item used in sourceContextItemIds. Never cite an unknown id. Action items require an explicit owner and accepted next action. English output only. Return no prose outside JSON.` },
+    { role: 'system', content: `Rewrite one personal memory from its transcript and user-supplied context. Return one JSON object matching the contract. Context is evidence and may contribute facts not spoken aloud, but distinguish plans or reference material from events and decisions that actually happened. Cite every context item used in sourceContextItemIds. Never cite an unknown id. Action items require an explicit owner and accepted next action. English output only.\n${TITLE_GUIDANCE}\nReturn no prose outside JSON.` },
     { role: 'user', content: JSON.stringify({
       existingMemory: { type: memory.type, titleEn: memory.title_en, summaryEn: memory.summary_en, emoji: memory.emoji,
         importance: memory.importance, startedAt: memory.started_at, endedAt: memory.ended_at },

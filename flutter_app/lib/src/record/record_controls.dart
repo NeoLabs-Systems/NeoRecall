@@ -56,8 +56,7 @@ class CaptureStatusPill extends StatelessWidget {
 }
 
 class StatusDot extends StatelessWidget {
-  const StatusDot({
-    super.key,required this.color, this.size = 7});
+  const StatusDot({super.key, required this.color, this.size = 7});
 
   final Color color;
   final double size;
@@ -78,7 +77,10 @@ class StatusDot extends StatelessWidget {
 
 class RecordButton extends StatelessWidget {
   const RecordButton({
-    super.key,required this.recording, required this.onPressed});
+    super.key,
+    required this.recording,
+    required this.onPressed,
+  });
 
   final bool recording;
   final VoidCallback onPressed;

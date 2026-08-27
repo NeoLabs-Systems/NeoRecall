@@ -18,6 +18,8 @@ import 'src/record/sync_cards.dart';
 import 'src/record/record_controls.dart';
 import 'src/record/source_picker.dart';
 import 'src/devices/audio_device_adapter.dart';
+import 'src/devices/appliance/ui/appliance_capture_section.dart';
+import 'src/devices/appliance/ui/appliance_setup_flow.dart';
 import 'src/sync/processing_status.dart';
 import 'src/models/recording_context.dart';
 
@@ -34,10 +36,19 @@ class RecordScreen extends StatefulWidget {
   State<RecordScreen> createState() => _RecordScreenState();
 }
 
+/// What the record button acts on.
+///
+/// One value, not a set of booleans that can disagree with each other. The Desk
+/// is a peer here rather than a section of its own: it is another answer to
+/// "where does this recording come from", and giving it a parallel block of its
+/// own is what made this page read as two products stapled together.
+enum _CaptureSource { phone, wearable, desk }
+
 class _RecordScreenState extends State<RecordScreen> {
   bool microphone = true;
   bool systemAudio = false;
   bool bluetoothPreferred = true;
+  _CaptureSource _source = _CaptureSource.phone;
 
   bool get _isMobile =>
       !kIsWeb &&
@@ -59,7 +70,42 @@ class _RecordScreenState extends State<RecordScreen> {
     );
     microphone = defaults.microphone;
     systemAudio = defaults.systemAudio;
-    bluetoothPreferred = defaults.bluetooth;
+    // The phone is the source that always works, so it is where this page
+    // starts. A wearable is preselected only when the owner actually has one
+    // chosen from an earlier session — "prefer Bluetooth" with no device behind
+    // it left people looking at a scan button they never asked for.
+    final bool hasWearable = widget.controller.preferredDeviceLabel != null;
+    _source = defaults.bluetooth && hasWearable
+        ? _CaptureSource.wearable
+        : _CaptureSource.phone;
+    bluetoothPreferred = _source == _CaptureSource.wearable;
+    if (_source == _CaptureSource.phone && !microphone && !systemAudio) {
+      microphone = true;
+    }
+  }
+
+  /// Move to a source. One place changes the selection, so the flags below it
+  /// cannot drift out of step with what the page is showing.
+  void _select(_CaptureSource source) {
+    setState(() {
+      _source = source;
+      bluetoothPreferred = source == _CaptureSource.wearable;
+      if (source != _CaptureSource.phone) {
+        microphone = false;
+        systemAudio = false;
+      } else if (!microphone && !systemAudio) {
+        microphone = true;
+      }
+    });
+    if (source != _CaptureSource.desk) {
+      // An immediate runtime preference, not a choice deferred until Record is
+      // pressed: it stops an idle wearable reconnect while the phone is chosen.
+      unawaited(
+        widget.controller.setPreferBluetoothCapture(
+          source == _CaptureSource.wearable,
+        ),
+      );
+    }
   }
 
   Future<bool> _consent() async {
@@ -96,7 +142,18 @@ class _RecordScreenState extends State<RecordScreen> {
     return accepted;
   }
 
+  /// True while the appliance itself is recording.
+  ///
+  /// The Desk records without this app, so its state is read from the device
+  /// rather than from anything the phone is doing.
+  bool get _deskIsRecording =>
+      widget.controller.appliance.status?.isRecording ?? false;
+
   Future<void> _toggle() async {
+    if (_source == _CaptureSource.desk) {
+      await _toggleDesk();
+      return;
+    }
     final controller = widget.controller;
     if (controller.isRecording) {
       if (_isMobile) unawaited(HapticFeedback.mediumImpact());
@@ -122,6 +179,34 @@ class _RecordScreenState extends State<RecordScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
+  }
+
+  /// Start or stop the Desk. The button on the device does the same thing, and
+  /// so does its own detail page — one command, three ways to reach it.
+  Future<void> _toggleDesk() async {
+    if (!await _consent()) return;
+    final appliance = widget.controller.appliance;
+    final bool ok = _deskIsRecording
+        ? await appliance.stopRecording()
+        : await appliance.startRecording();
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            appliance.message.isEmpty
+                ? 'The device did not answer.'
+                : appliance.message,
+          ),
+        ),
+      );
+    }
+  }
+
+  /// When the Desk started, derived from how long it says it has been running.
+  DateTime? _deskStartedAt(NeoRecallController controller) {
+    final Duration? elapsed = controller.appliance.status?.recordingElapsed;
+    if (elapsed == null || !_deskIsRecording) return null;
+    return DateTime.now().subtract(elapsed);
   }
 
   Future<void> _import() async {
@@ -259,8 +344,21 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
+  Future<void> _addDesk() async {
+    final completed = await showApplianceSetupFlow(
+      context,
+      widget.controller.appliance,
+    );
+    if (!completed || !mounted) return;
+    // Registration happens on the appliance after provisioning. Refreshing the
+    // account view here makes the new Desk appear without requiring a trip to
+    // Settings or a manual reload; the live controller fills the brief gap if
+    // the first heartbeat is still on its way.
+    await widget.controller.refreshAll();
+  }
+
   String get _headerDescription => _isMobile
-      ? 'Mobile capture prefers a connected Bluetooth device and falls back to the phone microphone. Android keeps a foreground service alive while recording.'
+      ? 'Mobile capture can use a connected streaming wearable or the phone microphone. Android keeps a foreground service alive while recording.'
       : _isDesktop
       ? 'Desktop can capture microphone and system audio together. Permissions are requested up front and recording stays visibly active.'
       : 'Browser capture supports microphone and optional tab/system audio through the browser permission flow.';
@@ -332,10 +430,16 @@ class _RecordScreenState extends State<RecordScreen> {
           );
         }
 
+        // The button reflects whatever it will act on. With the Desk chosen it
+        // shows the *device's* state, which is the honest answer even when this
+        // app has been closed the whole time it was recording.
+        final bool deskChosen = _source == _CaptureSource.desk;
         final stage = _CaptureStage(
-          recording: controller.isRecording,
+          recording: deskChosen ? _deskIsRecording : controller.isRecording,
           level: controller.audioLevel,
-          startedAt: controller.recordingStartedAt,
+          startedAt: deskChosen
+              ? _deskStartedAt(controller)
+              : controller.recordingStartedAt,
           processing: controller.processingStatus,
           showRecordButton: _showRecordButton,
           onToggle: _toggle,
@@ -404,8 +508,9 @@ class _RecordScreenState extends State<RecordScreen> {
   Widget _sourcesCard(NeoRecallPalette palette) {
     final controller = widget.controller;
     final locked = controller.isRecording;
+    final desks = visibleAppliances(controller.devices, controller.appliance);
     return SectionCard(
-      eyebrow: _isMobile ? 'CAPTURE SOURCE' : 'CAPTURE SOURCES',
+      eyebrow: 'WHERE TO RECORD',
       trailing: locked
           ? Text(
               'Locked while recording',
@@ -420,65 +525,139 @@ class _RecordScreenState extends State<RecordScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           SourceGroup(
-            options: _isMobile
-                ? _mobileOptions(locked)
-                : _desktopOptions(locked),
-          ),
-          if (bluetoothPreferred ||
-              controller.preferredDeviceLabel != null) ...<Widget>[
-            const SizedBox(height: AppSpacing.md),
-            _deviceStatusLine(palette),
-            const SizedBox(height: AppSpacing.sm + 2),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: <Widget>[
-                OutlinedButton.icon(
-                  onPressed: locked || controller.scanningWearables
-                      ? null
-                      : _scan,
-                  icon: controller.scanningWearables
-                      ? const ButtonSpinner()
-                      : const Icon(Icons.bluetooth_searching, size: 18),
-                  label: Text(
-                    controller.scanningWearables
-                        ? 'Scanning…'
-                        : 'Scan for wearables',
-                  ),
-                ),
-                if (controller.deviceStorageSyncAvailable)
-                  OutlinedButton.icon(
-                    onPressed: controller.deviceStorageSyncing
-                        ? null
-                        : _syncDeviceStorage,
-                    icon: controller.deviceStorageSyncing
-                        ? const ButtonSpinner()
-                        : const Icon(Icons.sync_rounded, size: 18),
-                    label: Text(
-                      controller.deviceStorageSyncing
-                          ? 'Syncing…'
-                          : 'Sync device recordings',
-                    ),
-                  ),
-              ],
-            ),
-            if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
-              const SizedBox(height: AppSpacing.md),
-              for (final device in controller.discoveredWearables)
-                _wearableRow(device),
+            options: <SourceOption>[
+              ...(_isMobile ? _mobileOptions(locked) : _desktopOptions(locked)),
+              if (desks.isNotEmpty) _deskOption(locked, desks.first),
             ],
-          ],
-          if (kIsWeb && bluetoothPreferred) ...<Widget>[
-            const SizedBox(height: AppSpacing.sm + 2),
-            const Footnote(
-              'The browser opens its Bluetooth chooser from the scan button. '
-              'Capture continues only while this web app remains active.',
-            ),
-          ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // Only the chosen source explains itself. Showing every source's
+          // controls at once was what made this page feel like two products in
+          // one card, and it put the same device in front of people twice.
+          _sourceDetail(palette, locked, desks),
         ],
       ),
     );
   }
+
+  SourceOption _deskOption(bool locked, ApplianceDevice desk) {
+    final name = desk['name'];
+    return SourceOption(
+      icon: Icons.speaker_group_outlined,
+      label: name is String && name.trim().isNotEmpty ? name : 'NeoRecall Desk',
+      description: 'Records the room on its own',
+      selected: _source == _CaptureSource.desk,
+      onTap: locked ? null : () => _select(_CaptureSource.desk),
+    );
+  }
+
+  Widget _sourceDetail(
+    NeoRecallPalette palette,
+    bool locked,
+    List<ApplianceDevice> desks,
+  ) {
+    switch (_source) {
+      case _CaptureSource.phone:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Footnote(
+              'Nothing to connect. This app records with the microphone the '
+              'phone already uses for calls.',
+            ),
+            if (desks.isEmpty) ...<Widget>[
+              const SizedBox(height: AppSpacing.md),
+              _addDeskAction(palette),
+            ],
+          ],
+        );
+      case _CaptureSource.wearable:
+        return _wearableDetail(palette, locked, desks);
+      case _CaptureSource.desk:
+        return _deskDetail();
+    }
+  }
+
+  Widget _wearableDetail(
+    NeoRecallPalette palette,
+    bool locked,
+    List<ApplianceDevice> desks,
+  ) {
+    final controller = widget.controller;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _deviceStatusLine(palette),
+        const SizedBox(height: AppSpacing.sm + 2),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: <Widget>[
+            OutlinedButton.icon(
+              onPressed: locked || controller.scanningWearables ? null : _scan,
+              icon: controller.scanningWearables
+                  ? const ButtonSpinner()
+                  : const Icon(Icons.bluetooth_searching, size: 18),
+              label: Text(
+                controller.scanningWearables ? 'Scanning…' : 'Scan for wearables',
+              ),
+            ),
+            if (controller.deviceStorageSyncAvailable)
+              OutlinedButton.icon(
+                onPressed: controller.deviceStorageSyncing
+                    ? null
+                    : _syncDeviceStorage,
+                icon: controller.deviceStorageSyncing
+                    ? const ButtonSpinner()
+                    : const Icon(Icons.sync_rounded, size: 18),
+                label: Text(
+                  controller.deviceStorageSyncing
+                      ? 'Syncing…'
+                      : 'Sync device recordings',
+                ),
+              ),
+          ],
+        ),
+        if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpacing.md),
+          for (final device in controller.discoveredWearables)
+            _wearableRow(device),
+        ],
+        if (kIsWeb) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm + 2),
+          const Footnote(
+            'The browser opens its Bluetooth chooser from the scan button. '
+            'Capture continues only while this web app remains active.',
+          ),
+        ],
+        if (desks.isEmpty) ...<Widget>[
+          const SizedBox(height: AppSpacing.md),
+          _addDeskAction(palette),
+        ],
+      ],
+    );
+  }
+
+  Widget _deskDetail() {
+    return ApplianceCaptureSection(
+      controller: widget.controller.appliance,
+      devices: widget.controller.devices,
+      onAdd: _addDesk,
+    );
+  }
+
+  /// One quiet line, not a block: somebody without a Desk should not have a
+  /// second product advertised at them every time they open this page.
+  Widget _addDeskAction(NeoRecallPalette palette) => Align(
+    alignment: Alignment.centerLeft,
+    child: TextButton.icon(
+      key: const ValueKey<String>('add-neorecall-desk'),
+      onPressed: _addDesk,
+      icon: const Icon(Icons.add_rounded, size: 18),
+      label: const Text('Set up a NeoRecall Desk'),
+      style: TextButton.styleFrom(foregroundColor: palette.accent),
+    ),
+  );
 
   /// Long-press opens device & sync diagnostics. Deliberately unadvertised:
   /// this stays a consumer product, so the troubleshooting surface has no
@@ -510,7 +689,7 @@ class _RecordScreenState extends State<RecordScreen> {
           Expanded(
             child: Text(
               controller.preferredDeviceLabel == null
-                  ? 'Connect a supported Bluetooth device before starting this source.'
+                  ? 'Connect a supported streaming wearable before starting this source.'
                   : 'Preferred device: ${controller.preferredDeviceLabel}',
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
@@ -573,14 +752,14 @@ class _RecordScreenState extends State<RecordScreen> {
       icon: Icons.mic_none_rounded,
       label: 'Microphone',
       description: 'Built-in or connected input',
-      selected: microphone && !bluetoothPreferred,
+      selected: _source == _CaptureSource.phone && microphone,
       onTap: locked
           ? null
-          : () => setState(() {
-              final next = !(microphone && !bluetoothPreferred);
-              microphone = next;
-              if (next) bluetoothPreferred = false;
-            }),
+          : () {
+              final bool next = !(microphone && _source == _CaptureSource.phone);
+              _select(_CaptureSource.phone);
+              setState(() => microphone = next);
+            },
     ),
     SourceOption(
       icon: _isDesktop
@@ -590,69 +769,38 @@ class _RecordScreenState extends State<RecordScreen> {
       description: _isDesktop
           ? 'Everything this machine plays'
           : 'Audio from the shared tab',
-      selected: systemAudio && !bluetoothPreferred,
+      selected: _source == _CaptureSource.phone && systemAudio,
       onTap: locked
           ? null
-          : () => setState(() {
-              final next = !(systemAudio && !bluetoothPreferred);
-              systemAudio = next;
-              if (next) bluetoothPreferred = false;
-            }),
+          : () {
+              final bool next = !(systemAudio && _source == _CaptureSource.phone);
+              _select(_CaptureSource.phone);
+              setState(() => systemAudio = next);
+            },
     ),
     SourceOption(
       icon: Icons.bluetooth_connected,
-      label: 'Bluetooth device',
-      description: 'Stream from a paired wearable',
-      selected: bluetoothPreferred,
-      onTap: locked
-          ? null
-          : () => setState(() {
-              final next = !bluetoothPreferred;
-              bluetoothPreferred = next;
-              if (next) {
-                microphone = false;
-                systemAudio = false;
-              }
-            }),
+      label: 'Wearable',
+      description: 'Streams audio into this app',
+      selected: _source == _CaptureSource.wearable,
+      onTap: locked ? null : () => _select(_CaptureSource.wearable),
     ),
   ];
 
   List<SourceOption> _mobileOptions(bool locked) => <SourceOption>[
     SourceOption(
-      icon: Icons.bluetooth_connected,
-      label: 'Bluetooth device',
-      description: 'Preferred when a wearable is linked',
-      selected: bluetoothPreferred,
-      onTap: locked
-          ? null
-          : () {
-              setState(() {
-                bluetoothPreferred = true;
-                microphone = false;
-                systemAudio = false;
-              });
-              unawaited(widget.controller.setPreferBluetoothCapture(true));
-            },
-    ),
-    SourceOption(
       icon: Icons.mic_none_rounded,
       label: 'Phone microphone',
-      description: 'Always-available fallback',
-      selected: !bluetoothPreferred,
-      onTap: locked
-          ? null
-          : () {
-              setState(() {
-                bluetoothPreferred = false;
-                microphone = true;
-                systemAudio = false;
-              });
-              // Source selection is an immediate runtime preference, not just
-              // a choice deferred until Record is pressed. This stops an idle
-              // wearable reconnect (and its status UI) while phone capture is
-              // selected.
-              unawaited(widget.controller.setPreferBluetoothCapture(false));
-            },
+      description: 'Always available, nothing to connect',
+      selected: _source == _CaptureSource.phone,
+      onTap: locked ? null : () => _select(_CaptureSource.phone),
+    ),
+    SourceOption(
+      icon: Icons.bluetooth_connected,
+      label: 'Wearable',
+      description: 'Streams audio into this app',
+      selected: _source == _CaptureSource.wearable,
+      onTap: locked ? null : () => _select(_CaptureSource.wearable),
     ),
   ];
 }

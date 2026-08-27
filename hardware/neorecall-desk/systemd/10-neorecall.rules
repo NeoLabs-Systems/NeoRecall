@@ -1,0 +1,60 @@
+// What the neorecall account is allowed to do to the system on the owner's
+// behalf, and nothing beyond it.
+//
+// Two things need permission this account would not otherwise have:
+//
+//   * Wi-Fi. The app sends credentials over Bluetooth, and the radio is switched
+//     off for the length of a recording so Bluetooth audio has the antenna to
+//     itself.
+//
+//   * Its own updates. The appliance service is a *user* unit, while the
+//     updater and its timer are system units, so "Check now" in the app was an
+//     unprivileged `systemctl start` of a system unit. polkit refused it, and
+//     with no authentication agent in a lingering session there was nobody to
+//     ask — the button reported failure and the appliance never looked for a
+//     new version. The grant below is restricted to the appliance's own units
+//     by name: this account may update itself, and may not touch anything else
+//     on the system.
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "neorecall") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var allowed = [
+        "org.freedesktop.NetworkManager.enable-disable-wifi",
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.settings.modify.own",
+        "org.freedesktop.NetworkManager.wifi.scan"
+    ];
+    if (allowed.indexOf(action.id) !== -1) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
+
+// The appliance's own units. Named explicitly rather than matched by prefix, so
+// a future unit has to be added here deliberately instead of inheriting the
+// grant by being called the right thing.
+var OWN_UNITS = [
+    "neorecall-desk-update.service",
+    "neorecall-desk-update.timer",
+    "neorecall-desk-relay.service",
+    "neorecall-desk.service"
+];
+
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "neorecall") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var managing = [
+        "org.freedesktop.systemd1.manage-units",
+        "org.freedesktop.systemd1.manage-unit-files"
+    ];
+    if (managing.indexOf(action.id) === -1) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (OWN_UNITS.indexOf(action.lookup("unit")) !== -1) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

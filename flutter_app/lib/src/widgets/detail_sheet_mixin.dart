@@ -44,7 +44,8 @@ mixin DetailSheetMixin<T extends StatefulWidget> on State<T> {
   /// Reads a list of objects from the payload, tolerating a missing or
   /// wrongly-typed field rather than throwing inside `build`.
   List<Map<String, dynamic>> listField(String key, {String? fallbackKey}) {
-    final raw = _detail?[key] ?? (fallbackKey == null ? null : _detail?[fallbackKey]);
+    final raw =
+        _detail?[key] ?? (fallbackKey == null ? null : _detail?[fallbackKey]);
     if (raw is! List) return const <Map<String, dynamic>>[];
     return raw
         .whereType<Map>()

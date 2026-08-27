@@ -29,16 +29,36 @@ object WidgetUpdater {
       // worth taking the app's process down for.
       return
     }
+    refresh(context, manager, kind, ids)
+  }
+
+  /** Shared, failure-isolated path for app- and launcher-triggered updates. */
+  internal fun refresh(
+    context: Context,
+    manager: AppWidgetManager,
+    kind: WidgetKind,
+    ids: IntArray,
+  ) {
     if (ids.isEmpty()) return
+    val renderer = try {
+      kind.renderer
+    } catch (_: Throwable) {
+      return
+    }
     ids.forEach { appWidgetId ->
       try {
-        manager.updateAppWidget(appWidgetId, kind.renderer.render(context, manager, appWidgetId))
-      } catch (_: Exception) {
-        // One widget failing to render must not stop the others.
+        manager.updateAppWidget(appWidgetId, renderer.render(context, manager, appWidgetId))
+      } catch (_: Throwable) {
+        // Widget rendering is auxiliary. Even a class-initialization failure
+        // must not terminate capture, upload, or the main application process.
       }
     }
-    kind.renderer.collectionViewId?.let { viewId ->
-      manager.notifyAppWidgetViewDataChanged(ids, viewId)
+    try {
+      renderer.collectionViewId?.let { viewId ->
+        manager.notifyAppWidgetViewDataChanged(ids, viewId)
+      }
+    } catch (_: Throwable) {
+      // A broken collection renderer must not take down unrelated widgets.
     }
   }
 }

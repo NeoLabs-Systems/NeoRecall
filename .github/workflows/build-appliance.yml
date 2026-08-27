@@ -1,13 +1,13 @@
-name: Build NeoRecall Desk
+name: Build Appliance
 
-# Builds and tests the NeoRecall Desk appliance's platform-independent Rust
-# crates (nrd-config, nrd-ledger, nrd-proto, nrd-audio, nrd-power) on every
-# change to its folder. These crates have no PipeWire/BlueZ/Slint/hardware
-# dependency and run unmodified on the CI host -- see
-# hardware/neorecall-desk/README.md for why the workspace is scoped this way
-# and what still needs the armv7 cross-compilation container (Risk R5) once
-# the hardware-bound crates (nrd-audio's PipeWire graph, nrd-ui, nrd-setup)
-# are added.
+# Tests the NeoRecall Desk appliance service and, on beta, publishes the release
+# the devices install and update themselves from.
+#
+# There is deliberately no image build here. A pre-built Raspberry Pi image took
+# the better part of an hour under emulation for every change, and it could only
+# ever reach a device by being written to a card. A source release plus a
+# one-line installer takes seconds to publish and reaches devices that are
+# already in the field.
 
 on:
   push:
@@ -23,47 +23,222 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: build-appliance-${{ github.workflow }}-${{ github.ref }}
+  group: build-appliance-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    working-directory: hardware/neorecall-desk
-
 jobs:
-  test:
-    name: Build and test the host-portable crates
+  checks:
+    name: Test the appliance service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hardware/neorecall-desk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      # The appliance is an ingest client, and the only way to know it still
+      # speaks the protocol is to point it at the real routes. Without the
+      # server's dependencies the integration test skips itself, and protocol
+      # drift would go unnoticed until a device in the field stopped uploading.
+      - name: Set up Node for the server
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install the server's dependencies
+        working-directory: ${{ github.workspace }}
+        # No --ignore-scripts: better-sqlite3 fetches its native binding in a
+        # postinstall step, and without it the server cannot open a database.
+        run: npm ci --omit=dev
+
+      - name: Test
+        run: pytest -q
+
+      - name: Check the installer
+        run: bash tests/test_install_script.sh
+
+      - name: Check the pinned UAC2 override
+        run: bash tests/test_uac2_source.sh
+
+      - name: Check the shell scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --shell=bash install.sh diagnostics.sh \
+            tests/test_install_script.sh tests/test_uac2_source.sh
+          shellcheck --shell=sh systemd/neorecall-usb-gadget.sh
+
+  integration:
+    name: Appliance against a real server
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          components: rustfmt, clippy
+          node-version: '20'
+          cache: npm
 
-      - name: Cache cargo registry and build output
-        uses: actions/cache@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            hardware/neorecall-desk/target
-          key: appliance-cargo-${{ runner.os }}-${{ hashFiles('hardware/neorecall-desk/Cargo.lock') }}
-          restore-keys: appliance-cargo-${{ runner.os }}-
+          python-version: '3.11'
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      # The backend's own dependencies, because this job boots the real server
+      # rather than a stand-in. A stub would accept headers the real routes
+      # reject, and that mistake only surfaces on hardware.
+      - name: Install the server
+        run: npm ci
 
-      - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Install the appliance
+        working-directory: hardware/neorecall-desk
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
 
-      - name: Build
-        run: cargo build --workspace
+      - name: Run the integration test
+        working-directory: hardware/neorecall-desk
+        run: pytest tests/test_ingest_integration.py -q
 
-      - name: Test
-        run: cargo test --workspace
+  uac2-kernel:
+    name: UAC2 override on Raspberry Pi kernel ${{ matrix.kernel }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel: '6.12'
+            commit: 73b1c785241360882ab9f7fb0793e775c25db325
+          - kernel: '6.18'
+            commit: 8c74b839debd96d0d7a441abc35d36b20fdda278
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the ARM64 kernel toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev
+
+      - name: Prepare the pinned Raspberry Pi kernel
+        run: |
+          git init --quiet "$RUNNER_TEMP/raspberrypi-linux"
+          git -C "$RUNNER_TEMP/raspberrypi-linux" remote add origin \
+            https://github.com/raspberrypi/linux.git
+          git -C "$RUNNER_TEMP/raspberrypi-linux" fetch --quiet --depth=1 origin \
+            "${{ matrix.commit }}"
+          git -C "$RUNNER_TEMP/raspberrypi-linux" checkout --quiet FETCH_HEAD
+          make -C "$RUNNER_TEMP/raspberrypi-linux" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
+          make -C "$RUNNER_TEMP/raspberrypi-linux" -j2 \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+
+      - name: Build the DKMS source
+        working-directory: hardware/neorecall-desk/kernel/neorecall-uac2-name
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+          KBUILD_MODPOST_WARN: '1'
+        run: |
+          make KERNEL_DIR="$RUNNER_TEMP/raspberrypi-linux"
+          test -f usb_f_uac2.ko
+          ! strings usb_f_uac2.ko | grep -qE '(Playback|Capture) (Inactive|Active)'
+
+  release:
+    name: Publish the appliance release
+    needs: [checks, integration, uac2-kernel]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/beta')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assemble the release
+        id: build
+        working-directory: hardware/neorecall-desk
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)
+          [ -n "$VERSION" ] || { echo "no version in pyproject.toml" >&2; exit 1; }
+          # A build of the same version from a different commit is still a
+          # different build, and a device has to be able to tell them apart.
+          VERSION="${VERSION}+g${GITHUB_SHA::7}"
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          TARBALL="$GITHUB_WORKSPACE/dist/neorecall-desk-${VERSION}.tar.gz"
+          tar czf "$TARBALL" \
+            --exclude='__pycache__' --exclude='*.pyc' \
+            --exclude='.pytest_cache' --exclude='.ruff_cache' \
+            src pyproject.toml systemd pipewire overlays kernel \
+            install.sh diagnostics.sh README.md
+
+          SHA=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/desk-latest/$(basename "$TARBALL")"
+          export VERSION SHA URL
+          python3 - <<'PY' > "$GITHUB_WORKSPACE/dist/manifest.json"
+          import datetime, json, os
+          print(json.dumps({
+              "product": "neorecall-desk",
+              "version": os.environ["VERSION"],
+              "url": os.environ["URL"],
+              "sha256": os.environ["SHA"],
+              "commit": os.environ["GITHUB_SHA"],
+              "built_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }, indent=2))
+          PY
+          cat "$GITHUB_WORKSPACE/dist/manifest.json"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: neorecall-desk-release
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish the rolling release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/beta'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Rolling tag: devices poll one stable URL, so the manifest has to be
+          # replaced rather than accumulated.
+          gh release delete desk-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create desk-latest \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NeoRecall Desk ${{ steps.build.outputs.version }}" \
+            --notes "Install or update on a Raspberry Pi:
+
+          \`\`\`
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/beta/hardware/neorecall-desk/install.sh | sudo bash
+          \`\`\`
+
+          Devices already installed pick this up by themselves within a day. Built from ${GITHUB_SHA}." \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            dist/*

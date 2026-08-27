@@ -52,7 +52,9 @@ class RingProtocol {
 
   /// Parse a NOTIFY_INFO (0x02) notification into read/write sequence cursors.
   static RingInfo? parseInfoNotification(List<int> value) {
-    if (value.isEmpty || value[0] != notifyInfo || value.length < 31) return null;
+    if (value.isEmpty || value[0] != notifyInfo || value.length < 31) {
+      return null;
+    }
     final bd = ByteData.sublistView(Uint8List.fromList(value));
     return RingInfo(
       readSeq: _readUint64BE(bd, 1),
@@ -64,7 +66,9 @@ class RingProtocol {
   }
 
   static DoneNotification? parseDoneNotification(List<int> value) {
-    if (value.isEmpty || value[0] != notifyDone || value.length < 10) return null;
+    if (value.isEmpty || value[0] != notifyDone || value.length < 10) {
+      return null;
+    }
     final bd = ByteData.sublistView(Uint8List.fromList(value));
     return DoneNotification(
       status: bd.getUint8(1),

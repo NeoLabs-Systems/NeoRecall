@@ -7,8 +7,7 @@ import '../../main_theme.dart';
 /// line saying what it actually records, which is the part people get wrong when
 /// choosing between a microphone, system audio, and a wearable.
 class SourceGroup extends StatelessWidget {
-  const SourceGroup({
-    super.key,required this.options});
+  const SourceGroup({super.key, required this.options});
 
   final List<SourceOption> options;
 
@@ -146,6 +145,7 @@ class DeviceRow extends StatelessWidget {
     required this.actionLabel,
     required this.onAction,
     this.batteryLevel,
+    this.connectedActionLabel,
   });
 
   final String name;
@@ -153,6 +153,14 @@ class DeviceRow extends StatelessWidget {
   final bool connected;
   final String actionLabel;
   final VoidCallback? onAction;
+
+  /// Action offered while the device is already connected, e.g. "Disconnect".
+  ///
+  /// Wearables only ever need connecting, so the default stays a plain
+  /// confirmation tick. A device the user actively switches between — the
+  /// appliance's headphones — needs a way back out, and that is what this adds
+  /// without giving every other caller a button it has no use for.
+  final String? connectedActionLabel;
   // Latest battery percentage for this device, if the connected wearable has
   // reported one yet.
   final int? batteryLevel;
@@ -210,10 +218,13 @@ class DeviceRow extends StatelessWidget {
             BatteryIndicator(level: batteryLevel!, palette: palette),
             const SizedBox(width: AppSpacing.sm),
           ],
-          if (connected)
+          if (connected && connectedActionLabel == null)
             Icon(Icons.check_circle, size: 18, color: palette.success)
           else
-            TextButton(onPressed: onAction, child: Text(actionLabel)),
+            TextButton(
+              onPressed: onAction,
+              child: Text(connected ? connectedActionLabel! : actionLabel),
+            ),
         ],
       ),
     );
@@ -222,7 +233,10 @@ class DeviceRow extends StatelessWidget {
 
 class BatteryIndicator extends StatelessWidget {
   const BatteryIndicator({
-    super.key,required this.level, required this.palette});
+    super.key,
+    required this.level,
+    required this.palette,
+  });
 
   final int level;
   final NeoRecallPalette palette;

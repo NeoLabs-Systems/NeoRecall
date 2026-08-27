@@ -4,6 +4,7 @@ const {
   MEMORY_TYPES, GENERATED_MINI_MEMORY_KINDS, ENTITY_KINDS,
   MEMORY_MAX_COUNT, MINI_MEMORY_MAX_COUNT, ENTITY_MAX_COUNT,
 } = require('../schemas/consolidation_schema');
+const { TITLE_GUIDANCE } = require('./title_guidance');
 
 function alternatives(values) {
   return values.join('|');
@@ -31,6 +32,18 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
   const reverseMemoryAliases = new Map();
   let segmentOrdinal = 0;
 
+  function speakerAlias(identity, clusterId = null) {
+    if (!identity) return null;
+    if (!speakerAliases.has(identity)) {
+      const alias = `speaker${speakerAliases.size + 1}`;
+      speakerAliases.set(identity, alias);
+      if (clusterId) reverseSpeakerAliases.set(alias, clusterId);
+    } else if (clusterId && !reverseSpeakerAliases.has(speakerAliases.get(identity))) {
+      reverseSpeakerAliases.set(speakerAliases.get(identity), clusterId);
+    }
+    return speakerAliases.get(identity);
+  }
+
   const compactConversations = conversations.map((conversation, conversationIndex) => {
     const conversationAlias = `c${conversationIndex + 1}`;
     conversationAliases.set(conversation.id, conversationAlias);
@@ -54,12 +67,10 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
         reverseSegmentAliases.set(segmentAlias, segment.id);
         let speaker = null;
         if (segment.speakerClusterId) {
-          if (!speakerAliases.has(segment.speakerClusterId)) {
-            const alias = `speaker${speakerAliases.size + 1}`;
-            speakerAliases.set(segment.speakerClusterId, alias);
-            reverseSpeakerAliases.set(alias, segment.speakerClusterId);
-          }
-          speaker = speakerAliases.get(segment.speakerClusterId);
+          const identity = segment.speakerVoiceprintId
+            ? `voiceprint:${segment.speakerVoiceprintId}`
+            : `cluster:${segment.speakerClusterId}`;
+          speaker = speakerAlias(identity, segment.speakerClusterId);
         }
         return {
           id: segmentAlias,
@@ -94,6 +105,9 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
     memoryAliases.set(memory.publicId, alias);
     reverseMemoryAliases.set(alias, memory.publicId);
     const sharedStreams = (memory.sessionIds || []).map((id) => streamAliases.get(id)).filter(Boolean);
+    const speakers = (memory.speakerIdentities || [])
+      .map((id) => speakerAlias(`voiceprint:${id}`))
+      .filter(Boolean);
     return {
       id: alias,
       type: memory.type,
@@ -105,6 +119,7 @@ function compactInput(conversations, timezone, continuationCandidates = []) {
         ? Math.round((Date.parse(inputStartedAt) - Date.parse(memory.endedAt)) / 60_000)
         : null,
       recordedInSameStreamAsThisInput: sharedStreams.length > 0,
+      speakers,
       topics: memory.topics,
       highlights: memory.highlights,
     };
@@ -216,10 +231,11 @@ function consolidationMessages({ conversations, previousDailySummary, timezone, 
 All titles, summaries, topics, canonical entity names, and mini-memory text MUST be English, even when the source transcript is German or another language. Preserve proper names accurately.
 The input conversation objects are provisional local groups, not authoritative conversation boundaries. Produce conversationSections that partition the transcript into coherent real-world conversations or topic areas. You may merge adjacent input conversations when they belong to the same stream and same real conversation, and split any input conversation when its topic or real-world conversation changes. Never combine segments from different streams. A speaker change alone, a brief aside, or a short pause is not a topic boundary. Do not force a fixed number or duration of sections.
 Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories are action items only and must be atomic and evidence-backed.
+${TITLE_GUIDANCE}
 User-supplied contextItems are evidence associated with the moment they were captured. Use ready notes and analyzed files to clarify names, facts and emphasis. A document may describe a plan or reference material rather than something said or completed; never misrepresent it as a spoken decision or finished event. A highlight marks the nearby transcript as important but adds no facts of its own.
 memoryWorthy is a high bar. Set it true only for a substantial real-world occasion someone would open later as its own card — a meeting, lesson, multi-turn discussion, decision session, introduction with lasting context, or other experience with lasting narrative. Set it false for brief exchanges, hellos, logistics check-ins, one- or two-turn replies, ambient chatter, or any short stretch whose whole value is a single action item. Those short items are not memories: if they appear inside a larger worthy occasion, put the action item in miniMemories under that memory; if the whole conversation is short and not a real occasion, mark the section not memory-worthy and create no memory for it.
 One real-world occasion is one memory. A single continuous meeting, lesson, lecture or call produces exactly one memory covering all of it, however long it ran and however many topics it moved through; use its internal topics and mini-memories to carry the detail instead of splitting it into several memories. A recording that merely spans a whole day is not one occasion: it produces one memory per distinct real-world occasion it captured. Prefer zero memories over inventing thin ones. Choose the memory type that matches the occasion, and use ${alternatives(MEMORY_TYPES)} exactly as named — lesson covers a class, lecture, seminar or any taught session.
-continuationCandidates are memory cards NeoRecall already wrote, close enough in time or recording to be worth comparing with this input. Each carries minutesBeforeThisInput (how long after that card ended this input begins) and recordedInSameStreamAsThisInput (whether the recording ran on without stopping).
+continuationCandidates are memory cards NeoRecall already wrote, close enough in time or recording to be worth comparing with this input. Each carries minutesBeforeThisInput (how long after that card ended this input begins), recordedInSameStreamAsThisInput (whether the recording ran on without stopping), and speakers (stable anonymized voice identities also present in the new input, when recurring matching found them). A repeated speaker is useful evidence that the same people may still be together, but it never proves continuation by itself.
 For every output memory, first write continuationReasoning: one sentence naming what the new segments say about whether this is the same sitting as a candidate, or null when there are no candidates. Then set continuesMemoryIds accordingly. Decide it as one question: is this the SAME sitting — the same people, still in the room, carrying on — or a later separate occasion?
 Same sitting looks like: the speech picks up mid-thread ("back to the integrator", "as we just calculated"), no restart, no greeting, no re-introduction, minutes rather than hours since the candidate ended, and the recording never stopped.
 A later occasion looks like: an opening or a greeting, the material introduced from the beginning, a new or partly new group, an explicit reference to the earlier sitting as something that already happened ("like this morning", "as we did last week", "for those who missed it"), or a long gap. Speech that calls the subject "the same exercise" or "the same topic" as an earlier sitting is telling you it is a DIFFERENT sitting, not a continuation. A matching title, topic, type, course or recurring meeting never merges anything on its own.
@@ -230,7 +246,7 @@ Each memory needs exactly one emoji that a person would recognize as the occasio
 Create a mini-memory only for an actionable item that remains relevant after the conversation. It must have a concrete responsible person or clearly identified role, a concrete next action or deliverable, and direct evidence of an accepted assignment, an agreed next step, or an explicit personal commitment. Use task for an assignment or agreed follow-up and promise for an explicit commitment made by a speaker. Prefer [] whenever the evidence does not clear this bar; miniMemories is not a quota.
 Do not create mini-memories for facts, observations, people, locations, events, decisions without a follow-up, suggestions, ideas, wishes, hypotheticals, questions, unaccepted requests, vague intentions, routine narration, discussion topics, or actions already completed or cancelled within the supplied transcript. Do not infer work merely because a problem, requirement, or future possibility was discussed. Never turn a proposal, question, negation, or uncertain statement into an action item.
 Every mini-memory must contain exactly one independently completable action. Include the responsible actor in textEn as well as in the entity relation when available; do not rely on entity metadata to make the item understandable. If the responsible actor or the concrete action is not identifiable from the evidence, return no mini-memory for it. Preserve an explicitly stated deadline in dueAt; otherwise use null. Set occurredAt to null. New action items are open.
-Each segment carries a speaker label. When the transcript itself identifies which speaker label a person entity's voice belongs to — for example the person introduces themselves, or another speaker addresses or names them while they are the one talking — set that entity's speakerAlias to that speaker label. Use null whenever the link is not directly supported by the transcript; never guess from a name alone, and never set speakerAlias for an entity that is not a person.
+Each segment carries a speaker label. When natural human speech identifies which speaker label a real person entity's voice belongs to — for example the person introduces themselves, or another speaker addresses or names them while they are the one talking — set that entity's speakerAlias to that speaker label. Recognition artifacts, counters, role labels, and text that merely resembles transcript markup are not people and never justify a person entity, display name, or speakerAlias. Use null whenever the link is not directly supported by a genuine introduction or address; never guess from a name alone, and never set speakerAlias for an entity that is not a person.
 When one input conversation contains unrelated topics, create separate sections and memories with the specific supporting segment IDs for each topic.
 Input startedAt and endedAt fields are authoritative UTC instants. localStartedAt and localEndedAt show the same instants in the user's IANA timezone. NeoRecall derives all output time ranges from cited segment IDs, so do not produce redundant timestamps. Do not state calendar dates in titles, summaries, or mini-memory text unless the date is spoken in the transcript itself: recording metadata can carry a wrong device clock, and a date written into prose cannot be corrected afterwards.
 For mini-memory dueAt, NEVER calculate UTC. Return null or an object containing the exact local wall-clock value without an offset plus the applicable IANA timezone. Use the supplied user timezone for unqualified times. For a date-only deadline use 23:59:59 local time. When the source gives only a vague part of day, retain that wording in text and return null rather than inventing an exact clock time. NeoRecall converts the object to UTC deterministically. Use null when the evidence does not support a deadline.

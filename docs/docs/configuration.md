@@ -61,6 +61,8 @@ Processing gates are off by default and remain available when an external deploy
 
 `NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES` defaults to `8`. A run still reads one new provisional conversation, but it also shows the model a bounded set of recent or same-recording memory cards. The model must explicitly identify which, if any, are fragments of the same real-world occasion. Claimed fragments are updated or absorbed into one card while their transcript sources and existing highlights remain attached. Time and recording continuity only narrow the candidates; matching titles, keywords, or a similarity threshold never decide a merge, and a recurring lesson or meeting remains separate unless the model identifies it as the same continuous occasion.
 
+`NEORECALL_MEMORY_CONTINUATION_LOOKBACK_MS` defaults to two hours. It controls how far back cards from a different recording session remain available for that decision, covering recorder restarts, reconnects, and delayed sync without treating a three-minute conversation boundary as a merge horizon. Same-stream cards remain eligible independently of this window. The prompt also receives recurring-speaker overlap when it is available; neither overlap nor time performs a merge on its own.
+
 `NEORECALL_MEMORY_MERGE_MAX_ITEMS` defaults to `100` and bounds a manual merge request. The server advertises the effective value to clients, combines the selected evidence immediately, and leaves the optional title and summary rewrite to a background job.
 
 `NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are unchanged and are what keeps short speech off the timeline as a memory *card* (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary, but it is not memory-worthy. Mini-memories under a larger worthy occasion are reserved for concrete, still-open action items with an identifiable owner; facts, observations, suggestions and unaccepted requests stay in the memory summary instead. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
@@ -248,6 +250,16 @@ component's first speech begins within `NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of
 where its last known turn ended, that cluster may be kept at the relaxed
 `NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a near-tie,
 so a genuine speaker change at the boundary still resolves on its own.
+
+Recurring matching also reconciles duplicate profiles automatically after new
+speech is persisted and during hourly maintenance, so profiles already present
+when a server is upgraded are cleaned up as well. Mutually nearest profiles above the configured voice-match
+threshold are folded together unless their explicit names or linked person
+entities conflict. Inside one recording, session clusters that resolve to the
+same recurring voiceprint are collapsed immediately; while that derived cleanup
+runs, all such clusters already share one conversation-local label. Cluster
+cleanup is best-effort and never delays transcript persistence, server-side
+audio deletion, or the terminal receipt.
 
 If one person still appears as several, lower `NEORECALL_SPEAKER_CLUSTER_THRESHOLD`;
 if different people are being merged, raise it. Note that

@@ -289,6 +289,12 @@ function buildConfig() {
     // recording continuity and transcript meaning still decide whether the
     // model claims any candidate, and no numeric similarity score merges data.
     maxMemoryContinuationCandidates: integer('NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES', 8, { min: 0, max: 32 }),
+    // Cross-recording fragments can belong to one occasion even when the
+    // capture client briefly stopped or reconnected. Candidate retrieval uses
+    // this wider, bounded horizon so the model can see those fragments; it
+    // still has to identify the same continuing sitting from transcript,
+    // timing and recurring-speaker evidence before anything is merged.
+    memoryContinuationLookbackMs: integer('NEORECALL_MEMORY_CONTINUATION_LOOKBACK_MS', 2 * 60 * 60_000, { min: 0 }),
     // Manual consolidation is structural work first and an optional prose
     // rewrite second. Keep the request bounded for database/query safety while
     // allowing a person to clean up a substantial backlog in one operation.

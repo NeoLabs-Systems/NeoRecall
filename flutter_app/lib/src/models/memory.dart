@@ -49,8 +49,9 @@ class RecallMemory {
       emoji: (json['emoji'] as String?)?.trim().isNotEmpty == true
           ? json['emoji'] as String
           : _fallbackEmoji(json['type'] as String?),
-      importance: (json['importance_override'] ?? json['importance'] as num? ?? 5)
-          .toDouble(),
+      importance:
+          (json['importance_override'] ?? json['importance'] as num? ?? 5)
+              .toDouble(),
       startedAt: DateTime.parse(json['started_at'] as String),
       endedAt: json['ended_at'] != null
           ? DateTime.tryParse(json['ended_at'] as String)
@@ -141,17 +142,20 @@ class MiniMemory {
       id: json['public_id'] as String,
       kind: json['kind'] as String? ?? 'fact',
       text: json['text_en'] as String? ?? '',
-      importance: (json['importance_override'] ?? json['importance'] as num? ?? 5)
-          .toDouble(),
+      importance:
+          (json['importance_override'] ?? json['importance'] as num? ?? 5)
+              .toDouble(),
       status: json['status'] as String?,
       occurredAt: parseOptional(json['occurred_at']),
       dueAt: parseOptional(json['due_at']),
       createdAt: parseOptional(json['created_at']),
-      timelineAt: parseOptional(json['timeline_at']) ??
+      timelineAt:
+          parseOptional(json['timeline_at']) ??
           parseOptional(json['occurred_at']) ??
           parseOptional(json['due_at']) ??
           parseOptional(json['created_at']),
-      memoryId: memory?['public_id'] as String? ??
+      memoryId:
+          memory?['public_id'] as String? ??
           json['memory_public_id'] as String?,
       memoryTitle: memory?['title_en'] as String?,
       memoryEmoji: memory?['emoji'] as String?,

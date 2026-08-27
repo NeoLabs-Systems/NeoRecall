@@ -29,17 +29,7 @@ abstract class NeoRecallAppWidget : AppWidgetProvider() {
     context: Context,
     appWidgetManager: AppWidgetManager,
     appWidgetIds: IntArray,
-  ) {
-    appWidgetIds.forEach { appWidgetId ->
-      appWidgetManager.updateAppWidget(
-        appWidgetId,
-        kind.renderer.render(context, appWidgetManager, appWidgetId),
-      )
-    }
-    kind.renderer.collectionViewId?.let { viewId ->
-      appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, viewId)
-    }
-  }
+  ) = WidgetUpdater.refresh(context.applicationContext, appWidgetManager, kind, appWidgetIds)
 
   override fun onAppWidgetOptionsChanged(
     context: Context,
@@ -48,9 +38,11 @@ abstract class NeoRecallAppWidget : AppWidgetProvider() {
     newOptions: Bundle,
   ) {
     super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
-    appWidgetManager.updateAppWidget(
-      appWidgetId,
-      kind.renderer.render(context, appWidgetManager, appWidgetId),
+    WidgetUpdater.refresh(
+      context.applicationContext,
+      appWidgetManager,
+      kind,
+      intArrayOf(appWidgetId),
     )
   }
 

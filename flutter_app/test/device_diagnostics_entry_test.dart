@@ -20,12 +20,12 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
 
-    await tester.ensureVisible(find.text('Bluetooth device'));
-    await tester.tap(find.text('Bluetooth device'));
+    await tester.ensureVisible(find.text('Wearable'));
+    await tester.tap(find.text('Wearable'));
     await tester.pump();
 
     final statusLine = find.text(
-      'Connect a supported Bluetooth device before starting this source.',
+      'Connect a supported streaming wearable before starting this source.',
     );
     expect(statusLine, findsOneWidget);
     // Nothing on screen advertises diagnostics before the gesture.
@@ -49,11 +49,11 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
 
-    await tester.ensureVisible(find.text('Bluetooth device'));
-    await tester.tap(find.text('Bluetooth device'));
+    await tester.ensureVisible(find.text('Wearable'));
+    await tester.tap(find.text('Wearable'));
     await tester.pump();
     final statusLine = find.text(
-      'Connect a supported Bluetooth device before starting this source.',
+      'Connect a supported streaming wearable before starting this source.',
     );
     await tester.ensureVisible(statusLine);
     await tester.pumpAndSettle();

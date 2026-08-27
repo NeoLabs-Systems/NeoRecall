@@ -63,9 +63,9 @@ void main() {
       ),
     );
 
-    expect(find.text('Bluetooth device'), findsOneWidget);
-    await tester.ensureVisible(find.text('Bluetooth device'));
-    await tester.tap(find.text('Bluetooth device'));
+    expect(find.text('Wearable'), findsOneWidget);
+    await tester.ensureVisible(find.text('Wearable'));
+    await tester.tap(find.text('Wearable'));
     await tester.pump();
     expect(find.text('Scan for wearables'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -86,12 +86,24 @@ void main() {
           ),
         );
 
-        expect(find.text('Bluetooth device'), findsOneWidget);
+        expect(find.text('Wearable'), findsOneWidget);
         expect(find.text('Phone microphone'), findsOneWidget);
+
+        // The page opens on the phone, which needs nothing set up, so the
+        // wearable's controls are behind its own option rather than shown to
+        // everybody who has no wearable.
+        expect(find.text('Scan for wearables'), findsNothing);
+
+        final Finder wearable = find.text('Wearable');
+        await tester.ensureVisible(wearable);
+        await tester.pumpAndSettle();
+        await tester.tap(wearable);
+        await tester.pumpAndSettle();
+
         expect(find.text('Scan for wearables'), findsOneWidget);
         expect(
           find.text(
-            'Connect a supported Bluetooth device before starting this source.',
+            'Connect a supported streaming wearable before starting this source.',
           ),
           findsOneWidget,
         );
@@ -194,18 +206,21 @@ void main() {
     );
 
     expect(find.text('Connected'), findsNothing);
-    expect(find.text('Devices'), findsNothing);
+    expect(find.text('Account devices'), findsNothing);
     expect(find.byTooltip('Settings'), findsOneWidget);
     expect(find.byTooltip('Sign out'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pump();
     expect(find.text('Settings areas'), findsOneWidget);
-    expect(find.text('Devices'), findsOneWidget);
+    expect(find.text('Account devices'), findsOneWidget);
 
-    await tester.tap(find.text('Devices'));
+    await tester.tap(find.text('Account devices'));
     await tester.pump();
-    expect(find.text('No registered devices'), findsOneWidget);
+    expect(find.text('No devices yet'), findsOneWidget);
+    // An empty list has to offer the way out of being empty. Pointing at another
+    // screen instead is how somebody ends up unable to find their own hardware.
+    expect(find.text('Add a NeoRecall Desk'), findsOneWidget);
     expect(find.textContaining('Backend URL'), findsNothing);
     expect(find.text('Client'), findsNothing);
   });

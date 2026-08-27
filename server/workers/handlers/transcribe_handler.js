@@ -181,6 +181,12 @@ function persistSegments(chunk, inferred) {
       searchIndex.upsertDocument({ userId: chunk.user_id, kind: 'segment', sourceId: Number(result.lastInsertRowid), body: segment.text,
         occurredAt: new Date(segment.startMs).toISOString(), importance: 0 }, db);
     }
+    const collapsedClusters = recurringMatching
+      ? matching.collapseSessionClustersByVoiceprint(db, { userId: chunk.user_id, sessionId: chunk.session_id })
+      : 0;
+    if (collapsedClusters) logger.info('Collapsed duplicate session speaker clusters', {
+      userId: chunk.user_id, sessionId: chunk.session_id, clusters: collapsedClusters,
+    });
     db.prepare(`UPDATE audio_chunks SET state='persisted_cleanup_pending',transcript_sha256=?,transcript_segment_count=?,
       persisted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error_code=NULL,error_message=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
       .run(checksum, clean.length, chunk.id);
@@ -241,6 +247,20 @@ async function handle(job, inference) {
     VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));
   const count = persistSegments(chunk, segments);
   captureSpeakerPreviews(chunk, count);
+  if (count && userSettings.recurringSpeakerMatching) {
+    try {
+      const result = require('../../services/speakers/speaker_service').reevaluate(chunk.user_id);
+      if (result.mergedCount) logger.info('Reconciled recurring speaker profiles', {
+        userId: chunk.user_id, merged: result.mergedCount, remaining: result.remainingCount,
+      });
+    } catch (error) {
+      // Identity cleanup is derived state. It must never prevent audio deletion
+      // and the terminal receipt after transcript persistence has succeeded.
+      logger.warn('Recurring speaker reconciliation failed', {
+        userId: chunk.user_id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
+      });
+    }
+  }
   return finishCleanup(chunk, count);
 }
 

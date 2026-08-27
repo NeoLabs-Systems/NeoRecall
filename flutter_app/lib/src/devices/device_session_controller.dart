@@ -62,6 +62,13 @@ class DeviceSessionController {
   /// being recorded, so reconnect, device-storage sync, and upload keep running.
   bool get linkDesired => preferBluetooth && hasPreferredDevice;
 
+  /// Whether the transport is linked right now. A preferred device and an
+  /// active adapter only describe what should connect; neither proves that the
+  /// BLE link exists.
+  bool get isConnected =>
+      state == DeviceTransportState.connectedStandby ||
+      state == DeviceTransportState.recording;
+
   bool get hasPreferredDevice {
     final device = preferredDevice;
     return device != null && registry[device.adapterId] != null;

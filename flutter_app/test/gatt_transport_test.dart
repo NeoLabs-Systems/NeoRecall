@@ -29,115 +29,91 @@ void main() {
       transport.lastScanSpec!.serviceUuids,
       contains(WearableDeviceUuids.heyPocketService),
     );
+    expect(
+      transport.lastScanSpec!.namePrefixes,
+      contains('PK01'),
+      reason: 'PK01_BLUE firmware omits its protocol service while advertising',
+    );
     await adapter.dispose();
   });
 
-  test(
-    'HeyPocket is discovered as a compatible device and connects',
-    () async {
-      final transport = _FakeGattTransport();
-      final adapter = DeviceAdapter(gatt: transport);
-      final discovery = expectLater(
-        adapter.discoveries,
-        emits(
-          isA<AudioDeviceDescriptor>()
-              .having((device) => device.displayName, 'name', 'Pocket')
-              .having((device) => device.metadata['type'], 'type', 'heyPocket')
-              .having(
-                (device) => device.metadata['compatibilityUnknown'],
-                'compatibility',
-                isFalse,
-              )
-              .having(
-                (device) => device.supportsMicrophone,
-                'microphone',
-                isTrue,
-              ),
-        ),
-      );
+  test('HeyPocket is discovered as a compatible device and connects', () async {
+    final transport = _FakeGattTransport();
+    final adapter = DeviceAdapter(gatt: transport);
+    final discovery = expectLater(
+      adapter.discoveries,
+      emits(
+        isA<AudioDeviceDescriptor>()
+            .having((device) => device.displayName, 'name', 'PK01_BLUE')
+            .having((device) => device.metadata['type'], 'type', 'heyPocket')
+            .having(
+              (device) => device.metadata['compatibilityUnknown'],
+              'compatibility',
+              isFalse,
+            )
+            .having(
+              (device) => device.supportsMicrophone,
+              'microphone',
+              isTrue,
+            ),
+      ),
+    );
 
-      await adapter.startScan();
-      transport.emitPeripheral(
-        const GattPeripheral(
-          id: 'pocket-device',
-          name: 'Pocket',
-          serviceUuids: <String>[],
-        ),
-      );
-      await discovery;
+    await adapter.startScan();
+    transport.emitPeripheral(
+      const GattPeripheral(
+        id: 'pocket-device',
+        name: 'PK01_BLUE',
+        serviceUuids: <String>[],
+      ),
+    );
+    await discovery;
 
-      // A validated, locally decodable device connects directly through the
-      // shared adapter without the unknown-device probe path.
-      final connected = expectLater(
-        adapter.transportStates,
-        emitsThrough(DeviceTransportState.connectedStandby),
-      );
-      const descriptor = AudioDeviceDescriptor(
-        adapterId: 'omi_family',
-        deviceKey: 'pocket-device',
-        displayName: 'Pocket',
-        transport: 'bluetooth_le',
-        metadata: <String, Object?>{
-          'type': 'heyPocket',
-          'serviceUuids': <String>[],
-        },
-      );
-      await adapter.connect(descriptor);
-      await connected;
-      expect(transport.pairCalls, 0);
-      await adapter.dispose();
-    },
-  );
+    // A validated, locally decodable device connects directly through the
+    // shared adapter without the unknown-device probe path.
+    final connected = expectLater(
+      adapter.transportStates,
+      emitsThrough(DeviceTransportState.connectedStandby),
+    );
+    const descriptor = AudioDeviceDescriptor(
+      adapterId: 'omi_family',
+      deviceKey: 'pocket-device',
+      displayName: 'PK01_BLUE',
+      transport: 'bluetooth_le',
+      metadata: <String, Object?>{
+        'type': 'heyPocket',
+        'serviceUuids': <String>[],
+      },
+    );
+    await adapter.connect(descriptor);
+    await connected;
+    expect(transport.pairCalls, 0);
+    await adapter.dispose();
+  });
 
-  test(
-    'an unrecognized in-range device is surfaced and probed before being saved',
-    () async {
-      final transport = _FakeGattTransport()
-        ..discoveredServiceUuids = const <String>['unknown-service'];
-      final adapter = DeviceAdapter(gatt: transport);
-      final discovery = expectLater(
-        adapter.discoveries,
-        emits(
-          isA<AudioDeviceDescriptor>()
-              .having((device) => device.displayName, 'name', 'Gizmo')
-              .having(
-                (device) => device.metadata['compatibilityUnknown'],
-                'compatibility',
-                isTrue,
-              ),
-        ),
-      );
+  test('unrecognized in-range devices are not shown or probed', () async {
+    final transport = _FakeGattTransport()
+      ..discoveredServiceUuids = const <String>['unknown-service'];
+    final adapter = DeviceAdapter(gatt: transport);
+    final discoveries = <AudioDeviceDescriptor>[];
+    final subscription = adapter.discoveries.listen(discoveries.add);
 
-      await adapter.startScan();
-      transport.emitPeripheral(
-        const GattPeripheral(
-          id: 'gizmo-device',
-          name: 'Gizmo',
-          serviceUuids: <String>[],
-        ),
-      );
-      await discovery;
-      const descriptor = AudioDeviceDescriptor(
-        adapterId: 'omi_family',
-        deviceKey: 'gizmo-device',
-        displayName: 'Gizmo',
-        transport: 'bluetooth_le',
-        supportsMicrophone: false,
-        metadata: <String, Object?>{
-          'type': 'custom',
-          'compatibilityUnknown': true,
-        },
-      );
-      await expectLater(adapter.connect(descriptor), throwsUnsupportedError);
-      expect(transport.pairCalls, 1);
-      expect(
-        transport.discoverServicesCalls,
-        2,
-        reason: 'services are refreshed after pairing',
-      );
-      await adapter.dispose();
-    },
-  );
+    await adapter.startScan();
+    transport.emitPeripheral(
+      const GattPeripheral(
+        id: 'gizmo-device',
+        name: 'Gizmo',
+        serviceUuids: <String>[],
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(discoveries, isEmpty);
+    expect(transport.discoverServicesCalls, 0);
+    expect(transport.pairCalls, 0);
+    await subscription.cancel();
+    await adapter.dispose();
+  });
 
   test('unexpected disconnect resumes an active wearable recording', () async {
     final transport = _FakeGattTransport();

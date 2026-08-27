@@ -39,88 +39,89 @@ class _SecuritySectionState extends State<SecuritySection> {
     return SettingsSectionList(
       controller: widget.controller,
       children: <Widget>[
-      SectionCard(
-        eyebrow: 'SECURITY',
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Two-factor authentication',
-              style: TextStyle(
-                color: palette.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
+        SectionCard(
+          eyebrow: 'SECURITY',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Two-factor authentication',
+                style: TextStyle(
+                  color: palette.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Protect your account with an authenticator app.',
-              style: TextStyle(color: palette.textSecondary, height: 1.45),
-            ),
-            const SizedBox(height: 16),
-            if (ctrl.isConfiguringTwoFactor)
-              const Center(child: CircularProgressIndicator())
-            else if (isEnabled) ...<Widget>[
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: palette.accent, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    '2FA is enabled ($recoveryCodesRemaining recovery codes remaining)',
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 6),
+              Text(
+                'Protect your account with an authenticator app.',
+                style: TextStyle(color: palette.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  OutlinedButton(
-                    onPressed: () => _disableTwoFactor(ctrl),
-                    child: const Text('Disable 2FA'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () => _regenerateRecoveryCodes(ctrl),
-                    child: const Text('Regenerate codes'),
-                  ),
-                ],
-              ),
-            ] else ...<Widget>[
-              Row(
-                children: [
-                  const Icon(
-                    Icons.warning_amber_rounded,
-                    color: Colors.amber,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '2FA is not enabled',
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontWeight: FontWeight.w600,
+              if (ctrl.isConfiguringTwoFactor)
+                const Center(child: CircularProgressIndicator())
+              else if (isEnabled) ...<Widget>[
+                Row(
+                  children: [
+                    Icon(Icons.check_circle, color: palette.accent, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '2FA is enabled ($recoveryCodesRemaining recovery codes remaining)',
+                      style: TextStyle(
+                        color: palette.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => _setupTwoFactor(ctrl),
-                child: const Text('Enable 2FA'),
-              ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => _disableTwoFactor(ctrl),
+                      child: const Text('Disable 2FA'),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () => _regenerateRecoveryCodes(ctrl),
+                      child: const Text('Regenerate codes'),
+                    ),
+                  ],
+                ),
+              ] else ...<Widget>[
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.amber,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '2FA is not enabled',
+                      style: TextStyle(
+                        color: palette.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => _setupTwoFactor(ctrl),
+                  child: const Text('Enable 2FA'),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-      SectionCard(
-        eyebrow: 'SECURITY KEYS',
-        child: _securityKeysCard(palette, ctrl),
-      ),
-      _dangerZone(ctrl),
-    ]);
+        SectionCard(
+          eyebrow: 'SECURITY KEYS',
+          child: _securityKeysCard(palette, ctrl),
+        ),
+        _dangerZone(ctrl),
+      ],
+    );
   }
 
   Widget _securityKeysCard(NeoRecallPalette palette, NeoRecallController ctrl) {
@@ -215,7 +216,6 @@ class _SecuritySectionState extends State<SecuritySection> {
     );
   }
 
-
   /// The only irreversible action in the app, so it is deliberately the last
   /// thing in the last section rather than a menu item next to "Rename".
   Future<void> _deleteAccount(NeoRecallController ctrl) async {
@@ -229,7 +229,9 @@ class _SecuritySectionState extends State<SecuritySection> {
     // logout() has already cleared the session, so the app is back at sign-in.
     // Confirm what happened rather than dropping the user somewhere silently.
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Your account and all its data were deleted.')),
+      const SnackBar(
+        content: Text('Your account and all its data were deleted.'),
+      ),
     );
   }
 

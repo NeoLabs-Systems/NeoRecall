@@ -162,7 +162,8 @@ class LinearResampler {
 
     final step = inputRate / outputRate;
     final n = input.length;
-    int sampleAt(int index) => index < 0 ? (_previousTail ?? input[0]) : input[index];
+    int sampleAt(int index) =>
+        index < 0 ? (_previousTail ?? input[0]) : input[index];
 
     final out = <int>[];
     var position = _position;

@@ -137,8 +137,7 @@ class _OrbPainter extends CustomPainter {
           );
 
     for (var index = 0; index < CaptureOrb.ticks; index += 1) {
-      final angle =
-          -math.pi / 2 + index * 2 * math.pi / CaptureOrb.ticks;
+      final angle = -math.pi / 2 + index * 2 * math.pi / CaptureOrb.ticks;
       final direction = Offset(math.cos(angle), math.sin(angle));
       canvas.drawLine(
         center + direction * ringRadius,

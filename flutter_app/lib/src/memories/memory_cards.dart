@@ -9,7 +9,10 @@ import 'memory_formatting.dart';
 
 class SearchField extends StatelessWidget {
   const SearchField({
-    super.key,required this.controller, required this.onChanged});
+    super.key,
+    required this.controller,
+    required this.onChanged,
+  });
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
@@ -333,8 +336,7 @@ class ActionIcon extends StatelessWidget {
 }
 
 class DailySummaryCard extends StatelessWidget {
-  const DailySummaryCard({
-    super.key,required this.summary});
+  const DailySummaryCard({super.key, required this.summary});
 
   final Map summary;
 
@@ -548,8 +550,7 @@ class MemoryCard extends StatelessWidget {
 }
 
 class SoftPill extends StatelessWidget {
-  const SoftPill({
-    super.key,required this.label});
+  const SoftPill({super.key, required this.label});
 
   final String label;
 

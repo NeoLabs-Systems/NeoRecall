@@ -30,6 +30,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       final local = moment.startedAt.toLocal();
       return DateTime(local.year, local.month, local.day);
     }
+
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
@@ -77,13 +78,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
               padding: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  for (var index = 0; index < moments.length; index++) ...<Widget>[
+                  for (
+                    var index = 0;
+                    index < moments.length;
+                    index++
+                  ) ...<Widget>[
                     if (index == 0 ||
                         dayOf(moments[index - 1]) != dayOf(moments[index]))
                       _DayHeader(
                         day: dayOf(moments[index]),
                         groupCount: moments
-                            .where((moment) => dayOf(moment) == dayOf(moments[index]))
+                            .where(
+                              (moment) =>
+                                  dayOf(moment) == dayOf(moments[index]),
+                            )
                             .length,
                       ),
                     _TimelineEntry(
@@ -92,7 +100,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       lastInDay:
                           index == moments.length - 1 ||
                           dayOf(moments[index + 1]) != dayOf(moments[index]),
-                      busy: controller.reprocessingMomentId == moments[index].id,
+                      busy:
+                          controller.reprocessingMomentId == moments[index].id,
                       onReprocess: moments[index].canReprocess
                           ? () => controller.reprocessMoment(moments[index].id!)
                           : null,
@@ -118,7 +127,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           // A long history does not fit in one page, and the reader needs to
           // know where in it they are standing rather than watching a list
           // grow without end.
-          if (controller.hasOlderMoments || controller.hasNewerMoments) ...<Widget>[
+          if (controller.hasOlderMoments ||
+              controller.hasNewerMoments) ...<Widget>[
             const SizedBox(height: 20),
             _TimelinePager(controller: controller),
           ],
@@ -247,7 +257,10 @@ class _TimelineEntry extends StatelessWidget {
         .toSet()
         .toList();
     final visible = expanded ? segments : segments.take(2).toList();
-    final hidden = (moment.segmentCount - visible.length).clamp(0, moment.segmentCount);
+    final hidden = (moment.segmentCount - visible.length).clamp(
+      0,
+      moment.segmentCount,
+    );
     // A conversation that is still being recorded carries a provisional
     // account of itself so it can be read before it ends; it is refined once
     // the conversation closes.
@@ -412,10 +425,8 @@ class _TimelineEntry extends StatelessWidget {
                         runSpacing: 5,
                         children: topics
                             .map(
-                              (topic) => _TopicChip(
-                                label: topic,
-                                palette: palette,
-                              ),
+                              (topic) =>
+                                  _TopicChip(label: topic, palette: palette),
                             )
                             .toList(),
                       ),

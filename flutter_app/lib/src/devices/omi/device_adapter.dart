@@ -18,8 +18,7 @@ import 'offline_sync.dart';
 /// family. This avoids competing browser choosers/native scans while keeping
 /// every device's wire protocol in its own connector.
 class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
-  DeviceAdapter({GattTransport? gatt})
-    : _gatt = gatt ?? createGattTransport();
+  DeviceAdapter({GattTransport? gatt}) : _gatt = gatt ?? createGattTransport();
 
   /// Primary services used to select supported wearables during the scan.
   static const List<String> _serviceUuids = <String>[
@@ -64,6 +63,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         ? connector as WearableOfflineSync
         : null;
   }
+
   WearableAudioDecoder? _decoder;
   WearableAudioDecoder? _frameDecoder;
   OmiFrameAssembler? _assembler;
@@ -129,9 +129,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         serviceUuids: _serviceUuids,
         optionalServiceUuids: _secondaryServiceUuids,
         namePrefixes: <String>[
-          'Pocket',
-          'HeyPocket',
-          'PKT01',
+          ...DiscoveredWearable.heyPocketNamePrefixes,
           // Omi/OmiGlass advertise their 128-bit service, but include the name
           // prefixes too so discovery still works on platforms/firmware that do
           // not put the service UUID in the advertisement (scan filters are OR).
@@ -176,8 +174,12 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         'locallyDecodable': locallyDecodable,
       },
     );
-    if ((!identityValidated || !locallyDecodable) &&
-        type != WearableDeviceType.custom) {
+    // Never list arbitrary nearby BLE peripherals. Compatibility probing used
+    // to happen only after a user tapped one of those rows, which filled the UI
+    // with unrelated watches, TVs, and accessories while the real PK01 name was
+    // missed. A supported device must identify itself by its protocol service
+    // or one of the protocol's advertised names before it reaches the UI.
+    if (!identityValidated || !locallyDecodable) {
       return;
     }
     _found[wearable.id] = wearable;
@@ -201,9 +203,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
             name.startsWith('openglass'),
       WearableDeviceType.heyPocket =>
         has(WearableDeviceUuids.heyPocketService) ||
-            name.contains('heypocket') ||
-            name.startsWith('pkt01') ||
-            name.startsWith('pocket'),
+            DiscoveredWearable.hasHeyPocketName(device.name),
       WearableDeviceType.custom => false,
     };
   }

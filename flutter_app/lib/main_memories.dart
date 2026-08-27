@@ -9,7 +9,6 @@ import 'src/memories/memory_detail_sheets.dart';
 import 'src/models/memory.dart';
 import 'src/widgets/selection_mixin.dart';
 
-
 class MemoriesScreen extends StatefulWidget {
   const MemoriesScreen({super.key, required this.controller});
 
@@ -327,8 +326,7 @@ class _MemoriesScreenState extends State<MemoriesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) =>
-          MiniDetailSheet(controller: controller, mini: mini),
+      builder: (context) => MiniDetailSheet(controller: controller, mini: mini),
     );
   }
 
@@ -459,4 +457,3 @@ class _MemoriesScreenState extends State<MemoriesScreen>
     );
   }
 }
-

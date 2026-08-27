@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -26,6 +25,9 @@ import 'src/models/recording.dart';
 import 'src/models/recording_context.dart';
 import 'src/models/speaker.dart';
 import 'src/models/timeline_moment.dart';
+import 'src/devices/appliance/appliance_controller.dart';
+import 'src/devices/appliance/appliance_link.dart';
+import 'src/devices/ble/gatt_transport.dart';
 import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
@@ -304,7 +306,7 @@ class NeoRecallController extends ChangeNotifier
       miniMemories: miniMemories,
       now: DateTime.now(),
       deviceLabel: preferredDeviceLabel ?? device?.displayName,
-      deviceConnected: audioDeviceSessions.activeAdapter != null,
+      deviceConnected: deviceConnected,
       deviceBatteryPercent: preferredDeviceBatteryLevel,
       devicePendingSeconds: deviceStoragePendingSeconds,
       dayInReview: _todaysSummary(),
@@ -388,7 +390,7 @@ class NeoRecallController extends ChangeNotifier
         mobile.background.active.isNotEmpty
             ? (
                 BackgroundLivePhase.connected,
-                'NeoRecall stays connected',
+                mobile.background.active.notificationTitle,
                 mobile.background.active.statusDetail,
               )
             : (
@@ -665,6 +667,53 @@ class NeoRecallController extends ChangeNotifier
             .supportsConcurrentCapture;
   }
 
+  ApplianceController? _appliance;
+
+  /// The controller for a NeoRecall Desk appliance, created on first use.
+  ///
+  /// It is deliberately not part of the capture stack. The appliance records and
+  /// uploads on its own, so this is a remote control for a device that already
+  /// works without the app, not another source of audio the app has to manage.
+  ApplianceController get appliance => _appliance ??= ApplianceController(
+    link: ApplianceLink(transport: createGattTransport()),
+    mintApiKey: _mintApplianceKey,
+    backendUrl: () => backendUrl,
+    timezone: () => _cachedSettings['timezone'] as String? ?? 'UTC',
+    rememberedDevice: () => _preferences?.getString(_applianceKey()),
+    rememberDevice: (String? id) async {
+      _preferences ??= await SharedPreferences.getInstance();
+      if (id == null) {
+        await _preferences!.remove(_applianceKey());
+      } else {
+        await _preferences!.setString(_applianceKey(), id);
+      }
+    },
+  );
+
+  /// Per account, so signing in as somebody else does not inherit their device.
+  String _applianceKey() => 'applianceDeviceId:${accountId ?? ''}';
+
+  /// Create the access key the appliance will use, scoped to ingest alone.
+  ///
+  /// Doing this here is what removes the last thing a user would otherwise have
+  /// to type into a device with no keyboard. `ingest:write` also covers the
+  /// one-time device registration, so nothing broader is needed.
+  Future<String> _mintApplianceKey(String name) async {
+    final response = await api.request(
+      'POST',
+      '/api/v1/api-keys',
+      body: <String, Object?>{
+        'name': name,
+        'scopes': <String>['ingest:write'],
+      },
+    );
+    final token = response is Map ? response['token'] : null;
+    if (token is! String || token.isEmpty) {
+      throw StateError('the server did not return an access key');
+    }
+    return token;
+  }
+
   @override
   String get backendUrl {
     if (api.baseUrl.isNotEmpty) return api.baseUrl;
@@ -796,6 +845,12 @@ class NeoRecallController extends ChangeNotifier
           'backendMode': kIsWeb ? 'same_origin' : 'configured',
         },
       );
+      if (authenticated) {
+        // In the background: the Desk is meant to be reachable from the app
+        // without anybody setting it up again, and a device that is simply
+        // switched off must not delay sign-in.
+        unawaited(appliance.reconnectToRemembered());
+      }
       if (!_deviceRuntimeInitialized) {
         if (recorder is MobileRecallRecorder) {
           await (recorder as MobileRecallRecorder).initialize(
@@ -2525,7 +2580,38 @@ class NeoRecallController extends ChangeNotifier
   /// otherwise let the system suspend always-on background capture.
   Future<void> openBatterySettings() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    await openAppSettings();
+    final mobile = recorder;
+    if (mobile is! MobileRecallRecorder) return;
+    final background = mobile.background;
+    if (background is! BatteryOptimizationControl) return;
+    final battery = background as BatteryOptimizationControl;
+    try {
+      if (!await battery.batteryOptimizationExempt()) {
+        await battery.requestBatteryOptimizationExemption();
+      }
+      await _refreshBatteryOptimizationRisk(mobile);
+    } catch (error) {
+      warning =
+          'Android could not open the battery-optimization request: $error';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _refreshBatteryOptimizationRisk(
+    MobileRecallRecorder mobile,
+  ) async {
+    final background = mobile.background;
+    if (background is! BatteryOptimizationControl) return;
+    final battery = background as BatteryOptimizationControl;
+    try {
+      final exempt = await battery.batteryOptimizationExempt();
+      if (exempt && backgroundCaptureAtRisk) {
+        backgroundCaptureAtRisk = false;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Advisory only. A failed status read must not affect capture or upload.
+    }
   }
 
   /// Called when the app returns to the foreground. Proactively resumes sync and
@@ -2536,6 +2622,7 @@ class NeoRecallController extends ChangeNotifier
       // Re-arm a runtime the user released from the notification, and retry a
       // microphone capture that could not resume while no UI was attached.
       await mobile.resumeBackgroundRuntime();
+      await _refreshBatteryOptimizationRisk(mobile);
       if (_supportsDurableMobileResume) {
         unawaited(_resumeMobileCaptureIfRequested());
       }
@@ -2915,6 +3002,7 @@ class NeoRecallController extends ChangeNotifier
     _backgroundSubscription?.cancel();
     _mobileInterruptionSubscription?.cancel();
     _syncProgressSub?.cancel();
+    _appliance?.dispose();
     deviceStorageSync.dispose();
     sync.close();
     disposeRecordingContext();

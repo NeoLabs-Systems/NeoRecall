@@ -75,6 +75,7 @@ class DeviceStorageSyncScheduler {
 
   Timer? _timer;
   Future<void>? _inFlight;
+
   /// Follow-up sweep shared by every request that arrived while a sweep was
   /// already running, so concurrent taps produce one extra sweep, not N.
   Future<void>? _queued;
@@ -190,9 +191,7 @@ class DeviceStorageSyncScheduler {
       return;
     }
     _consecutiveFailures += 1;
-    _quietUntil = _clock().add(
-      policy.backoffForFailures(_consecutiveFailures),
-    );
+    _quietUntil = _clock().add(policy.backoffForFailures(_consecutiveFailures));
   }
 
   void dispose() {

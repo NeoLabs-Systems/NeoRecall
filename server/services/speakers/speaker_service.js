@@ -53,6 +53,8 @@ function merge(userId, targetId, sourceId) {
   const centroid = mergedCentroid(target, source);
   const db = getDatabase();
   db.transaction(() => {
+    const affectedConversations = db.prepare(`SELECT DISTINCT conversation_id FROM conversation_speakers
+      WHERE voiceprint_id IN (?,?)`).all(targetId, sourceId).map((row) => row.conversation_id);
     const targetPreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(targetId);
     const sourcePreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(sourceId);
     const sourceSelection = sourcePreview && {
@@ -79,8 +81,13 @@ function merge(userId, targetId, sourceId) {
     db.prepare('UPDATE speaker_turns SET voiceprint_id=? WHERE voiceprint_id=? AND user_id=?').run(targetId, sourceId, userId);
     db.prepare('UPDATE conversation_speakers SET voiceprint_id=? WHERE voiceprint_id=?').run(targetId, sourceId);
     db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=COALESCE(display_name,?),
-      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(centroid.buffer, centroid.total, source.display_name, targetId, userId);
+      entity_id=COALESCE(entity_id,?),
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(
+      centroid.buffer, centroid.total, source.display_name, source.entity_id, targetId, userId,
+    );
     db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(sourceId, userId);
+    const membership = require('../conversations/conversation_membership_service');
+    for (const conversationId of affectedConversations) membership.rebuildConversationSpeakers(db, userId, conversationId);
   })();
   return getOwned(userId, targetId);
 }
@@ -94,6 +101,7 @@ function mergeMany(userId, targetId, sourceIds) {
 }
 
 function sameExplicitIdentity(first, second) {
+  if (first.entity_id && second.entity_id && first.entity_id !== second.entity_id) return false;
   const firstName = first.display_name?.trim();
   const secondName = second.display_name?.trim();
   return !firstName || !secondName || firstName === secondName;
@@ -112,14 +120,12 @@ function rankedPeers(row, rows) {
     .sort((left, right) => right.score - left.score);
 }
 
-function reevaluationPairs(rows, { voiceMatchThreshold, voiceMatchMargin }) {
+function reevaluationPairs(rows, { voiceMatchThreshold }) {
   const matches = new Map();
   for (const row of rows) {
     const ranked = rankedPeers(row, rows);
     const best = ranked[0];
-    const runnerUp = ranked[1];
-    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold
-      && (!runnerUp || best.score - runnerUp.score >= voiceMatchMargin)) {
+    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold) {
       matches.set(row.id, best);
     }
   }

@@ -49,7 +49,8 @@ class TimelineMoment {
   /// Set aside after repeated failures; the transcript is unaffected.
   bool get isSetAside => quarantined;
 
-  bool get hasWriteUp => (titleEn ?? '').trim().isNotEmpty || (summaryEn ?? '').trim().isNotEmpty;
+  bool get hasWriteUp =>
+      (titleEn ?? '').trim().isNotEmpty || (summaryEn ?? '').trim().isNotEmpty;
 
   /// A moment can be written up again only once it is finished.
   bool get canReprocess => id != null && !isPending && !isLive;
@@ -71,12 +72,16 @@ class TimelineMoment {
         .where((topic) => topic.trim().isNotEmpty)
         .toList(),
     memoryWorthy: json['memoryWorthy'] as bool?,
-    refinedAt: json['refinedAt'] == null ? null : DateTime.tryParse(json['refinedAt'].toString()),
+    refinedAt: json['refinedAt'] == null
+        ? null
+        : DateTime.tryParse(json['refinedAt'].toString()),
     quarantined: json['quarantined'] == true,
     segmentCount: (json['segmentCount'] as num?)?.toInt() ?? 0,
     segments: ((json['segments'] as List?) ?? const <dynamic>[])
         .cast<Map>()
-        .map((row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)))
+        .map(
+          (row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)),
+        )
         .toList(),
   );
 }

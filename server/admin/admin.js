@@ -96,6 +96,7 @@ const settingLabels = {
   minMemoryEvidenceMs: 'Minimum memory evidence (ms)',
   minMemoryEvidenceChars: 'Minimum memory evidence characters',
   maxConsolidationInputChars: 'Maximum consolidation characters',
+  memoryContinuationLookbackMs: 'Cross-recording memory continuation lookback (ms)',
 };
 
 function renderSettings(settings) {

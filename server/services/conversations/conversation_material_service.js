@@ -59,7 +59,14 @@ function isComplete(userId, conversationId, database = getDatabase()) {
   });
 }
 
-const SEGMENT_PROJECTION = `SELECT public_id id,started_at,ended_at,text,language,speaker_cluster_id speakerClusterId
+const SEGMENT_PROJECTION = `SELECT public_id id,started_at,ended_at,text,language,speaker_cluster_id speakerClusterId,
+  (SELECT st.voiceprint_id FROM speaker_turns st
+    WHERE st.chunk_id=transcript_segments.chunk_id
+      AND st.cluster_id=transcript_segments.speaker_cluster_id
+      AND st.voiceprint_id IS NOT NULL
+      AND st.start_ms<=transcript_segments.chunk_start_ms
+      AND st.end_ms>=transcript_segments.chunk_end_ms
+    ORDER BY st.start_ms LIMIT 1) speakerVoiceprintId
   FROM transcript_segments WHERE conversation_id=? AND user_id=?`;
 const SEGMENT_ORDER = 'ORDER BY started_at,ended_at,public_id';
 

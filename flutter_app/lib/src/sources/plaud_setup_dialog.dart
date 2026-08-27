@@ -40,13 +40,17 @@ class _PlaudSetupDialogState extends State<PlaudSetupDialog> {
         'accessToken': token,
         'pollMinutes': _pollMinutes,
       };
-      final check = await widget.controller.api.request(
-            'POST',
-            '/api/v1/sources/verify',
-            body: <String, Object?>{'type': 'plaud', 'config': config},
-          ) as Map;
+      final check =
+          await widget.controller.api.request(
+                'POST',
+                '/api/v1/sources/verify',
+                body: <String, Object?>{'type': 'plaud', 'config': config},
+              )
+              as Map;
       if (check['ok'] != true) {
-        throw StateError(check['error']?.toString() ?? 'PLAUD rejected the token.');
+        throw StateError(
+          check['error']?.toString() ?? 'PLAUD rejected the token.',
+        );
       }
       final name = _nameController.text.trim();
       await widget.controller.api.request(
@@ -99,7 +103,8 @@ class _PlaudSetupDialogState extends State<PlaudSetupDialog> {
               enableSuggestions: false,
               decoration: const InputDecoration(
                 labelText: 'PLAUD access token',
-                helperText: 'Stored only on your NeoRecall server, never shown again.',
+                helperText:
+                    'Stored only on your NeoRecall server, never shown again.',
               ),
               enabled: !_saving,
             ),
@@ -117,10 +122,15 @@ class _PlaudSetupDialogState extends State<PlaudSetupDialog> {
               ),
               items: const <DropdownMenuItem<int>>[
                 DropdownMenuItem<int>(value: 5, child: Text('Every 5 minutes')),
-                DropdownMenuItem<int>(value: 15, child: Text('Every 15 minutes')),
+                DropdownMenuItem<int>(
+                  value: 15,
+                  child: Text('Every 15 minutes'),
+                ),
                 DropdownMenuItem<int>(value: 60, child: Text('Hourly')),
               ],
-              onChanged: _saving ? null : (value) => setState(() => _pollMinutes = value ?? 15),
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => _pollMinutes = value ?? 15),
             ),
             if (_error != null) ...<Widget>[
               const SizedBox(height: 14),
