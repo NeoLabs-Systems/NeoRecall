@@ -165,9 +165,10 @@ test('a self-introduction identified during consolidation names the voiceprint a
     assert.equal(queued.queued, true);
     await service.execute(queued.runId);
 
-    const voiceprint = db.prepare('SELECT display_name,entity_id FROM voiceprints WHERE id=?').get(voiceprintId);
+    const voiceprint = db.prepare('SELECT display_name,display_name_source,entity_id FROM voiceprints WHERE id=?').get(voiceprintId);
     const entity = db.prepare('SELECT id,canonical_name_en FROM entities WHERE user_id=?').get(userId);
     assert.equal(voiceprint.display_name, 'Alex');
+    assert.equal(voiceprint.display_name_source, 'inferred');
     assert.equal(voiceprint.entity_id, entity.id);
     assert.equal(entity.canonical_name_en, 'Alex');
   } finally {

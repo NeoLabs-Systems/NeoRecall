@@ -151,7 +151,8 @@ function storedChunkTargetMs(userId) {
 
 function speakerVocabulary(userId) {
   return getDatabase().prepare(`SELECT display_name FROM voiceprints
-    WHERE user_id=? AND display_name IS NOT NULL ORDER BY updated_at DESC`).all(userId)
+    WHERE user_id=? AND display_name IS NOT NULL AND display_name_source='manual'
+    ORDER BY updated_at DESC`).all(userId)
     .map((row) => row.display_name.trim()).filter(Boolean);
 }
 

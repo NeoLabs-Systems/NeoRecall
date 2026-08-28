@@ -27,10 +27,14 @@ function getOwned(userId, id) {
 }
 
 function update(userId, id, changes) {
-  getOwned(userId, id);
-  getDatabase().prepare(`UPDATE voiceprints SET display_name=?,matching_enabled=COALESCE(?,matching_enabled),
+  const current = getOwned(userId, id);
+  const displayName = changes.displayName === undefined ? current.display_name : changes.displayName;
+  const displayNameSource = changes.displayName === undefined
+    ? current.display_name_source
+    : (changes.displayName === null ? null : 'manual');
+  getDatabase().prepare(`UPDATE voiceprints SET display_name=?,display_name_source=?,matching_enabled=COALESCE(?,matching_enabled),
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(
-    changes.displayName === undefined ? getOwned(userId, id).display_name : changes.displayName,
+    displayName, displayNameSource,
     changes.matchingEnabled === undefined ? null : Number(changes.matchingEnabled), id, userId);
   return getOwned(userId, id);
 }
@@ -80,10 +84,12 @@ function merge(userId, targetId, sourceId) {
     }
     db.prepare('UPDATE speaker_turns SET voiceprint_id=? WHERE voiceprint_id=? AND user_id=?').run(targetId, sourceId, userId);
     db.prepare('UPDATE conversation_speakers SET voiceprint_id=? WHERE voiceprint_id=?').run(targetId, sourceId);
-    db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=COALESCE(display_name,?),
+    const mergedDisplayName = target.display_name || source.display_name;
+    const mergedDisplayNameSource = target.display_name ? target.display_name_source : source.display_name_source;
+    db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=?,display_name_source=?,
       entity_id=COALESCE(entity_id,?),
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(
-      centroid.buffer, centroid.total, source.display_name, source.entity_id, targetId, userId,
+      centroid.buffer, centroid.total, mergedDisplayName, mergedDisplayNameSource, source.entity_id, targetId, userId,
     );
     db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(sourceId, userId);
     const membership = require('../conversations/conversation_membership_service');

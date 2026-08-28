@@ -10,6 +10,7 @@ const jobs = require('../../services/jobs/job_service');
 const settings = require('../../services/settings/settings_service');
 const searchIndex = require('../../embeddings/search_index_service');
 const deduper = require('../../transcription/token_deduper');
+const transcriptQuality = require('../../transcription/transcript_quality');
 const matching = require('../../transcription/speaker_matching');
 const speakerPreviews = require('../../services/speakers/speaker_preview_service');
 const { createLogger } = require('../../utils/logger');
@@ -230,8 +231,15 @@ async function handle(job, inference) {
   const inferenceStartedAt = process.hrtime.bigint();
   const userSettings = settings.get(chunk.user_id);
   const vocabulary = settings.transcriptionVocabulary(chunk.user_id);
-  const segments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
+  const inferredSegments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
     vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled });
+  const quality = transcriptQuality.compactSegments(inferredSegments, processingSettings.get());
+  const segments = quality.segments;
+  if (quality.changedSegments) logger.warn('Compacted degenerate ASR repetition', {
+    chunkId: chunk.id,
+    changedSegments: quality.changedSegments,
+    removedWords: quality.removedWords,
+  });
   // The pipeline's heartbeat. One line per piece of audio saying what came back,
   // which is what makes "it is working, just slowly" distinguishable from "it
   // stopped" without waiting for a memory to appear at the end of the chain.

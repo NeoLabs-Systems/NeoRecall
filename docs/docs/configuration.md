@@ -25,7 +25,7 @@ NeoRecall does not install or run a transcription or language model. Provider se
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
-Each account can add custom vocabulary under **Settings → Recording → Transcription**, one word or phrase per line. NeoRecall also includes every named speaker automatically and shows those names separately in Settings. The combined list is sent as an OpenAI-compatible prompt, Deepgram keywords/keyterms, or AssemblyAI keyterms according to the selected provider. For prompt-only OpenAI-compatible providers, an account-level switch controls an additional conservative correction: NeoRecall rewrites a returned word only when it is a long, close, unambiguous match for one single-word vocabulary entry; multi-word phrases are never rewritten. Applied corrections are counted in server logs without logging transcript text or vocabulary. `NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS` and `NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH` control the list limits. The conservative fallback is configured with `NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH`, `NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE`, `NEORECALL_VOCABULARY_CORRECTION_SIMILARITY`, and `NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN`.
+Each account can add custom vocabulary under **Settings → Recording → Transcription**, one word or phrase per line. NeoRecall also includes speaker names the user has explicitly confirmed and shows those names separately in Settings. Names inferred by the language model remain available as display metadata but are deliberately excluded from transcription vocabulary, preventing an incorrect inferred name from biasing later recordings and creating a feedback loop. Existing names are treated as unconfirmed when this provenance tracking is introduced; saving a speaker name in the Speakers screen confirms it. The combined trusted list is sent as an OpenAI-compatible prompt, Deepgram keywords/keyterms, or AssemblyAI keyterms according to the selected provider. For prompt-only OpenAI-compatible providers, an account-level switch controls an additional conservative correction: NeoRecall rewrites a returned word only when it is a long, close, unambiguous match for one single-word vocabulary entry; multi-word phrases are never rewritten. Applied corrections are counted in server logs without logging transcript text or vocabulary. `NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS` and `NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH` control the list limits. The conservative fallback is configured with `NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH`, `NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE`, `NEORECALL_VOCABULARY_CORRECTION_SIMILARITY`, and `NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN`.
 
 For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`, `deepseek`, `openrouter`, `together`, or `openai_compatible`. Set `AI_API_MODEL` and either the provider-specific key from `.env.example` or `AI_API_KEY`. Custom OpenAI-compatible endpoints also require `AI_API_BASE_URL`.
 
@@ -222,6 +222,19 @@ service returns timestamped text for the whole chunk; every segment takes the
 turn it overlaps most, and that turn's embedding with it. A segment with a second
 voice talking across more than a fifth of it is marked as overlapping rather than
 quietly credited to one person.
+
+Before persistence, a phrase-independent quality guard also catches the failure
+mode where an ASR provider fills a short timestamp with the same word or short
+token template dozens of times. It compacts a run only when it repeats at least
+`NEORECALL_TRANSCRIPT_REPETITION_MIN_REPEATS` times (default `8`), covers at least
+`NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE` of the segment (default `0.8`),
+and would require more than `NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND` (default
+`5`) to have actually been spoken. Patterns are bounded by
+`NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS` (default `8`). Numeric slots
+may vary between repetitions, which handles counter-like hallucinations without
+keying the detector to a word such as a speaker label. One occurrence remains in
+the transcript as evidence; normal emphasis, lists, and realistically paced
+repetition are preserved.
 
 A voice is fingerprinted from everything it said in the chunk, weighted by how
 long each turn lasted — not from a single turn. That matters more than any

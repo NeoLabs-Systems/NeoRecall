@@ -153,6 +153,14 @@ function buildConfig() {
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
+    // ASR services occasionally fill a short timestamp with the same token
+    // template dozens of times. Detect that structurally and only when the
+    // resulting speaking rate is implausible; no vocabulary or phrase list is
+    // involved. The original first occurrence remains as evidence.
+    transcriptRepetitionMinimumRepeats: integer('NEORECALL_TRANSCRIPT_REPETITION_MIN_REPEATS', 8, { min: 3, max: 1_000 }),
+    transcriptRepetitionMaximumPatternWords: integer('NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS', 8, { min: 1, max: 32 }),
+    transcriptRepetitionMinimumCoverage: number('NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE', 0.8, { min: 0.5, max: 1 }),
+    transcriptMaximumWordsPerSecond: number('NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND', 5, { min: 1, max: 50 }),
     conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
     conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
     conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),

@@ -40,15 +40,18 @@ test('user settings validate timezones and preserve the environment interval flo
   await request(app).put('/api/v1/settings').set(auth).send({ recordingStartMinute: 1440 }).expect(400);
 });
 
-test('speaker names are automatically merged into transcription vocabulary per user', async () => {
+test('only user-confirmed speaker names are merged into transcription vocabulary', async () => {
   const registered = await request(app).post('/api/v1/auth/register').send({ username: 'vocabulary-user', password: 'another long unique password' }).expect(201);
   const userId = registered.body.user.id;
   await request(app).put('/api/v1/settings').set('Authorization', `Bearer ${registered.body.session.token}`)
     .send({ customVocabulary: ['NeoRecall', 'Ada Lovelace'] }).expect(200);
   const crypto = require('node:crypto');
   getDatabase().prepare(`INSERT INTO voiceprints
-    (id,user_id,display_name,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
-    VALUES (?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, 'Grace Hopper', Buffer.alloc(8), 'test', 2, 1);
+    (id,user_id,display_name,display_name_source,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
+    VALUES (?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, 'Grace Hopper', 'manual', Buffer.alloc(8), 'test', 2, 1);
+  getDatabase().prepare(`INSERT INTO voiceprints
+    (id,user_id,display_name,display_name_source,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
+    VALUES (?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(), userId, 'Unconfirmed model guess', 'inferred', Buffer.alloc(8), 'test', 2, 1);
   const vocabulary = require('../../server/services/settings/settings_service').transcriptionVocabulary(userId);
   assert.deepEqual(vocabulary, ['Grace Hopper', 'NeoRecall', 'Ada Lovelace']);
   const exposed = require('../../server/services/settings/settings_service').get(userId);

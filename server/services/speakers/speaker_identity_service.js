@@ -38,6 +38,7 @@ function linkEntitiesToSpeakers(database, userId, entities, entityIds, clusterId
     if (!entityId) continue;
     // COALESCE never overwrites a name the user already set manually.
     const changes = database.prepare(`UPDATE voiceprints SET entity_id=?,display_name=COALESCE(display_name,?),
+      display_name_source=CASE WHEN display_name IS NULL THEN 'inferred' ELSE display_name_source END,
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`)
       .run(entityId, entity.displayName || entity.canonicalNameEn, voiceprint.id, userId).changes;
     if (changes) linked.push({ voiceprintId: voiceprint.id, entityId });
