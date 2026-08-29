@@ -56,6 +56,10 @@ function seedCluster(db, { userId, sessionId, ordinal, embedding }) {
   return clusterId;
 }
 
+test('the shipped speaker duration cutoff favors labeling short speech', () => {
+  assert.equal(limits().speakerMinimumTurnMs, 500);
+});
+
 test('a boundary-continuity anchor keeps its cluster despite drift below the plain threshold', () => {
   const db = getDatabase();
   const { userId, sessionId } = seedSession(db);
@@ -155,6 +159,16 @@ test('speech too short to fingerprint never becomes a new speaker', () => {
   assert.equal(resolved, null, 'the turn resolves to no speaker at all');
   assert.equal(db.prepare('SELECT COUNT(*) count FROM speaker_clusters WHERE user_id=?').get(userId).count, before,
     'and no cluster is created for it');
+});
+
+test('speech at the minimum fingerprint duration creates a speaker', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { speakerMinimumTurnMs } = limits();
+  const resolved = matching.resolveCluster(db, {
+    userId, sessionId, embedding: QUERY, continuity: null, durationMs: speakerMinimumTurnMs,
+  });
+  assert.ok(resolved, 'real short speech at the configured cutoff gets a speaker label');
 });
 
 test('a confident global match without continuity still resolves normally', () => {

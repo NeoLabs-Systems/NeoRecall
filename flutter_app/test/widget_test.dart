@@ -9,10 +9,12 @@ import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_memories.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
+import 'package:neorecall/main_speakers.dart';
 import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/main_timeline.dart';
 import 'package:neorecall/src/api_client.dart';
 import 'package:neorecall/src/models/memory.dart';
+import 'package:neorecall/src/models/speaker.dart';
 import 'package:neorecall/src/models/timeline_moment.dart';
 import 'package:neorecall/src/models/transcript.dart';
 
@@ -185,6 +187,51 @@ void main() {
       },
     );
   }
+
+  testWidgets('speaker selection can select every visible speaker', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = NeoRecallController()
+      ..speakers = const <RecallSpeaker>[
+        RecallSpeaker(
+          id: 'speaker-1',
+          name: 'First speaker',
+          occurrences: 3,
+          matchingEnabled: true,
+        ),
+        RecallSpeaker(
+          id: 'speaker-2',
+          name: 'Second speaker',
+          occurrences: 2,
+          matchingEnabled: true,
+        ),
+        RecallSpeaker(
+          id: 'speaker-3',
+          name: 'Third speaker',
+          occurrences: 1,
+          matchingEnabled: true,
+        ),
+      ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: SpeakersScreen(controller: controller)),
+      ),
+    );
+    await tester.tap(find.text('Select'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Select all speakers'));
+    await tester.pump();
+
+    expect(find.text('3 selected'), findsOneWidget);
+    expect(find.byTooltip('All speakers selected'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('desktop navigation keeps devices inside settings', (
     tester,

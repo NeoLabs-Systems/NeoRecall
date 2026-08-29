@@ -243,10 +243,11 @@ per fingerprint the same voice scored anywhere from 0.20 to 0.87 while two
 different voices reached 0.77, so the two populations are indistinguishable. With
 two seconds they separate cleanly — the same voice never below 0.55, different
 voices never above 0.50. `NEORECALL_SPEAKER_CLUSTER_THRESHOLD` sits at 0.52,
-inside that gap, and `NEORECALL_SPEAKER_MINIMUM_TURN_MS` refuses to found a new
-speaker on less than two seconds of pooled speech. Below that bar a turn may still
-join a voice that already exists; it cannot invent one, so a half-second of noise
-never becomes a person.
+inside that gap. `NEORECALL_SPEAKER_MINIMUM_TURN_MS` defaults to `500`: this
+deliberately favors giving real short speech a possibly imperfect speaker label
+over leaving it unlabeled, while still preventing the briefest diarization blips
+from founding a profile. Below that duration a turn may join a voice that already
+exists, but it cannot invent one.
 
 A match needs `NEORECALL_SPEAKER_CLUSTER_MARGIN` over the runner-up only when that
 runner-up is itself *below* the threshold — the case the margin exists for, where a

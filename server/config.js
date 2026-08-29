@@ -125,8 +125,10 @@ function buildConfig() {
     speakerClusterThreshold: number('NEORECALL_SPEAKER_CLUSTER_THRESHOLD', 0.52, { min: -1, max: 1 }),
     // Two clusters this alike in one recording are merged back into one.
     speakerClusterMergeThreshold: number('NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD', 0.55, { min: -1, max: 1 }),
-    // Speech shorter than this may join an existing voice but never founds a new one.
-    speakerMinimumTurnMs: integer('NEORECALL_SPEAKER_MINIMUM_TURN_MS', 2_000, { min: 0, max: 60_000 }),
+    // Speech shorter than this may join an existing voice but never founds a new
+    // one. Half a second filters brief diarization blips while favoring a
+    // possibly imperfect speaker label over leaving real short speech unlabeled.
+    speakerMinimumTurnMs: integer('NEORECALL_SPEAKER_MINIMUM_TURN_MS', 500, { min: 0, max: 60_000 }),
     // A cluster match this close to the runner-up is ambiguous, not confident.
     // Without a margin, a single fixed threshold occasionally lets a distinct new
     // speaker's embedding score just above it against some unrelated existing

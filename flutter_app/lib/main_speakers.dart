@@ -232,6 +232,9 @@ class _SpeakersScreenState extends State<SpeakersScreen>
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final visibleSpeakers = controller.speakers;
+    final allSpeakersSelected =
+        visibleSpeakers.isNotEmpty &&
+        visibleSpeakers.every((speaker) => isSelected(speaker.id));
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
@@ -277,6 +280,10 @@ class _SpeakersScreenState extends State<SpeakersScreen>
           if (selecting) ...<Widget>[
             _SpeakerSelectionBar(
               count: selectedCount,
+              onSelectAll: allSpeakersSelected
+                  ? null
+                  : () =>
+                        selectAll(visibleSpeakers.map((speaker) => speaker.id)),
               onDelete: _deleteSelected,
               onMerge: selectedCount >= 2 ? _mergeSelected : null,
             ),
@@ -545,11 +552,13 @@ class _SpeakerRow extends StatelessWidget {
 class _SpeakerSelectionBar extends StatelessWidget {
   const _SpeakerSelectionBar({
     required this.count,
+    required this.onSelectAll,
     required this.onDelete,
     this.onMerge,
   });
 
   final int count;
+  final VoidCallback? onSelectAll;
   final VoidCallback onDelete;
   final VoidCallback? onMerge;
 
@@ -561,15 +570,25 @@ class _SpeakerSelectionBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: <Widget>[
-          Text(
-            count == 0 ? 'Select speakers' : '$count selected',
-            style: TextStyle(
-              color: palette.textSecondary,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
+          Expanded(
+            child: Text(
+              count == 0 ? 'Select speakers' : '$count selected',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: palette.textSecondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
             ),
           ),
-          const Spacer(),
+          _SpeakerSelectionAction(
+            tooltip: onSelectAll == null
+                ? 'All speakers selected'
+                : 'Select all speakers',
+            icon: Icons.select_all_rounded,
+            onPressed: onSelectAll,
+          ),
           _SpeakerSelectionAction(
             tooltip: 'Combine into one speaker',
             icon: Icons.merge_type_rounded,

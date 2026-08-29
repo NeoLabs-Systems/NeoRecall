@@ -34,6 +34,16 @@ mixin SelectionMixin<T extends StatefulWidget> on State<T> {
     });
   }
 
+  /// Replaces the current selection with every supplied row.
+  void selectAll(Iterable<String> ids) {
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(ids);
+      _selecting = _selected.isNotEmpty;
+    });
+  }
+
   void exitSelect() {
     setState(() {
       _selecting = false;
