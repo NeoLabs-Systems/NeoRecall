@@ -64,9 +64,7 @@ def test_a_pull_without_a_chunk_id_is_refused():
 
 
 def _chunk_on(ledger, *, content=b"pcm" * 100):
-    session = ledger.open_session(
-        device_started_at="2026-08-30T10:00:00Z", timezone="UTC"
-    )
+    session = ledger.open_session(device_started_at="2026-08-30T10:00:00Z", timezone="UTC")
     row = ledger.append_chunk(
         session_id=session.id,
         sequence=0,

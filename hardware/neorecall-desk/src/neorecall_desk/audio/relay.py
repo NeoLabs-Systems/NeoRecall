@@ -396,8 +396,9 @@ def _follow_host_playback_level(card: str, target_id: int, monitor: subprocess.P
         except RelayError:
             refreshed = _resolve_node_id(SPEAKER_RELAY_OUT)
             if refreshed is None:
-                LOG.warning("skipping a host volume event: %s is not in the graph yet",
-                            SPEAKER_RELAY_OUT)
+                LOG.warning(
+                    "skipping a host volume event: %s is not in the graph yet", SPEAKER_RELAY_OUT
+                )
                 return
             target_id = refreshed
             try:
