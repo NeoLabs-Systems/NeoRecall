@@ -168,3 +168,72 @@ def test_a_command_never_runs_on_the_thread_that_delivered_it():
     assert server.wait_until_idle()
 
     assert ran_on and ran_on[0] != threading.get_ident()
+
+
+def test_shutdown_sends_the_phone_away_but_never_the_headphones():
+    """Found after an OTA restart: the phone's link outlives the service.
+
+    The ACL connection survives, the GATT registration behind it does not, and
+    the app sits on dead subscriptions showing the last status it ever got. A
+    clean disconnect at shutdown turns that into an ordinary drop the app's
+    backoff already handles. The headphones stay: they are an audio route, and
+    a service restart is none of their business.
+    """
+    import asyncio
+
+    disconnected = []
+
+    class Proxy:
+        def __init__(self, path):
+            self._path = path
+
+        async def call_disconnect(self):
+            disconnected.append(self._path)
+
+    objects = {
+        "/org/bluez/hci0/dev_PHONE": {
+            gatt.bluez.DEVICE_IFACE: {
+                "Connected": True,
+                "Alias": "Pixel 10 Pro",
+                "Class": 0x5A020C,
+                "Icon": "phone",
+            }
+        },
+        "/org/bluez/hci0/dev_HEADSET": {
+            gatt.bluez.DEVICE_IFACE: {
+                "Connected": True,
+                "Alias": "Arctis Nova 7",
+                "Class": 0x240404,
+            }
+        },
+        "/org/bluez/hci0/dev_GONE": {
+            gatt.bluez.DEVICE_IFACE: {"Connected": False, "Class": 0x5A020C}
+        },
+    }
+
+    server = gatt.GattServer(
+        runtime=None,
+        snapshot_provider=lambda: Snapshot(state=State.IDLE),
+        on_command=lambda command: protocol.CommandResult(command=command.name),
+        on_provision=lambda provisioning: protocol.CommandResult(command="setup"),
+    )
+
+    async def fake_objects(bus):
+        return objects
+
+    async def fake_introspected(bus, path, interface):
+        return Proxy(path)
+
+    original = (gatt.bluez.managed_objects, gatt.bluez.introspected)
+    gatt.bluez.managed_objects, gatt.bluez.introspected = fake_objects, fake_introspected
+
+    class Runtime:
+        bus = None
+
+    server._runtime = Runtime()
+    try:
+        asyncio.run(server._disconnect_centrals())
+    finally:
+        gatt.bluez.managed_objects, gatt.bluez.introspected = original
+
+    assert disconnected == ["/org/bluez/hci0/dev_PHONE"]

@@ -480,7 +480,44 @@ class GattServer:
             self._runtime.run(self._unregister(), timeout=20)
         except bluez.BluetoothUnavailable:
             LOG.debug("Bluetooth already gone during shutdown")
+        try:
+            self._runtime.run(self._disconnect_centrals(), timeout=20)
+        except bluez.BluetoothUnavailable:
+            pass
         self._registered = False
+
+    async def _disconnect_centrals(self) -> None:
+        """Send every connected phone away before the service goes down.
+
+        Found after an OTA restart: the phone's ACL link survives the service
+        exiting, but the GATT registration behind it is gone. The app then sits
+        on a live-looking connection with dead subscriptions, showing the last
+        status it ever received — for as long as the owner does not reconnect
+        by hand. A clean disconnect here turns that into an ordinary drop, and
+        the app's reconnect backoff does the rest against the next instance.
+
+        Headphones are exempt: they are an audio route, not a control link, and
+        kicking them would interrupt playback over a service restart that they
+        never notice otherwise.
+        """
+        from .headphones import _looks_like_audio
+
+        bus = self._runtime.bus
+        objects = await bluez.managed_objects(bus)
+        for path, interfaces in objects.items():
+            device = interfaces.get(bluez.DEVICE_IFACE)
+            if device is None or not device.get("Connected"):
+                continue
+            if _looks_like_audio(device):
+                continue
+            proxy = await bluez.introspected(bus, path, bluez.DEVICE_IFACE)
+            if proxy is None:
+                continue
+            try:
+                await proxy.call_disconnect()
+                LOG.info("disconnected %s for the restart", device.get("Alias", path))
+            except Exception:  # noqa: BLE001 - shutdown must not hang on one device
+                LOG.debug("could not disconnect %s", path, exc_info=True)
 
     async def _unregister(self) -> None:
         bus = self._runtime.bus
