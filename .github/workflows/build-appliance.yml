@@ -221,7 +221,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the rolling release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/beta'
+        # The job itself only runs on workflow_dispatch, so gating this step on
+        # a push event meant the release could never publish under any trigger —
+        # devices polled a manifest that had never existed. Branch is the guard.
+        if: github.ref == 'refs/heads/beta'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
