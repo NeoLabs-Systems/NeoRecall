@@ -1,4 +1,6 @@
 #!/bin/bash
+# shellcheck disable=SC2016  # patterns quote a literal dollar to match installer source
+# shellcheck disable=SC2013  # the grep emits one token per line by construction
 # Checks on install.sh that do not need a Raspberry Pi.
 #
 # The installer is the least testable and most consequential part of this

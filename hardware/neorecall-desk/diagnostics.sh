@@ -46,7 +46,7 @@ asneo() {
     cat /proc/device-tree/model 2>/dev/null; echo
     echo "serial: $(tr -d '\0' </proc/device-tree/serial-number 2>/dev/null)"
     echo "arch:   $(dpkg --print-architecture 2>/dev/null)"
-    cat /etc/os-release 2>/dev/null | head -4
+    head -4 /etc/os-release 2>/dev/null
 
   s INSTALL_RESULT
     cat "$D/install-result.txt" 2>/dev/null || echo "(the install has not run yet)"
