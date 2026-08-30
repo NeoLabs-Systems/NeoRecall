@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../diagnostics/client_diagnostic_log.dart';
 import '../ble/gatt_transport.dart';
 import 'appliance_link.dart';
+import 'appliance_offline_sync.dart';
 import 'appliance_protocol.dart';
 
 /// Creates an access key for the appliance and returns it.
@@ -41,6 +42,19 @@ class ApplianceController extends ChangeNotifier {
   }
 
   final ApplianceLink _link;
+
+  /// The Bluetooth rescue path for recordings the Desk cannot upload itself.
+  late final ApplianceOfflineSync offlineSync = ApplianceOfflineSync(_link);
+
+  /// Whether recordings are stuck on the Desk: it has some, and no network to
+  /// send them with. This is the one situation the Bluetooth drain exists for.
+  bool get hasStrandedRecordings {
+    final ApplianceStatus? status = _status;
+    return _connected &&
+        status != null &&
+        status.pendingRecordings > 0 &&
+        !status.networkOnline;
+  }
   final ApiKeyMinter _mintApiKey;
   final String Function() _backendUrl;
   final String Function() _timezone;
@@ -137,14 +151,59 @@ class ApplianceController extends ChangeNotifier {
 
   void _onConnection(bool connected) {
     _connected = connected;
+    if (connected) {
+      _retryAttempt = 0;
+      _retryTimer?.cancel();
+      _retryTimer = null;
+    }
     if (!connected) {
       // Keep the last status on screen rather than blanking it. The appliance
       // has not changed what it is doing just because the phone walked away.
       _networks = const <WifiNetwork>[];
       _headphones = const <ApplianceHeadphone>[];
+      _retryLater();
     }
     notifyListeners();
   }
+
+  Timer? _retryTimer;
+  int _retryAttempt = 0;
+
+  /// Spacing between reconnect attempts after an unasked-for drop.
+  ///
+  /// Short first, because most drops are momentary — a doorway, a pocket. Then
+  /// widening, because a device that has not answered twice is probably off or
+  /// elsewhere, and hammering the radio drains the phone for nothing. After the
+  /// last attempt it stops: opening the device page or relaunching the app each
+  /// try again anyway.
+  static const List<Duration> _retrySchedule = <Duration>[
+    Duration(seconds: 3),
+    Duration(seconds: 8),
+    Duration(seconds: 20),
+    Duration(seconds: 45),
+  ];
+
+  void _retryLater() {
+    // Only chase a device this account actually set up, and never fight an
+    // explicit disconnect or an ongoing setup flow.
+    if (_userAskedDisconnect || _rememberedDevice() == null) return;
+    if (_retryAttempt >= _retrySchedule.length) return;
+    final Duration wait = _retrySchedule[_retryAttempt];
+    _retryAttempt += 1;
+    _retryTimer?.cancel();
+    _retryTimer = Timer(wait, () async {
+      if (_connected || _userAskedDisconnect) return;
+      ClientDiagnosticLog.instance.record(
+        'appliance',
+        'reconnect_attempt',
+        details: <String, Object?>{'attempt': _retryAttempt},
+      );
+      await reconnectToRemembered();
+      if (!_connected) _retryLater();
+    });
+  }
+
+  bool _userAskedDisconnect = false;
 
   void _onCandidate(ApplianceCandidate candidate) {
     final existing = _candidates.indexWhere(
@@ -252,6 +311,7 @@ class ApplianceController extends ChangeNotifier {
     ApplianceCandidate candidate, {
     bool pair = false,
   }) async {
+    _userAskedDisconnect = false;
     return _guard(() async {
       await _link.connect(candidate.deviceId, pair: pair);
       // Read the state straight away and keep it here, rather than waiting for
@@ -275,6 +335,7 @@ class ApplianceController extends ChangeNotifier {
   Future<void> reconnectToRemembered() async {
     final String? deviceId = _rememberedDevice();
     if (deviceId == null || deviceId.isEmpty || _connected) return;
+    _userAskedDisconnect = false;
     try {
       await _link.connect(deviceId);
       final status = await _link.refresh();
@@ -286,7 +347,13 @@ class ApplianceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> disconnect() => _link.disconnect();
+  Future<void> disconnect() {
+    // Remember that this drop was asked for, so the reconnect loop does not
+    // immediately undo what the owner just did.
+    _userAskedDisconnect = true;
+    _retryTimer?.cancel();
+    return _link.disconnect();
+  }
 
   Future<void> refresh() async {
     final status = await _link.refresh();
@@ -531,6 +598,7 @@ class ApplianceController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _retryTimer?.cancel();
     _checkDeadline?.cancel();
     unawaited(_statusSubscription.cancel());
     unawaited(_discoverySubscription.cancel());

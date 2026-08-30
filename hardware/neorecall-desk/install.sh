@@ -58,6 +58,12 @@ step() {
 # ---------------------------------------------------------------- preflight
 
 [ "$(id -u)" -eq 0 ] || die "run this with sudo:  curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/beta/hardware/neorecall-desk/install.sh | sudo bash"
+# One installer at a time. The hourly update timer and a manual run can land
+# in the same minute — observed during OTA testing — and two of these
+# interleaving would tear the venv down under each other.
+exec 9>/var/lock/neorecall-desk-install.lock
+flock -n 9 || die "another install or update is already running"
+
 mkdir -p "$(dirname "$LOG")" "$STATE"
 touch "$LOG" 2>/dev/null
 
@@ -393,7 +399,27 @@ install -m 0644 "$SRC/systemd/neorecall-desk-diagnostics.timer" /etc/systemd/sys
 printf 'dwc2\nlibcomposite\n' > /etc/modules-load.d/neorecall-desk.conf
 log "ok    services and permissions"
 
+# Wi-Fi power saving is off for good. The Zero 2 W runs Wi-Fi and Bluetooth on
+# one chip behind one antenna, and power save works by letting the Wi-Fi side
+# doze and wake on a cycle — every wake-up steals airtime from A2DP mid-stream.
+# That is the classic source of "the headphones lose a few milliseconds now and
+# then": not congestion, just the radio taking scheduled naps. The cost is a
+# few dozen milliwatts on a mains-powered device.
+install -d /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/10-neorecall-no-powersave.conf <<'WIFI'
+[connection]
+wifi.powersave = 2
+WIFI
+systemctl reload NetworkManager >/dev/null 2>&1 || true
+iw dev wlan0 set power_save off >/dev/null 2>&1 || true
+log "ok    Wi-Fi power saving disabled (it starves Bluetooth audio)"
+
 install -d /etc/systemd/journald.conf.d
+# Storage=persistent is only half of it: journald keeps logging to RAM until
+# /var/log/journal exists. Without this directory every reboot destroyed the
+# evidence — twice a hardware bug was reproduced and the journal of the boot
+# that held the proof was gone.
+install -d /var/log/journal
 cat > /etc/systemd/journald.conf.d/10-neorecall.conf <<'JOURNAL'
 [Journal]
 Storage=persistent

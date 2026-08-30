@@ -56,6 +56,12 @@ SETUP_MODE_TIMEOUT_S = 300
 #: so each page has to be read out before the next replaces it.
 DISCOVERY_PAGE_GAP_S = 0.12
 
+#: Time between audio pages during a Bluetooth drain. Far tighter than the
+#: discovery gap: audio pages are numbered, so a lost one is detected by the
+#: phone and re-requested with a resume — a luxury scan results do not have.
+#: At 192 bytes a page this paces the transfer near 12 KB/s.
+AUDIO_PAGE_GAP_S = 0.015
+
 
 class _Characteristic(ServiceInterface):
     def __init__(
@@ -362,6 +368,23 @@ class GattServer:
     def publish_status(self) -> None:
         payload = protocol.encode_status(self._snapshot(), self._last_result)
         self._status.publish(payload)
+
+    def publish_audio(self, pages: list[bytes], *, abort=None) -> int:
+        """Stream a chunk's pages over the discovery characteristic.
+
+        Returns how many pages went out. ``abort`` is polled between pages so a
+        recording that starts mid-transfer can stop the drain immediately — the
+        recording always wins the radio.
+        """
+        sent = 0
+        for index, page in enumerate(pages):
+            if abort is not None and abort():
+                break
+            if index:
+                time.sleep(AUDIO_PAGE_GAP_S)
+            self._discovery.publish(page)
+            sent += 1
+        return sent
 
     def publish_discovery(self, kind: str, entries: list[dict]) -> None:
         """Send a result list, in as many notifications as it takes.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_theme.dart';
@@ -36,7 +38,8 @@ void main() {
     await open(tester, applianceStatusPayload());
 
     expect(find.text('READY'), findsOneWidget);
-    expect(find.text('Ready'), findsOneWidget);
+    // Exactly once: the header used to repeat the pill's word as a subtitle.
+    expect(find.text('Ready'), findsNothing);
     expect(find.byType(RecordButton), findsNothing);
     expect(find.byType(CaptureOrb), findsNothing);
   });
@@ -114,6 +117,13 @@ void main() {
       find.textContaining('A recording already running is not affected'),
       findsOneWidget,
     );
+
+    // The drop arms the controller's reconnect backoff. disconnect() cancels
+    // that timer synchronously; the link teardown behind it is not awaited,
+    // because inside fake async its completion would need pump after pump —
+    // and the pending-timer invariant only cares about the timer.
+    unawaited(rig.controller.disconnect());
+    await tester.pump();
   });
 
   testWidgets('an error from the appliance is shown as a sentence', (tester) async {

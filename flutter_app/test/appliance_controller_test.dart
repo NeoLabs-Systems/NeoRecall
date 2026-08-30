@@ -442,6 +442,30 @@ void main() {
       expect(rig.controller.message, isNot(contains('Exception')));
     });
 
+    test('a drop the owner did not ask for is retried', () async {
+      // Walking through a doorway used to cost the connection until the next
+      // manual visit to the device page. The link now heals itself: a short
+      // first retry for momentary drops, widening after that.
+      await rig.connect(pair: true);
+      rig.transport.dropConnection();
+
+      // Attempt 1 fires after ~3 s.
+      await Future<void>.delayed(const Duration(seconds: 4));
+
+      expect(rig.transport.connected.length, greaterThan(1));
+    });
+
+    test('an explicit disconnect stays disconnected', () async {
+      await rig.connect(pair: true);
+
+      await rig.controller.disconnect();
+      rig.transport.dropConnection();
+      await Future<void>.delayed(const Duration(seconds: 4));
+
+      // Nothing reconnects behind the owner's back.
+      expect(rig.transport.connected, isEmpty);
+    });
+
     test('refuses to set up a device when the app is not signed in', () async {
       await rig.connect(pair: true);
       rig.backend = '';

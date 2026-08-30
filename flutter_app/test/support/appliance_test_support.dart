@@ -17,6 +17,10 @@ class FakeGattTransport implements GattTransport {
   final StreamController<bool> _connections = StreamController<bool>.broadcast();
 
   final List<Uint8List> commandWrites = <Uint8List>[];
+
+  /// A scripted device: called with each decoded command so a test can answer
+  /// the way the appliance would (a listing, audio pages, a status).
+  void Function(Map<String, Object?> command)? onCommandWrite;
   final List<Uint8List> provisionWrites = <Uint8List>[];
   final List<String> connected = <String>[];
   final List<String> paired = <String>[];
@@ -106,6 +110,13 @@ class FakeGattTransport implements GattTransport {
     if (failure != null) throw failure;
     if (characteristicUuid == ApplianceProtocol.commandUuid) {
       commandWrites.add(value);
+      final void Function(Map<String, Object?>)? script = onCommandWrite;
+      if (script != null) {
+        // Answer asynchronously, the way a device does: never inside the write.
+        scheduleMicrotask(
+          () => script(cborDecode(value) as Map<String, Object?>),
+        );
+      }
     } else if (characteristicUuid == ApplianceProtocol.provisionUuid) {
       provisionWrites.add(value);
     }
@@ -164,6 +175,13 @@ class ApplianceRig {
 
   Map<String, Object?> lastCommand() =>
       cborDecode(transport.commandWrites.last) as Map<String, Object?>;
+
+  /// Every command of one name this rig has seen, decoded, in order.
+  List<Map<String, Object?>> commandsNamed(String name) => transport
+      .commandWrites
+      .map((Uint8List raw) => cborDecode(raw) as Map<String, Object?>)
+      .where((Map<String, Object?> c) => c['c'] == name)
+      .toList(growable: false);
 }
 
 /// Encode a status payload the way the appliance would.

@@ -335,3 +335,54 @@ def test_no_loopback_is_ever_built_without_a_name():
     """
     with pytest.raises(ValueError, match="name"):
         relay.loopback_command(capture="alsa_input.x", playback=None, name="")
+
+
+def test_a_replug_is_recognised_only_on_the_edge_into_configured():
+    """The moment the stale-handle cure has to fire, and only that moment.
+
+    Measured, not reasoned: after a cable replug the relay's long-open ALSA
+    handle to the gadget delivers silence for ever — 117 000 captured frames,
+    RMS 0, while the computer audibly played. Rebuilding the graph fixed it on
+    the spot, so the graph is rebuilt exactly when the host (re)attaches.
+    """
+    # The cure moment: back to configured from unplugged or suspended.
+    assert relay.replug_happened("not attached", "configured")
+    assert relay.replug_happened("suspended", "configured")
+    assert relay.replug_happened("default", "configured")
+
+    # Steady states and mid-enumeration flapping must not restart anything.
+    assert not relay.replug_happened("configured", "configured")
+    assert not relay.replug_happened("configured", "not attached")
+    assert not relay.replug_happened("not attached", "default")
+    assert not relay.replug_happened("", "configured"), "first reading is not a replug"
+
+
+def test_a_stale_volume_target_is_re_resolved_not_fatal(monkeypatch, caplog):
+    """One stale node id took the whole relay down for ten silent seconds.
+
+    Node ids churn with the graph; names do not. The volume follower now
+    re-resolves by name and retries, and a still-failing event is skipped —
+    volume is a convenience, audio is the product.
+    """
+    import logging
+
+    calls = []
+
+    def apply(card, target_id):
+        calls.append(target_id)
+        if target_id == 127:  # the id that vanished on hardware
+            raise relay.RelayError("wpctl set-volume 127 failed")
+
+    class EndedMonitor:
+        stdout = iter(())
+
+        def terminate(self):  # pragma: no cover - must not be reached
+            raise AssertionError("the monitor must not be killed over one event")
+
+    monkeypatch.setattr(relay, "_apply_host_playback_level", apply)
+    monkeypatch.setattr(relay, "_resolve_node_id", lambda name: 201)
+
+    with caplog.at_level(logging.INFO):
+        relay._follow_host_playback_level("UAC2Gadget", 127, EndedMonitor())
+
+    assert calls == [127, 201], "retried once with the freshly resolved id"

@@ -18,8 +18,10 @@ import logging
 import subprocess
 import threading
 import time
+import zlib
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from ..audio import graph
 from ..config import ConfigStore
@@ -242,7 +244,9 @@ class Supervisor:
         if pump.needs_attention:
             return f"{pump.needs_attention} recordings could not be sent."
         if pump.pending_chunks and not self._radio.online():
-            return f"No network yet — {pump.pending_chunks} recordings are waiting."
+            count = pump.pending_chunks
+            noun = "recording is" if count == 1 else "recordings are"
+            return f"No network yet — {count} {noun} waiting."
         return ""
 
     def _connected_headset(self):
@@ -423,6 +427,9 @@ class Supervisor:
             protocol.CMD_UPDATE_NOW: lambda: self._update_now(),
             protocol.CMD_SET_AUTO_UPDATE: lambda: self._set_auto_update(command),
             protocol.CMD_SELFTEST: lambda: self._selftest(),
+            protocol.CMD_DRAIN_LIST: lambda: self._drain_list(),
+            protocol.CMD_DRAIN_PULL: lambda: self._drain_pull(command),
+            protocol.CMD_DRAIN_ACK: lambda: self._drain_ack(command),
         }.get(command.name)
         if handler is None:
             return CommandResult(
@@ -431,6 +438,91 @@ class Supervisor:
                 message="This device does not understand that request.",
             )
         return handler()
+
+    # ------------------------------------------------------------------- drain
+
+    def _drain_list(self) -> CommandResult:
+        """What is waiting on the device, for the phone to fetch over Bluetooth.
+
+        The whole feature exists for one situation: the device recorded but has
+        no network to upload with. The phone then takes custody the same way it
+        does for a wearable's on-board storage — pull, store durably, and only
+        then is anything deleted here.
+        """
+        if self._machine.state is State.RECORDING:
+            return CommandResult(
+                command=protocol.CMD_DRAIN_LIST,
+                ok=False,
+                message="Not while a recording is running.",
+            )
+        entries = [
+            {
+                "id": row.id,
+                "by": row.byte_size,
+                "du": row.duration_ms,
+                "sh": row.sha256,
+                "at": row.created_at,
+            }
+            for row in self._ledger.drainable()
+        ]
+        if self._gatt is not None:
+            self._gatt.publish_discovery("pending", entries)
+        return CommandResult(command=protocol.CMD_DRAIN_LIST, ok=True)
+
+    def _drain_pull(self, command: Command) -> CommandResult:
+        if self._machine.state is State.RECORDING:
+            return CommandResult(
+                command=protocol.CMD_DRAIN_PULL,
+                ok=False,
+                message="Not while a recording is running.",
+            )
+        row = self._ledger.chunk(command.chunk)
+        if row is None or row.state != "ready":
+            return CommandResult(
+                command=protocol.CMD_DRAIN_PULL,
+                ok=False,
+                message="That recording is not on the device any more.",
+            )
+        try:
+            raw = Path(row.path).read_bytes()
+        except OSError:
+            return CommandResult(
+                command=protocol.CMD_DRAIN_PULL,
+                ok=False,
+                message="That recording could not be read.",
+            )
+        # Compressed once, paged after: recorded speech with its silences
+        # shrinks two- to three-fold, and at Bluetooth speeds that is the
+        # difference between a transfer and a wait.
+        packed = zlib.compress(raw, 6)
+        pages = protocol.audio_pages(row.id, packed, start_page=command.page)
+        if self._gatt is not None:
+            sent = self._gatt.publish_audio(
+                pages, abort=lambda: self._machine.state is State.RECORDING
+            )
+            if sent < len(pages):
+                return CommandResult(
+                    command=protocol.CMD_DRAIN_PULL,
+                    ok=False,
+                    message="The transfer stopped because a recording started.",
+                )
+        return CommandResult(command=protocol.CMD_DRAIN_PULL, ok=True)
+
+    def _drain_ack(self, command: Command) -> CommandResult:
+        """The phone proved custody; the device lets go.
+
+        The proof is the SHA-256 of the bytes the phone durably stored, checked
+        against this device's own record of the chunk. mark_drained refuses
+        anything else — a phone that stored nothing cannot fake the hash.
+        """
+        if not self._ledger.mark_drained(command.chunk, command.sha):
+            return CommandResult(
+                command=protocol.CMD_DRAIN_ACK,
+                ok=False,
+                message="That recording was not released.",
+            )
+        self._publish()
+        return CommandResult(command=protocol.CMD_DRAIN_ACK, ok=True)
 
     def _route_output(self, target: OutputTarget) -> tuple[bool, str]:
         """Actually move the sound, and remember where it went.

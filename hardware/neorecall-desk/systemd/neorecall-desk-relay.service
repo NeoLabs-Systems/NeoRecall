@@ -14,10 +14,12 @@ Type=simple
 ExecStart=/usr/local/lib/neorecall-desk/venv/bin/neorecall-desk-relay
 
 # The relay is what makes the box useful even to somebody who never sets up
-# NeoRecall, so it keeps trying. The delay gives the audio graph time to publish
-# the WM8960 and the USB gadget after a boot.
+# NeoRecall, so it keeps trying. Short, because a deliberate exit is how the
+# relay reopens its stale audio handles after the computer replugs — somebody
+# is standing there waiting for sound. The relay itself heals the boot-order
+# race by restarting WirePlumber, so a long grace period buys nothing.
 Restart=always
-RestartSec=10
+RestartSec=2
 
 [Install]
 WantedBy=default.target

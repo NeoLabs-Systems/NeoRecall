@@ -204,7 +204,33 @@ class ApplianceLink {
   String _partialKind = '';
   int _nextPage = 0;
 
+  final StreamController<ApplianceAudioPage> _audioPages =
+      StreamController<ApplianceAudioPage>.broadcast();
+
+  /// Raw pages of a recording being drained over Bluetooth.
+  ///
+  /// Separated from the discovery collector on purpose: scan results are
+  /// abandon-and-rescan, audio pages are buffer-and-resume, and one collector
+  /// serving both would do each badly.
+  Stream<ApplianceAudioPage> get audioPages => _audioPages.stream;
+
   void _onDiscoveryBytes(Uint8List payload) {
+    // Audio first, cheaply: during a drain thousands of these arrive, and each
+    // one must not pay for the full discovery bookkeeping.
+    try {
+      final Object? peeked = cborDecode(payload);
+      if (peeked is Map<Object?, Object?>) {
+        final ApplianceAudioPage? audio = ApplianceAudioPage.tryDecode(peeked);
+        if (audio != null) {
+          // A page can arrive after dispose: BLE notifications queue, and the
+          // device does not know the app stopped listening.
+          if (!_audioPages.isClosed) _audioPages.add(audio);
+          return;
+        }
+      }
+    } on CborFormatException {
+      // Fall through: the discovery decoder reports unreadable frames.
+    }
     final ApplianceDiscovery page;
     try {
       page = ApplianceDiscovery.decode(payload);
@@ -337,6 +363,7 @@ class ApplianceLink {
   }
 
   Future<void> dispose() async {
+    await _audioPages.close();
     await disconnect();
     await _scanSubscription?.cancel();
     await _statuses.close();

@@ -51,6 +51,13 @@ CMD_UPDATE_NOW = "update_now"
 CMD_SET_AUTO_UPDATE = "set_auto_update"
 CMD_SELFTEST = "selftest"
 
+# Bluetooth drain: hand recordings to the owner's phone when there is no Wi-Fi.
+# The phone lists what is waiting, pulls one chunk at a time, and acknowledges
+# each with the SHA-256 it verified — only then does the device delete its copy.
+CMD_DRAIN_LIST = "drain_list"
+CMD_DRAIN_PULL = "drain_pull"
+CMD_DRAIN_ACK = "drain_ack"
+
 #: Placeholder name used when a write could not even be parsed into a command.
 #: A refusal still has to reach the app: silence would leave it waiting on a
 #: notification that is never coming.
@@ -73,6 +80,9 @@ KNOWN_COMMANDS = frozenset(
         CMD_UPDATE_NOW,
         CMD_SET_AUTO_UPDATE,
         CMD_SELFTEST,
+        CMD_DRAIN_LIST,
+        CMD_DRAIN_PULL,
+        CMD_DRAIN_ACK,
     }
 )
 
@@ -116,6 +126,10 @@ class Command:
     target: OutputTarget | None = None
     enabled: bool | None = None
     text: str = ""
+    #: Drain only: which chunk, resuming from which page, verified as what.
+    chunk: str = ""
+    page: int = 0
+    sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -311,6 +325,38 @@ def discovery_pages(kind: str, entries: list[dict]) -> list[bytes]:
     ]
 
 
+#: Payload bytes per audio page, chosen so header + data stay inside one
+#: notification. Verified by test rather than trusted: a page that does not fit
+#: is silently truncated by BlueZ, which is how the discovery channel once broke.
+AUDIO_PAGE_BYTES = 192
+
+
+def audio_pages(chunk_id: str, data: bytes, *, start_page: int = 0) -> list[bytes]:
+    """A chunk's (compressed) bytes as one notification per page.
+
+    Pages are numbered so the phone can detect a lost notification and resume
+    the pull from the first missing page instead of starting the chunk over —
+    at Bluetooth speeds a restart is minutes, a resume is seconds.
+    """
+    total = max(1, -(-len(data) // AUDIO_PAGE_BYTES))
+    pages = []
+    for index in range(start_page, total):
+        piece = data[index * AUDIO_PAGE_BYTES : (index + 1) * AUDIO_PAGE_BYTES]
+        pages.append(
+            cbor2.dumps(
+                {
+                    "v": PROTOCOL_VERSION,
+                    "k": "audio",
+                    "ch": chunk_id[:8],
+                    "p": index,
+                    "n": total,
+                    "d": piece,
+                }
+            )
+        )
+    return pages
+
+
 def decode_discovery(payload: bytes) -> tuple[str, list[dict]]:
     raw = cbor2.loads(payload)
     if not isinstance(raw, dict):
@@ -369,7 +415,29 @@ def decode_command(payload: bytes) -> Command:
     if name == CMD_RENAME:
         text = _text(raw, "n", limit=MAX_NAME_LENGTH, label="The device name", required=True)
 
-    return Command(name=name, address=address, target=target, enabled=enabled, text=text)
+    chunk = ""
+    page = 0
+    sha = ""
+    if name in (CMD_DRAIN_PULL, CMD_DRAIN_ACK):
+        chunk = _text(raw, "ch", limit=64, label="The recording id", required=True)
+    if name == CMD_DRAIN_PULL:
+        raw_page = raw.get("fp", 0)
+        if not isinstance(raw_page, int) or raw_page < 0:
+            raise ProtocolError("That resume point is not a page number.")
+        page = raw_page
+    if name == CMD_DRAIN_ACK:
+        sha = _text(raw, "sh", limit=64, label="The checksum", required=True)
+
+    return Command(
+        name=name,
+        address=address,
+        target=target,
+        enabled=enabled,
+        text=text,
+        chunk=chunk,
+        page=page,
+        sha=sha,
+    )
 
 
 def decode_provisioning(payload: bytes) -> Provisioning:

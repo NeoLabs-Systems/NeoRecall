@@ -26,6 +26,9 @@ class ApplianceProtocol {
   static const String setOutput = 'set_output';
   static const String setHeadsetMic = 'set_headset_mic';
   static const String wifiScan = 'wifi_scan';
+  static const String drainList = 'drain_list';
+  static const String drainPull = 'drain_pull';
+  static const String drainAck = 'drain_ack';
   static const String bluetoothScan = 'bt_scan';
   static const String bluetoothConnect = 'bt_connect';
   static const String bluetoothDisconnect = 'bt_disconnect';
@@ -204,6 +207,71 @@ class ApplianceStatus {
 /// notification — seven self-test verdicts are about 650 bytes against a
 /// 244-byte packet — so the appliance splits them and [page] says which part
 /// this is. [ApplianceLink] reassembles them; nothing above it sees a page.
+/// One page of a recording travelling over Bluetooth during a drain.
+///
+/// Pages are numbered so a lost notification is detectable and the pull can be
+/// resumed from the first missing page — at Bluetooth speeds a restart costs
+/// minutes, a resume seconds.
+class ApplianceAudioPage {
+  const ApplianceAudioPage({
+    required this.chunkPrefix,
+    required this.page,
+    required this.pages,
+    required this.data,
+  });
+
+  final String chunkPrefix;
+  final int page;
+  final int pages;
+  final Uint8List data;
+
+  static ApplianceAudioPage? tryDecode(Map<Object?, Object?> raw) {
+    if (raw['k'] != 'audio') return null;
+    final Object? data = raw['d'];
+    if (data is! Uint8List) return null;
+    return ApplianceAudioPage(
+      chunkPrefix: raw['ch'] is String ? raw['ch']! as String : '',
+      page: raw['p'] is int ? raw['p']! as int : 0,
+      pages: raw['n'] is int ? raw['n']! as int : 1,
+      data: data,
+    );
+  }
+}
+
+/// A recording waiting on the device, as announced by a drain listing.
+class AppliancePendingRecording {
+  const AppliancePendingRecording({
+    required this.id,
+    required this.byteSize,
+    required this.durationMs,
+    required this.sha256,
+    this.createdAt,
+  });
+
+  final String id;
+  final int byteSize;
+  final int durationMs;
+  final String sha256;
+  final DateTime? createdAt;
+
+  static AppliancePendingRecording? fromEntry(Map<String, Object?> entry) {
+    final Object? id = entry['id'];
+    final Object? sha = entry['sh'];
+    if (id is! String || id.isEmpty || sha is! String || sha.isEmpty) {
+      return null;
+    }
+    return AppliancePendingRecording(
+      id: id,
+      byteSize: entry['by'] is int ? entry['by']! as int : 0,
+      durationMs: entry['du'] is int ? entry['du']! as int : 0,
+      sha256: sha,
+      createdAt: entry['at'] is String
+          ? DateTime.tryParse(entry['at']! as String)
+          : null,
+    );
+  }
+}
+
 class ApplianceDiscovery {
   const ApplianceDiscovery({
     required this.kind,
@@ -333,6 +401,28 @@ class ApplianceCommand {
   static const ApplianceCommand scanWifi = ApplianceCommand._({
     'c': ApplianceProtocol.wifiScan,
   });
+
+  /// List the recordings waiting on the device for a Bluetooth hand-over.
+  static const ApplianceCommand drainList = ApplianceCommand._({
+    'c': ApplianceProtocol.drainList,
+  });
+
+  /// Pull one recording, resuming from [fromPage] after a lost notification.
+  static ApplianceCommand drainPull(String chunkId, {int fromPage = 0}) =>
+      ApplianceCommand._(<String, Object?>{
+        'c': ApplianceProtocol.drainPull,
+        'ch': chunkId,
+        if (fromPage > 0) 'fp': fromPage,
+      });
+
+  /// Tell the device its copy may go: the phone durably stored bytes whose
+  /// SHA-256 is [sha256] — the device checks that against its own record.
+  static ApplianceCommand drainAck(String chunkId, String sha256) =>
+      ApplianceCommand._(<String, Object?>{
+        'c': ApplianceProtocol.drainAck,
+        'ch': chunkId,
+        'sh': sha256,
+      });
   static const ApplianceCommand scanBluetooth = ApplianceCommand._({
     'c': ApplianceProtocol.bluetoothScan,
   });

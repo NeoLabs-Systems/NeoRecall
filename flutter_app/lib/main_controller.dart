@@ -651,9 +651,13 @@ class NeoRecallController extends ChangeNotifier
   @override
   bool get deviceStorageSyncAvailable {
     final adapter = audioDeviceSessions.activeAdapter;
-    if (adapter is! StorageSyncCapableAdapter) return false;
+    if (adapter is! StorageSyncCapableAdapter) {
+      // No wearable with storage — but a Desk with stranded recordings is the
+      // same situation wearing a different radio, and uses the same sweep.
+      return _appliance?.hasStrandedRecordings ?? false;
+    }
     if ((adapter as StorageSyncCapableAdapter).offlineSyncConnector == null) {
-      return false;
+      return _appliance?.hasStrandedRecordings ?? false;
     }
     // A drain may run during live capture only where the device keeps the two on
     // independent channels (Omi does; HeyPocket does not). Everywhere else the
@@ -666,6 +670,10 @@ class NeoRecallController extends ChangeNotifier
             .offlineSyncConnector!
             .supportsConcurrentCapture;
   }
+
+  @override
+  WearableOfflineSync? get applianceOfflineSource =>
+      (_appliance?.hasStrandedRecordings ?? false) ? _appliance!.offlineSync : null;
 
   ApplianceController? _appliance;
 

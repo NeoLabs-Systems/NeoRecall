@@ -18,6 +18,10 @@ mixin DeviceSyncController on ChangeNotifier {
   String get _platform;
   String get _deviceName;
   bool get deviceStorageSyncAvailable;
+
+  /// A Desk with stranded recordings, when there is one — the appliance's
+  /// offline connector, provided by the app controller. Null everywhere else.
+  WearableOfflineSync? get applianceOfflineSource;
   bool get isRecording;
   bool get online;
   String? get error;
@@ -120,11 +124,20 @@ mixin DeviceSyncController on ChangeNotifier {
     // wearable's BLE channel/buffer and would corrupt each other.
     if (!authenticated || isRecording) return true;
     final adapter = audioDeviceSessions.activeAdapter;
-    if (adapter is! StorageSyncCapableAdapter) return true;
-    final storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+    WearableOfflineSync? storage;
+    String deviceName = 'the device';
+    if (adapter is StorageSyncCapableAdapter) {
+      storage = (adapter as StorageSyncCapableAdapter).offlineSyncConnector;
+      deviceName =
+          audioDeviceSessions.preferredDevice?.displayName ?? deviceName;
+    }
+    if (storage == null && applianceOfflineSource != null) {
+      // No wearable to drain, but a Desk holding recordings it cannot upload:
+      // the same sweep, the same custody rules, a different radio underneath.
+      storage = applianceOfflineSource;
+      deviceName = 'NeoRecall Desk';
+    }
     if (storage == null) return true;
-    final deviceName =
-        audioDeviceSessions.preferredDevice?.displayName ?? 'the device';
 
     // An automatic sweep stays invisible until it actually transfers something.
     // Showing a spinner on every poll would report activity, not progress.

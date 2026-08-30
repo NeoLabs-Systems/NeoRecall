@@ -74,7 +74,18 @@ class _ApplianceSheetState extends State<ApplianceSheet>
     return ApplianceSheetScaffold(
       controller: controller,
       title: widget.deviceName,
-      subtitle: () => controller.status?.summary ?? 'Connecting…',
+      // The summary, minus what the status line below already says: a header
+      // reading "Ready" above a pill reading READY was the page repeating
+      // itself. What survives is the part with information — the queue, the
+      // headset, "Sending 3 recordings".
+      subtitle: () {
+        final ApplianceStatus? status = controller.status;
+        if (status == null) return 'Connecting…';
+        final String summary = status.summary;
+        if (summary == 'Ready') return null;
+        if (summary.startsWith('Recording ·')) return null;
+        return summary;
+      },
       trailing: () => IconButton(
         tooltip: 'Device settings',
         icon: const Icon(Icons.tune_rounded),

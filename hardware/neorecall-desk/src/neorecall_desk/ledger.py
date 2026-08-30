@@ -36,6 +36,11 @@ STATE_UPLOADED = "uploaded"
 STATE_TERMINAL = "terminal"
 STATE_RELEASED = "released"
 STATE_FAILED = "failed"
+#: Handed to the owner's phone over Bluetooth. Terminal like released, but the
+#: proof is different: not a server receipt, a SHA-256 echoed back by the phone
+#: after it stored the audio durably. Custody moved; the recording is now the
+#: phone's to upload through its own pipeline.
+STATE_DRAINED = "drained"
 STATE_NEEDS_ATTENTION = "needs_attention"
 
 # Gap reasons accepted by POST /api/v1/ingest/sessions/{id}/gaps. The set is
@@ -297,8 +302,23 @@ class Ledger:
 
     def sessions_needing_declaration(self) -> list[SessionRow]:
         with self._lock:
+            # A session whose every chunk went to the phone has nothing left for
+            # the server: declaring it would create an empty session there while
+            # the audio arrives through the phone's own import pipeline.
+            # Skipped only when the phone took every chunk it had. A session
+            # with no chunks at all still goes to the server — that is how an
+            # empty recording gets closed instead of staying active for ever.
             rows = self._db.execute(
-                "SELECT * FROM sessions WHERE declared=0 ORDER BY started_at"
+                """SELECT * FROM sessions WHERE declared=0
+                   AND NOT (
+                       EXISTS (SELECT 1 FROM chunks
+                               WHERE chunks.session_id = sessions.id)
+                       AND NOT EXISTS (SELECT 1 FROM chunks
+                                       WHERE chunks.session_id = sessions.id
+                                         AND chunks.state != ?)
+                   )
+                   ORDER BY started_at""",
+                (STATE_DRAINED,),
             ).fetchall()
         return [_session_from_row(row) for row in rows]
 
@@ -425,10 +445,37 @@ class Ledger:
     def pending_count(self) -> int:
         with self._lock:
             row = self._db.execute(
-                "SELECT COUNT(*) AS n FROM chunks WHERE state NOT IN (?,?)",
-                (STATE_RELEASED, STATE_NEEDS_ATTENTION),
+                "SELECT COUNT(*) AS n FROM chunks WHERE state NOT IN (?,?,?)",
+                (STATE_RELEASED, STATE_NEEDS_ATTENTION, STATE_DRAINED),
             ).fetchone()
         return int(row["n"])
+
+    # ------------------------------------------------------------------- drain
+
+    def drainable(self) -> list[ChunkRow]:
+        """Chunks the phone may pull over Bluetooth: ready ones, oldest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM chunks WHERE state=? ORDER BY created_at",
+                (STATE_READY,),
+            ).fetchall()
+        return [_chunk_from_row(row) for row in rows]
+
+    def mark_drained(self, chunk_id: str, verified_sha256: str) -> bool:
+        """Delete the local audio because the phone proved it holds it.
+
+        The same bar as the server-side release, translated: the phone sends
+        back the SHA-256 of the bytes it durably stored, and only an exact match
+        releases anything. A phone that stored nothing cannot fake the hash.
+        """
+        row = self.chunk(chunk_id)
+        if row is None or row.state != STATE_READY:
+            return False
+        if not verified_sha256 or verified_sha256.lower() != row.sha256.lower():
+            return False
+        Path(row.path).unlink(missing_ok=True)
+        self.set_state(chunk_id, STATE_DRAINED)
+        return True
 
     def needs_attention_count(self) -> int:
         with self._lock:

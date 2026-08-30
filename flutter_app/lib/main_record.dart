@@ -639,10 +639,47 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Widget _deskDetail() {
-    return ApplianceCaptureSection(
-      controller: widget.controller.appliance,
-      devices: widget.controller.devices,
-      onAdd: _addDesk,
+    final controller = widget.controller;
+    final appliance = controller.appliance;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ApplianceCaptureSection(
+          controller: appliance,
+          devices: controller.devices,
+          onAdd: _addDesk,
+        ),
+        // Only when recordings are genuinely stuck: the Desk has audio and no
+        // network to send it with. This is the same sweep the wearables use —
+        // pull over Bluetooth, store on the phone, upload per the app's own
+        // settings — so there is nothing new for the user to learn here.
+        if (appliance.hasStrandedRecordings) ...<Widget>[
+          const SizedBox(height: AppSpacing.md),
+          InlineMessage(
+            icon: Icons.cloud_off_rounded,
+            message:
+                'The device has recordings but no Wi-Fi. You can move them '
+                'to this phone over Bluetooth; they upload from here later.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: controller.deviceStorageSyncing
+                  ? null
+                  : _syncDeviceStorage,
+              icon: controller.deviceStorageSyncing
+                  ? const ButtonSpinner()
+                  : const Icon(Icons.download_rounded, size: 18),
+              label: Text(
+                controller.deviceStorageSyncing
+                    ? 'Moving recordings…'
+                    : 'Move recordings to this phone',
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 

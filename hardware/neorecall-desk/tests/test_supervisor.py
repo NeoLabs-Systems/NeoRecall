@@ -106,12 +106,17 @@ class FakeGatt:
         self.published = 0
         self.setup_mode = False
         self.discoveries = []
+        self.audio_pages = []
 
     def publish_status(self):
         self.published += 1
 
     def publish_discovery(self, kind, entries):
         self.discoveries.append((kind, entries))
+
+    def publish_audio(self, pages, *, abort=None):
+        self.audio_pages = list(pages)
+        return len(pages)
 
     def set_setup_mode(self, enabled):
         self.setup_mode = enabled
@@ -895,3 +900,67 @@ def test_a_headset_whose_sink_never_appears_is_reported_not_hidden(rig):
 
     assert not result.ok
     assert result.message
+
+
+# -------------------------------------------------------------------- drain
+
+
+def _recorded_chunk(rig):
+    store = rig["supervisor"]._ledger
+    session = store.open_session(device_started_at="2026-08-30T10:00:00Z", timezone="UTC")
+    row = store.append_chunk(
+        session_id=session.id,
+        sequence=0,
+        payload=b"\x01\x02" * 400,
+        duration_ms=5000,
+        overlap_ms=0,
+        monotonic_offset_ms=0,
+    )
+    store.close_session(
+        session.id, ended_at="2026-08-30T10:05:00Z", status="ended", final_sequence=0
+    )
+    return row
+
+
+def test_the_phone_can_take_custody_over_bluetooth(rig):
+    """The no-Wi-Fi path end to end: list, pull, acknowledge, release.
+
+    A device that recorded somewhere without network would otherwise hold the
+    audio until somebody carried it home. The phone takes over with the same
+    custody bar as the server: nothing is deleted until it proves, by hash,
+    that it durably holds the bytes.
+    """
+    import zlib as z
+
+    import cbor2 as c
+
+    supervisor, gatt = rig["supervisor"], rig["gatt"]
+    row = _recorded_chunk(rig)
+
+    assert supervisor.handle_command(protocol.Command(name=protocol.CMD_DRAIN_LIST)).ok
+    kind, entries = gatt.discoveries[-1]
+    assert kind == "pending"
+    assert entries[0]["id"] == row.id and entries[0]["sh"] == row.sha256
+
+    assert supervisor.handle_command(
+        protocol.Command(name=protocol.CMD_DRAIN_PULL, chunk=row.id)
+    ).ok
+    received = z.decompress(b"".join(c.loads(page)["d"] for page in gatt.audio_pages))
+    assert received == b"\x01\x02" * 400
+
+    assert supervisor.handle_command(
+        protocol.Command(name=protocol.CMD_DRAIN_ACK, chunk=row.id, sha=row.sha256)
+    ).ok
+    assert supervisor._ledger.chunk(row.id).state == "drained"
+
+
+def test_no_drain_while_a_recording_is_running(rig):
+    supervisor = rig["supervisor"]
+    row = _recorded_chunk(rig)
+    supervisor.start_recording()
+
+    # The recording owns the radio and the CPU; the drain waits its turn.
+    assert not supervisor.handle_command(protocol.Command(name=protocol.CMD_DRAIN_LIST)).ok
+    assert not supervisor.handle_command(
+        protocol.Command(name=protocol.CMD_DRAIN_PULL, chunk=row.id)
+    ).ok

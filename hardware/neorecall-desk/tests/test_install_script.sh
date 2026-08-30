@@ -185,6 +185,17 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
+# One antenna serves Wi-Fi and Bluetooth. Wi-Fi power save dozes and wakes on a
+# cycle, and each wake-up steals airtime from A2DP — heard as lost milliseconds.
+check "Wi-Fi power saving is disabled for Bluetooth audio" \
+    matches 'wifi\.powersave = 2'
+
+# Persistent journald needs its directory, not just its setting.
+check "the journal survives a reboot" matches 'install -d /var/log/journal'
+
+# The hourly timer and a manual update can land in the same minute.
+check "two installers cannot interleave" matches 'flock -n 9'
+
 echo
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES check(s) failed."

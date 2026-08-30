@@ -47,7 +47,10 @@ GADGET_HINTS = ("uac2", "gadget")
 #: Bluetooth headphones, when a pair is connected. Optional by nature.
 BLUETOOTH_HINTS = ("bluez_output",)
 
-RESTART_DELAY_S = 5.0
+# One second, because this loop is also the replug detector: somebody has just
+# plugged a cable in and is waiting for sound. Five seconds of polling plus ten
+# of restart delay reads as "it does not work", not as "it is starting".
+RESTART_DELAY_S = 1.0
 
 #: ALSA cards whose absence from the graph is worth trying to fix rather than
 #: merely reporting.
@@ -216,6 +219,37 @@ def loopback_command(
     return command
 
 
+#: Exit code for "the host replugged": distinct so the unit can restart fast.
+REPLUG_EXIT = 75
+
+#: Where the kernel reports what the USB cable is doing.
+UDC_STATE_GLOB = "/sys/class/udc/*/state"
+
+
+def _udc_state() -> str:
+    import glob
+
+    for path in glob.glob(UDC_STATE_GLOB):
+        try:
+            return pathlib.Path(path).read_text().strip()
+        except OSError:
+            continue
+    return ""
+
+
+def replug_happened(previous: str, current: str) -> bool:
+    """Whether the host just (re)attached, judged from two UDC state readings.
+
+    Found by measurement, not reasoning: after a cable replug the relay's
+    long-open ALSA handle to the gadget stays "running" and delivers silence
+    for ever. The Mac plays, the graph hums, and 117 000 captured frames come
+    back RMS 0. Reopening everything is the only cure, so the moment to do it
+    is the moment the state file returns to "configured" from anything else —
+    which also covers the host waking from sleep.
+    """
+    return current == "configured" and previous not in ("", "configured")
+
+
 def _card_exists_but_is_not_in_the_graph(message: str) -> bool:
     """Whether ALSA has a card that the PipeWire graph is missing.
 
@@ -245,20 +279,33 @@ def _restart_wireplumber() -> bool:
 
 
 def _use_unity_gain(endpoints: dict[str, str]) -> None:
-    """Pass audio through at the level it arrived.
+    """Pass audio through at the level it arrived — except where somebody listens.
 
     A fresh PipeWire node defaults to 40 % volume. On a box whose whole job is
     relaying, that is a hidden attenuation on every path: the laptop already
     controls its own volume, and the hardware mixer sets the rest. Stacking a
     third, invisible one only makes the appliance quieter than anything explains.
+
+    The audible outputs are the exception, learned the loud way: forcing the
+    speaker sink to 100 % on every relay start overrode whatever level — or
+    mute — the owner had set, and a routine graph rebuild became a jump scare.
+    Plumbing gets unity; ears get the configured volume.
     """
+    audible = {"speaker", "headphones"}
+    try:
+        from ..config import ConfigStore
+
+        listening_level = ConfigStore().get().volume
+    except Exception:  # noqa: BLE001 - an unreadable preference must not stop audio
+        listening_level = 0.7
     by_name = {node["name"]: node["id"] for node in _nodes()}
     for role, name in endpoints.items():
         node_id = by_name.get(name)
         if node_id is None:
             continue
+        level = f"{listening_level:.2f}" if role in audible else "1.0"
         result = subprocess.run(
-            ["wpctl", "set-volume", str(node_id), "1.0"],
+            ["wpctl", "set-volume", str(node_id), level],
             capture_output=True,
             text=True,
             check=False,
@@ -327,17 +374,47 @@ def _apply_host_playback_level(card: str, target_id: int) -> None:
     LOG.info("host speaker volume is %.0f%%%s", level * 100, " (muted)" if muted else "")
 
 
+def _resolve_node_id(name: str) -> int | None:
+    node = next((node for node in _nodes() if node["name"] == name), None)
+    return node["id"] if node else None
+
+
 def _follow_host_playback_level(card: str, target_id: int, monitor: subprocess.Popen) -> None:
-    """Apply the initial host volume and each subsequent ALSA control event."""
-    try:
-        _apply_host_playback_level(card, target_id)
-        if monitor.stdout is None:
-            raise RelayError("the ALSA control monitor has no output stream")
-        for _event in monitor.stdout:
+    """Apply the initial host volume and each subsequent ALSA control event.
+
+    Volume is a convenience; audio is the product. This loop therefore treats
+    its own failures as its own problem: a stale node id is re-resolved by name
+    and the event retried, and an event that still fails is skipped with a log
+    line. The first version raised instead — one stale id after a graph rebuild
+    took the whole relay down, ten silent seconds, in the middle of a self-test.
+    """
+
+    def apply() -> None:
+        nonlocal target_id
+        try:
             _apply_host_playback_level(card, target_id)
-    except Exception as error:  # A dead worker must make systemd restart the relay.
-        LOG.error("host volume synchronization stopped: %s", error)
-        monitor.terminate()
+        except RelayError:
+            refreshed = _resolve_node_id(SPEAKER_RELAY_OUT)
+            if refreshed is None:
+                LOG.warning("skipping a host volume event: %s is not in the graph yet",
+                            SPEAKER_RELAY_OUT)
+                return
+            target_id = refreshed
+            try:
+                _apply_host_playback_level(card, target_id)
+            except RelayError as error:
+                LOG.warning("skipping a host volume event: %s", error)
+
+    try:
+        apply()
+        if monitor.stdout is None:
+            LOG.warning("the ALSA control monitor has no output; host volume stays fixed")
+            return
+        for _event in monitor.stdout:
+            apply()
+        LOG.info("the ALSA control monitor ended")
+    except Exception:  # noqa: BLE001 - volume sync must never take the audio down
+        LOG.exception("host volume synchronization stopped")
 
 
 def _start_host_volume_monitor(processes: list) -> None:
@@ -359,7 +436,9 @@ def _start_host_volume_monitor(processes: list) -> None:
         )
     except OSError as error:
         raise RelayError(f"cannot monitor host volume on ALSA card {card}: {error}") from error
-    processes.append(monitor)
+    # Deliberately NOT in the supervised process list: the monitor's death
+    # costs volume-key sync, not audio, and rebuilding the whole graph over it
+    # is how a cosmetic failure became ten seconds of silence.
     threading.Thread(
         target=_follow_host_playback_level,
         args=(card, target["id"], monitor),
@@ -532,6 +611,7 @@ def run() -> int:
 
         # Supervise rather than exit: a loopback that dies takes half the relay
         # with it, and systemd only sees this process.
+        udc_before = _udc_state()
         while True:
             for process in processes:
                 if process.poll() is not None:
@@ -540,6 +620,14 @@ def run() -> int:
                         process.returncode,
                     )
                     return 1
+            udc_now = _udc_state()
+            if replug_happened(udc_before, udc_now):
+                # The stale-handle bug: every open ALSA stream to the gadget is
+                # now silence. Exit and let systemd rebuild the whole graph with
+                # fresh handles — that is what makes plugging in just work.
+                LOG.info("the computer (re)attached; rebuilding the audio graph")
+                return REPLUG_EXIT
+            udc_before = udc_now
             time.sleep(RESTART_DELAY_S)
     except KeyboardInterrupt:
         return 0

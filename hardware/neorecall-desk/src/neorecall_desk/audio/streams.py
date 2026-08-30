@@ -51,7 +51,6 @@ NODE_NEAR = os.environ.get("NEORECALL_NODE_NEAR", "neorecall.capture.near")
 #: address, which differs between Pi models.
 NODE_FAR = os.environ.get("NEORECALL_NODE_FAR", "")
 NODE_RELAY_OUT = os.environ.get("NEORECALL_NODE_RELAY_OUT", "neorecall.relay.out")
-NODE_VIRTUAL_MIC = os.environ.get("NEORECALL_NODE_VIRTUAL_MIC", "neorecall.virtual.mic")
 
 
 class AudioStream(Protocol):
