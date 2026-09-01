@@ -102,7 +102,9 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
   // it may not invent one or drag a centroid toward its own noise.
   const reliable = durationMs === null || durationMs >= config.speakerMinimumTurnMs;
   const rows = database.prepare('SELECT * FROM speaker_clusters WHERE user_id=? AND session_id=? AND centroid_embedding IS NOT NULL').all(userId, sessionId);
-  const ranked = voiceprintStorage.rankVoiceprints(embedding, rows);
+  // Session centroids are stored in the clear. Rank them as raw vectors;
+  // `rankVoiceprints` is the comparison for sealed voiceprint rows.
+  const ranked = vectors.rank(embedding, rows);
   const best = ranked[0];
   const runnerUp = ranked[1];
   let cluster = null;
@@ -152,7 +154,9 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) 
   }
   const rows = database.prepare('SELECT * FROM voiceprints WHERE user_id=? AND matching_enabled=1 AND embedding_model=? AND embedding_dimensions=?')
     .all(userId, modelName, embedding.length);
-  const ranked = vectors.rank(embedding, rows);
+  // Voiceprint centroids are sealed at rest. Ranking the ciphertext as a
+  // vector scores every enrolled voice at -1 and mints a duplicate.
+  const ranked = voiceprintStorage.rankVoiceprints(embedding, rows);
   const best = ranked[0]; const runnerUp = ranked[1];
   const config = processingSettings.get();
   let voiceprint = best && best.score >= config.voiceMatchThreshold && (!runnerUp || best.score - runnerUp.score >= config.voiceMatchMargin) ? best.row : null;

@@ -198,6 +198,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
       },
       body: JSON.stringify({
         model, messages: openAiMessages(messages), response_format: wireResponseFormat(responseFormat) || { type: 'json_object' },
+        temperature: config.llmTemperature,
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(extraBody || {}),
       }),

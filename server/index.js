@@ -23,12 +23,15 @@ if (!process.env.NEORECALL_ROLE) {
     logger.error('Unhandled rejection', { reason: reason && reason.stack ? reason.stack : String(reason) });
   });
   process.on('exit', (code) => { if (code !== 0) console.error(`[server] HTTP process exiting with code ${code}`); });
-  adminAuth.bootstrap().then(() => {
-    require('./services/sources').init();
-    const config = getConfig();
-    const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
-    for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
-  }).catch((error) => { logger.error('Server startup failed', { error }); process.exitCode = 1; });
+  Promise.resolve()
+    .then(() => require('./db/migrate').migrate())
+    .then(() => adminAuth.bootstrap())
+    .then(() => {
+      require('./services/sources').init();
+      const config = getConfig();
+      const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
+      for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
+    }).catch((error) => { logger.error('Server startup failed', { error }); process.exitCode = 1; });
 } else {
   throw new Error(`Unknown NEORECALL_ROLE: ${process.env.NEORECALL_ROLE}`);
 }

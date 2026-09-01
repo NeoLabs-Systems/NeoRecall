@@ -174,7 +174,7 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
   if (!conversationIds.length) return { quarantined: [] };
   const db = getDatabase();
   const limit = processingSettings.get().consolidationMaxFailures;
-  db.transaction(() => {
+  return db.transaction(() => {
     const quarantined = [];
     for (const conversationId of conversationIds) {
       const row = db.prepare(`UPDATE conversations SET consolidation_failures=consolidation_failures+1,

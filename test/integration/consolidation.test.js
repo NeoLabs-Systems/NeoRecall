@@ -85,6 +85,7 @@ test('one consolidation pass creates English memories and a durable interval gat
   assert.deepEqual(outboundBody.response_format.json_schema.schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
   // The completion budget is always sent; its size is configuration, not contract.
   assert.equal(outboundBody.max_tokens, require('../../server/config').getConfig().aiConsolidationMaxOutputTokens);
+  assert.equal(outboundBody.temperature, require('../../server/config').getConfig().llmTemperature);
   assert.equal(outboundBody.messages[1].content.includes(conversationId), false);
   assert.equal(outboundBody.messages[1].content.includes(segmentPublicId), false);
   const storedMemory = db.prepare('SELECT title_en,started_at,ended_at FROM memories WHERE user_id=?').get(userId);

@@ -5,6 +5,13 @@ function tokens(value) {
     .filter((part) => part.isWordLike).map((part) => part.segment);
 }
 
+// Whisper verbose_json reports `avg_logprob` (negative). Providers that omit
+// confidence leave `null`. Treating a missing value as 0 makes the empty
+// reading beat a real logprob, so the worse copy wins.
+function reportedConfidence(value) {
+  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+}
+
 function similarity(left, right) {
   const a = tokens(left); const b = tokens(right);
   if (!a.length || !b.length) return 0;
@@ -47,7 +54,7 @@ function dedupe(segments, previousSegments, { similarityThreshold, timeTolerance
       Math.abs(candidate.startMs - segment.startMs) <= timeToleranceMs &&
       Math.abs(candidate.endMs - segment.endMs) <= timeToleranceMs && similarity(candidate.text, segment.text) >= similarityThreshold);
     if (!duplicate) accepted.push(segment);
-    else if ((segment.asrConfidence || 0) > (duplicate.asrConfidence || 0) && accepted.includes(duplicate)) accepted.splice(accepted.indexOf(duplicate), 1, segment);
+    else if (reportedConfidence(segment.asrConfidence) > reportedConfidence(duplicate.asrConfidence) && accepted.includes(duplicate)) accepted.splice(accepted.indexOf(duplicate), 1, segment);
   }
   return accepted;
 }

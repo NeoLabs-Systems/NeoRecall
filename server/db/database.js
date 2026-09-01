@@ -11,28 +11,45 @@ const logger = createLogger('database');
 let connection;
 let vectorReady = false;
 
+function waitForUnlock(deadline) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(50, Math.max(1, deadline - Date.now())));
+}
+
 function openDatabase(filename) {
-  const database = new Database(filename);
-  database.pragma('journal_mode = WAL');
-  database.pragma('foreign_keys = ON');
-  database.pragma('busy_timeout = 10000');
-  database.pragma('synchronous = FULL');
-  database.pragma('trusted_schema = OFF');
-  try {
-    sqliteVec.load(database);
-    const actualVersion = database.prepare('SELECT vec_version() AS version').get().version;
-    if (String(actualVersion).replace(/^v/, '') !== String(expectedVecVersion).replace(/^v/, '')) {
-      throw new Error(`sqlite-vec ${actualVersion} loaded, but lockfile expects ${expectedVecVersion}.`);
-    }
-    vectorReady = true;
-  } catch (error) {
-    if (getConfig().requireVector) {
-      database.close();
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    let database;
+    try {
+      database = new Database(filename, { timeout: 10_000 });
+      database.pragma('busy_timeout = 10000');
+      database.pragma('journal_mode = WAL');
+      database.pragma('foreign_keys = ON');
+      database.pragma('synchronous = FULL');
+      database.pragma('trusted_schema = OFF');
+      try {
+        sqliteVec.load(database);
+        const actualVersion = database.prepare('SELECT vec_version() AS version').get().version;
+        if (String(actualVersion).replace(/^v/, '') !== String(expectedVecVersion).replace(/^v/, '')) {
+          throw new Error(`sqlite-vec ${actualVersion} loaded, but lockfile expects ${expectedVecVersion}.`);
+        }
+        vectorReady = true;
+      } catch (error) {
+        if (getConfig().requireVector) {
+          database.close();
+          throw error;
+        }
+        logger.warn('sqlite-vec is unavailable; semantic search is disabled', { error: error.message });
+      }
+      return database;
+    } catch (error) {
+      if (database && database.open) database.close();
+      if (error && error.code === 'SQLITE_BUSY' && Date.now() < deadline) {
+        waitForUnlock(deadline);
+        continue;
+      }
       throw error;
     }
-    logger.warn('sqlite-vec is unavailable; semantic search is disabled', { error: error.message });
   }
-  return database;
 }
 
 function getDatabase() {

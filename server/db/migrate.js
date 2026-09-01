@@ -18,7 +18,7 @@ function withForeignKeysDisabled(database, run) {
   const wasEnabled = database.pragma('foreign_keys', { simple: true }) === 1;
   if (wasEnabled) database.pragma('foreign_keys = OFF');
   try {
-    run();
+    return run();
   } finally {
     if (wasEnabled) database.pragma('foreign_keys = ON');
   }
@@ -52,24 +52,27 @@ function migrate(database = getDatabase()) {
     if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) continue;
     const migration = require(path.join(migrationsPath, filename));
     const apply = database.transaction(() => {
+      // The already-applied check belongs inside the writer lock. HTTP and the
+      // worker both migrate on boot; without it they can both pass the outer
+      // read, both apply, and the second hits a missing column mid-rebuild.
+      if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return false;
       migration.up(database);
       // Verified inside the transaction: a rebuild that orphaned a reference
       // must roll back, not commit and then report.
       if (migration.rebuildsReferencedTable) verifyForeignKeys(database, filename);
       database.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(version, filename);
+      return true;
     });
-    if (migration.rebuildsReferencedTable) {
+    const applied = migration.rebuildsReferencedTable
       // SQLite cannot widen a CHECK constraint in place, so such a migration has
       // to recreate the table. Dropping a table that other tables reference runs
       // an implicit delete first, which would fire their ON DELETE actions and
       // silently null the live foreign keys. Enforcement therefore has to be off
       // across the rebuild, and the pragma is a no-op inside a transaction —
       // hence outside it. The rebuild itself stays atomic either way.
-      withForeignKeysDisabled(database, apply);
-    } else {
-      apply();
-    }
-    logger.info('Applied migration', { version, filename });
+      ? withForeignKeysDisabled(database, () => apply.immediate())
+      : apply.immediate();
+    if (applied) logger.info('Applied migration', { version, filename });
   }
 }
 

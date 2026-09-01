@@ -216,6 +216,21 @@ test('a session speaker cluster keeps its established voiceprint when global mat
   assert.equal(db.prepare('SELECT sample_count FROM voiceprints WHERE id=?').get(first.id).sample_count, 2);
 });
 
+test('a sealed voiceprint is recognized as the same person in a later cluster', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const firstCluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const first = matching.resolveVoiceprint(db, { userId, clusterId: firstCluster, embedding: QUERY, enabled: true });
+  const stored = db.prepare('SELECT centroid_embedding FROM voiceprints WHERE id=?').get(first.id).centroid_embedding;
+  assert.notEqual(Buffer.compare(stored, bytes(QUERY)), 0, 'the enrolled centroid is sealed at rest');
+
+  // No speaker_turns, so sticky assignment cannot hide a failed global rank.
+  const laterCluster = seedCluster(db, { userId, sessionId, ordinal: 2, embedding: QUERY });
+  const matched = matching.resolveVoiceprint(db, { userId, clusterId: laterCluster, embedding: QUERY, enabled: true });
+  assert.equal(matched.id, first.id, 'global matching still finds the sealed voiceprint');
+  assert.equal(db.prepare('SELECT count(*) count FROM voiceprints WHERE user_id=?').get(userId).count, 1);
+});
+
 test('a voice is fingerprinted from everything it said in a chunk, not from one turn', () => {
   const { poolBySpeaker } = require('../../server/transcription/diarization');
   const turns = [

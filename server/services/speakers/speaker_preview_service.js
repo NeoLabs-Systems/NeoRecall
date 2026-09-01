@@ -98,6 +98,99 @@ function extractPreview(filename, channelLayout, selection) {
   return output;
 }
 
+function wavAudio(bytes) {
+  if (!bytes || bytes.length < 44) return null;
+  let offset = 12;
+  let byteRate;
+  let sampleRate;
+  let dataStart;
+  let dataSize;
+  while (offset + 8 <= bytes.length) {
+    const id = bytes.toString('ascii', offset, offset + 4);
+    const size = bytes.readUInt32LE(offset + 4);
+    if (id === 'fmt ') {
+      sampleRate = bytes.readUInt32LE(offset + 12);
+      byteRate = bytes.readUInt32LE(offset + 16);
+    }
+    if (id === 'data') {
+      dataStart = offset + 8;
+      dataSize = size;
+      break;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  if (!byteRate || dataStart === undefined) return null;
+  const end = Math.min(bytes.length, dataStart + dataSize);
+  return {
+    pcm: bytes.subarray(dataStart, end),
+    byteRate,
+    sampleRate: sampleRate || 16000,
+  };
+}
+
+function wavDurationMs(bytes) {
+  const audio = wavAudio(bytes);
+  if (!audio) return 0;
+  return Math.floor((audio.pcm.length / audio.byteRate) * 1000);
+}
+
+function wrapMonoPcmWav(pcm, sampleRate = 16000) {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+// Original chunk audio is deleted after persist, so later chunks cannot
+// re-extract earlier speech. Concatenate the already-stored clip with this
+// chunk's excerpt, capped at the configured maximum.
+function concatPreviewAudio(first, second, maxDurationMs) {
+  const left = wavAudio(first);
+  const right = wavAudio(second);
+  if (!left || !right) {
+    const error = new Error('Speaker preview audio is not a readable WAV clip.');
+    error.code = 'SPEAKER_PREVIEW_FAILED';
+    throw error;
+  }
+  const sampleRate = left.sampleRate || 16000;
+  const maxPcmBytes = Math.floor((maxDurationMs / 1000) * sampleRate) * 2;
+  const remaining = Math.max(0, maxPcmBytes - left.pcm.length);
+  const take = remaining ? right.pcm.subarray(0, remaining - (remaining % 2)) : Buffer.alloc(0);
+  return wrapMonoPcmWav(Buffer.concat([left.pcm, take]), sampleRate);
+}
+
+function capSelection(selection, remainingMs) {
+  if (!selection || remainingMs <= 0) return null;
+  if (selection.durationMs <= remainingMs) return selection;
+  let used = 0;
+  const turns = [];
+  for (const turn of selection.turns) {
+    if (used >= remainingMs) break;
+    const available = turn.end_ms - turn.start_ms;
+    const take = Math.min(available, remainingMs - used);
+    if (take <= 0) continue;
+    turns.push({ ...turn, end_ms: turn.start_ms + take });
+    used += take;
+  }
+  if (used <= 0) return null;
+  const quality = turns.reduce(
+    (sum, turn) => sum + Number(turn.quality || 0) * Math.max(1, turn.end_ms - turn.start_ms),
+    0,
+  ) / used;
+  return { turns, durationMs: used, quality };
+}
+
 function candidatesForChunk(database, chunkId) {
   return database
     .prepare(
@@ -123,6 +216,24 @@ function shouldReplacePreview(current, selection, targetDurationMs) {
   return selection.quality > Number(current.quality);
 }
 
+function storePreview(database, { voiceprintId, userId, audio, durationMs, quality }) {
+  const { speakerPreviewMinimumMs, speakerPreviewMaximumMs } = getConfig();
+  const clamped = Math.max(speakerPreviewMinimumMs, Math.min(speakerPreviewMaximumMs, durationMs));
+  database
+    .prepare(
+      `INSERT INTO speaker_previews
+        (voiceprint_id,user_id,audio,content_type,duration_ms,quality)
+       VALUES (?,?,?,'audio/wav',?,?)
+       ON CONFLICT(voiceprint_id) DO UPDATE SET
+         audio=excluded.audio,
+         content_type=excluded.content_type,
+         duration_ms=excluded.duration_ms,
+         quality=excluded.quality,
+         updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+    )
+    .run(voiceprintId, userId, voiceprintStorage.sealPreviewAudio(audio), clamped, quality);
+}
+
 function captureFromChunk(chunk) {
   if (!chunk?.temporary_path) return 0;
   const database = getDatabase();
@@ -133,38 +244,54 @@ function captureFromChunk(chunk) {
     grouped.set(turn.voiceprint_id, turns);
   }
   let captured = 0;
+  const targetDurationMs = getConfig().speakerPreviewMaximumMs;
   for (const [voiceprintId, turns] of grouped) {
     const selection = selectTurns(turns);
     if (!selection) continue;
     const current = database
-      .prepare('SELECT duration_ms,quality FROM speaker_previews WHERE voiceprint_id=?')
+      .prepare('SELECT duration_ms,quality,audio FROM speaker_previews WHERE voiceprint_id=?')
       .get(voiceprintId);
-    const targetDurationMs = getConfig().speakerPreviewMaximumMs;
-    if (!shouldReplacePreview(current, selection, targetDurationMs)) continue;
-    const audio = extractPreview(
-      chunk.temporary_path,
-      chunk.channel_layout,
-      selection,
-    );
-    database
-      .prepare(
-        `INSERT INTO speaker_previews
-          (voiceprint_id,user_id,audio,content_type,duration_ms,quality)
-         VALUES (?,?,?,'audio/wav',?,?)
-         ON CONFLICT(voiceprint_id) DO UPDATE SET
-           audio=excluded.audio,
-           content_type=excluded.content_type,
-           duration_ms=excluded.duration_ms,
-           quality=excluded.quality,
-           updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-      )
-      .run(
-        voiceprintId,
-        chunk.user_id,
-        voiceprintStorage.sealPreviewAudio(audio),
-        selection.durationMs,
-        selection.quality,
-      );
+
+    let audio;
+    let durationMs;
+    let quality;
+    const existing = current ? voiceprintStorage.readPreviewAudio(current.audio) : null;
+    const currentMs = existing ? (wavDurationMs(existing) || current.duration_ms) : 0;
+
+    if (!current) {
+      audio = extractPreview(chunk.temporary_path, chunk.channel_layout, selection);
+      durationMs = wavDurationMs(audio) || selection.durationMs;
+      quality = selection.quality;
+    } else if (currentMs >= targetDurationMs) {
+      if (!shouldReplacePreview({ ...current, duration_ms: currentMs }, selection, targetDurationMs)) continue;
+      audio = extractPreview(chunk.temporary_path, chunk.channel_layout, selection);
+      durationMs = wavDurationMs(audio) || selection.durationMs;
+      quality = selection.quality;
+    } else if (selection.durationMs >= targetDurationMs) {
+      audio = extractPreview(chunk.temporary_path, chunk.channel_layout, selection);
+      durationMs = wavDurationMs(audio) || selection.durationMs;
+      quality = selection.quality;
+    } else {
+      const remainingMs = targetDurationMs - currentMs;
+      // Ask for a little extra so a short ffmpeg atrim cannot leave the clip
+      // just under the Speakers display floor; concat still caps at the max.
+      const addition = capSelection(selection, remainingMs + 100);
+      if (!addition) continue;
+      const extra = extractPreview(chunk.temporary_path, chunk.channel_layout, addition);
+      audio = concatPreviewAudio(existing, extra, targetDurationMs);
+      durationMs = wavDurationMs(audio);
+      if (durationMs <= currentMs) continue;
+      const addedMs = durationMs - currentMs;
+      quality = (Number(current.quality) * currentMs + addition.quality * addedMs) / durationMs;
+    }
+
+    storePreview(database, {
+      voiceprintId,
+      userId: chunk.user_id,
+      audio,
+      durationMs,
+      quality,
+    });
     captured += 1;
   }
   return captured;
@@ -186,6 +313,8 @@ function get(userId, voiceprintId) {
 module.exports = {
   selectTurns,
   extractPreview,
+  concatPreviewAudio,
+  wavDurationMs,
   captureFromChunk,
   get,
   shouldReplacePreview,
