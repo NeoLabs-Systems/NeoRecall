@@ -321,6 +321,12 @@ The issued access is limited to `search:read`, `memories:read`, and
 the authorization page shows the exact NeoAgent callback URL. NeoAgent cannot
 upload audio, change memories, start consolidation, or call NeoRecall Ask.
 
-Set `NEORECALL_PUBLIC_URL` to the externally reachable HTTPS origin when
-NeoRecall is behind a reverse proxy. Local HTTP URLs remain suitable when both
+Companion bootstrap advertises authorize/token endpoints using the host
+NeoAgent used to reach NeoRecall, so a LAN or reverse-proxy hostname works even
+when `NEORECALL_PUBLIC_URL` is still `localhost`. Set `NEORECALL_PUBLIC_URL` to
+the externally reachable HTTPS origin when NeoRecall is behind a reverse proxy
+for other public-facing links. Local HTTP URLs remain suitable when both
 services run on a trusted private host.
+
+NeoAgent's `PUBLIC_URL` must resolve in the browser that completes OAuth; that
+callback path is always `/api/integrations/oauth/callback`.

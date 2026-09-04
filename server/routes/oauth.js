@@ -31,6 +31,18 @@ function publicBaseUrl(req) {
   return String(getConfig().publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
 }
 
+function callerBaseUrl(req) {
+  // Prefer the host NeoAgent actually used to reach this server. A mis-set
+  // NEORECALL_PUBLIC_URL of localhost breaks browser OAuth when the companion
+  // connects over a LAN IP or reverse-proxy hostname.
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
+  const host = forwardedHost || String(req.get('host') || '').trim();
+  if (!host) return publicBaseUrl(req);
+  const protocol = forwardedProto || req.protocol || 'http';
+  return `${protocol}://${host}`.replace(/\/+$/, '');
+}
+
 function appendRedirect(url, values) {
   const target = new URL(url);
   for (const [key, value] of Object.entries(values)) if (value) target.searchParams.set(key, value);
@@ -117,7 +129,7 @@ function renderConsent(authorize) {
 router.post('/api/oauth/companion/neoagent/bootstrap', slidingWindow({ windowMs: 15 * 60_000, limit: 80 }), (req, res) => {
   try {
     const issued = createCompanionClient({ redirectUri: req.body?.redirectUri, appName: req.body?.appName });
-    const root = publicBaseUrl(req);
+    const root = callerBaseUrl(req);
     return res.json({
       companion: 'neoagent', created: issued.created, clientId: issued.client.id,
       redirectUri: JSON.parse(issued.client.redirect_uris_json)[0], scopes: SCOPES,
