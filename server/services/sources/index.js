@@ -18,14 +18,13 @@ const logger = createLogger('sources');
 // break the whole service at require time.
 const SOURCE_TYPES = {
   discord: () => require('./discord_source'),
-  plaud: () => require('./plaud_source'),
 };
 
 // Config keys that hold credentials and must never be echoed back to a client.
 const SECRET_CONFIG_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'password', 'apiKey']);
 
 // Removed connectors cannot start and should not remain visible in clients.
-const RETIRED_SOURCE_TYPES = Object.freeze(['google_meet', 'zoom', 'microsoft_teams', 'meeting']);
+const RETIRED_SOURCE_TYPES = Object.freeze(['google_meet', 'zoom', 'microsoft_teams', 'meeting', 'plaud']);
 
 function driverFor(type) {
   const load = SOURCE_TYPES[type];

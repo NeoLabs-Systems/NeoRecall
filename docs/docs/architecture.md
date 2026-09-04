@@ -106,7 +106,13 @@ and streams audio into the ordinary ingest pipeline.
 - **Discord** — each user pastes their own bot token and trigger usernames.
   When a listed person joins a voice channel, the bot joins and records every
   speaker until they leave.
-PLAUD remains a separate import connector for finished wearable files.
+
+Plaud Note Pro and NotePin S pair as wearables on iOS and Android through Plaud
+Embedded: the phone binds the pin over BLE, drains finished files, and runs them
+through the ordinary ingest pipeline. Handshake tokens are minted on the
+NeoRecall server; audio is not uploaded to Plaud. Binding a device unbinds the
+consumer Plaud app. Desktop and the browser cannot complete Plaud's encrypted
+handshake — there is no Plaud SDK for those platforms.
 
 ## Processing pipeline
 

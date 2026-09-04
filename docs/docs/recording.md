@@ -87,9 +87,12 @@ bounded timeouts, and queued chunks remain on disk through offline periods.
 
 Bluetooth support is transport- and device-adapter based. Adapters normalize
 PCM, connection states, battery state, and physical start/stop/standby/wake
-events. Reconnect uses bounded exponential backoff. No Bluetooth protocol is
-enabled in the default registry until that device's audio framing and control
-semantics have been validated.
+events. Reconnect uses bounded exponential backoff. Plaud Note Pro and NotePin S
+pair on iOS and Android as offline-first wearables: the pin records on its own,
+and NeoRecall drains finished files over BLE after a handshake token from this
+server. The consumer Plaud app cannot stay bound to the same device. Desktop and
+web clients can use other wearables over Bluetooth, but Plaud pairing stays on
+the phone.
 
 Android cannot override a user Force stop, revoked permissions, exhausted
 storage, or some vendor battery-management policies. iOS cannot continue after

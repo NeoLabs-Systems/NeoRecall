@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 
 import 'diagnostics/client_diagnostic_log.dart';
+import 'devices/plaud/plaud_session.dart';
 import 'models/chunk.dart';
 import 'sync/upload_compression.dart';
 import 'models/recording.dart';
@@ -61,6 +62,7 @@ class NeoRecallApiClient {
   int? maxMemoryMergeItems;
   int? maxContextFileBytes;
   int? maxContextNoteCharacters;
+  bool plaudEmbedded = false;
 
   /// Compression is opt-in only after the authenticated server explicitly
   /// advertises support. This keeps queued audio compatible with older backend
@@ -71,6 +73,7 @@ class NeoRecallApiClient {
     maxMemoryMergeItems = null;
     maxContextFileBytes = null;
     maxContextNoteCharacters = null;
+    plaudEmbedded = false;
     if (token == null) return;
     try {
       final meta = await request('GET', '/api/v1/meta');
@@ -96,6 +99,8 @@ class NeoRecallApiClient {
       maxContextNoteCharacters = limits is Map
           ? (limits['contextNoteMaxCharacters'] as num?)?.toInt()
           : null;
+      plaudEmbedded =
+          capabilities is Map && capabilities['plaudEmbedded'] == true;
     } catch (_) {
       // Identity uploads are universally compatible and remain the safe
       // fallback while the server is offline or predates capability discovery.
@@ -127,6 +132,28 @@ class NeoRecallApiClient {
       _decode(response);
     }
     return response.bodyBytes;
+  }
+
+  Future<PlaudEmbeddedSession?> fetchPlaudSession() async {
+    try {
+      final payload = await request('POST', '/api/v1/devices/plaud/session');
+      if (payload is! Map) return null;
+      final token = payload['accessToken'] as String?;
+      final domain = payload['customDomain'] as String?;
+      final userId = payload['userId'] as String?;
+      final expiresIn = (payload['expiresIn'] as num?)?.toInt() ?? 0;
+      if (token == null || domain == null || userId == null) return null;
+      final skew = expiresIn > 120 ? 60 : 0;
+      return PlaudEmbeddedSession(
+        accessToken: token,
+        customDomain: domain,
+        userId: userId,
+        expiresAt: DateTime.now().add(Duration(seconds: expiresIn - skew)),
+      );
+    } on ApiException catch (error) {
+      if (error.status == 404) return null;
+      rethrow;
+    }
   }
 
   Future<dynamic> request(String method, String path, {Object? body}) async {

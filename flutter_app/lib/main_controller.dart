@@ -18,6 +18,7 @@ import 'src/devices/audio_codec_decoder.dart';
 import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
 import 'src/devices/device_storage_sync_scheduler.dart';
+import 'src/devices/plaud/plaud_session.dart';
 import 'src/devices/omi/offline_sync.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
@@ -91,7 +92,10 @@ class NeoRecallController extends ChangeNotifier
           audioDeviceSessions ??
           DeviceSessionController(registry: this.audioDeviceRegistry);
     }
+    bindPlaudSessionFetcher(this.audioDeviceRegistry, _fetchPlaudSession);
   }
+
+  Future<PlaudEmbeddedSession?> _fetchPlaudSession() => api.fetchPlaudSession();
 
   static const String _configuredBackendUrl = String.fromEnvironment(
     'NEORECALL_API_URL',
@@ -629,7 +633,10 @@ class NeoRecallController extends ChangeNotifier
 
   // Devices that record on-device (button-triggered) rather than streaming live;
   // for these, pulling stored recordings is the primary action, not live capture.
-  static const Set<String> _offlineFirstDeviceTypes = <String>{'heyPocket'};
+  static const Set<String> _offlineFirstDeviceTypes = <String>{
+    'heyPocket',
+    'plaud',
+  };
 
   /// True when the connected wearable is an offline-first (button-record-on-
   /// device) type, so the UI can present "sync recordings" as the primary flow.

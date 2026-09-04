@@ -1,0 +1,24 @@
+name: plaud_sdk
+description: Flutter bridge for the Plaud iOS/Android device SDKs — BLE scan/connect, on-device recording list, and audio export.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: systems.neolabs.plaud_sdk
+        pluginClass: PlaudSdkPlugin
+      ios:
+        pluginClass: PlaudSdkPlugin

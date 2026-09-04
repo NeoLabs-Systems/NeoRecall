@@ -39,6 +39,8 @@ dependencies:
   # Pure-Dart MP3 decoder (no native/FFI, works on web + desktop + mobile) used
   # to decode HeyPocket wearable audio to PCM16 on-device, matching the other
   # wearable connectors. Pinned to a specific commit for reproducible builds.
+  plaud_sdk:
+    path: plugins/plaud_sdk
   minimp3_dart:
     git:
       url: https://github.com/Telosnex/minimp3_dart.git

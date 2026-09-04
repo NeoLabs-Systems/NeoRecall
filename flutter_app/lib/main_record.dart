@@ -726,7 +726,7 @@ class _RecordScreenState extends State<RecordScreen> {
           Expanded(
             child: Text(
               controller.preferredDeviceLabel == null
-                  ? 'Connect a supported streaming wearable before starting this source.'
+                  ? 'Connect a supported wearable before starting this source.'
                   : 'Preferred device: ${controller.preferredDeviceLabel}',
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),

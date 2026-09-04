@@ -5,9 +5,24 @@ const { z } = require('zod');
 const devices = require('../services/devices/device_service');
 const { requireAuth, requireScope, requireAnyScope } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 
 const router = express.Router();
 router.use(requireAuth);
+
+router.post(
+  '/plaud/session',
+  requireAnyScope('devices:write', 'ingest:write'),
+  asyncRoute(async (req, res) => {
+    const session = await require('../services/devices/plaud_embedded_auth').mintUserSession(req.auth.userId);
+    if (!session) {
+      res.status(404).json({ error: 'Plaud devices are not configured on this server.' });
+      return;
+    }
+    res.json(session);
+  }),
+);
+
 const deviceSchema = z.object({
   id: z.string().uuid().optional(), clientUuid: z.string().min(8).max(128), name: z.string().min(1).max(100), platform: z.string().min(1).max(40),
   kind: z.enum(['browser', 'desktop', 'mobile', 'import', 'wearable', 'appliance']), capabilities: z.record(z.unknown()).optional(),

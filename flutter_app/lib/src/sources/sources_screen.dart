@@ -4,7 +4,6 @@ import '../../main_controller.dart';
 import '../../main_theme.dart';
 import 'discord_setup_dialog.dart';
 import 'platform_copy.dart';
-import 'plaud_setup_dialog.dart';
 import 'source_platform_card.dart';
 
 class SourcesScreen extends StatefulWidget {
@@ -73,7 +72,6 @@ class _SourcesScreenState extends State<SourcesScreen>
   Future<void> _setupManual(String typeId) async {
     final Widget? dialog = switch (typeId) {
       'discord' => DiscordSetupDialog(controller: widget.controller),
-      'plaud' => PlaudSetupDialog(controller: widget.controller),
       _ => null,
     };
     if (dialog == null) return;
@@ -104,40 +102,6 @@ class _SourcesScreenState extends State<SourcesScreen>
     }
   }
 
-  Future<void> _syncSource(Map<String, dynamic> source) async {
-    final type = source['type'] as String? ?? '';
-    setState(() => _busyTypes.add(type));
-    try {
-      final result =
-          await widget.controller.api.request(
-                'POST',
-                '/api/v1/sources/${source['id']}/sync',
-              )
-              as Map;
-      if (mounted) {
-        final imported = result['imported'];
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              imported is num && imported > 0
-                  ? 'Imported $imported new recording${imported == 1 ? '' : 's'}.'
-                  : 'Sync complete. No new recordings.',
-            ),
-          ),
-        );
-      }
-      await _load(silent: true);
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Sync failed: $error')));
-      }
-      await _load(silent: true);
-    } finally {
-      if (mounted) setState(() => _busyTypes.remove(type));
-    }
-  }
 
   Future<void> _deleteSource(Map<String, dynamic> source) async {
     final palette = neoRecallPaletteOf(context);
@@ -250,9 +214,7 @@ class _SourcesScreenState extends State<SourcesScreen>
             onToggle: card.source == null
                 ? null
                 : (value) => _toggleSource(card.source!, value),
-            onSync: card.copy.id == 'plaud' && card.source != null
-                ? () => _syncSource(card.source!)
-                : null,
+            onSync: null,
             onDisconnect: card.source == null
                 ? null
                 : () => _deleteSource(card.source!),
@@ -271,7 +233,6 @@ class _SourcesScreenState extends State<SourcesScreen>
     }
 
     final live = _buildCards(SourceCategory.liveCapture);
-    final imports = _buildCards(SourceCategory.import);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -299,7 +260,7 @@ class _SourcesScreenState extends State<SourcesScreen>
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              'Connect external recording services and run their audio through the same transcription pipeline as your devices.',
+              'Connect Discord as a live source. Plaud Note Pro and NotePin S pair from Record on iOS or Android (not desktop or the browser).',
               style: TextStyle(
                 color: palette.textSecondary,
                 fontSize: 13.5,
@@ -312,12 +273,6 @@ class _SourcesScreenState extends State<SourcesScreen>
               'Live capture',
               'Discord voice — the bot joins a channel and records while people are present.',
               live,
-            ),
-            _section(
-              palette,
-              'Imports',
-              'Pull finished recordings from a linked wearable account.',
-              imports,
             ),
           ],
         ),

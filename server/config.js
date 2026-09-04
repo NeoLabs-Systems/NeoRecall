@@ -329,6 +329,12 @@ function buildConfig() {
     diagnosticRetentionDays: integer('NEORECALL_DIAGNOSTIC_RETENTION_DAYS', 7, { min: 1, max: 90 }),
     diagnosticMaxEventsPerUser: integer('NEORECALL_DIAGNOSTIC_MAX_EVENTS_PER_USER', 500, { min: 50, max: 10_000 }),
     diagnosticExportMaxEvents: integer('NEORECALL_DIAGNOSTIC_EXPORT_MAX_EVENTS', 250, { min: 10, max: 1_000 }),
+    // Plaud Embedded partner credentials. Used only to mint per-user JWTs so
+    // the mobile client can bind Note Pro / NotePin S over BLE. Audio never
+    // goes to Plaud; leave both unset to hide the pairing session endpoint.
+    plaudClientId: process.env.NEORECALL_PLAUD_CLIENT_ID || '',
+    plaudClientSecret: process.env.NEORECALL_PLAUD_CLIENT_SECRET || '',
+    plaudApiHost: (process.env.NEORECALL_PLAUD_API_HOST || 'platform-us.plaud.ai').replace(/^https?:\/\//, '').replace(/\/+$/, ''),
   };
   validateConfig(config, { promptReserveTokens: LLM_PROMPT_RESERVE_TOKENS });
   return Object.freeze(config);

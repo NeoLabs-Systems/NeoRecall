@@ -18,6 +18,7 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `NEORECALL_CONTEXT_MAX_FILE_BYTES` | Maximum original context-file upload | `33554432` |
 | `NEORECALL_CONTEXT_MAX_ITEMS` | Maximum context items per recording or memory | `200` |
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
+| `NEORECALL_PLAUD_CLIENT_ID` / `NEORECALL_PLAUD_CLIENT_SECRET` | Partner credentials so iOS and Android can bind Plaud Note Pro / NotePin S over BLE | unset (pairing hidden) |
 
 ## External inference providers
 

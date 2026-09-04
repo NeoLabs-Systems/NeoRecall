@@ -1,12 +1,21 @@
 import 'audio_device_adapter.dart';
 import 'omi/device_adapter.dart';
+import 'plaud/plaud_adapter.dart';
+import 'plaud/plaud_session.dart';
 
-/// Application-level registry bootstrap.
-///
-/// Concrete device protocols are registered here only after their wire format,
-/// lifecycle, and button semantics have been validated. Keeping the default
-/// empty prevents an unknown Bluetooth device from being treated as a
-/// compatible audio source.
-AudioDeviceAdapterRegistry createDefaultDeviceRegistry() {
-  return AudioDeviceAdapterRegistry()..register(DeviceAdapter());
+AudioDeviceAdapterRegistry createDefaultDeviceRegistry({
+  PlaudSessionFetcher? plaudSession,
+}) {
+  final plaud = PlaudAdapter(fetchSession: plaudSession);
+  return AudioDeviceAdapterRegistry()
+    ..register(DeviceAdapter())
+    ..register(plaud);
+}
+
+void bindPlaudSessionFetcher(
+  AudioDeviceAdapterRegistry registry,
+  PlaudSessionFetcher fetchSession,
+) {
+  final adapter = registry[PlaudAdapter.adapterId];
+  if (adapter is PlaudAdapter) adapter.attachSessionFetcher(fetchSession);
 }
