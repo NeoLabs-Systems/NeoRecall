@@ -1,0 +1,336 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+/// Wire frames captured from a Memoket Gem (firmware 01.42.01.10) while the
+/// official app remotely started/stopped recording and later drained a file
+/// that was recorded offline. Opcodes and layouts below are exactly what
+/// crossed the air.
+class MemoketProtocol {
+  static const int opPing = 0x00;
+  static const int opRecordStart = 0x01;
+  static const int opRecordStop = 0x02;
+  static const int opListFiles = 0x03;
+  static const int opDownload = 0x04;
+  static const int opDelete = 0x05;
+  static const int opBattery = 0xe1;
+  static const int opFirmware = 0xe3;
+  static const int opSetTime = 0xe5;
+  static const int opStorage = 0xe8;
+  static const int opTimeQuery = 0xff;
+
+  /// Phone → Gem: start on-device recording (and the live Opus stream).
+  static final Uint8List recordStart = Uint8List.fromList(const <int>[
+    opRecordStart,
+    0x00,
+    0x00,
+  ]);
+
+  /// Phone → Gem: stop the current recording.
+  static final Uint8List recordStop = Uint8List.fromList(const <int>[
+    opRecordStop,
+    0x00,
+  ]);
+
+  static final Uint8List ping = Uint8List.fromList(const <int>[opPing]);
+  static final Uint8List batteryQuery = Uint8List.fromList(const <int>[
+    opBattery,
+  ]);
+  static final Uint8List firmwareQuery = Uint8List.fromList(const <int>[
+    opFirmware,
+    0x01,
+  ]);
+  static final Uint8List timeQuery = Uint8List.fromList(const <int>[
+    opTimeQuery,
+    0x68,
+  ]);
+  static final Uint8List storageQuery = Uint8List.fromList(const <int>[
+    opStorage,
+  ]);
+  static final Uint8List listFiles = Uint8List.fromList(const <int>[
+    opListFiles,
+  ]);
+
+  static Uint8List setTime(DateTime when) {
+    final unix = when.toUtc().millisecondsSinceEpoch ~/ 1000;
+    return Uint8List.fromList(<int>[
+      opSetTime,
+      (unix >> 24) & 0xff,
+      (unix >> 16) & 0xff,
+      (unix >> 8) & 0xff,
+      unix & 0xff,
+    ]);
+  }
+
+  static Uint8List fileCommand(int opcode, String filename) {
+    final name = ascii.encode(filename);
+    return Uint8List.fromList(<int>[opcode, name.length, ...name]);
+  }
+
+  /// Live notify packets are `00 00 00 00 <seq> <opus-frame>`; stored-file
+  /// chunks are already a single Opus frame (they start with the TOC `0xbc`
+  /// seen on every captured packet).
+  static Uint8List? liveOpusFrame(List<int> packet) {
+    if (packet.length >= 6 &&
+        packet[0] == 0 &&
+        packet[1] == 0 &&
+        packet[2] == 0 &&
+        packet[3] == 0) {
+      return Uint8List.fromList(packet.sublist(5));
+    }
+    if (packet.isNotEmpty && packet.first == 0xbc) {
+      return Uint8List.fromList(packet);
+    }
+    return null;
+  }
+
+  static int? batteryLevel(List<int> frame) {
+    if (frame.length < 2 || frame.first != opBattery) return null;
+    return frame[1];
+  }
+
+  static String? firmwareVersion(List<int> frame) {
+    if (frame.length < 2 || frame.first != opFirmware) return null;
+    return ascii.decode(frame.sublist(1), allowInvalid: true).trim();
+  }
+
+  /// `03 ff` ends a listing. `03 01 00 00 <dur8> <namelen> <name> <size32be>`
+  /// is one stored file. A notify that is only `03 ff` is the terminator.
+  static bool isListEnd(List<int> frame) =>
+      frame.length >= 2 && frame[0] == opListFiles && frame[1] == 0xff;
+
+  static MemoketStoredFile? parseListEntry(List<int> frame) {
+    if (frame.length < 10 || frame.first != opListFiles || frame[1] == 0xff) {
+      return null;
+    }
+    final duration = frame[4];
+    final nameLen = frame[5];
+    if (nameLen <= 0 || frame.length < 6 + nameLen + 4) return null;
+    final name = ascii.decode(
+      frame.sublist(6, 6 + nameLen),
+      allowInvalid: true,
+    );
+    if (name.isEmpty) return null;
+    final sizeOff = 6 + nameLen;
+    final size =
+        (frame[sizeOff] << 24) |
+        (frame[sizeOff + 1] << 16) |
+        (frame[sizeOff + 2] << 8) |
+        frame[sizeOff + 3];
+    return MemoketStoredFile(
+      filename: name,
+      durationSeconds: duration,
+      byteLength: size,
+    );
+  }
+
+  static String? recordingFilename(List<int> frame) {
+    if (frame.isEmpty ||
+        (frame.first != opRecordStart && frame.first != opRecordStop)) {
+      return null;
+    }
+    final match = RegExp(
+      r'(\d{8}_\d{6}_\d+\.opus)',
+    ).firstMatch(ascii.decode(frame, allowInvalid: true));
+    return match?.group(1);
+  }
+
+  static bool isDownloadComplete(List<int> frame) =>
+      frame.length >= 2 && frame[0] == opDownload && frame[1] == 0x02;
+
+  static bool isDeleteAck(List<int> frame) =>
+      frame.length >= 2 && frame[0] == opDelete && frame[1] == 0x01;
+
+  /// Concatenated raw Opus frames are not a file. The import pipeline needs a
+  /// container; Ogg Opus is what the server already accepts as `audio/ogg`.
+  /// Opus TOC bit 2 is the stereo flag (RFC 6716). Captured Gem frames are
+  /// `0xbc` — stereo CELT.
+  static int opusChannelCount(List<int> frame) {
+    if (frame.isEmpty) return 1;
+    return ((frame.first >> 2) & 1) == 1 ? 2 : 1;
+  }
+
+  static Uint8List wrapOpusFramesAsOgg(
+    List<Uint8List> frames, {
+    int sampleRate = 16000,
+    int samplesPerFrame = 1920,
+  }) {
+    final serial = 0x4d4b4731; // 'MKG1'
+    final channels = frames.isEmpty ? 1 : opusChannelCount(frames.first);
+    final pages = <Uint8List>[];
+    pages.add(
+      _oggPage(
+        headerType: 0x02,
+        granule: 0,
+        serial: serial,
+        sequence: 0,
+        body: _opusHead(sampleRate, channels),
+      ),
+    );
+    pages.add(
+      _oggPage(
+        headerType: 0x00,
+        granule: 0,
+        serial: serial,
+        sequence: 1,
+        body: _opusTags(),
+      ),
+    );
+    var granule = 0;
+    for (var i = 0; i < frames.length; i += 1) {
+      granule += samplesPerFrame;
+      pages.add(
+        _oggPage(
+          headerType: i == frames.length - 1 ? 0x04 : 0x00,
+          granule: granule,
+          serial: serial,
+          sequence: i + 2,
+          body: frames[i],
+        ),
+      );
+    }
+    final out = BytesBuilder();
+    for (final page in pages) {
+      out.add(page);
+    }
+    return out.toBytes();
+  }
+
+  static Uint8List _opusHead(int sampleRate, int channels) {
+    final out = BytesBuilder()
+      ..add(ascii.encode('OpusHead'))
+      ..add(<int>[
+        1, // version
+        channels.clamp(1, 2),
+        0, 0, // pre-skip
+        sampleRate & 0xff,
+        (sampleRate >> 8) & 0xff,
+        (sampleRate >> 16) & 0xff,
+        (sampleRate >> 24) & 0xff,
+        0, 0, // output gain
+        0, // mapping family
+      ]);
+    return out.toBytes();
+  }
+
+  static Uint8List _opusTags() {
+    const vendor = 'NeoRecall';
+    final out = BytesBuilder()
+      ..add(ascii.encode('OpusTags'))
+      ..add(<int>[
+        vendor.length,
+        0,
+        0,
+        0,
+        ...ascii.encode(vendor),
+        0,
+        0,
+        0,
+        0, // user comment count
+      ]);
+    return out.toBytes();
+  }
+
+  static Uint8List _oggPage({
+    required int headerType,
+    required int granule,
+    required int serial,
+    required int sequence,
+    required List<int> body,
+  }) {
+    final lacing = <int>[];
+    var remaining = body.length;
+    while (remaining >= 255) {
+      lacing.add(255);
+      remaining -= 255;
+    }
+    lacing.add(remaining);
+    final header = BytesBuilder()
+      ..add(ascii.encode('OggS'))
+      ..add(<int>[0, headerType])
+      ..add(_u64le(granule))
+      ..add(_u32le(serial))
+      ..add(_u32le(sequence))
+      ..add(const <int>[0, 0, 0, 0]) // CRC placeholder
+      ..add(<int>[lacing.length, ...lacing]);
+    final page = BytesBuilder()
+      ..add(header.toBytes())
+      ..add(body);
+    final bytes = page.toBytes();
+    final crc = _oggCrc(bytes);
+    bytes[22] = crc & 0xff;
+    bytes[23] = (crc >> 8) & 0xff;
+    bytes[24] = (crc >> 16) & 0xff;
+    bytes[25] = (crc >> 24) & 0xff;
+    return bytes;
+  }
+
+  static List<int> _u32le(int value) => <int>[
+    value & 0xff,
+    (value >> 8) & 0xff,
+    (value >> 16) & 0xff,
+    (value >> 24) & 0xff,
+  ];
+
+  static List<int> _u64le(int value) => <int>[..._u32le(value), 0, 0, 0, 0];
+
+  static int _oggCrc(List<int> data) {
+    var crc = 0;
+    final table = _crcTable;
+    for (final byte in data) {
+      crc = table[((crc >> 24) ^ byte) & 0xff] ^ ((crc << 8) & 0xffffffff);
+    }
+    return crc;
+  }
+
+  static final List<int> _crcTable = _buildCrcTable();
+
+  static List<int> _buildCrcTable() {
+    final table = List<int>.filled(256, 0);
+    for (var i = 0; i < 256; i += 1) {
+      var r = i << 24;
+      for (var bit = 0; bit < 8; bit += 1) {
+        r = (r & 0x80000000) != 0
+            ? ((r << 1) ^ 0x04c11db7) & 0xffffffff
+            : (r << 1) & 0xffffffff;
+      }
+      table[i] = r;
+    }
+    return table;
+  }
+}
+
+class MemoketStoredFile {
+  const MemoketStoredFile({
+    required this.filename,
+    required this.durationSeconds,
+    required this.byteLength,
+  });
+
+  /// Device filename, e.g. `20260905_222817_2.opus`.
+  final String filename;
+  final int durationSeconds;
+  final int byteLength;
+
+  String get id => filename;
+  String get contentType => 'audio/ogg';
+  String get importFilename =>
+      'memoket-${filename.replaceFirst(RegExp(r'\.opus$'), '.ogg')}';
+
+  /// The device stamps its own wall clock, which the handshake sets from this
+  /// phone — so the `YYYYMMDD_HHMMSS` prefix is read back as local time.
+  DateTime? get capturedAt {
+    final stamp = RegExp(
+      r'^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})',
+    ).firstMatch(filename);
+    if (stamp == null) return null;
+    final local = DateTime(
+      int.parse(stamp.group(1)!),
+      int.parse(stamp.group(2)!),
+      int.parse(stamp.group(3)!),
+      int.parse(stamp.group(4)!),
+      int.parse(stamp.group(5)!),
+      int.parse(stamp.group(6)!),
+    );
+    return local.toUtc();
+  }
+}

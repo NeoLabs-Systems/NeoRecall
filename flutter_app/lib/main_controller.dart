@@ -635,6 +635,7 @@ class NeoRecallController extends ChangeNotifier
   // for these, pulling stored recordings is the primary action, not live capture.
   static const Set<String> _offlineFirstDeviceTypes = <String>{
     'heyPocket',
+    'memoket',
     'plaud',
   };
 
@@ -643,6 +644,14 @@ class NeoRecallController extends ChangeNotifier
   bool get preferredDeviceIsOfflineFirst {
     final type = audioDeviceSessions.preferredDevice?.metadata['type'];
     return type is String && _offlineFirstDeviceTypes.contains(type);
+  }
+
+  /// True when that wearable also streams live audio (Memoket), so the record
+  /// button stays available next to sync. HeyPocket and Plaud do not stream.
+  bool get preferredDeviceStreamsLive {
+    final type = audioDeviceSessions.preferredDevice?.metadata['type'];
+    return type is String &&
+        const <String>{'omi', 'omiGlass', 'memoket'}.contains(type);
   }
 
   /// True when the preferred wearable is actually connected right now — not
@@ -680,7 +689,9 @@ class NeoRecallController extends ChangeNotifier
 
   @override
   WearableOfflineSync? get applianceOfflineSource =>
-      (_appliance?.hasStrandedRecordings ?? false) ? _appliance!.offlineSync : null;
+      (_appliance?.hasStrandedRecordings ?? false)
+      ? _appliance!.offlineSync
+      : null;
 
   ApplianceController? _appliance;
 
@@ -2361,7 +2372,11 @@ class NeoRecallController extends ChangeNotifier
   Future<void> _startFromDeviceControl() async {
     try {
       await setPreferBluetoothCapture(true);
-      await startRecording(microphone: false, systemAudio: false);
+      await startRecording(
+        microphone: false,
+        systemAudio: false,
+        bluetooth: true,
+      );
     } catch (exception) {
       warning =
           'The device requested recording, but capture could not start: $exception';

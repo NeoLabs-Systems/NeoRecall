@@ -363,18 +363,26 @@ class _RecordScreenState extends State<RecordScreen> {
       ? 'Desktop can capture microphone and system audio together. Permissions are requested up front and recording stays visibly active.'
       : 'Browser capture supports microphone and optional tab/system audio through the browser permission flow.';
 
-  /// Offline-first wearables (HeyPocket) record on the device itself and cannot
-  /// live-stream, so the live record button is hidden when such a device is the
-  /// chosen source — sync is the only capture path. The stop control is always
-  /// kept while a recording is somehow active.
+  /// Offline-only wearables (HeyPocket, Plaud) hide the live record button
+  /// because they have no stream. A hybrid like Memoket still syncs stored
+  /// files but also live-captures, so the button stays. Stop is always kept
+  /// while a recording is active — including one started from the hardware.
   bool get _showRecordButton =>
       widget.controller.isRecording ||
-      !(bluetoothPreferred && widget.controller.preferredDeviceIsOfflineFirst);
+      !(bluetoothPreferred &&
+          widget.controller.preferredDeviceIsOfflineFirst &&
+          !widget.controller.preferredDeviceStreamsLive);
 
   String? get _stageFootnote {
     if (!_showRecordButton) {
       return 'This device records by itself — there is no live capture. '
           'Use “Sync device recordings” to pull and transcribe them.';
+    }
+    if (bluetoothPreferred &&
+        widget.controller.preferredDeviceIsOfflineFirst &&
+        widget.controller.preferredDeviceStreamsLive) {
+      return 'Start from the app or the device. Either side can stop. '
+          'Recordings made while you were away still sync from the device.';
     }
     if (_isDesktop) {
       return 'System audio uses the OS screen-recording permission and captures '
@@ -599,7 +607,9 @@ class _RecordScreenState extends State<RecordScreen> {
                   ? const ButtonSpinner()
                   : const Icon(Icons.bluetooth_searching, size: 18),
               label: Text(
-                controller.scanningWearables ? 'Scanning…' : 'Scan for wearables',
+                controller.scanningWearables
+                    ? 'Scanning…'
+                    : 'Scan for wearables',
               ),
             ),
             if (controller.deviceStorageSyncAvailable)
@@ -793,7 +803,8 @@ class _RecordScreenState extends State<RecordScreen> {
       onTap: locked
           ? null
           : () {
-              final bool next = !(microphone && _source == _CaptureSource.phone);
+              final bool next =
+                  !(microphone && _source == _CaptureSource.phone);
               _select(_CaptureSource.phone);
               setState(() => microphone = next);
             },
@@ -810,7 +821,8 @@ class _RecordScreenState extends State<RecordScreen> {
       onTap: locked
           ? null
           : () {
-              final bool next = !(systemAudio && _source == _CaptureSource.phone);
+              final bool next =
+                  !(systemAudio && _source == _CaptureSource.phone);
               _select(_CaptureSource.phone);
               setState(() => systemAudio = next);
             },

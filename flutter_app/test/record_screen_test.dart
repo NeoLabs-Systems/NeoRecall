@@ -232,6 +232,7 @@ void main() {
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
     expect(find.text('Pocket recorder records on its own'), findsOneWidget);
+    expect(find.text('Start recording'), findsNothing);
 
     final phoneMicrophone = find.text('Phone microphone');
     await tester.ensureVisible(phoneMicrophone);
@@ -239,6 +240,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Pocket recorder records on its own'), findsNothing);
     expect(controller.preferBluetoothCapture, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Memoket keeps live record next to device sync', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController(
+      recorder: _IdleRecorder(),
+      audioDeviceRegistry: AudioDeviceAdapterRegistry(),
+    );
+    await controller.audioDeviceSessions.bindAccount('account-1');
+    controller.audioDeviceSessions.preferredDevice =
+        const AudioDeviceDescriptor(
+          adapterId: 'omi_family',
+          deviceKey: 'gem-1',
+          displayName: 'Memoket Gem',
+          transport: 'bluetooth_le',
+          metadata: <String, Object?>{'type': 'memoket'},
+        );
+    controller.preferBluetoothCapture = true;
+    controller.preferredDeviceLabel = 'Memoket Gem';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Start recording'), findsOneWidget);
+    expect(find.text('Memoket Gem records on its own'), findsOneWidget);
+    expect(
+      find.textContaining('Start from the app or the device'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -396,6 +428,42 @@ class _FakeRecorder implements RecallRecorder {
 
   @override
   bool get isRecording => true;
+
+  @override
+  Future<RecorderCapability> start({
+    required bool microphone,
+    required bool systemAudio,
+    required int chunkMs,
+    required int overlapMs,
+    ExternalAudioCaptureDevice? externalDevice,
+  }) async => const RecorderCapability(
+    microphone: true,
+    systemAudio: false,
+    persistentStorage: false,
+    sampleRate: 16000,
+    sourceKind: 'microphone',
+  );
+
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> dispose() async {}
+}
+
+class _IdleRecorder implements RecallRecorder {
+  @override
+  Stream<RecordedAudioChunk> get chunks =>
+      const Stream<RecordedAudioChunk>.empty();
+  @override
+  Stream<RecordedAudioChunk> get partials =>
+      const Stream<RecordedAudioChunk>.empty();
+  @override
+  Stream<String> get warnings => const Stream<String>.empty();
+  @override
+  Stream<double> get levels => const Stream<double>.empty();
+
+  @override
+  bool get isRecording => false;
 
   @override
   Future<RecorderCapability> start({

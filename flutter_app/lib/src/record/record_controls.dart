@@ -165,7 +165,7 @@ class ButtonSpinner extends StatelessWidget {
   );
 }
 
-/// Primary "sync" affordance for offline-first wearables (HeyPocket): these
+/// Primary "sync" affordance for offline-first wearables (HeyPocket, Memoket): these
 /// record on the device itself, so pulling those recordings — not live capture
 /// — is the main action. Recordings also sync automatically on connect; this
 /// makes the manual path obvious and explains the model.

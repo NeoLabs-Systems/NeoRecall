@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/audio_codec_decoder.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
@@ -53,6 +55,20 @@ void main() {
       ),
       WearableDeviceType.custom,
     );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'Memoket Gem',
+        serviceUuids: const <String>[],
+      ),
+      WearableDeviceType.memoket,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: 'Unknown',
+        serviceUuids: <String>[WearableDeviceUuids.memoketService],
+      ),
+      WearableDeviceType.memoket,
+    );
   });
 
   test(
@@ -104,6 +120,34 @@ void main() {
     expect(assembler.accept(<int>[0, 0, 0, 1, 2, 3]), isNull);
     final frame = assembler.accept(<int>[1, 0, 0, 4, 5]);
     expect(frame, <int>[1, 2, 3]);
+  });
+
+  test('Opus frame candidates keep the TOC and offer a strip fallback', () {
+    expect(
+      WearableAudioDecoder.opusFrameCandidates(<int>[0xbc, 0x62, 0x11]),
+      <List<int>>[
+        <int>[0xbc, 0x62, 0x11],
+        <int>[0x62, 0x11],
+      ],
+    );
+    expect(
+      WearableAudioDecoder.opusFrameCandidates(<int>[0x04, 0x11]),
+      <List<int>>[
+        <int>[0x04, 0x11],
+      ],
+    );
+  });
+
+  test('stereo Opus PCM is downmixed to mono', () {
+    final mixed = WearableAudioDecoder.pcm16FromOpusSamples(<int>[
+      1000,
+      2000,
+      -1000,
+      1000,
+    ], channels: 2);
+    final view = ByteData.sublistView(mixed);
+    expect(view.getInt16(0, Endian.little), 1500);
+    expect(view.getInt16(2, Endian.little), 0);
   });
 
   test('MP3 codec is locally decodable without async initialization', () async {

@@ -30,10 +30,44 @@ void main() {
       contains(WearableDeviceUuids.heyPocketService),
     );
     expect(
+      transport.lastScanSpec!.serviceUuids,
+      contains(WearableDeviceUuids.memoketService),
+    );
+    expect(
       transport.lastScanSpec!.namePrefixes,
       contains('PK01'),
       reason: 'PK01_BLUE firmware omits its protocol service while advertising',
     );
+    expect(transport.lastScanSpec!.namePrefixes, contains('Memoket'));
+    await adapter.dispose();
+  });
+
+  test('Memoket Gem is discovered as a compatible device', () async {
+    final transport = _FakeGattTransport();
+    final adapter = DeviceAdapter(gatt: transport);
+    final discovery = expectLater(
+      adapter.discoveries,
+      emits(
+        isA<AudioDeviceDescriptor>()
+            .having((device) => device.displayName, 'name', 'Memoket Gem')
+            .having((device) => device.metadata['type'], 'type', 'memoket')
+            .having(
+              (device) => device.metadata['compatibilityUnknown'],
+              'compatibility',
+              isFalse,
+            ),
+      ),
+    );
+
+    await adapter.startScan();
+    transport.emitPeripheral(
+      const GattPeripheral(
+        id: 'memoket-device',
+        name: 'Memoket Gem',
+        serviceUuids: <String>[],
+      ),
+    );
+    await discovery;
     await adapter.dispose();
   });
 

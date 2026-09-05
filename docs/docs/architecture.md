@@ -114,6 +114,10 @@ NeoRecall server; audio is not uploaded to Plaud. Binding a device unbinds the
 consumer Plaud app. Desktop and the browser cannot complete Plaud's encrypted
 handshake — there is no Plaud SDK for those platforms.
 
+Memoket Gem uses the shared wearable GATT adapter: a local connector speaks its
+control opcodes, streams live Opus while the app (or the hardware button) is
+recording, and drains stored files over a separate notify characteristic.
+
 ## Processing pipeline
 
 Each independently decodable audio chunk is first read locally. A 640 KB

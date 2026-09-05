@@ -2,6 +2,7 @@ import '../ble/gatt_connector_transport.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
 import 'heypocket_connector.dart';
+import 'memoket_connector.dart';
 import 'omi_connector.dart';
 
 WearableConnector createWearableConnector(
@@ -15,6 +16,8 @@ WearableConnector createWearableConnector(
       return OmiGlassConnector(device: device, transport: transport);
     case WearableDeviceType.heyPocket:
       return HeyPocketConnector(device: device, transport: transport);
+    case WearableDeviceType.memoket:
+      return MemoketConnector(device: device, transport: transport);
     case WearableDeviceType.custom:
       throw UnsupportedError(
         'No validated wearable protocol matches ${device.name}.',

@@ -64,6 +64,7 @@ void main() {
     // The scan selectors themselves are still present.
     expect(granted, contains(WearableDeviceUuids.omiService));
     expect(granted, contains(WearableDeviceUuids.heyPocketService));
+    expect(granted, contains(WearableDeviceUuids.memoketService));
     await adapter.dispose();
   });
 

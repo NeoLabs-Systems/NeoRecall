@@ -92,7 +92,10 @@ pair on iOS and Android as offline-first wearables: the pin records on its own,
 and NeoRecall drains finished files over BLE after a handshake token from this
 server. The consumer Plaud app cannot stay bound to the same device. Desktop and
 web clients can use other wearables over Bluetooth, but Plaud pairing stays on
-the phone.
+the phone. Memoket Gem pairs as a BLE wearable on the same clients: it streams
+live Opus and records on the device. Start and stop work from the app or the
+hardware button. Files recorded while disconnected are drained into the
+ordinary ingest pipeline.
 
 Android cannot override a user Force stop, revoked permissions, exhausted
 storage, or some vendor battery-management policies. iOS cannot continue after
