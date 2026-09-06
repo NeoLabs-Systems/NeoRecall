@@ -58,6 +58,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   StreamSubscription<List<int>>? _buttonSub;
   StreamSubscription<int>? _batterySub;
   Timer? _linkWatchdog;
+  Timer? _batteryPoll;
+  static const Duration _batteryPollInterval = Duration(seconds: 30);
   WearableConnector? _connector;
 
   /// The connected device's offline-storage capability, if it exposes one.
@@ -398,6 +400,11 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       // verified against the real devices. Bonding is only requested on the
       // unknown-device probe path, where an encrypted characteristic may be the
       // thing being probed.
+      // Battery and button notifies fire during the handshake. A broadcast
+      // listener attached afterwards never sees that first reading, so the
+      // record sheet stayed on "—" until the next (rare) change notify.
+      _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
+      _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
       await connector.connect(requiresPairing: false);
       _connector = connector;
       final omiFraming =
@@ -413,10 +420,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       );
       _assembler = omiFraming ? OmiFrameAssembler() : null;
       _audioSub = connector.audioBytes.stream.listen(_handleAudioPacket);
-      _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
-      _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
       _setState(DeviceTransportState.connectedStandby);
       _startLinkWatchdog();
+      await _refreshBattery();
+      _startBatteryPoll();
       ClientDiagnosticLog.instance.record(
         'bluetooth',
         'connection_ready',
@@ -566,6 +573,27 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     }
   }
 
+  Future<void> _refreshBattery() async {
+    final connector = _connector;
+    if (connector == null) return;
+    // Vendor battery queries share the control characteristic with start/stop.
+    // A poll mid-take has made the Gem halt live audio and emit a stop.
+    if (_state == DeviceTransportState.recording) return;
+    try {
+      final level = await connector.readBatteryLevel();
+      if (level >= 0 && level <= 100) _handleBattery(level);
+    } catch (_) {
+      // A missed poll must not drop the last reading the UI is showing.
+    }
+  }
+
+  void _startBatteryPoll() {
+    _batteryPoll?.cancel();
+    _batteryPoll = Timer.periodic(_batteryPollInterval, (_) {
+      unawaited(_refreshBattery());
+    });
+  }
+
   void _handleBattery(int level) {
     if (!_controlEvents.isClosed) {
       _controlEvents.add(
@@ -656,6 +684,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
 
   Future<void> _clearProtocolState() async {
     _stopLinkWatchdog();
+    _batteryPoll?.cancel();
+    _batteryPoll = null;
     await _cancelSafely(_audioSub);
     await _cancelSafely(_buttonSub);
     await _cancelSafely(_batterySub);

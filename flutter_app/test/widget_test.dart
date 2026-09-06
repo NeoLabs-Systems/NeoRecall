@@ -54,9 +54,7 @@ void main() {
     expect(find.text('NeoRecall'), findsOneWidget);
   });
 
-  testWidgets('the source sheet is where a wearable is chosen', (
-    tester,
-  ) async {
+  testWidgets('the source sheet is where a wearable is chosen', (tester) async {
     final controller = NeoRecallController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -448,6 +446,90 @@ void main() {
     expect(find.textContaining('Hidden until expanded'), findsOneWidget);
     expect(find.text('Show less'), findsOneWidget);
     expect(find.text('Write up again'), findsOneWidget);
+  });
+
+  testWidgets('moment selection can select every visible moment', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime(2026, 7, 29, 12);
+    final controller = NeoRecallController()
+      ..moments = <TimelineMoment>[
+        TimelineMoment(
+          id: 'conversation-a',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 12)),
+          endedAt: now.subtract(const Duration(minutes: 8)),
+          state: 'consolidated',
+          titleEn: 'First moment',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+        TimelineMoment(
+          id: 'conversation-b',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 6)),
+          endedAt: now.subtract(const Duration(minutes: 5)),
+          state: 'closed',
+          titleEn: 'Second moment',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+      ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: TimelineScreen(controller: controller)),
+      ),
+    );
+    await tester.tap(find.text('Select'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Select all moments'));
+    await tester.pump();
+
+    expect(find.text('2 selected'), findsOneWidget);
+    expect(find.byTooltip('All moments selected'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('swiping a moment asks to delete it', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime(2026, 7, 29, 12);
+    final controller = NeoRecallController()
+      ..moments = <TimelineMoment>[
+        TimelineMoment(
+          id: 'conversation-a',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 12)),
+          endedAt: now.subtract(const Duration(minutes: 8)),
+          state: 'consolidated',
+          titleEn: 'Irrigation planning',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+      ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: TimelineScreen(controller: controller)),
+      ),
+    );
+    await tester.drag(find.byType(Dismissible), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete this moment?'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('account registration remains reachable in a short viewport', (

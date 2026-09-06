@@ -42,7 +42,8 @@ void main() {
     expect(file!.filename, '20260905_222817_2.opus');
     expect(file.durationSeconds, 10);
     expect(file.byteLength, 41760);
-    expect(file.capturedAt, DateTime(2026, 9, 5, 22, 28, 17).toUtc());
+    expect(file.capturedAt, DateTime.utc(2026, 9, 5, 22, 28, 17));
+    expect(file.capturedAt!.isUtc, isTrue);
     expect(MemoketProtocol.isListEnd(_hex('03ff')), isTrue);
   });
 
@@ -103,6 +104,37 @@ void main() {
     expect(MemoketProtocol.liveOpusFrame(live), _hex('bc62133e788d88b7'));
     final stored = _hex('bc6a59d892db3aac');
     expect(MemoketProtocol.liveOpusFrame(stored), stored);
+  });
+
+  test('a 480-byte notify is six 20 ms frames, not one', () {
+    final chunk = Uint8List.fromList(<int>[
+      for (var i = 0; i < 6; i += 1) ...<int>[
+        0xbc,
+        i,
+        ...List<int>.filled(78, i),
+      ],
+    ]);
+    expect(chunk.length, MemoketProtocol.packedNotifyBytes);
+    final frames = MemoketProtocol.splitPackedOpusFrames(chunk);
+    expect(frames, hasLength(6));
+    expect(frames[0].length, 80);
+    expect(frames[3].first, 0xbc);
+    expect(frames[3][1], 3);
+    expect(MemoketProtocol.opusFramesDurationMs(frames), 120);
+    expect(_lastOggGranule(MemoketProtocol.wrapOpusFramesAsOgg(frames)), 5760);
+    final live = Uint8List.fromList(<int>[0, 0, 0, 0, 7, ...chunk]);
+    expect(
+      MemoketProtocol.splitPackedOpusFrames(
+        MemoketProtocol.liveOpusFrame(live)!,
+      ),
+      hasLength(6),
+    );
+    expect(
+      MemoketProtocol.opusFramesDurationMs(
+        MemoketProtocol.splitPackedOpusFrames(_hex('bc6a59d892db3aac')),
+      ),
+      20,
+    );
   });
 
   test('start/stop notifies expose the on-device filename', () {

@@ -68,6 +68,35 @@ void main() {
     await adapter.dispose();
   });
 
+  test('a handshake battery reading reaches the UI', () async {
+    // Connectors publish the first percentage during onConnected. Listening
+    // only after connect() returned dropped that event on a broadcast stream.
+    final gatt = _RecordingGattTransport()..batteryPercent = 78;
+    final adapter = DeviceAdapter(gatt: gatt);
+    final levels = <int>[];
+    final sub = adapter.controlEvents.listen((event) {
+      if (event.type == DeviceControlEventType.battery) {
+        final level = event.payload['level'];
+        if (level is int) levels.add(level);
+      }
+    });
+    const descriptor = AudioDeviceDescriptor(
+      adapterId: 'omi_family',
+      deviceKey: 'glass-1',
+      displayName: 'OpenGlass',
+      transport: 'bluetooth_le',
+      metadata: <String, Object?>{
+        'type': 'omiGlass',
+        'serviceUuids': <String>[],
+      },
+    );
+    await adapter.connect(descriptor);
+    await Future<void>.delayed(Duration.zero);
+    expect(levels, contains(78));
+    await sub.cancel();
+    await adapter.dispose();
+  });
+
   test('an OmiGlass found by name only is still accepted', () async {
     // The scan carries 'OmiGlass'/'OpenGlass' name prefixes precisely for
     // firmware that omits the service UUID from its advertisement. Requiring
@@ -230,6 +259,7 @@ class _RecordingGattTransport implements GattTransport {
   final StreamController<bool> _connections =
       StreamController<bool>.broadcast();
   bool pairThrows = false;
+  int? batteryPercent;
   GattScanSpec? lastScanSpec;
 
   @override
@@ -291,7 +321,14 @@ class _RecordingGattTransport implements GattTransport {
   }
 
   @override
-  Future<Uint8List> read(String d, String s, String c) async => Uint8List(0);
+  Future<Uint8List> read(String d, String s, String c) async {
+    if (batteryPercent != null &&
+        (s.toLowerCase() == WearableDeviceUuids.batteryService ||
+            c.toLowerCase() == WearableDeviceUuids.batteryLevel)) {
+      return Uint8List.fromList(<int>[batteryPercent!]);
+    }
+    return Uint8List(0);
+  }
 
   @override
   Future<void> requestAccess() async {}

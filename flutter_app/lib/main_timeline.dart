@@ -1,15 +1,14 @@
-import 'dart:async';
-
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_moment_audio.dart';
 import 'main_processing_status.dart';
 import 'main_shared.dart';
+import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
-import 'src/sync/pending_audio_preview.dart';
+import 'src/widgets/selection_mixin.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({
@@ -28,98 +27,151 @@ class TimelineScreen extends StatefulWidget {
   State<TimelineScreen> createState() => _TimelineScreenState();
 }
 
-class _TimelineScreenState extends State<TimelineScreen> {
+class _TimelineScreenState extends State<TimelineScreen>
+    with SelectionMixin<TimelineScreen> {
   final Set<String> _expanded = <String>{};
-  AudioPlayer? _player;
-  StreamSubscription<void>? _completeSubscription;
-  String? _playingKey;
-  bool _loadingAudio = false;
-  List<PendingAudioPart> _playingParts = const <PendingAudioPart>[];
-  int _playingPartIndex = 0;
 
   NeoRecallController get controller => widget.controller;
 
-  @override
-  void dispose() {
-    _completeSubscription?.cancel();
-    final player = _player;
-    if (player != null) unawaited(player.dispose());
-    super.dispose();
+  Future<bool> _confirmDelete(int count) async {
+    if (count < 1) return false;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          count == 1 ? 'Delete this moment?' : 'Delete $count moments?',
+        ),
+        content: Text(
+          count == 1
+              ? 'This will permanently delete this conversation and its transcript. A memory that came only from this conversation will be removed too.'
+              : 'This will permanently delete these conversations and their transcripts. Memories that came only from them will be removed too.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return confirm == true;
   }
 
-  AudioPlayer _ensurePlayer() {
-    final existing = _player;
-    if (existing != null) return existing;
-    final player = AudioPlayer();
-    _player = player;
-    _completeSubscription = player.onPlayerComplete.listen((_) {
-      if (_playingPartIndex + 1 < _playingParts.length) {
-        unawaited(_playPart(_playingParts, _playingPartIndex + 1));
-      } else if (mounted) {
-        setState(() {
-          _playingKey = null;
-          _playingParts = const <PendingAudioPart>[];
-          _playingPartIndex = 0;
-        });
-      }
-    });
-    return player;
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds;
+    if (!await _confirmDelete(ids.length)) return;
+    if (!mounted) return;
+    await runBulkAction(
+      controller.bulkDeleteMoments,
+      success: (deleted) =>
+          'Deleted ${deleted.length} moment${deleted.length == 1 ? '' : 's'}',
+      failure: (error) => 'Could not delete moments: $error',
+    );
   }
 
-  Future<void> _toggleMomentAudio(TimelineMoment moment) async {
-    if (_loadingAudio) return;
-    if (_playingKey == moment.key) {
-      await _player?.stop();
-      if (mounted) {
-        setState(() {
-          _playingKey = null;
-          _playingParts = const <PendingAudioPart>[];
-          _playingPartIndex = 0;
-        });
-      }
-      return;
-    }
-    setState(() => _loadingAudio = true);
+  Future<void> _swipeDelete(TimelineMoment moment) async {
+    final id = moment.id;
+    if (id == null) return;
     try {
-      final parts = await controller.loadMomentAudio(moment);
-      if (!mounted || parts.isEmpty) return;
-      _playingKey = moment.key;
-      await _playPart(parts, 0);
+      await controller.deleteMoment(id);
+      if (!mounted) return;
+      if (isSelected(id)) toggleSelect(id);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Deleted 1 moment')));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            error.toString().replaceFirst(
-              RegExp(r'^(Bad state|StateError|Exception):\s*'),
-              '',
-            ),
-          ),
-        ),
+        SnackBar(content: Text('Could not delete moments: $error')),
       );
-    } finally {
-      if (mounted) setState(() => _loadingAudio = false);
     }
   }
 
-  Future<void> _playPart(List<PendingAudioPart> parts, int index) async {
-    final bytes = await controller.readRetainedAudioPart(parts[index].id);
-    if (!mounted) return;
-    final player = _ensurePlayer();
-    await player.stop();
-    await player.setSource(BytesSource(bytes, mimeType: parts[index].mimeType));
-    await player.resume();
-    if (mounted) {
-      setState(() {
-        _playingParts = parts;
-        _playingPartIndex = index;
-      });
-    }
+  /// Select and Done — kept in one place so the standalone header and
+  /// Library's row cannot diverge.
+  Widget _actions() => selecting
+      ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+      : TextButton.icon(
+          onPressed: controller.moments.isEmpty ? null : () => enterSelect(),
+          icon: const Icon(Icons.checklist_rounded, size: 18),
+          label: const Text('Select'),
+        );
+
+  Widget _headerTrailing(List<TimelineMoment> moments) {
+    final actions = _actions();
+    final wide = MediaQuery.sizeOf(context).width >= AppBreakpoints.mobile;
+    if (!wide || moments.isEmpty || selecting) return actions;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _TimelineCount(
+          conversations: moments.length,
+          segments: moments.fold<int>(
+            0,
+            (total, moment) => total + moment.segmentCount,
+          ),
+        ),
+        const SizedBox(width: 8),
+        actions,
+      ],
+    );
+  }
+
+  Widget _momentTile(TimelineMoment moment, {required bool lastInDay}) {
+    final id = moment.id;
+    final entry = _TimelineEntry(
+      moment: moment,
+      expanded: _expanded.contains(moment.key),
+      lastInDay: lastInDay,
+      busy: controller.reprocessingMomentId == moment.id,
+      hasAudio: controller.momentsWithRetainedAudio.contains(moment.key),
+      selecting: selecting,
+      selected: id != null && isSelected(id),
+      onTap: selecting && id != null ? () => toggleSelect(id) : null,
+      onLongPress: id == null ? null : () => enterSelect(id),
+      onPlay: selecting
+          ? null
+          : () => showMomentAudioSheet(context, controller, moment),
+      onReprocess: moment.canReprocess
+          ? () => controller.reprocessMoment(moment.id!)
+          : null,
+      loadedSegments: controller.momentTranscripts[moment.id],
+      loadingSegments: controller.loadingMomentTranscripts.contains(moment.id),
+      onToggle: () {
+        setState(() {
+          if (!_expanded.add(moment.key)) {
+            _expanded.remove(moment.key);
+          }
+        });
+        if (_expanded.contains(moment.key)) {
+          controller.openMomentTranscript(moment);
+        }
+      },
+    );
+    if (selecting || id == null) return entry;
+    return Dismissible(
+      key: ValueKey<String>('moment-$id'),
+      direction: DismissDirection.endToStart,
+      background: const _MomentDismissBackground(),
+      confirmDismiss: (_) => _confirmDelete(1),
+      onDismissed: (_) => _swipeDelete(moment),
+      child: entry,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final moments = widget.controller.moments;
+    final selectableIds = moments
+        .map((moment) => moment.id)
+        .whereType<String>()
+        .toList();
+    final allMomentsSelected =
+        selectableIds.isNotEmpty && selectableIds.every((id) => isSelected(id));
     // Day headers are drawn from the moments themselves; a moment never spans
     // a day boundary in a way that matters here, so its start decides.
     DateTime dayOf(TimelineMoment moment) {
@@ -134,20 +186,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ? const EdgeInsets.only(bottom: 40)
             : const EdgeInsets.fromLTRB(24, 24, 24, 48),
         children: <Widget>[
-          if (!widget.embedded) ...<Widget>[
+          if (widget.embedded)
+            Align(alignment: Alignment.centerRight, child: _actions())
+          else ...<Widget>[
             ScreenHeader(
               title: 'Moments',
               description:
                   'A compact stream of conversations. Expand only the ones you want to read in full.',
-              trailing: moments.isEmpty
-                  ? null
-                  : _TimelineCount(
-                      conversations: moments.length,
-                      segments: moments.fold<int>(
-                        0,
-                        (total, moment) => total + moment.segmentCount,
-                      ),
-                    ),
+              trailing: _headerTrailing(moments),
             ),
             const SizedBox(height: 18),
           ],
@@ -155,6 +201,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
             issues: controller.processingIssues,
             audioStillOnDevice: controller.audioStillOnDevice,
           ),
+          if (selecting) ...<Widget>[
+            _MomentSelectionBar(
+              count: selectedCount,
+              onSelectAll: allMomentsSelected
+                  ? null
+                  : () => selectAll(selectableIds),
+              onDelete: _deleteSelected,
+            ),
+            const SizedBox(height: 14),
+          ],
           if (moments.isEmpty)
             // Only claim there is nothing here when there is genuinely nothing
             // here. If something is holding recordings up, the card above has
@@ -175,59 +231,35 @@ class _TimelineScreenState extends State<TimelineScreen> {
           else
             AppPanel(
               padding: EdgeInsets.zero,
-              child: Column(
-                children: <Widget>[
-                  for (
-                    var index = 0;
-                    index < moments.length;
-                    index++
-                  ) ...<Widget>[
-                    if (index == 0 ||
-                        dayOf(moments[index - 1]) != dayOf(moments[index]))
-                      _DayHeader(
-                        day: dayOf(moments[index]),
-                        groupCount: moments
-                            .where(
-                              (moment) =>
-                                  dayOf(moment) == dayOf(moments[index]),
-                            )
-                            .length,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.panel),
+                child: Column(
+                  children: <Widget>[
+                    for (
+                      var index = 0;
+                      index < moments.length;
+                      index++
+                    ) ...<Widget>[
+                      if (index == 0 ||
+                          dayOf(moments[index - 1]) != dayOf(moments[index]))
+                        _DayHeader(
+                          day: dayOf(moments[index]),
+                          groupCount: moments
+                              .where(
+                                (moment) =>
+                                    dayOf(moment) == dayOf(moments[index]),
+                              )
+                              .length,
+                        ),
+                      _momentTile(
+                        moments[index],
+                        lastInDay:
+                            index == moments.length - 1 ||
+                            dayOf(moments[index + 1]) != dayOf(moments[index]),
                       ),
-                    _TimelineEntry(
-                      moment: moments[index],
-                      expanded: _expanded.contains(moments[index].key),
-                      lastInDay:
-                          index == moments.length - 1 ||
-                          dayOf(moments[index + 1]) != dayOf(moments[index]),
-                      busy:
-                          controller.reprocessingMomentId == moments[index].id,
-                      hasAudio: controller.momentsWithRetainedAudio.contains(
-                        moments[index].key,
-                      ),
-                      playing: _playingKey == moments[index].key,
-                      loadingAudio:
-                          _loadingAudio && _playingKey == moments[index].key,
-                      onPlay: () => _toggleMomentAudio(moments[index]),
-                      onReprocess: moments[index].canReprocess
-                          ? () => controller.reprocessMoment(moments[index].id!)
-                          : null,
-                      loadedSegments:
-                          controller.momentTranscripts[moments[index].id],
-                      loadingSegments: controller.loadingMomentTranscripts
-                          .contains(moments[index].id),
-                      onToggle: () {
-                        setState(() {
-                          if (!_expanded.add(moments[index].key)) {
-                            _expanded.remove(moments[index].key);
-                          }
-                        });
-                        if (_expanded.contains(moments[index].key)) {
-                          controller.openMomentTranscript(moments[index]);
-                        }
-                      },
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           // A long history does not fit in one page, and the reader needs to
@@ -321,9 +353,11 @@ class _TimelineEntry extends StatelessWidget {
     this.loadingSegments = false,
     this.onReprocess,
     this.hasAudio = false,
-    this.playing = false,
-    this.loadingAudio = false,
     this.onPlay,
+    this.selecting = false,
+    this.selected = false,
+    this.onTap,
+    this.onLongPress,
   });
 
   final TimelineMoment moment;
@@ -335,9 +369,11 @@ class _TimelineEntry extends StatelessWidget {
   final bool loadingSegments;
   final VoidCallback? onReprocess;
   final bool hasAudio;
-  final bool playing;
-  final bool loadingAudio;
   final VoidCallback? onPlay;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   /// Where this moment stands, in the reader's terms. Null when it simply
   /// stands finished and there is nothing to say.
@@ -358,6 +394,40 @@ class _TimelineEntry extends StatelessWidget {
     }
     if (duration.inMinutes > 0) return '${duration.inMinutes} min';
     return '${duration.inSeconds.clamp(1, 59)} sec';
+  }
+
+  List<Widget> _titleMeta({
+    required NeoRecallPalette palette,
+    required bool provisional,
+    required bool compact,
+    required String timeLabel,
+    required String endLabel,
+  }) {
+    final status = _statusLabel();
+    return <Widget>[
+      if (provisional) _LiveInsightBadge(palette: palette),
+      if (!provisional && status != null)
+        _MomentStatus(label: status, palette: palette),
+      if (hasAudio && onPlay != null)
+        IconButton(
+          tooltip: 'Listen',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: onPlay,
+          icon: const Icon(Icons.play_arrow_rounded, size: 20),
+        ),
+      if (compact)
+        Text(
+          '$timeLabel–$endLabel',
+          style: TextStyle(color: palette.textMuted, fontSize: 10.5),
+        ),
+      Icon(Icons.graphic_eq_rounded, size: 15, color: palette.textMuted),
+      Text(
+        '${moment.segmentCount}',
+        style: TextStyle(color: palette.textMuted, fontSize: 11),
+      ),
+    ];
   }
 
   @override
@@ -391,316 +461,307 @@ class _TimelineEntry extends StatelessWidget {
       moment.endedAt.toLocal(),
     ).format(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        border: lastInDay
-            ? null
-            : Border(bottom: BorderSide(color: palette.border)),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (!compact)
-              SizedBox(
-                width: 78,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: <Widget>[
-                      Text(
-                        timeLabel,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _durationLabel(),
-                        style: TextStyle(
-                          color: palette.textMuted,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            SizedBox(
-              width: 28,
-              child: Stack(
-                alignment: Alignment.topCenter,
-                children: <Widget>[
-                  Positioned(
-                    top: 0,
-                    bottom: 0,
-                    child: Container(width: 1, color: palette.borderLight),
-                  ),
-                  Positioned(
-                    top: 18,
-                    child: Container(
-                      width: 9,
-                      height: 9,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: palette.accent,
-                        border: Border.all(color: palette.bgCard, width: 2),
-                        boxShadow: <BoxShadow>[
-                          BoxShadow(
-                            color: palette.accent.withValues(alpha: 0.28),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(compact ? 8 : 6, 13, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            moment.isPending
-                                ? 'Just recorded'
-                                : generatedTitle?.isNotEmpty == true
-                                ? generatedTitle!
-                                : 'Conversation',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+    return Material(
+      color: selected
+          ? palette.accentSoft.withValues(alpha: 0.25)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Container(
+          decoration: BoxDecoration(
+            border: lastInDay
+                ? null
+                : Border(bottom: BorderSide(color: palette.border)),
+          ),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (!compact)
+                  SizedBox(
+                    width: 78,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: <Widget>[
+                          Text(
+                            timeLabel,
                             style: const TextStyle(
-                              fontSize: 13.5,
+                              fontSize: 12,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                        ),
-                        if (provisional) ...<Widget>[
-                          const SizedBox(width: 6),
-                          _LiveInsightBadge(palette: palette),
-                        ],
-                        if (!provisional && _statusLabel() != null) ...<Widget>[
-                          const SizedBox(width: 6),
-                          _MomentStatus(
-                            label: _statusLabel()!,
-                            palette: palette,
-                          ),
-                        ],
-                        if (hasAudio && onPlay != null) ...<Widget>[
-                          const SizedBox(width: 4),
-                          IconButton(
-                            tooltip: playing ? 'Stop' : 'Listen',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 32,
-                              minHeight: 32,
-                            ),
-                            onPressed: loadingAudio ? null : onPlay,
-                            icon: loadingAudio
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Icon(
-                                    playing
-                                        ? Icons.stop_rounded
-                                        : Icons.play_arrow_rounded,
-                                    size: 20,
-                                  ),
-                          ),
-                        ],
-                        if (compact)
+                          const SizedBox(height: 3),
                           Text(
-                            '$timeLabel–$endLabel',
+                            _durationLabel(),
                             style: TextStyle(
                               color: palette.textMuted,
                               fontSize: 10.5,
                             ),
                           ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.graphic_eq_rounded,
-                          size: 15,
-                          color: palette.textMuted,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${moment.segmentCount}',
-                          style: TextStyle(
-                            color: palette.textMuted,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (generatedSummary?.isNotEmpty == true) ...<Widget>[
-                      const SizedBox(height: 6),
-                      Text(
-                        generatedSummary!,
-                        maxLines: expanded ? null : 2,
-                        overflow: expanded
-                            ? TextOverflow.visible
-                            : TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: palette.textSecondary,
-                          height: 1.38,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                    if (topics.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 7),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 5,
-                        children: topics
-                            .map(
-                              (topic) =>
-                                  _TopicChip(label: topic, palette: palette),
-                            )
-                            .toList(),
-                      ),
-                    ],
-                    if (speakers.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 7),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 5,
-                        children: speakers
-                            .take(4)
-                            .map(
-                              (speaker) => _SpeakerChip(
-                                label: speaker,
-                                palette: palette,
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ],
-                    const SizedBox(height: 9),
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      alignment: Alignment.topCenter,
-                      child: Column(
-                        children: <Widget>[
-                          for (
-                            var index = 0;
-                            index < visible.length;
-                            index++
-                          ) ...<Widget>[
-                            _TranscriptLine(segment: visible[index]),
-                            if (index < visible.length - 1)
-                              const SizedBox(height: 7),
-                          ],
                         ],
                       ),
                     ),
-                    if (expanded && loadingSegments) ...<Widget>[
-                      const SizedBox(height: 10),
-                      Row(
-                        children: <Widget>[
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                SizedBox(
+                  width: 28,
+                  child: Stack(
+                    alignment: Alignment.topCenter,
+                    children: <Widget>[
+                      Positioned(
+                        top: 0,
+                        bottom: 0,
+                        child: Container(width: 1, color: palette.borderLight),
+                      ),
+                      Positioned(
+                        top: 18,
+                        child: Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: palette.accent,
+                            border: Border.all(color: palette.bgCard, width: 2),
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: palette.accent.withValues(alpha: 0.28),
+                                blurRadius: 8,
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(compact ? 8 : 6, 13, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            if (selecting) ...<Widget>[
+                              Icon(
+                                selected
+                                    ? Icons.check_circle_rounded
+                                    : Icons.circle_outlined,
+                                color: selected
+                                    ? palette.accent
+                                    : palette.textMuted,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                            ],
+                            Expanded(
+                              child: Text(
+                                moment.isPending
+                                    ? 'Just recorded'
+                                    : generatedTitle?.isNotEmpty == true
+                                    ? generatedTitle!
+                                    : 'Conversation',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            if (!selecting && !compact)
+                              for (final widget in _titleMeta(
+                                palette: palette,
+                                provisional: provisional,
+                                compact: false,
+                                timeLabel: timeLabel,
+                                endLabel: endLabel,
+                              )) ...<Widget>[const SizedBox(width: 6), widget],
+                          ],
+                        ),
+                        if (!selecting && compact) ...<Widget>[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: _titleMeta(
+                              palette: palette,
+                              provisional: provisional,
+                              compact: true,
+                              timeLabel: timeLabel,
+                              endLabel: endLabel,
+                            ),
+                          ),
+                        ],
+                        if (generatedSummary?.isNotEmpty == true) ...<Widget>[
+                          const SizedBox(height: 6),
                           Text(
-                            'Loading the rest of this moment',
+                            generatedSummary!,
+                            maxLines: expanded ? null : 2,
+                            overflow: expanded
+                                ? TextOverflow.visible
+                                : TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: palette.textSecondary,
+                              height: 1.38,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ],
+                        if (topics.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 7),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 5,
+                            children: topics
+                                .map(
+                                  (topic) => _TopicChip(
+                                    label: topic,
+                                    palette: palette,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                        if (speakers.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 7),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 5,
+                            children: speakers
+                                .take(4)
+                                .map(
+                                  (speaker) => _SpeakerChip(
+                                    label: speaker,
+                                    palette: palette,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                        const SizedBox(height: 9),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          alignment: Alignment.topCenter,
+                          child: Column(
+                            children: <Widget>[
+                              for (
+                                var index = 0;
+                                index < visible.length;
+                                index++
+                              ) ...<Widget>[
+                                _TranscriptLine(segment: visible[index]),
+                                if (index < visible.length - 1)
+                                  const SizedBox(height: 7),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (expanded && loadingSegments) ...<Widget>[
+                          const SizedBox(height: 10),
+                          Row(
+                            children: <Widget>[
+                              const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Loading the rest of this moment',
+                                style: TextStyle(
+                                  color: palette.textMuted,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (expanded &&
+                            !loadingSegments &&
+                            segments.length < moment.segmentCount) ...<Widget>[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
                             style: TextStyle(
                               color: palette.textMuted,
                               fontSize: 11.5,
                             ),
                           ),
                         ],
-                      ),
-                    ],
-                    if (expanded &&
-                        !loadingSegments &&
-                        segments.length < moment.segmentCount) ...<Widget>[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
-                        style: TextStyle(
-                          color: palette.textMuted,
-                          fontSize: 11.5,
-                        ),
-                      ),
-                    ],
-                    if (hidden > 0 || expanded) ...<Widget>[
-                      const SizedBox(height: 5),
-                      Row(
-                        children: <Widget>[
-                          TextButton.icon(
-                            onPressed: onToggle,
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                            ),
-                            icon: Icon(
-                              expanded
-                                  ? Icons.expand_less_rounded
-                                  : Icons.expand_more_rounded,
-                              size: 17,
-                            ),
-                            label: Text(
-                              expanded
-                                  ? 'Show less'
-                                  : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
-                            ),
-                          ),
-                          const Spacer(),
-                          // Offered only once a moment is open: it acts on what
-                          // the reader is looking at, and it is not something to
-                          // trip over while scanning the day.
-                          if (expanded && onReprocess != null)
-                            TextButton.icon(
-                              onPressed: busy ? null : onReprocess,
-                              style: TextButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
+                        if (hidden > 0 || expanded) ...<Widget>[
+                          const SizedBox(height: 5),
+                          Row(
+                            children: <Widget>[
+                              TextButton.icon(
+                                onPressed: selecting ? null : onToggle,
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                ),
+                                icon: Icon(
+                                  expanded
+                                      ? Icons.expand_less_rounded
+                                      : Icons.expand_more_rounded,
+                                  size: 17,
+                                ),
+                                label: Text(
+                                  expanded
+                                      ? 'Show less'
+                                      : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
                                 ),
                               ),
-                              icon: busy
-                                  ? const SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.auto_awesome, size: 15),
-                              label: Text(
-                                busy
-                                    ? 'Writing up'
-                                    : moment.hasWriteUp
-                                    ? 'Write up again'
-                                    : 'Write up now',
-                              ),
-                            ),
+                              const Spacer(),
+                              // Offered only once a moment is open: it acts on what
+                              // the reader is looking at, and it is not something to
+                              // trip over while scanning the day.
+                              if (expanded && onReprocess != null && !selecting)
+                                TextButton.icon(
+                                  onPressed: busy ? null : onReprocess,
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                  ),
+                                  icon: busy
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.auto_awesome,
+                                          size: 15,
+                                        ),
+                                  label: Text(
+                                    busy
+                                        ? 'Writing up'
+                                        : moment.hasWriteUp
+                                        ? 'Write up again'
+                                        : 'Write up now',
+                                  ),
+                                ),
+                            ],
+                          ),
                         ],
-                      ),
-                    ],
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -918,4 +979,105 @@ class _MomentStatus extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _MomentDismissBackground extends StatelessWidget {
+  const _MomentDismissBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return ColoredBox(
+      color: palette.danger,
+      child: const Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Icon(Icons.delete_outline_rounded, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
+class _MomentSelectionBar extends StatelessWidget {
+  const _MomentSelectionBar({
+    required this.count,
+    required this.onSelectAll,
+    required this.onDelete,
+  });
+
+  final int count;
+  final VoidCallback? onSelectAll;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final enabled = count > 0;
+    return AppPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              count == 0 ? 'Select moments' : '$count selected',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: palette.textSecondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          _MomentSelectionAction(
+            tooltip: onSelectAll == null
+                ? 'All moments selected'
+                : 'Select all moments',
+            icon: Icons.select_all_rounded,
+            onPressed: onSelectAll,
+          ),
+          _MomentSelectionAction(
+            tooltip: 'Delete',
+            icon: Icons.delete_outline_rounded,
+            danger: true,
+            onPressed: enabled ? onDelete : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MomentSelectionAction extends StatelessWidget {
+  const _MomentSelectionAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(
+        icon,
+        size: 20,
+        color: onPressed == null
+            ? palette.textMuted.withValues(alpha: 0.4)
+            : danger
+            ? palette.danger
+            : palette.textSecondary,
+      ),
+    );
+  }
 }

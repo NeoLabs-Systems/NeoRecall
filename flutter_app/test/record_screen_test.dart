@@ -493,16 +493,66 @@ void main() {
         reason: 'the live record screen overflowed at ${size.width}px',
       );
 
-      await tester.pumpWidget(wrap(const SizedBox.shrink()));
-      await tester.pump();
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+    await tester.pump();
     });
   }
+
+  testWidgets('typing a live note survives the audio-level rebuilds', (
+    tester,
+  ) async {
+    final controller = recordingController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => wrap(RecordScreen(controller: controller)),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('recording-context-note')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('recording-context-note')),
+    );
+    await tester.pump();
+    expect(find.text('Add a note'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Alice was in the room');
+    expect(find.text('Alice was in the room'), findsOneWidget);
+
+    // The live app rebuilds MaterialApp on every audio-level tick. A dialog
+    // that allocates a new TextEditingController in its builder loses focus
+    // and the draft, which looked like the take restarting.
+    controller.audioLevel = 0.4;
+    controller.notifyListeners();
+    await tester.pump();
+    controller.audioLevel = 0.9;
+    controller.notifyListeners();
+    await tester.pump();
+
+    expect(find.text('Add a note'), findsOneWidget);
+    expect(find.text('Alice was in the room'), findsOneWidget);
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+    await tester.pump();
+  });
 }
 
 class _PlaybackController extends NeoRecallController {
   _PlaybackController({required super.recorder});
 
   bool mobileDataUploadRequested = false;
+
+  @override
+  String? get activeRecordingSessionId => 'session-live';
 
   @override
   Future<void> uploadQueuedAudioOnMobileDataOnce() async {

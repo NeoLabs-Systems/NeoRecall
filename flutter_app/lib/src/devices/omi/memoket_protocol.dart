@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'wearable_capture_time.dart';
+
 /// Wire frames captured from a Memoket Gem (firmware 01.42.01.10) while the
 /// official app remotely started/stopped recording and later drained a file
 /// that was recorded offline. Opcodes and layouts below are exactly what
@@ -71,9 +73,15 @@ class MemoketProtocol {
     return Uint8List.fromList(<int>[opcode, name.length, ...name]);
   }
 
-  /// Live notify packets are `00 00 00 00 <seq> <opus-frame>`; stored-file
-  /// chunks are already a single Opus frame (they start with the TOC `0xbc`
-  /// seen on every captured packet).
+  /// Live notify packets are `00 00 00 00 <seq> <opus…>` (HCI: 485 bytes
+  /// every 120 ms). Stored-file notifies are the same 480-byte Opus payload
+  /// without that header. Both pack six 20 ms CELT frames, not one.
+  static const int packedNotifyBytes = 480;
+  static const int packedFrameBytes = 80;
+  static const int packedFramesPerNotify = 6;
+
+  /// Live notify packets are `00 00 00 00 <seq> <opus-payload>`; stored-file
+  /// chunks are the 480-byte payload alone (they start with TOC `0xbc`).
   static Uint8List? liveOpusFrame(List<int> packet) {
     if (packet.length >= 6 &&
         packet[0] == 0 &&
@@ -86,6 +94,30 @@ class MemoketProtocol {
       return Uint8List.fromList(packet);
     }
     return null;
+  }
+
+  /// One BLE notify is 120 ms of audio: six 20 ms frames of [packedFrameBytes].
+  /// Treating the 480-byte blob as a single TOC `0xbc` packet made a 10 s take
+  /// decode as 1.8 s and play about 6× too fast.
+  static List<Uint8List> splitPackedOpusFrames(List<int> payload) {
+    if (payload.isEmpty) return const <Uint8List>[];
+    if (payload.length >= packedFrameBytes * 2 &&
+        payload.length % packedFrameBytes == 0) {
+      final count = payload.length ~/ packedFrameBytes;
+      final frames = <Uint8List>[];
+      final expectedConfig = opusConfig(payload.first);
+      for (var i = 0; i < count; i += 1) {
+        final slice = Uint8List.fromList(
+          payload.sublist(i * packedFrameBytes, (i + 1) * packedFrameBytes),
+        );
+        if (opusConfig(slice.first) != expectedConfig) {
+          return <Uint8List>[Uint8List.fromList(payload)];
+        }
+        frames.add(slice);
+      }
+      return frames;
+    }
+    return <Uint8List>[Uint8List.fromList(payload)];
   }
 
   static int? batteryLevel(List<int> frame) => parseBattery(frame)?.percent;
@@ -423,21 +455,6 @@ class MemoketStoredFile {
   String get importFilename =>
       'memoket-${filename.replaceFirst(RegExp(r'\.opus$'), '.ogg')}';
 
-  /// The device stamps its own wall clock, which the handshake sets from this
-  /// phone — so the `YYYYMMDD_HHMMSS` prefix is read back as local time.
-  DateTime? get capturedAt {
-    final stamp = RegExp(
-      r'^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})',
-    ).firstMatch(filename);
-    if (stamp == null) return null;
-    final local = DateTime(
-      int.parse(stamp.group(1)!),
-      int.parse(stamp.group(2)!),
-      int.parse(stamp.group(3)!),
-      int.parse(stamp.group(4)!),
-      int.parse(stamp.group(5)!),
-      int.parse(stamp.group(6)!),
-    );
-    return local.toUtc();
-  }
+  /// The handshake sets the Gem with unix UTC; the filename is that clock.
+  DateTime? get capturedAt => WearableCaptureTime.parseUtcStamp(filename);
 }

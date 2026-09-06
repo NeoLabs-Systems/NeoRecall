@@ -1,10 +1,12 @@
 'use strict';
 
 const express = require('express');
+const { z } = require('zod');
 const service = require('../services/conversations/conversation_service');
 const timeline = require('../services/conversations/timeline_service');
 const reprocess = require('../services/conversations/conversation_reprocess_service');
 const { requireAuth, requireScope } = require('../middleware/auth');
+const { validate } = require('../middleware/validate');
 const router = express.Router();
 router.use(requireAuth);
 router.get('/', requireScope('recordings:read'), (req, res) => res.json(service.list(req.auth.userId, req.query)));
@@ -15,8 +17,17 @@ router.get('/timeline', requireScope('recordings:read'), (req, res) => res.json(
 router.get('/:id/segments', requireScope('recordings:read'), (req, res) => {
   res.json(timeline.segments(req.auth.userId, req.params.id));
 });
+router.post('/bulk', requireScope('recordings:write'), validate(z.object({
+  ids: z.array(z.string().min(1)).min(1).max(100),
+  action: z.enum(['delete']),
+})), (req, res) => {
+  res.json(service.bulkRemove(req.auth.userId, req.body.ids));
+});
 router.post('/:id/reprocess', requireScope('memories:write'), (req, res) => {
   res.status(202).json(reprocess.reprocess(req.auth.userId, req.params.id));
+});
+router.delete('/:id', requireScope('recordings:write'), (req, res) => {
+  res.json(service.remove(req.auth.userId, req.params.id));
 });
 router.get('/:id', requireScope('recordings:read'), (req, res) => { res.json(service.get(req.auth.userId, req.params.id)); });
 module.exports = router;

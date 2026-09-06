@@ -2202,6 +2202,11 @@ class NeoRecallController extends ChangeNotifier
   /// events inside it, and two concurrent starts would fight over the device.
   bool _autoStartingLiveCapture = false;
 
+  /// Last transport state already handled, so recording → standby is not treated
+  /// as a fresh link (that used to start an offline sweep on the control
+  /// characteristic the Gem had just used for stop).
+  DeviceTransportState? _lastHandledDeviceTransportState;
+
   Future<void> _startLiveCaptureOnLink() async {
     if (_autoStartingLiveCapture) return;
     if (!shouldAutoStartLiveCapture) return;
@@ -2296,6 +2301,15 @@ class NeoRecallController extends ChangeNotifier
   void _handleDeviceControlEvent(DeviceControlEvent event) {
     switch (event.type) {
       case DeviceControlEventType.startRecording:
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'hardware_start_requested',
+          details: <String, Object?>{
+            'isRecording': isRecording,
+            'starting': _startingRecording,
+            'stopping': _stoppingRecording,
+          },
+        );
         if (!isRecording &&
             !_startingRecording &&
             !_stoppingRecording &&
@@ -2306,7 +2320,17 @@ class NeoRecallController extends ChangeNotifier
       case DeviceControlEventType.stopRecording:
       case DeviceControlEventType.standby:
       case DeviceControlEventType.powerOff:
-        if (isRecording) unawaited(stopRecording());
+        if (isRecording) {
+          ClientDiagnosticLog.instance.record(
+            'device_capture',
+            'hardware_stop_requested',
+            details: <String, Object?>{
+              'type': event.type.name,
+              'session': _activeSession?.id,
+            },
+          );
+          unawaited(stopRecording());
+        }
       case DeviceControlEventType.powerOn:
       case DeviceControlEventType.wake:
         unawaited(audioDeviceSessions.connectPreferred());
@@ -2326,29 +2350,44 @@ class NeoRecallController extends ChangeNotifier
   }
 
   void _handleDeviceTransportState(DeviceTransportState state) {
+    final previous = _lastHandledDeviceTransportState;
+    _lastHandledDeviceTransportState = state;
     ClientDiagnosticLog.instance.record(
       'device_transport',
       'state_changed',
       level: state == DeviceTransportState.faulted ? 'warning' : 'info',
       details: <String, Object?>{
         'state': state.name,
+        'previous': previous?.name,
         'device': audioDeviceSessions.preferredDevice?.displayName,
         'type': audioDeviceSessions.preferredDevice?.metadata['type'],
       },
     );
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
-      preferredDeviceBatteryLevel = null;
+      // Keep the last percentage across a brief radio drop. The record sheet
+      // only shows it while connected, and a reconnect will refresh it.
       deviceStorageSync.onDeviceUnlinked();
     } else if (state == DeviceTransportState.connectedStandby) {
-      // §9: after each (re)connect, pull anything the device recorded offline,
-      // then keep sweeping while it stays linked so later recordings arrive on
-      // their own — with or without the app open.
-      deviceStorageSync.onDeviceLinked();
-      // Show what the device is holding as soon as it links, so the amount is
-      // known before the user decides to sync.
-      unawaited(refreshDeviceStoragePending());
-      unawaited(_startLiveCaptureOnLink());
+      // A live stop also lands here. Sweeping then writes list/delete on the
+      // same control characteristic the Gem just used for stop, and the
+      // follow-up start notify reopened a take the user did not start.
+      final becameLinked =
+          previous == null ||
+          previous == DeviceTransportState.disconnected ||
+          previous == DeviceTransportState.connecting ||
+          previous == DeviceTransportState.faulted ||
+          previous == DeviceTransportState.unknown;
+      if (becameLinked) {
+        // §9: after each (re)connect, pull anything the device recorded
+        // offline, then keep sweeping while it stays linked so later
+        // recordings arrive on their own — with or without the app open.
+        deviceStorageSync.onDeviceLinked();
+        // Show what the device is holding as soon as it links, so the amount
+        // is known before the user decides to sync.
+        unawaited(refreshDeviceStoragePending());
+        unawaited(_startLiveCaptureOnLink());
+      }
     }
     final connected =
         state == DeviceTransportState.connectedStandby ||

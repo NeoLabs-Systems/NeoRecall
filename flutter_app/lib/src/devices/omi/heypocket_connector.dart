@@ -6,6 +6,7 @@ import '../../diagnostics/client_diagnostic_log.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
 import 'offline_sync.dart';
+import 'wearable_capture_time.dart';
 
 /// A recording held in HeyPocket on-board flash, addressed by its capture date
 /// and per-day file id (both echoed verbatim to the download/delete commands).
@@ -26,31 +27,11 @@ class HeyPocketStoredFile {
   /// When the device recorded this file, in UTC.
   ///
   /// The time lives in [fileId] (`YYYYMMDDHHMMSS`), not in [date]. Using the
-  /// date alone stamped every recording of a day at local midnight — which
-  /// converts to the *previous* day in UTC east of Greenwich, and collapsed
-  /// every recording of one day onto a single instant. Both made a synced
-  /// recording impossible to find on the timeline.
-  DateTime? get capturedAt {
-    final stamp = RegExp(
-      r'^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})',
-    ).firstMatch(fileId);
-    if (stamp != null) {
-      // The device stamps its own local wall clock, which the sync preamble
-      // (`APP&T&…`) sets from this phone — so it is read back as local time.
-      final local = DateTime(
-        int.parse(stamp.group(1)!),
-        int.parse(stamp.group(2)!),
-        int.parse(stamp.group(3)!),
-        int.parse(stamp.group(4)!),
-        int.parse(stamp.group(5)!),
-        int.parse(stamp.group(6)!),
-      );
-      return local.toUtc();
-    }
-    // Firmware that numbers files sequentially instead of by timestamp: fall
-    // back to the day it was listed under, at local midnight.
-    return DateTime.tryParse(date)?.toUtc();
-  }
+  /// date alone stamped every recording of a day at midnight and collapsed
+  /// every recording of one day onto a single instant.
+  DateTime? get capturedAt =>
+      WearableCaptureTime.parseUtcStamp(fileId) ??
+      WearableCaptureTime.parseUtcDate(date);
 }
 
 /// HeyPocket (also labelled PKT01 / "Pocket AI") BLE recorder.
@@ -345,7 +326,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       'APP&FW',
       'APP&MAC',
       'APP&SPACE',
-      'APP&T&${_formatTimestamp(DateTime.now())}',
+      'APP&T&${WearableCaptureTime.formatUtcStamp(DateTime.now())}',
       'APP&REC&SECEN',
       'APP&STE',
     ]) {
@@ -459,7 +440,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     await _sendSyncPreamble();
     // Enumerate recent days, de-duplicating by id (a day can be re-listed).
     final byId = <String, HeyPocketStoredFile>{};
-    final today = DateTime.now();
+    final today = DateTime.now().toUtc();
     for (var back = 0; back < _syncLookbackDays; back += 1) {
       final day = today.subtract(Duration(days: back));
       for (final file in await _listStoredFilesForDate(day)) {
@@ -477,7 +458,9 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     _listDone = done;
     _onFileEntry = collector.add;
     try {
-      await _writeControl('APP&LIST&${_formatDate(date)}');
+      await _writeControl(
+        'APP&LIST&${WearableCaptureTime.formatUtcDate(date)}',
+      );
       // The device ends each day's listing with MCU&LIST&<count>.
       await done.future.timeout(_listTimeout, onTimeout: () {});
     } catch (_) {
@@ -598,15 +581,11 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
     }
   }
 
-  static String _formatDate(DateTime time) {
-    String pad(int value) => value.toString().padLeft(2, '0');
-    return '${time.year.toString().padLeft(4, '0')}-'
-        '${pad(time.month)}-${pad(time.day)}';
-  }
-
   Future<void> _syncTime() async {
     try {
-      await _writeControl('APP&T&${_formatTimestamp(DateTime.now())}');
+      await _writeControl(
+        'APP&T&${WearableCaptureTime.formatUtcStamp(DateTime.now())}',
+      );
     } catch (_) {
       // A missed clock sync only affects device-side file timestamps.
     }
@@ -618,12 +597,6 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
       WearableDeviceUuids.heyPocketControlWrite,
       ascii.encode(command),
     );
-  }
-
-  static String _formatTimestamp(DateTime time) {
-    String pad(int value, int width) => value.toString().padLeft(width, '0');
-    return '${pad(time.year, 4)}${pad(time.month, 2)}${pad(time.day, 2)}'
-        '${pad(time.hour, 2)}${pad(time.minute, 2)}${pad(time.second, 2)}';
   }
 
   @override

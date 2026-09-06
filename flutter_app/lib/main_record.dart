@@ -279,32 +279,7 @@ class _RecordScreenState extends State<RecordScreen> {
     if (sessionId == null) return;
     final text = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        final input = TextEditingController();
-        return AlertDialog(
-          title: const Text('Add a note'),
-          content: TextField(
-            controller: input,
-            autofocus: true,
-            minLines: 3,
-            maxLines: 8,
-            decoration: const InputDecoration(
-              hintText:
-                  'Names, context, decisions, or anything the transcript may miss…',
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, input.text),
-              child: const Text('Save note'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => const _RecordingNoteDialog(),
     );
     if (text?.trim().isNotEmpty == true) {
       await _runContextAction(
@@ -599,6 +574,52 @@ class _RecordScreenState extends State<RecordScreen> {
         if (microphone && systemAudio) return 'Microphone and device audio';
         return systemAudio ? 'Device audio' : 'Microphone';
     }
+  }
+}
+
+/// Owns the note field so a parent rebuild — audio-level ticks rebuild the
+/// whole app — cannot throw away the controller and steal focus mid-typing.
+class _RecordingNoteDialog extends StatefulWidget {
+  const _RecordingNoteDialog();
+
+  @override
+  State<_RecordingNoteDialog> createState() => _RecordingNoteDialogState();
+}
+
+class _RecordingNoteDialogState extends State<_RecordingNoteDialog> {
+  late final TextEditingController _input = TextEditingController();
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add a note'),
+      content: TextField(
+        controller: _input,
+        autofocus: true,
+        minLines: 3,
+        maxLines: 8,
+        decoration: const InputDecoration(
+          hintText:
+              'Names, context, decisions, or anything the transcript may miss…',
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _input.text),
+          child: const Text('Save note'),
+        ),
+      ],
+    );
   }
 }
 

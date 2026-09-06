@@ -13,6 +13,9 @@ mixin LibraryController on ChangeNotifier {
   List<MiniMemory> get miniMemories;
   set miniMemories(List<MiniMemory> value);
   List<RecallSpeaker> get speakers;
+  List<TimelineMoment> get moments;
+  set moments(List<TimelineMoment> value);
+  Map<String, List<TranscriptSegment>> get momentTranscripts;
   Future<Map<String, dynamic>> _settings();
   Future<void> refreshAll({bool silent});
   Future<void> _cacheSettings(Map<String, dynamic> value);
@@ -63,6 +66,33 @@ mixin LibraryController on ChangeNotifier {
       body: <String, dynamic>{'ids': ids, 'action': 'delete'},
     );
     await refreshAll(silent: true);
+  }
+
+  Future<void> deleteMoment(String id) => bulkDeleteMoments(<String>[id]);
+
+  Future<void> bulkDeleteMoments(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final removed = ids.toSet();
+    final previous = moments;
+    moments = moments
+        .where((moment) => moment.id == null || !removed.contains(moment.id))
+        .toList();
+    for (final id in ids) {
+      momentTranscripts.remove(id);
+    }
+    notifyListeners();
+    try {
+      await api.request(
+        'POST',
+        '/api/v1/conversations/bulk',
+        body: <String, dynamic>{'ids': ids, 'action': 'delete'},
+      );
+      unawaited(refreshAll(silent: true));
+    } catch (_) {
+      moments = previous;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> mergeSpeakers(String targetId, List<String> sourceIds) async {

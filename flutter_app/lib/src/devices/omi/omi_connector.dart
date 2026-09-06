@@ -7,6 +7,7 @@ import 'device_models.dart';
 import 'offline_audio.dart';
 import 'offline_sync.dart';
 import 'ring_protocol.dart';
+import 'wearable_capture_time.dart';
 
 class OmiConnector extends WearableConnector with WearableOfflineSync {
   OmiConnector({required super.device, required super.transport});
@@ -280,6 +281,7 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
     // sits on its 8-minute timeout, blocking the capture it was cancelled for.
     _activeDrain = doneCompleter;
     var frameCount = 0;
+    int? firstTimestamp;
 
     final subscription =
         (await transport.characteristicStream(
@@ -304,6 +306,7 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
             case RingProtocol.notifyData:
               reassembler.append(value.sublist(1));
               for (final record in reassembler.drainRecords()) {
+                firstTimestamp ??= RingProtocol.readRecordTimestamp(record);
                 _packetsTransferred += 1;
                 // ~30k packets per sweep: publishing each one would flood the
                 // UI, so report every 25.
@@ -392,6 +395,7 @@ class OmiConnector extends WearableConnector with WearableOfflineSync {
           bytes: wav,
           contentType: 'audio/wav',
           filename: 'omi-offline.wav',
+          capturedAt: WearableCaptureTime.fromUnixSeconds(firstTimestamp),
         ),
       );
     }

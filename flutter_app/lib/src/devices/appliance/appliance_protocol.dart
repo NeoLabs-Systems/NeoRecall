@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../omi/wearable_capture_time.dart';
 import 'appliance_codec.dart';
 
 /// The contract with the NeoRecall Desk appliance.
@@ -266,7 +267,7 @@ class AppliancePendingRecording {
       durationMs: entry['du'] is int ? entry['du']! as int : 0,
       sha256: sha,
       createdAt: entry['at'] is String
-          ? DateTime.tryParse(entry['at']! as String)
+          ? WearableCaptureTime.parseDeviceInstant(entry['at']! as String)
           : null,
     );
   }
