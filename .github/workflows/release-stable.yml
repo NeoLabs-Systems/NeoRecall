@@ -38,7 +38,30 @@ jobs:
           git fetch origin main beta --tags --force
           git checkout main
           echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
-          git merge --no-ff origin/beta -m "chore(release): promote beta to main [skip ci]"
+          if git merge --no-ff origin/beta -m "chore(release): promote beta to main [skip ci]"; then
+            exit 0
+          fi
+          # Both branches carry their own release commits, so the version fields
+          # of these two files conflict on every promotion. beta's copies are the
+          # right ones: main holds nothing of its own here, and "Set package
+          # version" below overwrites the version moments later anyway. The
+          # lockfile is only ever taken wholesale from a branch -- regenerating
+          # it drops the platform binaries the other jobs install.
+          conflicts="$(git diff --name-only --diff-filter=U)"
+          if [[ -z "$conflicts" ]]; then
+            echo "::error::The promotion merge failed without leaving conflicts to resolve."
+            exit 1
+          fi
+          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'package\.json|package-lock\.json' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo "::error::beta and main conflict outside the version files; resolve this by hand."
+            printf '%s\n' "$unexpected" >&2
+            git merge --abort
+            exit 1
+          fi
+          git checkout origin/beta -- package.json package-lock.json
+          git add package.json package-lock.json
+          git commit --no-edit
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
