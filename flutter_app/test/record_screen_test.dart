@@ -95,7 +95,7 @@ void main() {
 
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('No watch backlog'), findsOneWidget);
+    expect(find.text('No device backlog'), findsOneWidget);
     expect(
       tester
           .widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade))
@@ -113,7 +113,7 @@ void main() {
           .crossFadeState,
       CrossFadeState.showSecond,
     );
-    expect(find.text('Watch transfer'), findsOneWidget);
+    expect(find.text('Device transfer'), findsOneWidget);
     expect(find.text('Stored on phone'), findsOneWidget);
     expect(find.text('Server upload'), findsOneWidget);
     expect(find.text('Server transcription'), findsOneWidget);

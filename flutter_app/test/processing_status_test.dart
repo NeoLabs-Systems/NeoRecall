@@ -274,4 +274,16 @@ void main() {
       expect(status.complete, isFalse);
     },
   );
+
+  test('byte-accurate transfer progress overrides the unit ratio', () {
+    final status = const ProcessingStatusSnapshot().copyWithTransfer(
+      active: true,
+      pending: 1,
+      pendingSeconds: 16,
+      transferred: 1,
+      total: 2,
+      completeFraction: 0.05,
+    );
+    expect(status.watchFraction, closeTo(0.05, 0.001));
+  });
 }

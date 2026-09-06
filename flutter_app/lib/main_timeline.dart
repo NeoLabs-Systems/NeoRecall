@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
@@ -6,6 +9,7 @@ import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
+import 'src/sync/pending_audio_preview.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({
@@ -26,8 +30,92 @@ class TimelineScreen extends StatefulWidget {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   final Set<String> _expanded = <String>{};
+  AudioPlayer? _player;
+  StreamSubscription<void>? _completeSubscription;
+  String? _playingKey;
+  bool _loadingAudio = false;
+  List<PendingAudioPart> _playingParts = const <PendingAudioPart>[];
+  int _playingPartIndex = 0;
 
   NeoRecallController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _completeSubscription?.cancel();
+    final player = _player;
+    if (player != null) unawaited(player.dispose());
+    super.dispose();
+  }
+
+  AudioPlayer _ensurePlayer() {
+    final existing = _player;
+    if (existing != null) return existing;
+    final player = AudioPlayer();
+    _player = player;
+    _completeSubscription = player.onPlayerComplete.listen((_) {
+      if (_playingPartIndex + 1 < _playingParts.length) {
+        unawaited(_playPart(_playingParts, _playingPartIndex + 1));
+      } else if (mounted) {
+        setState(() {
+          _playingKey = null;
+          _playingParts = const <PendingAudioPart>[];
+          _playingPartIndex = 0;
+        });
+      }
+    });
+    return player;
+  }
+
+  Future<void> _toggleMomentAudio(TimelineMoment moment) async {
+    if (_loadingAudio) return;
+    if (_playingKey == moment.key) {
+      await _player?.stop();
+      if (mounted) {
+        setState(() {
+          _playingKey = null;
+          _playingParts = const <PendingAudioPart>[];
+          _playingPartIndex = 0;
+        });
+      }
+      return;
+    }
+    setState(() => _loadingAudio = true);
+    try {
+      final parts = await controller.loadMomentAudio(moment);
+      if (!mounted || parts.isEmpty) return;
+      _playingKey = moment.key;
+      await _playPart(parts, 0);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.toString().replaceFirst(
+              RegExp(r'^(Bad state|StateError|Exception):\s*'),
+              '',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingAudio = false);
+    }
+  }
+
+  Future<void> _playPart(List<PendingAudioPart> parts, int index) async {
+    final bytes = await controller.readRetainedAudioPart(parts[index].id);
+    if (!mounted) return;
+    final player = _ensurePlayer();
+    await player.stop();
+    await player.setSource(BytesSource(bytes, mimeType: parts[index].mimeType));
+    await player.resume();
+    if (mounted) {
+      setState(() {
+        _playingParts = parts;
+        _playingPartIndex = index;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +201,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           dayOf(moments[index + 1]) != dayOf(moments[index]),
                       busy:
                           controller.reprocessingMomentId == moments[index].id,
+                      hasAudio: controller.momentsWithRetainedAudio.contains(
+                        moments[index].key,
+                      ),
+                      playing: _playingKey == moments[index].key,
+                      loadingAudio:
+                          _loadingAudio && _playingKey == moments[index].key,
+                      onPlay: () => _toggleMomentAudio(moments[index]),
                       onReprocess: moments[index].canReprocess
                           ? () => controller.reprocessMoment(moments[index].id!)
                           : null,
@@ -225,6 +320,10 @@ class _TimelineEntry extends StatelessWidget {
     this.loadedSegments,
     this.loadingSegments = false,
     this.onReprocess,
+    this.hasAudio = false,
+    this.playing = false,
+    this.loadingAudio = false,
+    this.onPlay,
   });
 
   final TimelineMoment moment;
@@ -235,6 +334,10 @@ class _TimelineEntry extends StatelessWidget {
   final List<TranscriptSegment>? loadedSegments;
   final bool loadingSegments;
   final VoidCallback? onReprocess;
+  final bool hasAudio;
+  final bool playing;
+  final bool loadingAudio;
+  final VoidCallback? onPlay;
 
   /// Where this moment stands, in the reader's terms. Null when it simply
   /// stands finished and there is nothing to say.
@@ -388,6 +491,33 @@ class _TimelineEntry extends StatelessWidget {
                           _MomentStatus(
                             label: _statusLabel()!,
                             palette: palette,
+                          ),
+                        ],
+                        if (hasAudio && onPlay != null) ...<Widget>[
+                          const SizedBox(width: 4),
+                          IconButton(
+                            tooltip: playing ? 'Stop' : 'Listen',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                            onPressed: loadingAudio ? null : onPlay,
+                            icon: loadingAudio
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    playing
+                                        ? Icons.stop_rounded
+                                        : Icons.play_arrow_rounded,
+                                    size: 20,
+                                  ),
                           ),
                         ],
                         if (compact)

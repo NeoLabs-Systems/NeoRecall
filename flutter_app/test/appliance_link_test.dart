@@ -118,5 +118,12 @@ class _FakeTransport implements GattTransport {
   Future<GattAvailability> availability() async => GattAvailability.ready;
 
   @override
+  Stream<GattAvailability> get availabilityChanges =>
+      const Stream<GattAvailability>.empty();
+
+  @override
+  Future<bool> isDeviceConnected(String deviceId) async => false;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

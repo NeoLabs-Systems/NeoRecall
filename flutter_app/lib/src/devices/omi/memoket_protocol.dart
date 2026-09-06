@@ -32,6 +32,11 @@ class MemoketProtocol {
   ]);
 
   static final Uint8List ping = Uint8List.fromList(const <int>[opPing]);
+
+  /// Phone → Gem on the control write characteristic. Reply is
+  /// `e1 <percent> <status>` (`e14e02` = 78%, status 0x02 charging/full).
+  /// The Gem also exposes standard Battery (180F / 2A19); prefer that read
+  /// when the characteristic is present — it does not need a control write.
   static final Uint8List batteryQuery = Uint8List.fromList(const <int>[
     opBattery,
   ]);
@@ -83,9 +88,16 @@ class MemoketProtocol {
     return null;
   }
 
-  static int? batteryLevel(List<int> frame) {
+  static int? batteryLevel(List<int> frame) => parseBattery(frame)?.percent;
+
+  /// Vendor battery notify/reply captured on the control channel.
+  /// Status 0x01 = charging, 0x02 = charging or full (HCI: `e14e02`).
+  static MemoketBattery? parseBattery(List<int> frame) {
     if (frame.length < 2 || frame.first != opBattery) return null;
-    return frame[1];
+    final percent = frame[1];
+    if (percent > 100) return null;
+    final status = frame.length > 2 ? frame[2] : null;
+    return MemoketBattery(percent: percent, status: status);
   }
 
   static String? firmwareVersion(List<int> frame) {
@@ -123,6 +135,36 @@ class MemoketProtocol {
     );
   }
 
+  /// The Gem sometimes repeats the same list entry. Keep the fattest copy.
+  static List<MemoketStoredFile> uniqueStoredFiles(
+    Iterable<MemoketStoredFile> files,
+  ) {
+    final byId = <String, MemoketStoredFile>{};
+    for (final file in files) {
+      final existing = byId[file.id];
+      if (existing == null ||
+          file.byteLength > existing.byteLength ||
+          (file.byteLength == existing.byteLength &&
+              file.durationSeconds > existing.durationSeconds)) {
+        byId[file.id] = file;
+      }
+    }
+    return byId.values.toList(growable: false);
+  }
+
+  /// How many payload bytes a listed take should still produce.
+  ///
+  /// Prefer the device's announced size. Duration is only a floor when the
+  /// size is missing — firmware duration is not a 20 ms frame count.
+  static int expectedAudioBytes({
+    required int durationSeconds,
+    required int announcedBytes,
+  }) {
+    if (announcedBytes > 0) return announcedBytes;
+    if (durationSeconds <= 0) return 0;
+    return durationSeconds * 4000;
+  }
+
   static String? recordingFilename(List<int> frame) {
     if (frame.isEmpty ||
         (frame.first != opRecordStart && frame.first != opRecordStop)) {
@@ -143,19 +185,74 @@ class MemoketProtocol {
   /// Concatenated raw Opus frames are not a file. The import pipeline needs a
   /// container; Ogg Opus is what the server already accepts as `audio/ogg`.
   /// Opus TOC bit 2 is the stereo flag (RFC 6716). Captured Gem frames are
-  /// `0xbc` — stereo CELT.
+  /// `0xbc` — stereo CELT wideband, 20 ms.
   static int opusChannelCount(List<int> frame) {
     if (frame.isEmpty) return 1;
     return ((frame.first >> 2) & 1) == 1 ? 2 : 1;
   }
 
-  static Uint8List wrapOpusFramesAsOgg(
-    List<Uint8List> frames, {
-    int sampleRate = 16000,
-    int samplesPerFrame = 1920,
-  }) {
+  /// RFC 6716 configuration number (TOC bits 7–3).
+  static int opusConfig(int toc) => (toc >> 3) & 31;
+
+  /// How many Opus frames one packet contains (TOC code, bits 1–0).
+  static int opusFrameCount(int toc) {
+    switch (toc & 3) {
+      case 1:
+      case 2:
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
+  /// Duration of one coded frame inside the packet, in microseconds.
+  static int opusFrameDurationUs(int toc) {
+    final config = opusConfig(toc);
+    if (config <= 11) {
+      return const <int>[10000, 20000, 40000, 60000][config % 4];
+    }
+    if (config <= 15) return config.isEven ? 10000 : 20000;
+    return const <int>[2500, 5000, 10000, 20000][(config - 16) % 4];
+  }
+
+  static int opusPacketDurationUs(int toc) =>
+      opusFrameDurationUs(toc) * opusFrameCount(toc);
+
+  /// Informational input rate for OpusHead. The decoder still works at 48 kHz;
+  /// this is the bandwidth the TOC advertised (RFC 6716 Table 2).
+  static int opusInputSampleRate(int toc) {
+    final config = opusConfig(toc);
+    if (config <= 3) return 8000;
+    if (config <= 7) return 12000;
+    if (config <= 11) return 16000;
+    if (config <= 13) return 24000;
+    if (config <= 15) return 48000;
+    if (config <= 19) return 8000;
+    if (config <= 23) return 16000;
+    if (config <= 27) return 24000;
+    return 48000;
+  }
+
+  /// RFC 7845: an Ogg Opus granule is PCM samples at 48 kHz, not the
+  /// input-rate sample count. Labeling a 20 ms `0xbc` frame as 1920 samples
+  /// at 16 kHz made a 1.6 s take look like 9 s and stretched Whisper's input.
+  static int opusGranuleIncrement(int toc) =>
+      (48000 * opusPacketDurationUs(toc)) ~/ 1000000;
+
+  static int opusFramesDurationMs(Iterable<List<int>> frames) {
+    var microseconds = 0;
+    for (final frame in frames) {
+      if (frame.isEmpty) continue;
+      microseconds += opusPacketDurationUs(frame.first);
+    }
+    return (microseconds + 500) ~/ 1000;
+  }
+
+  static Uint8List wrapOpusFramesAsOgg(List<Uint8List> frames) {
     final serial = 0x4d4b4731; // 'MKG1'
+    final toc = frames.isEmpty ? 0 : frames.first.first;
     final channels = frames.isEmpty ? 1 : opusChannelCount(frames.first);
+    final sampleRate = frames.isEmpty ? 16000 : opusInputSampleRate(toc);
     final pages = <Uint8List>[];
     pages.add(
       _oggPage(
@@ -177,14 +274,15 @@ class MemoketProtocol {
     );
     var granule = 0;
     for (var i = 0; i < frames.length; i += 1) {
-      granule += samplesPerFrame;
+      final frame = frames[i];
+      if (frame.isNotEmpty) granule += opusGranuleIncrement(frame.first);
       pages.add(
         _oggPage(
           headerType: i == frames.length - 1 ? 0x04 : 0x00,
           granule: granule,
           serial: serial,
           sequence: i + 2,
-          body: frames[i],
+          body: frame,
         ),
       );
     }
@@ -297,6 +395,15 @@ class MemoketProtocol {
     }
     return table;
   }
+}
+
+class MemoketBattery {
+  const MemoketBattery({required this.percent, this.status});
+
+  final int percent;
+  final int? status;
+
+  bool get charging => status == 0x01 || status == 0x02;
 }
 
 class MemoketStoredFile {

@@ -19,6 +19,7 @@ test('user settings validate timezones and preserve the environment interval flo
   const auth = { Authorization: `Bearer ${registered.body.session.token}` };
   const initial = await request(app).get('/api/v1/settings').set(auth).expect(200);
   assert.equal(initial.body.settings.uploadOnlyOnUnmetered, true);
+  assert.equal(initial.body.settings.keepRawAudio, true);
   assert.equal(initial.body.settings.recordingScheduleEnabled, false);
   const updated = await request(app).put('/api/v1/settings').set(auth).send({
     consolidationIntervalMs: 1000,
@@ -36,6 +37,8 @@ test('user settings validate timezones and preserve the environment interval flo
   assert.equal(updated.body.settings.uploadOnlyOnUnmetered, false);
   assert.equal(updated.body.settings.recordingStartMinute, 480);
   assert.deepEqual(updated.body.settings.customVocabulary, ['NeoRecall', 'Qbii Technologies']);
+  const audio = await request(app).put('/api/v1/settings').set(auth).send({ keepRawAudio: false }).expect(200);
+  assert.equal(audio.body.settings.keepRawAudio, false);
   await request(app).put('/api/v1/settings').set(auth).send({ timezone: 'Not/A_Timezone' }).expect(400);
   await request(app).put('/api/v1/settings').set(auth).send({ recordingStartMinute: 1440 }).expect(400);
 });

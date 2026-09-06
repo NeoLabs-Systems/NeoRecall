@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/devices/ble/gatt_transport.dart';
+import 'package:neorecall/src/devices/device_session_controller.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
 import 'package:neorecall/src/devices/omi/device_adapter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('GATT scan requires a protocol selector', () {
@@ -125,6 +127,93 @@ void main() {
     await adapter.dispose();
   });
 
+  test('turning Bluetooth off drops a connected wearable', () async {
+    final transport = _FakeGattTransport();
+    final adapter = DeviceAdapter(gatt: transport);
+    await adapter.startScan();
+    transport.emitPeripheral(
+      const GattPeripheral(
+        id: 'pocket-device',
+        name: 'PK01_BLUE',
+        serviceUuids: <String>[],
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    const descriptor = AudioDeviceDescriptor(
+      adapterId: 'omi_family',
+      deviceKey: 'pocket-device',
+      displayName: 'PK01_BLUE',
+      transport: 'bluetooth_le',
+      metadata: <String, Object?>{
+        'type': 'heyPocket',
+        'serviceUuids': <String>[],
+      },
+    );
+    await adapter.connect(descriptor);
+    expect(await adapter.hasLiveLink(), isTrue);
+
+    final dropped = expectLater(
+      adapter.transportStates,
+      emitsThrough(DeviceTransportState.disconnected),
+    );
+    transport.emitAvailability(GattAvailability.poweredOff);
+    await dropped;
+    expect(await adapter.hasLiveLink(), isFalse);
+    expect(await adapter.radioIsReady(), isFalse);
+    await adapter.dispose();
+  });
+
+  test('session does not stay connected after the radio powers off', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final transport = _FakeGattTransport();
+    final adapter = DeviceAdapter(gatt: transport);
+    final sessions = DeviceSessionController(
+      registry: AudioDeviceAdapterRegistry()..register(adapter),
+    );
+    await sessions.bindAccount('acct-1');
+    await adapter.startScan();
+    transport.emitPeripheral(
+      const GattPeripheral(
+        id: 'pocket-device',
+        name: 'PK01_BLUE',
+        serviceUuids: <String>[],
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    const descriptor = AudioDeviceDescriptor(
+      adapterId: 'omi_family',
+      deviceKey: 'pocket-device',
+      displayName: 'PK01_BLUE',
+      transport: 'bluetooth_le',
+      metadata: <String, Object?>{
+        'type': 'heyPocket',
+        'serviceUuids': <String>[],
+      },
+    );
+    sessions.preferredDevice = descriptor;
+    sessions.activeAdapter = adapter;
+    final banners = <String>[];
+    final bannerSub = sessions.messages.listen(banners.add);
+    final connected = await sessions.connectPreferred(
+      scheduleReconnect: false,
+    );
+    await bannerSub.cancel();
+    expect(
+      connected,
+      isTrue,
+      reason:
+          'state=${sessions.state} banners=$banners live=${await adapter.hasLiveLink()}',
+    );
+    expect(sessions.isConnected, isTrue);
+
+    transport.emitAvailability(GattAvailability.poweredOff);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(sessions.isConnected, isFalse);
+    expect(await sessions.connectPreferred(scheduleReconnect: false), isFalse);
+    await sessions.dispose();
+    await adapter.dispose();
+  });
+
   test('unrecognized in-range devices are not shown or probed', () async {
     final transport = _FakeGattTransport()
       ..discoveredServiceUuids = const <String>['unknown-service'];
@@ -217,9 +306,13 @@ class _FakeGattTransport implements GattTransport {
       StreamController<GattPeripheral>.broadcast();
   final StreamController<bool> _connections =
       StreamController<bool>.broadcast();
+  final StreamController<GattAvailability> _availability =
+      StreamController<GattAvailability>.broadcast();
   final StreamController<Uint8List> _notifications =
       StreamController<Uint8List>.broadcast();
 
+  GattAvailability currentAvailability = GattAvailability.ready;
+  bool gattLinked = false;
   bool? lastAutoReconnect;
   int discoverServicesCalls = 0;
   int pairCalls = 0;
@@ -239,8 +332,23 @@ class _FakeGattTransport implements GattTransport {
     _discoveries.add(peripheral);
   }
 
+  void emitAvailability(GattAvailability value) {
+    currentAvailability = value;
+    _availability.add(value);
+  }
+
   @override
-  Future<GattAvailability> availability() async => GattAvailability.ready;
+  Stream<GattAvailability> get availabilityChanges => _availability.stream;
+
+  @override
+  Future<GattAvailability> availability() async => currentAvailability;
+
+  @override
+  Future<bool> isDeviceConnected(String deviceId) async =>
+      gattLinked && _radioCanConnect(currentAvailability);
+
+  static bool _radioCanConnect(GattAvailability value) =>
+      value == GattAvailability.ready || value == GattAvailability.unknown;
 
   @override
   Stream<bool> connectionChanges(String deviceId) => _connections.stream;
@@ -252,11 +360,14 @@ class _FakeGattTransport implements GattTransport {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     lastAutoReconnect = autoReconnect;
+    gattLinked = true;
     emitConnection(true);
   }
 
   @override
-  Future<void> disconnect(String deviceId) async {}
+  Future<void> disconnect(String deviceId) async {
+    gattLinked = false;
+  }
 
   @override
   Future<void> pair(String deviceId) async {
@@ -300,6 +411,7 @@ class _FakeGattTransport implements GattTransport {
   Future<void> dispose() async {
     await _discoveries.close();
     await _connections.close();
+    await _availability.close();
     await _notifications.close();
   }
 

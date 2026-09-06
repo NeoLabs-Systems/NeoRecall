@@ -17,6 +17,7 @@ mixin LibraryController on ChangeNotifier {
   Future<void> refreshAll({bool silent});
   Future<void> _cacheSettings(Map<String, dynamic> value);
   Future<void> _refreshPending();
+  Future<void> applyRawAudioRetention({bool purgeAll = false});
   void _applyRecordingSchedule();
   SyncCoordinator get sync;
   String? get notice;
@@ -86,7 +87,15 @@ mixin LibraryController on ChangeNotifier {
   Future<void> updateSettings(Map<String, dynamic> changes) async {
     final payload =
         await api.request('PUT', '/api/v1/settings', body: changes) as Map;
-    await _cacheSettings(Map<String, dynamic>.from(payload['settings'] as Map));
+    final settings = Map<String, dynamic>.from(payload['settings'] as Map);
+    // An older server drops unknown keys. Keep the choice the user just made
+    // so raw-audio retention does not snap back to the default.
+    if (changes.containsKey('keepRawAudio') &&
+        !settings.containsKey('keepRawAudio')) {
+      settings['keepRawAudio'] = changes['keepRawAudio'];
+    }
+    await _cacheSettings(settings);
+    await applyRawAudioRetention();
     // Status is derived from the cached policy, so refresh it before returning
     // to a settings screen that may have just changed the network rule.
     await _refreshPending();

@@ -23,6 +23,7 @@ const schema = z.object({
   recordingEndMinute: z.number().int().min(0).max(1439).optional(),
   customVocabulary: z.array(z.string().trim().min(1)).optional(),
   contextOriginalRetentionDays: z.number().int().min(1).max(365).optional(),
+  keepRawAudio: z.boolean().optional(),
   vocabularyCorrectionEnabled: z.boolean().optional(),
 });
 
@@ -35,6 +36,7 @@ const keyMap = Object.freeze({
   recordingStartMinute: 'recording_start_minute', recordingEndMinute: 'recording_end_minute',
   customVocabulary: 'custom_vocabulary',
   contextOriginalRetentionDays: 'context_original_retention_days',
+  keepRawAudio: 'keep_raw_audio',
   vocabularyCorrectionEnabled: 'vocabulary_correction_enabled',
 });
 
@@ -60,6 +62,7 @@ function defaults() {
     recordingEndMinute: 0,
     customVocabulary: [],
     contextOriginalRetentionDays: 7,
+    keepRawAudio: true,
     vocabularyCorrectionEnabled: true,
   };
 }

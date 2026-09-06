@@ -89,7 +89,14 @@ abstract class GattTransport {
   Stream<GattPeripheral> get discoveries;
   Stream<bool> connectionChanges(String deviceId);
 
+  /// Adapter power / permission changes. Peripheral [connectionChanges] often
+  /// stay silent when the phone's Bluetooth radio is turned off.
+  Stream<GattAvailability> get availabilityChanges;
+
   Future<GattAvailability> availability();
+
+  /// Whether the host stack currently reports a live GATT session.
+  Future<bool> isDeviceConnected(String deviceId);
   Future<void> requestAccess();
   Future<void> startScan(
     GattScanSpec spec, {
@@ -150,6 +157,14 @@ class UniversalGattTransport implements GattTransport {
       UniversalBle.connectionStream(deviceId).distinct();
 
   @override
+  Stream<GattAvailability> get availabilityChanges {
+    if (kIsWeb) return const Stream<GattAvailability>.empty();
+    return UniversalBle.availabilityStream
+        .map(_mapAvailability)
+        .distinct();
+  }
+
+  @override
   Future<GattAvailability> availability() async {
     if (kIsWeb) {
       // Web Bluetooth exposes availability through the chooser rather than a
@@ -157,7 +172,20 @@ class UniversalGattTransport implements GattTransport {
       // authoritative capability check.
       return GattAvailability.unknown;
     }
-    final state = await UniversalBle.getBluetoothAvailabilityState();
+    return _mapAvailability(await UniversalBle.getBluetoothAvailabilityState());
+  }
+
+  @override
+  Future<bool> isDeviceConnected(String deviceId) async {
+    try {
+      final state = await UniversalBle.getConnectionState(deviceId);
+      return state == BleConnectionState.connected;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static GattAvailability _mapAvailability(AvailabilityState state) {
     return switch (state) {
       AvailabilityState.poweredOn => GattAvailability.ready,
       AvailabilityState.poweredOff => GattAvailability.poweredOff,

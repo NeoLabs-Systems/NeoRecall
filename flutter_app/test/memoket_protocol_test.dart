@@ -20,6 +20,13 @@ void main() {
 
   test('battery and firmware replies decode the captured payloads', () {
     expect(MemoketProtocol.batteryLevel(_hex('e14e02')), 78);
+    final battery = MemoketProtocol.parseBattery(_hex('e14e02'));
+    expect(battery, isNotNull);
+    expect(battery!.percent, 78);
+    expect(battery.status, 0x02);
+    expect(battery.charging, isTrue);
+    expect(MemoketProtocol.parseBattery(_hex('e14e00'))!.charging, isFalse);
+    expect(MemoketProtocol.parseBattery(_hex('e1c8')), isNull);
     expect(
       MemoketProtocol.firmwareVersion(_hex('e330312e34322e30312e3130')),
       '01.42.01.10',
@@ -37,6 +44,40 @@ void main() {
     expect(file.byteLength, 41760);
     expect(file.capturedAt, DateTime(2026, 9, 5, 22, 28, 17).toUtc());
     expect(MemoketProtocol.isListEnd(_hex('03ff')), isTrue);
+  });
+
+  test('a repeated list entry is kept once, preferring the larger size', () {
+    const first = MemoketStoredFile(
+      filename: '20260906_172959_2.opus',
+      durationSeconds: 16,
+      byteLength: 0,
+    );
+    const fuller = MemoketStoredFile(
+      filename: '20260906_172959_2.opus',
+      durationSeconds: 16,
+      byteLength: 384000,
+    );
+    final files = MemoketProtocol.uniqueStoredFiles(<MemoketStoredFile>[
+      first,
+      fuller,
+      first,
+    ]);
+    expect(files, hasLength(1));
+    expect(files.single.byteLength, 384000);
+    expect(
+      MemoketProtocol.expectedAudioBytes(
+        durationSeconds: 16,
+        announcedBytes: 384000,
+      ),
+      384000,
+    );
+    expect(
+      MemoketProtocol.expectedAudioBytes(
+        durationSeconds: 16,
+        announcedBytes: 0,
+      ),
+      64000,
+    );
   });
 
   test('two recordings from one day keep distinct capture times', () {
@@ -101,5 +142,39 @@ void main() {
     expect(headAt, isNonNegative);
     expect(ogg[headAt + 8], 1);
     expect(ogg[headAt + 9], 2);
+    // 0xbc is CELT wideband stereo, 20 ms. OpusHead rate is informational;
+    // the granule must be 48 kHz samples (RFC 7845), 960 per frame.
+    expect(MemoketProtocol.opusConfig(0xbc), 23);
+    expect(MemoketProtocol.opusInputSampleRate(0xbc), 16000);
+    expect(MemoketProtocol.opusPacketDurationUs(0xbc), 20000);
+    expect(MemoketProtocol.opusGranuleIncrement(0xbc), 960);
+    expect(MemoketProtocol.opusFramesDurationMs(frames), 40);
+    expect(ogg[headAt + 12], 16000 & 0xff);
+    expect(ogg[headAt + 13], (16000 >> 8) & 0xff);
+    expect(_lastOggGranule(ogg), 1920);
   });
+}
+
+int _lastOggGranule(Uint8List ogg) {
+  var last = 0;
+  var offset = 0;
+  while (offset + 27 <= ogg.length) {
+    if (ascii.decode(ogg.sublist(offset, offset + 4), allowInvalid: true) !=
+        'OggS') {
+      offset += 1;
+      continue;
+    }
+    last =
+        ogg[offset + 6] |
+        (ogg[offset + 7] << 8) |
+        (ogg[offset + 8] << 16) |
+        (ogg[offset + 9] << 24);
+    final segments = ogg[offset + 26];
+    var body = 0;
+    for (var i = 0; i < segments && offset + 27 + i < ogg.length; i += 1) {
+      body += ogg[offset + 27 + i];
+    }
+    offset += 27 + segments + body;
+  }
+  return last;
 }

@@ -43,6 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final customVocabulary = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
   bool _savingUploadPolicy = false;
+  bool _savingKeepRawAudio = false;
   int _loadedContextRetentionDays = 7;
   AdminProviderClient? _adminClient;
 
@@ -117,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Shorten original-file retention?'),
           content: Text(
-            'Original context files older than $retention days will be permanently deleted during the next cleanup. Extracted text and AI descriptions remain.',
+            'Original photos, documents, and raw audio older than $retention days will be permanently deleted during the next cleanup. Transcripts and AI descriptions remain.',
           ),
           actions: <Widget>[
             TextButton(
@@ -148,6 +149,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'vocabularyCorrectionEnabled':
           current['vocabularyCorrectionEnabled'] as bool? ?? true,
       'contextOriginalRetentionDays': retention,
+      'keepRawAudio': current['keepRawAudio'] as bool? ?? true,
     });
     _loadedContextRetentionDays = retention;
     if (!mounted) return;
@@ -181,6 +183,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _setKeepRawAudio(bool value) async {
+    final current = settings;
+    if (current == null || _savingKeepRawAudio) return;
+    if (!value) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Stop keeping raw audio?'),
+          content: const Text(
+            'Recordings already on this device will be deleted now. '
+            'Transcripts, titles, and memories stay.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete raw audio'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    final previous = current['keepRawAudio'] as bool? ?? true;
+    setState(() {
+      current['keepRawAudio'] = value;
+      _savingKeepRawAudio = true;
+    });
+    try {
+      await widget.controller.updateSettings(<String, dynamic>{
+        'keepRawAudio': value,
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => current['keepRawAudio'] = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update raw audio storage: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _savingKeepRawAudio = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
@@ -191,12 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? AppSpacing.lg - 4
         : AppSpacing.lg;
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        gutter,
-        compact ? 20 : 28,
-        gutter,
-        0,
-      ),
+      padding: EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 0),
       child: Column(
         children: <Widget>[
           ScreenHeader(
@@ -651,8 +694,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            SwitchListTile(
+              key: const ValueKey<String>('keep-raw-audio'),
+              contentPadding: EdgeInsets.zero,
+              value: current['keepRawAudio'] as bool? ?? true,
+              onChanged: _savingKeepRawAudio ? null : _setKeepRawAudio,
+              title: const Text('Keep raw audio on this device'),
+              subtitle: const Text(
+                'On by default. Listen from Moments. The server still deletes '
+                'its copy after transcription; only this phone keeps the file, '
+                'and only until the retention period below.',
+              ),
+            ),
+            const Divider(),
             Text(
-              'Keep original photos and documents for ${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              'Keep original photos, documents, and raw audio for ${current['contextOriginalRetentionDays'] as int? ?? 7} days',
               style: TextStyle(
                 color: palette.textPrimary,
                 fontSize: 16,
@@ -661,7 +717,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'After this period NeoRecall deletes the original bytes but keeps extracted text, image descriptions, and source links.',
+              'After this period NeoRecall deletes the original bytes but keeps transcripts, extracted text, image descriptions, and source links.',
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
             const SizedBox(height: 14),
@@ -789,8 +845,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               label: chosenHours == 0 ? 'Immediate' : '${chosenHours}h',
               value: chosenHours.toDouble(),
               onChanged: (value) => setState(
-                () => current['consolidationIntervalMs'] =
-                    value.round() * hour,
+                () => current['consolidationIntervalMs'] = value.round() * hour,
               ),
             ),
             Text(

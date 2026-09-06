@@ -44,6 +44,7 @@ class ProcessingStatusSnapshot {
     this.watchTransferred = 0,
     this.watchTotal = 0,
     this.watchTransferActive = false,
+    this.transferFraction,
     this.phoneQueued = 0,
     this.uploading = 0,
     this.serverQueued = 0,
@@ -63,6 +64,7 @@ class ProcessingStatusSnapshot {
   final int watchTransferred;
   final int watchTotal;
   final bool watchTransferActive;
+  final double? transferFraction;
   final int phoneQueued;
   final int uploading;
   final int serverQueued;
@@ -80,8 +82,13 @@ class ProcessingStatusSnapshot {
       pendingAudioDuration + Duration(seconds: watchPendingSeconds);
   bool get hasIssues => issues.isNotEmpty;
   bool get canRetry => issues.any((issue) => issue.recoverable);
-  double? get watchFraction =>
-      watchTotal > 0 ? (watchTransferred / watchTotal).clamp(0.0, 1.0) : null;
+  double? get watchFraction {
+    final override = transferFraction;
+    if (override != null) return override.clamp(0.0, 1.0);
+    return watchTotal > 0
+        ? (watchTransferred / watchTotal).clamp(0.0, 1.0)
+        : null;
+  }
 
   ProcessingPipelineStage get activeStage {
     if (watchTransferActive || watchPending > 0) {
@@ -101,6 +108,7 @@ class ProcessingStatusSnapshot {
     required int pendingSeconds,
     required int transferred,
     required int total,
+    double? completeFraction,
     List<ProcessingIssue>? issues,
   }) => ProcessingStatusSnapshot(
     pendingBytes: pendingBytes,
@@ -110,6 +118,7 @@ class ProcessingStatusSnapshot {
     watchTransferred: transferred,
     watchTotal: total,
     watchTransferActive: active,
+    transferFraction: completeFraction,
     phoneQueued: phoneQueued,
     uploading: uploading,
     serverQueued: serverQueued,

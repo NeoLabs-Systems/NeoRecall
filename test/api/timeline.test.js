@@ -51,7 +51,7 @@ async function account(username) {
     (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
     VALUES (?,?,?,?,0,?,?,1,'wav','pcm_s16le','mono','2026-08-01T10:00:00.000Z',0,1000,'transcribed')`)
     .run(chunkId, userId, sessionId, sourceId, chunkId, crypto.randomBytes(32).toString('hex'));
-  return { userId, chunkId, token };
+  return { userId, chunkId, sessionId, token };
 }
 
 function conversation(context, { day, index, state = 'consolidated', segments = 3, title = null }) {
@@ -89,6 +89,8 @@ test('the timeline is paged by moments, newest first, each one previewed', async
   // megabytes for moments nobody opened.
   assert.equal(first.body.moments[0].segments.length, 3);
   assert.equal(first.body.moments[0].segmentCount, 40);
+  assert.deepEqual(first.body.moments[0].sessionIds, [context.sessionId]);
+  assert.deepEqual(first.body.moments[0].importIds, []);
 
   const second = await request(app).get(`/api/v1/conversations/timeline?limit=8&before=${first.body.nextCursor}`)
     .set(auth).expect(200);

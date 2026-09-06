@@ -68,9 +68,28 @@ function segments(userId, conversationId) {
 // This is what was recorded moments ago. It belongs at the top of the first
 // page: leaving it out would mean the newest thing someone said is the one
 // thing the timeline cannot show.
+function audioKeys(userId, conversationId) {
+  const pending = conversationId === PENDING_ID;
+  const where = pending ? 't.conversation_id IS NULL' : 't.conversation_id=?';
+  const parameters = pending ? [userId] : [userId, conversationId];
+  const rows = getDatabase().prepare(`SELECT DISTINCT c.session_id sessionId,
+      COALESCE(json_extract(src.metadata_json, '$.importId'),
+        CASE WHEN src.client_uuid LIKE 'import-source-%'
+          THEN substr(src.client_uuid, 15) END) importId
+    FROM transcript_segments t
+    JOIN audio_chunks c ON c.id=t.chunk_id
+    JOIN recording_sources src ON src.id=c.source_id
+    WHERE t.user_id=? AND ${where}`).all(...parameters);
+  return {
+    sessionIds: [...new Set(rows.map((row) => row.sessionId).filter(Boolean))],
+    importIds: [...new Set(rows.map((row) => row.importId).filter(Boolean))],
+  };
+}
+
 function pendingMoment(userId) {
   const { segments: rows, segmentCount } = readSegments(userId, PENDING_ID, PREVIEW_SEGMENTS);
   if (!rows.length) return null;
+  const keys = audioKeys(userId, PENDING_ID);
   return {
     id: PENDING_ID,
     kind: 'pending',
@@ -86,6 +105,8 @@ function pendingMoment(userId) {
     quarantined: false,
     segmentCount,
     segments: rows,
+    sessionIds: keys.sessionIds,
+    importIds: keys.importIds,
   };
 }
 
@@ -100,6 +121,7 @@ function list(userId, query = {}) {
   const page = rows.slice(0, limit);
   const moments = page.map((conversation) => {
     const { segments, segmentCount } = segmentsFor(userId, conversation.id);
+    const keys = audioKeys(userId, conversation.id);
     return {
       id: conversation.id,
       kind: 'conversation',
@@ -117,6 +139,8 @@ function list(userId, query = {}) {
       quarantined: Boolean(conversation.quarantined_at),
       segmentCount,
       segments,
+      sessionIds: keys.sessionIds,
+      importIds: keys.importIds,
     };
   });
   // Only the first page carries ungrouped speech: it is the newest material

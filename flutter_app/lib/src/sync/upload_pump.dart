@@ -43,6 +43,10 @@ class UploadPump {
   /// copy can be released (Wear OS does this to release the watch original).
   Future<bool> Function(AudioChunk chunk, Map<String, dynamic> receipt)?
   onTerminalReceipt;
+
+  /// Copies local audio aside after a terminal receipt, before [store.release].
+  /// Failures must not block release.
+  Future<void> Function(AudioChunk chunk)? onRetainAudio;
   bool _running = false;
   Timer? _timer;
   String? _accountId;
@@ -452,6 +456,12 @@ class UploadPump {
           // remains in both ownership ledgers until forwarding succeeds.
           return;
         }
+      }
+      try {
+        await onRetainAudio?.call(chunk);
+      } catch (_) {
+        // Playback copies are a convenience. A retain failure must never keep
+        // the upload pump from releasing audio that already has a receipt.
       }
       await store.release(id);
       try {

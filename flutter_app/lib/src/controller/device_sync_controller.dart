@@ -9,6 +9,14 @@ part of '../../main_controller.dart';
 mixin DeviceSyncController on ChangeNotifier {
   NeoRecallApiClient get api;
   ChunkStore get store;
+  RetainedAudioStore get retainedAudio;
+  Future<void> retainImportedAudio({
+    required String importId,
+    required Uint8List bytes,
+    required String contentType,
+    required String filename,
+    DateTime? capturedAt,
+  });
   RecallRecorder get recorder;
   SyncCoordinator get sync;
   AudioDeviceAdapterRegistry get audioDeviceRegistry;
@@ -329,6 +337,13 @@ mixin DeviceSyncController on ChangeNotifier {
         // stretches of one recording. Naming the device lets the server keep
         // them in one stream instead of one conversation per sweep.
         deviceId: await _registeredDeviceId(),
+      );
+      await retainImportedAudio(
+        importId: importId,
+        bytes: recording.bytes,
+        contentType: recording.contentType,
+        filename: recording.filename,
+        capturedAt: recording.capturedAt,
       );
       ClientDiagnosticLog.instance.record(
         'device_import',

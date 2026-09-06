@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -42,6 +43,7 @@ import 'src/sync/pending_audio_preview.dart';
 import 'src/background/home_widget_publisher.dart';
 import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
+import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
 
 part 'src/controller/auth_controller.dart';
@@ -51,14 +53,7 @@ part 'src/controller/library_controller.dart';
 part 'src/controller/context_controller.dart';
 part 'src/controller/integrations_controller.dart';
 
-enum RecallPage {
-  record,
-  library,
-  search,
-  sources,
-  devices,
-  settings,
-}
+enum RecallPage { record, library, search, sources, devices, settings }
 
 /// The three lists inside Library.
 ///
@@ -83,11 +78,13 @@ class NeoRecallController extends ChangeNotifier
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
+    RetainedAudioStore? retainedAudio,
     RecallRecorder? recorder,
     AudioDeviceAdapterRegistry? audioDeviceRegistry,
     DeviceSessionController? audioDeviceSessions,
   }) : api = api ?? NeoRecallApiClient(baseUrl: _defaultBackendUrl),
        store = store ?? createChunkStore(),
+       retainedAudio = retainedAudio ?? createRetainedAudioStore(),
        recorder = recorder ?? createRecorder() {
     final mobileRecorder = this.recorder;
     if (mobileRecorder is MobileRecallRecorder) {
@@ -129,6 +126,7 @@ class NeoRecallController extends ChangeNotifier
     'vocabularyCorrectionEnabled': true,
     'automaticSpeakerVocabulary': <String>[],
     'contextOriginalRetentionDays': 7,
+    'keepRawAudio': true,
   };
 
   static String get _defaultBackendUrl {
@@ -188,6 +186,8 @@ class NeoRecallController extends ChangeNotifier
   final NeoRecallApiClient api;
   @override
   final ChunkStore store;
+  @override
+  final RetainedAudioStore retainedAudio;
   @override
   final RecallRecorder recorder;
   @override
@@ -375,7 +375,7 @@ class NeoRecallController extends ChangeNotifier
     final (phase, title, fallback) = switch (processing.activeStage) {
       ProcessingPipelineStage.watchTransfer => (
         BackgroundLivePhase.watchTransfer,
-        'Downloading from watch',
+        'Downloading from device',
         'Audio is moving into protected phone storage',
       ),
       ProcessingPipelineStage.upload => (
@@ -485,6 +485,15 @@ class NeoRecallController extends ChangeNotifier
   final Map<String, List<TranscriptSegment>> momentTranscripts =
       <String, List<TranscriptSegment>>{};
   final Set<String> loadingMomentTranscripts = <String>{};
+
+  /// Moments that still have raw audio on this device.
+  final Set<String> momentsWithRetainedAudio = <String>{};
+
+  bool get keepRawAudio => _cachedSettings['keepRawAudio'] as bool? ?? true;
+
+  int get contextOriginalRetentionDays =>
+      _cachedSettings['contextOriginalRetentionDays'] as int? ?? 7;
+
   bool get hasOlderMoments => _momentNextCursor != null;
   bool get hasNewerMoments => momentPage > 0;
 
@@ -553,6 +562,7 @@ class NeoRecallController extends ChangeNotifier
       pendingSeconds: deviceStoragePendingSeconds,
       transferred: progress?.transferred ?? 0,
       total: progress?.total ?? 0,
+      completeFraction: progress?.fraction,
       issues: transferIssues,
     );
   }
@@ -860,6 +870,7 @@ class NeoRecallController extends ChangeNotifier
       sync.pump.uploadAllowed = _uploadsAllowed;
       sync.pump.onUploadActivity = _setBackgroundUploadActive;
       sync.pump.onTerminalReceipt = _forwardWatchTerminalReceipt;
+      sync.pump.onRetainAudio = _retainProcessedChunk;
       try {
         autostartEnabled = await startupEnabled();
       } catch (_) {
@@ -868,6 +879,8 @@ class NeoRecallController extends ChangeNotifier
       }
       if (!_syncInitialized) {
         await sync.initialize();
+        await retainedAudio.initialize();
+        await applyRawAudioRetention();
         _syncInitialized = true;
       }
       await initializeRecordingContext();
@@ -883,6 +896,7 @@ class NeoRecallController extends ChangeNotifier
           // Databases created before account ownership was added can only be
           // claimed by the still-authenticated session present during upgrade.
           await store.claimLegacySessions(accountId!);
+          await applyRawAudioRetention();
           await _preferences!.setString('accountId', accountId!);
         } on ApiException catch (exception) {
           if (exception.status != 401 && exception.status != 403) {
@@ -1369,6 +1383,7 @@ class NeoRecallController extends ChangeNotifier
     }
     try {
       await store.purgeAll();
+      if (accountId != null) await retainedAudio.purgeAccount(accountId!);
     } catch (_) {
       // Best effort. The account is already gone; being unable to unlink one
       // spooled file is not a reason to keep the session alive.
@@ -1400,6 +1415,7 @@ class NeoRecallController extends ChangeNotifier
     }
     try {
       await store.purgeAll();
+      if (accountId != null) await retainedAudio.purgeAccount(accountId!);
     } catch (_) {
       // Best effort: the server copy is already gone, and a spooled file that
       // cannot be unlinked must not leave the account looking un-erased.
@@ -2708,6 +2724,135 @@ class NeoRecallController extends ChangeNotifier
     _ => 'application/octet-stream',
   };
 
+  @override
+  Future<void> retainImportedAudio({
+    required String importId,
+    required Uint8List bytes,
+    required String contentType,
+    required String filename,
+    DateTime? capturedAt,
+  }) async {
+    if (!keepRawAudio) return;
+    final owner = accountId;
+    if (owner == null) return;
+    try {
+      await retainedAudio.retain(
+        accountId: owner,
+        id: 'import-$importId',
+        bytes: bytes,
+        mimeType: contentType,
+        filename: filename,
+        capturedAt: capturedAt ?? DateTime.now().toUtc(),
+        importId: importId,
+      );
+      await _refreshRetainedAudioAvailability();
+      notifyListeners();
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'audio',
+        'retain_import_failed',
+        level: 'warning',
+        details: <String, Object?>{
+          'importId': importId,
+          'error': error.toString(),
+        },
+      );
+    }
+  }
+
+  Future<void> _retainProcessedChunk(AudioChunk chunk) async {
+    if (!keepRawAudio) return;
+    final owner = accountId;
+    if (owner == null) return;
+    final bytes = await store.readBytes(chunk);
+    await retainedAudio.retain(
+      accountId: owner,
+      id: chunk.id,
+      bytes: bytes,
+      mimeType: _audioMimeType(chunk.container),
+      filename: '${chunk.id}.${chunk.container}',
+      capturedAt: chunk.startedAt,
+      sessionId: chunk.sessionId,
+      sequence: chunk.sequence,
+      duration: Duration(milliseconds: chunk.durationMs),
+    );
+    await _refreshRetainedAudioAvailability();
+    notifyListeners();
+  }
+
+  Future<void> applyRawAudioRetention({bool purgeAll = false}) async {
+    final owner = accountId;
+    if (owner == null) return;
+    try {
+      if (purgeAll || !keepRawAudio) {
+        await retainedAudio.purgeAccount(owner);
+      } else {
+        await retainedAudio.purgeExpired(
+          accountId: owner,
+          keep: Duration(days: contextOriginalRetentionDays),
+        );
+      }
+      await _refreshRetainedAudioAvailability();
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'audio',
+        'retain_purge_failed',
+        level: 'warning',
+        details: <String, Object?>{'error': error.toString()},
+      );
+    }
+  }
+
+  Future<void> _refreshRetainedAudioAvailability() async {
+    final owner = accountId;
+    momentsWithRetainedAudio.clear();
+    if (owner == null || !keepRawAudio) return;
+    for (final moment in moments) {
+      if (await retainedAudio.hasClips(
+        accountId: owner,
+        importIds: moment.importIds,
+        sessionIds: moment.sessionIds,
+      )) {
+        momentsWithRetainedAudio.add(moment.key);
+      }
+    }
+  }
+
+  Future<List<PendingAudioPart>> loadMomentAudio(TimelineMoment moment) async {
+    final owner = accountId;
+    if (owner == null) {
+      throw StateError('Sign in to listen to a recording.');
+    }
+    final clips = await retainedAudio.lookup(
+      accountId: owner,
+      importIds: moment.importIds,
+      sessionIds: moment.sessionIds,
+    );
+    if (clips.isEmpty) {
+      throw StateError('This recording is no longer kept on this device.');
+    }
+    return [
+      for (final clip in clips)
+        PendingAudioPart(
+          id: clip.id,
+          duration: clip.duration,
+          mimeType: clip.mimeType,
+        ),
+    ];
+  }
+
+  Future<Uint8List> readRetainedAudioPart(String partId) async {
+    final owner = accountId;
+    if (owner == null) {
+      throw StateError('Sign in to listen to a recording.');
+    }
+    final match = await retainedAudio.getClip(owner, partId);
+    if (match == null) {
+      throw StateError('This recording is no longer kept on this device.');
+    }
+    return retainedAudio.readBytes(match);
+  }
+
   Future<Uint8List> readPendingAudioPart(String partId) async {
     final ownerAccountId = accountId;
     if (ownerAccountId == null) {
@@ -2901,6 +3046,7 @@ class NeoRecallController extends ChangeNotifier
       if (results[5] != null) {
         moments = rows(5, 'moments').map(TimelineMoment.fromJson).toList();
         _momentNextCursor = results[5]?['nextCursor']?.toString();
+        await _refreshRetainedAudioAvailability();
       }
       if (results[6] != null) dailySummaries = rows(6, 'items');
       final processing = results[7];
@@ -2954,6 +3100,7 @@ class NeoRecallController extends ChangeNotifier
           .cast<Map>()
           .map((row) => TimelineMoment.fromJson(Map<String, dynamic>.from(row)))
           .toList();
+      await _refreshRetainedAudioAvailability();
       if (page < _momentPageCursors.length) {
         _momentPageCursors[page] = cursor;
       } else {
@@ -3100,11 +3247,18 @@ class NeoRecallController extends ChangeNotifier
           'source': 'file',
         },
       );
+      final payload = Uint8List.fromList(bytes);
       await api.importAudio(
         importId: importId,
-        bytes: Uint8List.fromList(bytes),
+        bytes: payload,
         filename: filename,
         contentType: contentType,
+      );
+      await retainImportedAudio(
+        importId: importId,
+        bytes: payload,
+        contentType: contentType,
+        filename: filename,
       );
       ClientDiagnosticLog.instance.record(
         'file_import',

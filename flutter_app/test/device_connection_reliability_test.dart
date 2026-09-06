@@ -239,6 +239,13 @@ class _RecordingGattTransport implements GattTransport {
   Future<GattAvailability> availability() async => GattAvailability.ready;
 
   @override
+  Stream<GattAvailability> get availabilityChanges =>
+      const Stream<GattAvailability>.empty();
+
+  @override
+  Future<bool> isDeviceConnected(String deviceId) async => false;
+
+  @override
   Stream<bool> connectionChanges(String deviceId) => _connections.stream;
 
   @override

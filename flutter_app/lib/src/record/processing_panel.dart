@@ -45,7 +45,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
       return 'Processing needs attention';
     }
     return switch (status.activeStage) {
-      ProcessingPipelineStage.watchTransfer => 'Downloading from watch',
+      ProcessingPipelineStage.watchTransfer => 'Downloading from device',
       ProcessingPipelineStage.phoneQueue => 'Queued securely on this device',
       ProcessingPipelineStage.upload => 'Uploading to server',
       ProcessingPipelineStage.serverQueue => 'Waiting in transcription queue',
@@ -58,7 +58,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
   IconData _icon(ProcessingStatusSnapshot status) {
     if (status.hasIssues) return Icons.sync_problem_rounded;
     return switch (status.activeStage) {
-      ProcessingPipelineStage.watchTransfer => Icons.watch_rounded,
+      ProcessingPipelineStage.watchTransfer => Icons.bluetooth_audio_rounded,
       ProcessingPipelineStage.phoneQueue => Icons.phone_android_rounded,
       ProcessingPipelineStage.upload => Icons.cloud_upload_rounded,
       ProcessingPipelineStage.serverQueue => Icons.hourglass_top_rounded,
@@ -75,12 +75,12 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
         ? 'Receiving encrypted audio'
         : status.watchPending > 0
         ? '${status.watchPending} item${status.watchPending == 1 ? '' : 's'} waiting'
-        : 'No watch backlog';
+        : 'No device backlog';
     final serverTotal = status.serverQueued + status.transcribing;
     return <_ProcessingStepData>[
       _ProcessingStepData(
-        icon: Icons.watch_rounded,
-        title: 'Watch transfer',
+        icon: Icons.bluetooth_audio_rounded,
+        title: 'Device transfer',
         detail: watchDetail,
         count: status.watchPending,
         active: status.watchTransferActive || status.watchPending > 0,

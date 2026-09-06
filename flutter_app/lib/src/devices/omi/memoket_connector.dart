@@ -10,7 +10,8 @@ import 'offline_sync.dart';
 /// Memoket Gem BLE recorder.
 ///
 /// Protocol confirmed against official-app HCI captures:
-/// - Handshake: ping, battery, firmware, clock, storage.
+/// - Handshake: ping, firmware, clock, storage. Battery is the standard
+///   180F/2A19 characteristic (HCI handle 0x0012), with vendor `e1` as fallback.
 /// - Remote start `01 00 00` / stop `02 00` also starts and stops on-device
 ///   recording; live Opus frames arrive on [WearableDeviceUuids.memoketAudioNotify].
 /// - Offline files: `03` lists, `04 <name>` downloads on the file-notify
@@ -23,10 +24,15 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   static const Duration _startTimeout = Duration(seconds: 3);
   static const Duration _stopTimeout = Duration(seconds: 4);
   static const Duration _downloadTimeout = Duration(seconds: 90);
+  static const Duration _downloadStallTimeout = Duration(seconds: 12);
   static const Duration _deleteTimeout = Duration(seconds: 3);
   static const int _downloadAttempts = 3;
-  static const Duration _commandGap = Duration(milliseconds: 40);
+  static const Duration _commandGap = Duration(milliseconds: 80);
+  static const Duration _subscribeSettle = Duration(milliseconds: 250);
+  static const Duration _writeRetryDelay = Duration(milliseconds: 200);
+  static const int _writeAttempts = 3;
   static const Duration _hardwareStartHoldoff = Duration(seconds: 3);
+  static const Duration _progressMinInterval = Duration(milliseconds: 200);
 
   final StreamController<WearableSyncProgress> _progress =
       StreamController<WearableSyncProgress>.broadcast();
@@ -43,16 +49,26 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   int _lastFilesListed = 0;
   int _lastSynced = 0;
   int _lastFailed = 0;
+  bool _batterySubscribed = false;
+  Future<void> _writeQueue = Future<void>.value();
 
   Completer<List<int>>? _reply;
   int? _replyOpcode;
   Completer<void>? _listDone;
   Completer<void>? _downloadDone;
+  Timer? _downloadStall;
+  MemoketStoredFile? _downloadingFile;
   Completer<bool>? _deleteAck;
   Completer<String>? _started;
   Completer<void>? _stopped;
   List<MemoketStoredFile>? _listed;
   List<Uint8List>? _downloadBuffer;
+  int _syncFileIndex = 0;
+  int _syncFileCount = 0;
+  int _syncExpectedBytes = 0;
+  List<MemoketStoredFile> _syncRemaining = const <MemoketStoredFile>[];
+  DateTime? _lastProgressAt;
+  double _lastPublishedFraction = -1;
 
   @override
   WearableAudioCodec get codec => WearableAudioCodec.opus;
@@ -93,13 +109,16 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         WearableDeviceUuids.memoketFileNotify,
       )).listen(_handleFileChunk),
     );
+    await _subscribeStandardBattery();
+    // CCCD writes must finish before the first control write. Android's GATT
+    // queue drops overlapping writes as a pigeon channel-error.
+    await Future<void>.delayed(_subscribeSettle);
     await _handshake();
   }
 
   Future<void> _handshake() async {
     await _command(MemoketProtocol.ping, MemoketProtocol.opPing);
-    final battery = await readBatteryLevel();
-    if (battery >= 0) batteryLevels.add(battery);
+    await readBatteryLevel();
     final fw = await _command(
       MemoketProtocol.firmwareQuery,
       MemoketProtocol.opFirmware,
@@ -126,13 +145,71 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
 
   @override
   Future<int> readBatteryLevel() async {
+    final standard = await _readStandardBattery();
+    if (standard != null) {
+      _publishBattery(standard);
+      return standard.percent;
+    }
     final reply = await _command(
       MemoketProtocol.batteryQuery,
       MemoketProtocol.opBattery,
     );
-    final level = reply == null ? null : MemoketProtocol.batteryLevel(reply);
-    if (level != null) _lastBattery = level;
+    final parsed = reply == null ? null : MemoketProtocol.parseBattery(reply);
+    if (parsed != null) _publishBattery(parsed);
     return _lastBattery;
+  }
+
+  Future<void> _subscribeStandardBattery() async {
+    if (_batterySubscribed) return;
+    if (!transport.hasCharacteristic(
+      WearableDeviceUuids.batteryService,
+      WearableDeviceUuids.batteryLevel,
+    )) {
+      return;
+    }
+    try {
+      track(
+        (await transport.characteristicStream(
+          WearableDeviceUuids.batteryService,
+          WearableDeviceUuids.batteryLevel,
+        )).listen((value) {
+          if (value.isEmpty) return;
+          _publishBattery(MemoketBattery(percent: value.first));
+        }),
+      );
+      _batterySubscribed = true;
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'memoket_battery_subscribe',
+        level: 'warning',
+        details: <String, Object?>{'error': error.toString()},
+      );
+    }
+  }
+
+  Future<MemoketBattery?> _readStandardBattery() async {
+    if (!transport.hasCharacteristic(
+      WearableDeviceUuids.batteryService,
+      WearableDeviceUuids.batteryLevel,
+    )) {
+      return null;
+    }
+    try {
+      final raw = await transport.readCharacteristic(
+        WearableDeviceUuids.batteryService,
+        WearableDeviceUuids.batteryLevel,
+      );
+      if (raw.isEmpty || raw.first > 100) return null;
+      return MemoketBattery(percent: raw.first);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _publishBattery(MemoketBattery battery) {
+    _lastBattery = battery.percent;
+    if (!batteryLevels.isClosed) batteryLevels.add(battery.percent);
   }
 
   @override
@@ -215,11 +292,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     }
     switch (opcode) {
       case MemoketProtocol.opBattery:
-        final level = MemoketProtocol.batteryLevel(data);
-        if (level != null) {
-          _lastBattery = level;
-          batteryLevels.add(level);
-        }
+        final parsed = MemoketProtocol.parseBattery(data);
+        if (parsed != null) _publishBattery(parsed);
       case MemoketProtocol.opFirmware:
         _firmware = MemoketProtocol.firmwareVersion(data);
       case MemoketProtocol.opRecordStart:
@@ -253,6 +327,14 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         }
       case MemoketProtocol.opDownload:
         if (MemoketProtocol.isDownloadComplete(data)) {
+          final file = _downloadingFile;
+          final buffer = _downloadBuffer;
+          if (file != null &&
+              buffer != null &&
+              !_downloadMeetsExpectation(buffer, file)) {
+            _armDownloadStall();
+            break;
+          }
           final done = _downloadDone;
           if (done != null && !done.isCompleted) done.complete();
         }
@@ -287,6 +369,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     final buffer = _downloadBuffer;
     if (buffer == null || data.isEmpty) return;
     buffer.add(Uint8List.fromList(data));
+    _armDownloadStall();
+    _publishFileProgress(_chunkBytes(buffer));
   }
 
   @override
@@ -317,9 +401,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         'try syncing again.',
       );
     }
-    final files = (await _listStoredFiles())
-        .where((file) => !_liveIngestedIds.contains(file.id))
-        .toList();
+    final files = MemoketProtocol.uniqueStoredFiles(
+      await _listStoredFiles(),
+    ).where((file) => !_liveIngestedIds.contains(file.id)).toList();
     _lastFilesListed = files.length;
     ClientDiagnosticLog.instance.record(
       'bluetooth_audio',
@@ -327,16 +411,54 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       details: <String, Object?>{
         'files': files.length,
         'deviceResponded': _sawControl,
+        'entries': files
+            .map(
+              (file) => <String, Object?>{
+                'id': file.id,
+                'durationSeconds': file.durationSeconds,
+                'bytes': file.byteLength,
+              },
+            )
+            .toList(growable: false),
       },
     );
     var count = 0;
     var failed = 0;
+    _syncFileCount = files.length;
+    _syncFileIndex = 0;
+    _syncRemaining = files;
+    _publishProgress(
+      transferred: 0,
+      total: files.length,
+      pending: files,
+      completeFraction: files.isEmpty ? 1.0 : 0.0,
+      force: true,
+    );
     for (var i = 0; i < files.length; i += 1) {
       if (_drainCancelled) break;
       final file = files[i];
-      _publishProgress(transferred: i, total: files.length, pending: files);
+      _syncFileIndex = i;
+      _syncExpectedBytes = MemoketProtocol.expectedAudioBytes(
+        durationSeconds: file.durationSeconds,
+        announcedBytes: file.byteLength,
+      );
+      _syncRemaining = files.sublist(i);
+      _publishFileProgress(0, force: true);
       try {
         final frames = await _downloadStoredFile(file);
+        final opusMs = MemoketProtocol.opusFramesDurationMs(frames);
+        ClientDiagnosticLog.instance.record(
+          'bluetooth_audio',
+          'memoket_file_wrapped',
+          details: <String, Object?>{
+            'id': file.id,
+            'listedSeconds': file.durationSeconds,
+            'announcedBytes': file.byteLength,
+            'frameCount': frames.length,
+            'opusDurationMs': opusMs,
+            'toc': frames.isEmpty ? null : frames.first.first,
+          },
+        );
         final bytes = MemoketProtocol.wrapOpusFramesAsOgg(frames);
         if (bytes.length < minBytes) continue;
         await onRecording(
@@ -348,8 +470,16 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
             capturedAt: file.capturedAt,
           ),
         );
+        _liveIngestedIds.add(file.id);
         await _deleteStoredFile(file);
         count += 1;
+        _publishProgress(
+          transferred: i + 1,
+          total: files.length,
+          pending: files.sublist(i + 1),
+          completeFraction: (i + 1) / files.length,
+          force: true,
+        );
       } catch (error) {
         ClientDiagnosticLog.instance.record(
           'bluetooth_audio',
@@ -362,10 +492,14 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     }
     _lastSynced = count;
     _lastFailed = failed;
+    _syncExpectedBytes = 0;
+    _syncRemaining = const <MemoketStoredFile>[];
     _publishProgress(
       transferred: count,
       total: files.length,
       pending: const [],
+      completeFraction: files.isEmpty ? 1.0 : count / files.length,
+      force: true,
     );
     ClientDiagnosticLog.instance.record(
       'bluetooth_audio',
@@ -377,10 +511,13 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         'cancelled': _drainCancelled,
       },
     );
-    if (count == 0 && failed > 0) {
+    if (failed > 0) {
       throw StateError(
-        'Found $failed recording(s) on the device but none could be '
-        'transferred. Keep the device close and try again.',
+        count == 0
+            ? 'Found $failed recording(s) on the device but none could be '
+                  'transferred. Keep the device close and try again.'
+            : 'Synced $count recording(s), but $failed stayed on the device. '
+                  'Keep it close and try again.',
       );
     }
     return count;
@@ -390,7 +527,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Future<WearableSyncProgress?> peekPending() async {
     if (recording || _deviceLive) return null;
     try {
-      final files = await _listStoredFiles();
+      final files = MemoketProtocol.uniqueStoredFiles(await _listStoredFiles());
       return WearableSyncProgress(
         pendingSeconds: files.fold<int>(
           0,
@@ -406,9 +543,11 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   @override
   Future<void> cancelStoredSync() async {
     _drainCancelled = true;
+    _stopDownloadStall();
     final done = _downloadDone;
     _downloadBuffer = null;
     _downloadDone = null;
+    _downloadingFile = null;
     if (done != null && !done.isCompleted) {
       done.completeError(StateError('Memoket sync cancelled.'));
     }
@@ -432,11 +571,18 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Future<List<Uint8List>> _downloadStoredFile(MemoketStoredFile file) async {
     List<Uint8List> best = const <Uint8List>[];
     var bestBytes = 0;
+    final expected = MemoketProtocol.expectedAudioBytes(
+      durationSeconds: file.durationSeconds,
+      announcedBytes: file.byteLength,
+    );
+    Object? lastError;
     for (var attempt = 0; attempt < _downloadAttempts; attempt += 1) {
       final buffer = <Uint8List>[];
       final done = Completer<void>();
       _downloadBuffer = buffer;
       _downloadDone = done;
+      _downloadingFile = file;
+      _armDownloadStall();
       try {
         await _write(
           MemoketProtocol.fileCommand(
@@ -445,35 +591,65 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
           ),
         );
         await done.future.timeout(_downloadTimeout);
-        for (
-          var i = 0;
-          i < 40 && _chunkBytes(buffer) < file.byteLength;
-          i += 1
-        ) {
+        for (var i = 0; i < 40 && _chunkBytes(buffer) < expected; i += 1) {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         }
+      } catch (error) {
+        lastError = error;
       } finally {
+        _stopDownloadStall();
         _downloadBuffer = null;
         _downloadDone = null;
+        _downloadingFile = null;
       }
       final bytes = _chunkBytes(buffer);
       if (bytes > bestBytes) {
         best = buffer;
         bestBytes = bytes;
       }
-      if (file.byteLength <= 0 || bestBytes >= file.byteLength) break;
+      if (_downloadMeetsExpectation(best, file)) break;
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
-    if (file.byteLength > 0 && bestBytes < file.byteLength) {
+    if (!_downloadMeetsExpectation(best, file)) {
       throw StateError(
-        'Memoket download incomplete after $_downloadAttempts attempts: '
-        '$bestBytes/${file.byteLength} bytes',
+        lastError is TimeoutException
+            ? 'Memoket download stalled at $bestBytes/$expected bytes for ${file.id}.'
+            : 'Memoket download incomplete after $_downloadAttempts attempts: '
+                  '$bestBytes/$expected bytes',
       );
     }
     if (best.isEmpty) {
       throw StateError('Memoket download produced no audio for ${file.id}.');
     }
     return best;
+  }
+
+  bool _downloadMeetsExpectation(
+    List<Uint8List> buffer,
+    MemoketStoredFile file,
+  ) {
+    final bytes = _chunkBytes(buffer);
+    if (bytes <= 0) return false;
+    final expected = MemoketProtocol.expectedAudioBytes(
+      durationSeconds: file.durationSeconds,
+      announcedBytes: file.byteLength,
+    );
+    return expected <= 0 || bytes >= (expected * 0.8).round();
+  }
+
+  void _armDownloadStall() {
+    _downloadStall?.cancel();
+    _downloadStall = Timer(_downloadStallTimeout, () {
+      final done = _downloadDone;
+      if (done != null && !done.isCompleted) {
+        done.completeError(TimeoutException('Memoket download stalled'));
+      }
+    });
+  }
+
+  void _stopDownloadStall() {
+    _downloadStall?.cancel();
+    _downloadStall = null;
   }
 
   Future<bool> _deleteStoredFile(MemoketStoredFile file) async {
@@ -518,21 +694,107 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     }
   }
 
-  Future<void> _write(List<int> value) async {
-    await transport.writeCharacteristic(
-      WearableDeviceUuids.memoketService,
-      WearableDeviceUuids.memoketControlWrite,
-      value,
+  Future<void> _write(List<int> value) {
+    final previous = _writeQueue;
+    final gate = Completer<void>();
+    _writeQueue = gate.future;
+    return () async {
+      await previous;
+      try {
+        await _writeNow(value);
+      } finally {
+        gate.complete();
+      }
+    }();
+  }
+
+  Future<void> _writeNow(List<int> value) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < _writeAttempts; attempt += 1) {
+      try {
+        await transport.writeCharacteristic(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlWrite,
+          value,
+        );
+        await Future<void>.delayed(_commandGap);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (_shouldTryWriteWithoutResponse(error)) {
+          try {
+            await transport.writeCharacteristic(
+              WearableDeviceUuids.memoketService,
+              WearableDeviceUuids.memoketControlWrite,
+              value,
+              withoutResponse: true,
+            );
+            await Future<void>.delayed(_commandGap);
+            return;
+          } catch (fallback) {
+            lastError = fallback;
+          }
+        }
+        await Future<void>.delayed(_writeRetryDelay * (attempt + 1));
+      }
+    }
+    throw StateError(_friendlyWriteError(lastError));
+  }
+
+  static bool _shouldTryWriteWithoutResponse(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('withresponse') ||
+        text.contains('does not support write') ||
+        text.contains('writevalue') ||
+        text.contains('channel');
+  }
+
+  static String _friendlyWriteError(Object? error) {
+    final text = error?.toString() ?? '';
+    if (text.toLowerCase().contains('channel') ||
+        text.toLowerCase().contains('writevalue') ||
+        text.toLowerCase().contains('disconnected')) {
+      return 'Could not reach the Gem over Bluetooth. Keep it close, close the '
+          'official Memoket app, and reconnect.';
+    }
+    return 'The Gem did not accept a command. Keep it close and try again.';
+  }
+
+  void _publishFileProgress(int bytes, {bool force = false}) {
+    if (_syncFileCount <= 0) return;
+    final expected = _syncExpectedBytes <= 0 ? bytes : _syncExpectedBytes;
+    final fileFrac = expected <= 0 ? 0.0 : (bytes / expected).clamp(0.0, 0.99);
+    final overall = (_syncFileIndex + fileFrac) / _syncFileCount;
+    _publishProgress(
+      transferred: _syncFileIndex,
+      total: _syncFileCount,
+      pending: _syncRemaining,
+      completeFraction: overall,
+      force: force,
     );
-    await Future<void>.delayed(_commandGap);
   }
 
   void _publishProgress({
     required int transferred,
     required int total,
     required List<MemoketStoredFile> pending,
+    double? completeFraction,
+    bool force = false,
   }) {
     if (_progress.isClosed) return;
+    final fraction =
+        completeFraction ?? (total > 0 ? transferred / total : null);
+    final now = DateTime.now();
+    if (!force &&
+        fraction != null &&
+        _lastPublishedFraction >= 0 &&
+        (fraction - _lastPublishedFraction).abs() < 0.02 &&
+        _lastProgressAt != null &&
+        now.difference(_lastProgressAt!) < _progressMinInterval) {
+      return;
+    }
+    _lastPublishedFraction = fraction ?? _lastPublishedFraction;
+    _lastProgressAt = now;
     _progress.add(
       WearableSyncProgress(
         transferred: transferred,
@@ -541,6 +803,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
           0,
           (sum, file) => sum + file.durationSeconds,
         ),
+        completeFraction: completeFraction,
       ),
     );
   }
@@ -559,9 +822,11 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     final list = _listDone;
     _listDone = null;
     if (list != null && !list.isCompleted) list.complete();
+    _stopDownloadStall();
     final download = _downloadDone;
     _downloadBuffer = null;
     _downloadDone = null;
+    _downloadingFile = null;
     if (download != null && !download.isCompleted) {
       download.completeError(StateError('Memoket disconnected during sync.'));
     }

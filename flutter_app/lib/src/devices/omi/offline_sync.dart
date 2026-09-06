@@ -40,6 +40,7 @@ class WearableSyncProgress {
     this.transferred = 0,
     this.total = 0,
     this.pendingSeconds = 0,
+    this.completeFraction,
   });
 
   /// Units already pulled this sweep (packets for a ring, files for a file list).
@@ -51,9 +52,17 @@ class WearableSyncProgress {
   /// Approximate seconds of audio still held on the device.
   final int pendingSeconds;
 
+  /// Byte-accurate 0..1 progress when a connector can report it. Preferred
+  /// over [transferred]/[total] so a two-file drain does not sit at 50% for
+  /// the entire second file.
+  final double? completeFraction;
+
   /// 0..1 once [total] is known, otherwise null (indeterminate).
-  double? get fraction =>
-      total > 0 ? (transferred / total).clamp(0.0, 1.0) : null;
+  double? get fraction {
+    final override = completeFraction;
+    if (override != null) return override.clamp(0.0, 1.0);
+    return total > 0 ? (transferred / total).clamp(0.0, 1.0) : null;
+  }
 
   bool get isEmpty => transferred == 0 && total == 0 && pendingSeconds == 0;
 }

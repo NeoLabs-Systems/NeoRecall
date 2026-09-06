@@ -221,6 +221,14 @@ void main() {
       await connector.connect();
       expect(connector.codec, WearableAudioCodec.opus);
       expect(await connector.readBatteryLevel(), 78);
+      expect(
+        transport.writes.any(
+          (write) =>
+              write.value.toString() ==
+              MemoketProtocol.batteryQuery.toString(),
+        ),
+        isTrue,
+      );
 
       await connector.startRecording();
       expect(
@@ -267,6 +275,27 @@ void main() {
       await connector.dispose();
     },
   );
+
+  test('Memoket battery prefers the standard 180F characteristic', () async {
+    final transport = _FakeWearableTransport();
+    transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[64];
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+
+    await connector.connect();
+    expect(await connector.readBatteryLevel(), 64);
+    expect(
+      transport.writes.any(
+        (write) =>
+            write.value.toString() == MemoketProtocol.batteryQuery.toString(),
+      ),
+      isFalse,
+    );
+    await connector.dispose();
+  });
 
   test(
     'Memoket hardware start/stop raises control events without a phone command',
@@ -431,6 +460,161 @@ void main() {
       await connector.dispose();
     },
   );
+
+  test('Memoket drain ignores a repeated list entry for the same file', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    final chunk = List<int>.filled(480, 0xbc);
+    _bindMemoketReplies(transport, fileChunk: chunk, repeatListEntry: true);
+    await connector.connect();
+    final count = await connector.drainStoredAudio((_) async {});
+    expect(count, 1);
+    expect(
+      transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opDownload)
+          .length,
+      1,
+    );
+    expect(
+      transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opDelete)
+          .length,
+      1,
+    );
+    await connector.dispose();
+  });
+
+  test('Memoket drain reports byte progress inside each file', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    const first = '20260905_222817_2.opus';
+    const second = '20260905_222900_2.opus';
+    final chunk = List<int>.filled(480, 0xbc);
+    void ctrl(List<int> value) => scheduleMicrotask(
+      () => transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        value,
+      ),
+    );
+    List<int> listEntry(String name) => <int>[
+      MemoketProtocol.opListFiles,
+      0x01,
+      0x00,
+      0x00,
+      0x0a,
+      name.length,
+      ...ascii.encode(name),
+      0x00,
+      0x00,
+      0x03,
+      0xc0,
+    ];
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.memoketControlWrite) return;
+      if (value.isEmpty) return;
+      switch (value.first) {
+        case MemoketProtocol.opPing:
+          ctrl(<int>[MemoketProtocol.opPing, 0x00]);
+        case MemoketProtocol.opBattery:
+          ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        case MemoketProtocol.opFirmware:
+          ctrl(<int>[
+            MemoketProtocol.opFirmware,
+            ...ascii.encode('01.42.01.10'),
+          ]);
+        case MemoketProtocol.opTimeQuery:
+          ctrl(<int>[MemoketProtocol.opTimeQuery, 0x68, 0, 0, 0, 0]);
+        case MemoketProtocol.opSetTime:
+          ctrl(<int>[MemoketProtocol.opSetTime, 0x01]);
+        case MemoketProtocol.opStorage:
+          ctrl(<int>[MemoketProtocol.opStorage, 0x0d, 0x00]);
+        case MemoketProtocol.opListFiles:
+          ctrl(listEntry(first));
+          ctrl(listEntry(second));
+          ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
+        case MemoketProtocol.opDownload:
+          scheduleMicrotask(() async {
+            transport.emit(
+              WearableDeviceUuids.memoketService,
+              WearableDeviceUuids.memoketFileNotify,
+              chunk,
+            );
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+            transport.emit(
+              WearableDeviceUuids.memoketService,
+              WearableDeviceUuids.memoketFileNotify,
+              chunk,
+            );
+            ctrl(<int>[MemoketProtocol.opDownload, 0x02]);
+          });
+        case MemoketProtocol.opDelete:
+          ctrl(<int>[MemoketProtocol.opDelete, 0x01]);
+      }
+    };
+
+    await connector.connect();
+    final fractions = <double>[];
+    final sub = connector.syncProgress.listen((progress) {
+      final fraction = progress.fraction;
+      if (fraction != null) fractions.add(fraction);
+    });
+    final count = await connector.drainStoredAudio((_) async {});
+    await sub.cancel();
+
+    expect(count, 2);
+    expect(fractions, isNotEmpty);
+    expect(fractions.first, closeTo(0.0, 0.001));
+    expect(
+      fractions.any((value) => value > 0.05 && value < 0.45),
+      isTrue,
+      reason: 'the first file must move the bar before 50%',
+    );
+    expect(
+      fractions.any((value) => value > 0.55 && value < 0.99),
+      isTrue,
+      reason: 'the second file must not sit at 50% for the whole copy',
+    );
+    expect(
+      fractions.reduce((a, b) => a > b ? a : b),
+      greaterThan(0.99),
+      reason: 'finishing the last file must take the bar off 50%',
+    );
+    await connector.dispose();
+  });
+
+  test('Memoket sync maps a BLE write failure to a reconnect hint', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    transport.writeError = StateError(
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+      'Message: Unable to establish connection on channel: '
+      '"dev.flutter.pigeon.universal_ble.UniversalBlePlatformChannel.writeValue".',
+    );
+
+    await expectLater(
+      connector.drainStoredAudio((_) async {}),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('official Memoket app'),
+        ),
+      ),
+    );
+    await connector.dispose();
+  });
 
   test('HeyPocket readBatteryLevel round-trips APP&BAT/MCU&BAT', () async {
     final transport = _FakeWearableTransport();
@@ -918,6 +1102,7 @@ void main() {
 void _bindMemoketReplies(
   _FakeWearableTransport transport, {
   List<int>? fileChunk,
+  bool repeatListEntry = false,
 }) {
   const filename = '20260905_222817_2.opus';
   const liveName = '20260905_222343_2.opus';
@@ -961,7 +1146,7 @@ void _bindMemoketReplies(
           ...ascii.encode(liveName),
         ]);
       case MemoketProtocol.opListFiles:
-        ctrl(<int>[
+        final entry = <int>[
           MemoketProtocol.opListFiles,
           0x01,
           0x00,
@@ -973,7 +1158,9 @@ void _bindMemoketReplies(
           0x00,
           0x01,
           0xe0,
-        ]);
+        ];
+        ctrl(entry);
+        if (repeatListEntry) ctrl(entry);
         ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
       case MemoketProtocol.opDownload:
         scheduleMicrotask(() {
@@ -1023,6 +1210,7 @@ class _FakeWearableTransport implements WearableTransport {
   final List<_GattWrite> writes = <_GattWrite>[];
   void Function(String service, String characteristic, List<int> value)?
   onWrite;
+  Object? writeError;
   bool requiredPairing = false;
 
   @override
@@ -1092,6 +1280,8 @@ class _FakeWearableTransport implements WearableTransport {
     List<int> value, {
     bool withoutResponse = false,
   }) async {
+    final error = writeError;
+    if (error != null) throw error;
     final copy = List<int>.from(value);
     writes.add(_GattWrite(serviceUuid, characteristicUuid, copy));
     onWrite?.call(serviceUuid, characteristicUuid, copy);

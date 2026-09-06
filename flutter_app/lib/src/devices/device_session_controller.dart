@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../diagnostics/client_diagnostic_log.dart';
 import 'audio_device_adapter.dart';
+import 'omi/device_adapter.dart';
 
 /// Coordinates preferred external capture device selection and reconnect.
 class DeviceSessionController {
@@ -31,6 +32,7 @@ class DeviceSessionController {
       StreamController<bool>.broadcast();
   StreamSubscription<DeviceTransportState>? _stateSub;
   StreamSubscription<DeviceControlEvent>? _controlSub;
+  StreamSubscription<bool>? _radioSub;
   Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
 
@@ -115,6 +117,7 @@ class DeviceSessionController {
         ),
       );
       activeAdapter = registry[preferredDevice!.adapterId];
+      _bindRadio(activeAdapter);
       preferBluetooth = map['preferBluetooth'] as bool? ?? true;
     } catch (error) {
       _messages.add('Preferred device restore failed: $error');
@@ -169,6 +172,7 @@ class DeviceSessionController {
     final previousAdapter = activeAdapter;
     preferredDevice = device;
     activeAdapter = registry[device.adapterId];
+    _bindRadio(activeAdapter);
     final connected = await connectPreferred(scheduleReconnect: false);
     if (!connected) {
       preferredDevice = previousDevice;
@@ -220,12 +224,25 @@ class DeviceSessionController {
       return false;
     }
     // Already linked (e.g. the attempt we just waited on connected this very
-    // device): report success instead of tearing a good link down.
+    // device): report success instead of tearing a good link down. A stale
+    // connectedStandby after the radio powered off must not short-circuit.
+    DeviceAdapter? radio;
+    if (adapter is DeviceAdapter) radio = adapter;
     if (state == DeviceTransportState.connectedStandby ||
         state == DeviceTransportState.recording) {
-      return true;
+      if (radio == null || await radio.hasLiveLink()) {
+        return true;
+      }
+      state = DeviceTransportState.disconnected;
+      _states.add(state);
+    }
+    if (radio != null && !await radio.radioIsReady()) {
+      state = DeviceTransportState.disconnected;
+      _states.add(state);
+      return false;
     }
     activeAdapter = adapter;
+    _bindRadio(adapter);
     await _stateSub?.cancel();
     await _controlSub?.cancel();
     _stateSub = adapter.transportStates.listen((value) {
@@ -238,10 +255,11 @@ class DeviceSessionController {
       }
       if (autoReconnect &&
           !_disconnecting &&
+          _connectOperation == null &&
           linkDesired &&
           value == DeviceTransportState.disconnected &&
           preferredDevice != null) {
-        _scheduleReconnect();
+        unawaited(_tryScheduleReconnect());
       }
     });
     // Control events (button presses, battery pushes, power state) are raw
@@ -276,10 +294,41 @@ class DeviceSessionController {
         );
       }
       if (autoReconnect && scheduleReconnect && linkDesired) {
-        _scheduleReconnect();
+        unawaited(_tryScheduleReconnect());
       }
       return false;
     }
+  }
+
+  void _bindRadio(AudioDeviceAdapter? adapter) {
+    unawaited(_radioSub?.cancel());
+    _radioSub = null;
+    DeviceAdapter? radio;
+    if (adapter is DeviceAdapter) radio = adapter;
+    if (radio != null) {
+      _radioSub = radio.radioReadyChanges.listen(_onRadioReady);
+    }
+  }
+
+  void _onRadioReady(bool ready) {
+    if (!ready) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      return;
+    }
+    if (autoReconnect && linkDesired && !isConnected && !_disconnecting) {
+      unawaited(connectPreferred());
+    }
+  }
+
+  Future<void> _tryScheduleReconnect() async {
+    DeviceAdapter? radio;
+    final adapter = activeAdapter;
+    if (adapter is DeviceAdapter) radio = adapter;
+    if (radio != null && !await radio.radioIsReady()) {
+      return;
+    }
+    _scheduleReconnect();
   }
 
   void _scheduleReconnect() {
@@ -313,6 +362,8 @@ class DeviceSessionController {
     _reconnectTimer?.cancel();
     await _stateSub?.cancel();
     await _controlSub?.cancel();
+    await _radioSub?.cancel();
+    _radioSub = null;
     await disconnect();
     await _states.close();
     await _messages.close();
