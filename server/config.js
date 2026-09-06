@@ -116,6 +116,22 @@ function buildConfig() {
     // inside one, since merging two people is harder to undo than leaving them apart.
     voiceMatchThreshold: number('NEORECALL_VOICE_MATCH_THRESHOLD', 0.62, { min: -1, max: 1 }),
     voiceMatchMargin: number('NEORECALL_VOICE_MATCH_MARGIN', 0.05, { min: 0, max: 2 }),
+    // Enrolling a person is the only speaker decision more evidence cannot undo,
+    // so it takes more than failing to match. A voice must score below this to
+    // count as somebody new; between here and voiceMatchThreshold is the grey
+    // band where it resembles someone already enrolled without confirming it,
+    // and the turn is left unattributed rather than becoming their duplicate.
+    voiceEnrollFloor: number('NEORECALL_VOICE_ENROLL_FLOOR', 0.45, { min: -1, max: 1 }),
+    // Pooled speech a fingerprint must be measured from before it may found a
+    // new person. Below this, a low score says the measurement was poor, not
+    // that the voice is unknown.
+    voiceEnrollMinimumMs: integer('NEORECALL_VOICE_ENROLL_MIN_MS', 3_000, { min: 0, max: 120_000 }),
+    // The bar for folding two enrolled profiles back together when each is the
+    // other's closest match and neither has a competing candidate nearby. Mutual
+    // exclusivity is far stronger evidence than a one-sided score, so this sits
+    // below voiceMatchThreshold — it is what lets the Speakers screen's re-detect
+    // repair duplicates that ordinary matching can never reach.
+    voiceRepairThreshold: number('NEORECALL_VOICE_REPAIR_THRESHOLD', 0.50, { min: -1, max: 1 }),
     // Distance for grouping voices inside one chunk; a larger value merges more.
     // A separate setting from speakerClusterThreshold below: this is a distance
     // (higher = fewer speakers), that is a similarity (higher = more speakers).

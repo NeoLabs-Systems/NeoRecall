@@ -142,16 +142,42 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
   return { ...cluster, centroid_embedding: storeVector(centroid), sample_count: cluster.sample_count + 1 };
 }
 
-function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) {
+// Updates an enrolled voice with a fresh sample and returns the stored row.
+function reinforce(database, voiceprint, embedding) {
+  const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(voiceprint.centroid_embedding), voiceprint.sample_count, embedding);
+  const sealed = voiceprintStorage.sealCentroid(centroid);
+  database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
+    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(sealed, voiceprint.id);
+  return { ...voiceprint, centroid_embedding: sealed, sample_count: voiceprint.sample_count + 1 };
+}
+
+// Resolves the durable voice (a person heard across recordings) an embedding
+// belongs to.
+//
+// Enrolling a voice is the one decision here that cannot be walked back by more
+// evidence: a spurious profile is permanent, shows up as its own unnamed person,
+// and then competes for every future match. So this only ever creates one from a
+// clear absence of anyone it could be — never from doubt.
+//
+// Three readings, three different answers:
+//   * a confident match, or a tie between two profiles that both clear the bar
+//     (which means one person is already split in two, not that the reading is
+//     unclear) — attach to the stronger one, and let reconciliation fold the
+//     split back together;
+//   * a match too close to call against a candidate below the bar, or a score in
+//     the grey band where the voice resembles someone known without confirming
+//     it — attach to nobody, and leave the turn for a later chunk with better
+//     evidence. The session cluster still labels it locally;
+//   * far from every enrolled voice, with enough speech behind the fingerprint
+//     to trust that distance — a new person.
+//
+// The previous rule enrolled on every one of those but the first, which made
+// duplicates self-amplifying: once someone had two profiles, their next chunk
+// scored alike against both, read as contested, and minted a third.
+function resolveVoiceprint(database, { userId, clusterId, embedding, enabled, speechMs = null }) {
   if (!enabled) return null;
   const assigned = clusterId ? stickyVoiceprintForCluster(database, { userId, clusterId }) : null;
-  if (assigned) {
-    const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(assigned.centroid_embedding), assigned.sample_count, embedding);
-    const sealed = voiceprintStorage.sealCentroid(centroid);
-    database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
-      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(sealed, assigned.id);
-    return { ...assigned, centroid_embedding: sealed, sample_count: assigned.sample_count + 1 };
-  }
+  if (assigned) return reinforce(database, assigned, embedding);
   const rows = database.prepare('SELECT * FROM voiceprints WHERE user_id=? AND matching_enabled=1 AND embedding_model=? AND embedding_dimensions=?')
     .all(userId, modelName, embedding.length);
   // Voiceprint centroids are sealed at rest. Ranking the ciphertext as a
@@ -159,19 +185,22 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled }) 
   const ranked = voiceprintStorage.rankVoiceprints(embedding, rows);
   const best = ranked[0]; const runnerUp = ranked[1];
   const config = processingSettings.get();
-  let voiceprint = best && best.score >= config.voiceMatchThreshold && (!runnerUp || best.score - runnerUp.score >= config.voiceMatchMargin) ? best.row : null;
-  if (!voiceprint) {
-    const id = crypto.randomUUID();
-    database.prepare(`INSERT INTO voiceprints
-      (id,user_id,centroid_embedding,embedding_model,embedding_dimensions,sample_count) VALUES (?,?,?,?,?,1)`)
-      .run(id, userId, voiceprintStorage.sealCentroid(embedding), modelName, embedding.length);
-    return database.prepare('SELECT * FROM voiceprints WHERE id=?').get(id);
+  if (best && best.score >= config.voiceMatchThreshold) {
+    const contested = runnerUp && runnerUp.score < config.voiceMatchThreshold
+      && best.score - runnerUp.score < config.voiceMatchMargin;
+    return contested ? null : reinforce(database, best.row, embedding);
   }
-  const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(voiceprint.centroid_embedding), voiceprint.sample_count, embedding);
-  const sealed = voiceprintStorage.sealCentroid(centroid);
-  database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
-    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(sealed, voiceprint.id);
-  return { ...voiceprint, centroid_embedding: sealed, sample_count: voiceprint.sample_count + 1 };
+  // Resembles someone enrolled without confirming it. Enrolling here is how the
+  // same person accumulates a profile per recording condition.
+  if (best && best.score >= config.voiceEnrollFloor) return null;
+  // A fingerprint pooled from too little speech is not evidence that this voice
+  // is new — only that it was measured badly.
+  if (speechMs !== null && speechMs < config.voiceEnrollMinimumMs) return null;
+  const id = crypto.randomUUID();
+  database.prepare(`INSERT INTO voiceprints
+    (id,user_id,centroid_embedding,embedding_model,embedding_dimensions,sample_count) VALUES (?,?,?,?,?,1)`)
+    .run(id, userId, voiceprintStorage.sealCentroid(vectors.normalize(embedding)), modelName, embedding.length);
+  return database.prepare('SELECT * FROM voiceprints WHERE id=?').get(id);
 }
 
 module.exports = {

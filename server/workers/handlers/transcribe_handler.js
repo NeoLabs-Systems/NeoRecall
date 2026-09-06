@@ -161,7 +161,10 @@ function persistSegments(chunk, inferred) {
             durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
           // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
           voiceprint = cluster
-            ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching })
+            ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching,
+              // Enrolling a person is permanent, so it is gated on the same
+              // pooled speech the fingerprint was actually measured from.
+              speechMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) })
             : null;
           resolved = { cluster, voiceprint, embedding };
           speakerCache.set(key, resolved);

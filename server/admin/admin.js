@@ -73,6 +73,9 @@ function showPage(name, updateHash = true) {
 const settingLabels = {
   voiceMatchThreshold: 'Voice match threshold',
   voiceMatchMargin: 'Voice runner-up margin',
+  voiceEnrollFloor: 'New-person enrollment floor',
+  voiceEnrollMinimumMs: 'Speech required to enroll a person (ms)',
+  voiceRepairThreshold: 'Duplicate-repair threshold (re-detect)',
   speakerClusterThreshold: 'Speaker match threshold (higher = more speakers)',
   speakerClusterMergeThreshold: 'Merge two speakers when this alike',
   speakerMinimumTurnMs: 'Shortest speech that may create a speaker (ms)',

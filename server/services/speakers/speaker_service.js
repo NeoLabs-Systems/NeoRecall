@@ -40,13 +40,14 @@ function update(userId, id, changes) {
 }
 
 function mergedCentroid(first, second) {
-  const left = voiceprintStorage.readCentroid(first.centroid_embedding);
-  const right = voiceprintStorage.readCentroid(second.centroid_embedding);
+  // Directions, not raw vectors: the same reason updateCentroid normalizes.
+  const left = vectors.normalize(voiceprintStorage.readCentroid(first.centroid_embedding));
+  const right = vectors.normalize(voiceprintStorage.readCentroid(second.centroid_embedding));
   if (left.length !== right.length) throw new HttpError(409, 'MODEL_MISMATCH', 'Speaker profiles use incompatible embedding models.');
   const total = first.sample_count + second.sample_count;
   const output = new Float32Array(left.length);
   for (let i = 0; i < left.length; i += 1) output[i] = (left[i] * first.sample_count + right[i] * second.sample_count) / total;
-  return { buffer: voiceprintStorage.sealCentroid(output), total };
+  return { buffer: voiceprintStorage.sealCentroid(vectors.normalize(output)), total };
 }
 
 function merge(userId, targetId, sourceId) {
@@ -126,19 +127,33 @@ function rankedPeers(row, rows) {
     .sort((left, right) => right.score - left.score);
 }
 
-function reevaluationPairs(rows, { voiceMatchThreshold }) {
+// Pairs of profiles that are the same person heard twice.
+//
+// Two bars, because two very different kinds of evidence are on offer. A score
+// clearing `voiceMatchThreshold` stands on its own. Below that, the pair must
+// earn it: each has to be the other's closest match *and* stand clear of its own
+// runner-up by `voiceMatchMargin`, so the two are alone together rather than
+// merely adjacent in a crowd of profiles. That second reading is only consulted
+// when `repair` is set — ordinary reconciliation after each chunk stays at the
+// strict bar, and the Speakers screen's re-detect is what reaches the rest.
+function reevaluationPairs(rows, { voiceMatchThreshold, voiceRepairThreshold, voiceMatchMargin }, { repair = false } = {}) {
+  const floor = repair ? Math.min(voiceRepairThreshold, voiceMatchThreshold) : voiceMatchThreshold;
+  const isolated = new Map();
   const matches = new Map();
   for (const row of rows) {
     const ranked = rankedPeers(row, rows);
     const best = ranked[0];
-    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold) {
-      matches.set(row.id, best);
-    }
+    if (!best || !sameExplicitIdentity(row, best.row) || best.score < floor) continue;
+    isolated.set(row.id, !ranked[1] || best.score - ranked[1].score >= voiceMatchMargin);
+    if (best.score >= voiceMatchThreshold || isolated.get(row.id)) matches.set(row.id, best);
   }
   const pairs = [];
   for (const row of rows) {
     const match = matches.get(row.id);
     if (!match || matches.get(match.row.id)?.row.id !== row.id || row.id > match.row.id) continue;
+    // A sub-threshold merge needs both halves to be unambiguous, not just the
+    // one whose turn it is to be scored.
+    if (match.score < voiceMatchThreshold && !(isolated.get(row.id) && isolated.get(match.row.id))) continue;
     pairs.push({ first: row, second: match.row, score: match.score });
   }
   return pairs.sort((left, right) => right.score - left.score);
@@ -152,7 +167,11 @@ function preferredMergeTarget(first, second) {
   return first.created_at <= second.created_at ? first : second;
 }
 
-function reevaluate(userId) {
+// `repair` is the Speakers screen's re-detect: the user has looked at the list,
+// seen one person listed several times, and asked for it to be sorted out. That
+// is a different situation from the automatic pass after each chunk, and it gets
+// the wider bar accordingly.
+function reevaluate(userId, { repair = false } = {}) {
   const db = getDatabase();
   const limits = processingSettings.get();
   return db.transaction(() => {
@@ -160,7 +179,7 @@ function reevaluate(userId) {
     while (true) {
       const rows = db.prepare(`SELECT * FROM voiceprints
         WHERE user_id=? AND matching_enabled=1 AND centroid_embedding IS NOT NULL`).all(userId);
-      const pairs = reevaluationPairs(rows, limits);
+      const pairs = reevaluationPairs(rows, limits, { repair });
       if (pairs.length === 0) break;
       for (const pair of pairs) {
         const target = preferredMergeTarget(pair.first, pair.second);

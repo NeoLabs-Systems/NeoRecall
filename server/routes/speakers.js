@@ -12,7 +12,9 @@ const speakerId = z.string().min(1);
 router.use(requireAuth);
 router.get('/', requireScope('speakers:read'), (req, res) => res.json({ speakers: service.list(req.auth.userId) }));
 router.post('/reevaluate', requireScope('speakers:write'), (req, res) => {
-  res.json(service.reevaluate(req.auth.userId));
+  // The user asked for this from the Speakers screen, having seen the duplicates
+  // themselves; the automatic pass after each chunk stays at the strict bar.
+  res.json(service.reevaluate(req.auth.userId, { repair: true }));
 });
 router.get('/:id/preview', requireScope('speakers:read'), (req, res, next) => {
   try {

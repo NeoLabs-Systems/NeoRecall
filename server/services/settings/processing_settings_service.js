@@ -8,6 +8,9 @@ const { HttpError } = require('../../middleware/error_handler');
 const schema = z.object({
   voiceMatchThreshold: z.number().min(-1).max(1).optional(),
   voiceMatchMargin: z.number().min(0).max(2).optional(),
+  voiceEnrollFloor: z.number().min(-1).max(1).optional(),
+  voiceEnrollMinimumMs: z.number().int().min(0).max(120_000).optional(),
+  voiceRepairThreshold: z.number().min(-1).max(1).optional(),
   speakerClusterThreshold: z.number().min(-1).max(1).optional(),
   speakerClusterMergeThreshold: z.number().min(-1).max(1).optional(),
   speakerMinimumTurnMs: z.number().int().min(0).max(60_000).optional(),
@@ -64,6 +67,12 @@ function update(input) {
   const next = { ...get(), ...parsed.data };
   if (next.speakerClusterContinuityThreshold > next.speakerClusterThreshold) {
     throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The continuity match threshold must not exceed the plain cluster match threshold.');
+  }
+  if (next.voiceEnrollFloor > next.voiceMatchThreshold) {
+    throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The bar for treating a voice as a new person must not exceed the bar for recognising a known one, or every voice would become a new person.');
+  }
+  if (next.voiceRepairThreshold > next.voiceMatchThreshold) {
+    throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The duplicate-repair threshold must not exceed the voice match threshold.');
   }
   if (next.maxConsolidationInputChars < next.minNewMaterialChars) {
     throw new HttpError(400, 'INVALID_MATERIAL_LIMITS', 'The consolidation input limit must not be lower than the material threshold.');

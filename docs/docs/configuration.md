@@ -266,11 +266,45 @@ where its last known turn ended, that cluster may be kept at the relaxed
 `NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a near-tie,
 so a genuine speaker change at the boundary still resolves on its own.
 
+Enrolling a durable voice — a person recognised across recordings, rather than a
+cluster inside one — is the only speaker decision more evidence cannot undo. A
+spurious profile is permanent, appears as its own unnamed person, and then
+competes for every later match, so it takes more than merely failing to match a
+known one. A voice must score below `NEORECALL_VOICE_ENROLL_FLOOR` (default
+`0.45`) to count as somebody new, and its fingerprint must be pooled from at
+least `NEORECALL_VOICE_ENROLL_MIN_MS` of speech (default `3000`) — below that, a
+low score says the measurement was poor, not that the voice is unknown. Between
+the floor and `NEORECALL_VOICE_MATCH_THRESHOLD` lies a grey band where a voice
+resembles someone enrolled without confirming it; there, and where a match over
+the bar is within `NEORECALL_VOICE_MATCH_MARGIN` of a candidate below it, the
+turn is attributed to nobody and left for a later chunk with better evidence. It
+still carries its conversation-local speaker label throughout. Two profiles that
+both clear the bar are one person already split rather than an unclear reading,
+so the stronger wins — the same correction the cluster layer describes above, for
+the same reason: refusing both used to mint a third copy, which made the next
+turn more ambiguous still.
+
+Speaker embeddings are not unit vectors, and their magnitude tracks loudness and
+turn length rather than who was talking, so every sample folded into a profile is
+normalized to a direction first. Left raw, one loud or long sample drags a
+profile off the voice it stands for until the person stops matching themselves
+and a duplicate is minted. The weight of a profile's accumulated history is
+capped, so a voice first enrolled through one microphone can still migrate toward
+the same person heard through another instead of freezing around whatever the
+first conversation sounded like.
+
 Recurring matching also reconciles duplicate profiles automatically after new
 speech is persisted and during hourly maintenance, so profiles already present
 when a server is upgraded are cleaned up as well. Mutually nearest profiles above the configured voice-match
 threshold are folded together unless their explicit names or linked person
-entities conflict. Inside one recording, session clusters that resolve to the
+entities conflict. The Speakers screen's re-detect goes further, because there
+the user has looked at the list and asked for the duplicates to be sorted out: it
+also folds together a pair below the match threshold but above
+`NEORECALL_VOICE_REPAIR_THRESHOLD` (default `0.50`) when each profile is the
+other's closest match *and* stands clear of its own runner-up by the voice-match
+margin. Mutual exclusivity is far stronger evidence than a one-sided score; mere
+adjacency in a crowd of profiles is not, and is refused. The automatic pass after
+each chunk stays at the strict bar. Inside one recording, session clusters that resolve to the
 same recurring voiceprint are collapsed immediately; while that derived cleanup
 runs, all such clusters already share one conversation-local label. Cluster
 cleanup is best-effort and never delays transcript persistence, server-side

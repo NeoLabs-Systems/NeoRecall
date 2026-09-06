@@ -303,3 +303,193 @@ test('clusters resolved to one recurring voice share a label and collapse into o
   assert.equal(db.prepare('SELECT COUNT(DISTINCT speaker_cluster_id) count FROM transcript_segments WHERE conversation_id=?')
     .get(conversationId).count, 1, 'all transcript evidence follows the surviving cluster');
 });
+
+// --- Enrolling a durable voice ------------------------------------------------
+//
+// A session cluster is disposable; an enrolled voiceprint is not. A spurious one
+// is permanent, appears as its own unnamed person, and then competes for every
+// later match — which is how one person ends up listed several times. These
+// cover the readings where the old resolver enrolled and the new one declines.
+
+const voiceprintStorage = require('../../server/transcription/voiceprint_storage');
+
+function seedVoiceprint(db, userId, embedding) {
+  const id = crypto.randomUUID();
+  db.prepare(`INSERT INTO voiceprints
+    (id,user_id,centroid_embedding,embedding_model,embedding_dimensions,sample_count) VALUES (?,?,?,?,?,4)`)
+    .run(id, userId, voiceprintStorage.sealCentroid(embedding), matching.modelName, embedding.length);
+  return id;
+}
+
+function voiceprintCount(db, userId) {
+  return db.prepare('SELECT COUNT(*) count FROM voiceprints WHERE user_id=?').get(userId).count;
+}
+
+test('a contested voice match attributes nothing rather than minting a third profile', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { voiceMatchThreshold: bar, voiceMatchMargin: margin } = limits();
+  // The reading itself is doubtful: a match just over the bar, with a candidate
+  // just under it close enough to be the same claim. Enrolling here is what made
+  // duplicates self-amplifying — every later chunk of this person's speech scored
+  // alike against the copies and produced another.
+  seedVoiceprint(db, userId, centroidWithSimilarity(bar + margin / 4));
+  seedVoiceprint(db, userId, centroidWithSimilarity(bar - margin / 4));
+  const cluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const before = voiceprintCount(db, userId);
+
+  const resolved = matching.resolveVoiceprint(db, { userId, clusterId: cluster, embedding: QUERY, enabled: true, speechMs: 10_000 });
+
+  assert.equal(resolved, null, 'the turn is left for a later chunk with better evidence');
+  assert.equal(voiceprintCount(db, userId), before, 'and no third copy of this person is created');
+});
+
+test('two enrolled profiles that both match are one person already split, and the stronger wins', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { voiceMatchThreshold: bar, voiceMatchMargin: margin } = limits();
+  // Both clear the bar, so this is not an unclear reading — it is one voice with
+  // two profiles. Attaching to the better of them stops the split widening while
+  // reconciliation folds them back together.
+  const stronger = seedVoiceprint(db, userId, centroidWithSimilarity(Math.min(1, bar + 0.2)));
+  seedVoiceprint(db, userId, centroidWithSimilarity(Math.min(1, bar + 0.2) - margin / 2));
+  const cluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const before = voiceprintCount(db, userId);
+
+  const resolved = matching.resolveVoiceprint(db, { userId, clusterId: cluster, embedding: QUERY, enabled: true, speechMs: 10_000 });
+
+  assert.equal(resolved.id, stronger);
+  assert.equal(voiceprintCount(db, userId), before, 'no profile is added for a voice that already has two');
+});
+
+test('a voice that resembles someone enrolled without confirming it enrolls nobody', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { voiceMatchThreshold: bar, voiceEnrollFloor: floor } = limits();
+  // The grey band. Too weak to claim it is this person, too close to claim it is
+  // somebody else — and claiming somebody else is what leaves a duplicate behind.
+  seedVoiceprint(db, userId, centroidWithSimilarity((bar + floor) / 2));
+  const cluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const before = voiceprintCount(db, userId);
+
+  const resolved = matching.resolveVoiceprint(db, { userId, clusterId: cluster, embedding: QUERY, enabled: true, speechMs: 30_000 });
+
+  assert.equal(resolved, null);
+  assert.equal(voiceprintCount(db, userId), before);
+});
+
+test('a fingerprint from too little speech never founds a new person', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { voiceEnrollFloor: floor, voiceEnrollMinimumMs } = limits();
+  seedVoiceprint(db, userId, centroidWithSimilarity(floor - 0.2));
+  const cluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const before = voiceprintCount(db, userId);
+
+  // Far from everyone enrolled, but measured from a fragment: a low score here
+  // says the measurement was poor, not that the voice is new.
+  const resolved = matching.resolveVoiceprint(db, {
+    userId, clusterId: cluster, embedding: QUERY, enabled: true, speechMs: Math.max(0, voiceEnrollMinimumMs - 1),
+  });
+
+  assert.equal(resolved, null);
+  assert.equal(voiceprintCount(db, userId), before);
+});
+
+test('a voice far from everyone enrolled, with speech behind it, still becomes a new person', () => {
+  const db = getDatabase();
+  const { userId, sessionId } = seedSession(db);
+  const { voiceEnrollFloor: floor, voiceEnrollMinimumMs } = limits();
+  seedVoiceprint(db, userId, centroidWithSimilarity(floor - 0.2));
+  const cluster = seedCluster(db, { userId, sessionId, ordinal: 1, embedding: QUERY });
+  const before = voiceprintCount(db, userId);
+
+  const resolved = matching.resolveVoiceprint(db, {
+    userId, clusterId: cluster, embedding: QUERY, enabled: true, speechMs: voiceEnrollMinimumMs,
+  });
+
+  assert.ok(resolved, 'a genuinely new participant is still recognised as one');
+  assert.equal(voiceprintCount(db, userId), before + 1);
+});
+
+// --- Centroids ----------------------------------------------------------------
+
+test('a loud sample moves a profile no further than a quiet one', () => {
+  const vectors = require('../../server/transcription/speaker_embeddings');
+  // Embedding magnitude tracks loudness and turn length, not who was talking.
+  // Left unnormalized, one loud sample drags a centroid off the voice it stands
+  // for until the person stops matching their own profile.
+  const profile = new Float32Array([1, 0]);
+  const quiet = new Float32Array([0, 1]);
+  const loud = new Float32Array([0, 40]);
+  const afterQuiet = vectors.updateCentroid(profile, 4, quiet);
+  const afterLoud = vectors.updateCentroid(profile, 4, loud);
+  assert.ok(Math.abs(afterQuiet[0] - afterLoud[0]) < 1e-6, 'the two samples move the profile identically');
+  assert.ok(Math.abs(Math.hypot(afterLoud[0], afterLoud[1]) - 1) < 1e-6, 'and the profile stays a unit direction');
+});
+
+test('an established profile can still migrate toward the same voice on a different microphone', () => {
+  const vectors = require('../../server/transcription/speaker_embeddings');
+  // Without a cap on accumulated history, a profile enrolled from one recording
+  // setup is frozen around it and the same person on a second device eventually
+  // enrolls again as somebody new.
+  const profile = new Float32Array([1, 0]);
+  const shifted = new Float32Array([0, 1]);
+  const moved = vectors.updateCentroid(profile, 100_000, shifted);
+  assert.ok(moved[1] > 0.015, 'a very old profile still responds to new evidence');
+});
+
+// --- Repairing duplicates that ordinary matching can never reach ---------------
+
+test('re-detect folds together a mutually exclusive pair below the match threshold', () => {
+  const service = require('../../server/services/speakers/speaker_service');
+  const config = limits();
+  const between = (config.voiceRepairThreshold + config.voiceMatchThreshold) / 2;
+  const rows = [
+    { id: 'a', display_name: null, entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
+      centroid_embedding: voiceprintStorage.sealCentroid(new Float32Array([1, 0])) },
+    { id: 'b', display_name: null, entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
+      centroid_embedding: voiceprintStorage.sealCentroid(centroidWithSimilarity(between)) },
+  ];
+  assert.equal(service.reevaluationPairs(rows, config).length, 0,
+    'the automatic pass after each chunk leaves a sub-threshold pair alone');
+  const repaired = service.reevaluationPairs(rows, config, { repair: true });
+  assert.equal(repaired.length, 1, 're-detect merges them: each is the other\'s only close match');
+});
+
+test('re-detect refuses a sub-threshold merge when a third voice is just as close', () => {
+  const service = require('../../server/services/speakers/speaker_service');
+  const config = limits();
+  const between = (config.voiceRepairThreshold + config.voiceMatchThreshold) / 2;
+  // Adjacency in a crowd is not evidence of identity. Mutual exclusivity is what
+  // justifies the lower bar, so without it the pair stays apart. Three
+  // dimensions, because two candidates equally close to `a` on a plane are
+  // necessarily close to each other too — and would then be a real duplicate.
+  const near = (similarity, axis) => {
+    const output = new Float32Array([similarity, 0, 0]);
+    output[axis] = Math.sqrt(Math.max(0, 1 - similarity * similarity));
+    return output;
+  };
+  const rows = [
+    { id: 'a', display_name: null, entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 3,
+      centroid_embedding: voiceprintStorage.sealCentroid(new Float32Array([1, 0, 0])) },
+    { id: 'b', display_name: null, entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 3,
+      centroid_embedding: voiceprintStorage.sealCentroid(near(between, 1)) },
+    { id: 'c', display_name: null, entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 3,
+      centroid_embedding: voiceprintStorage.sealCentroid(near(between - config.voiceMatchMargin / 4, 2)) },
+  ];
+  assert.equal(service.reevaluationPairs(rows, config, { repair: true }).length, 0);
+});
+
+test('a named speaker is never merged into a differently named one', () => {
+  const service = require('../../server/services/speakers/speaker_service');
+  const config = limits();
+  const rows = [
+    { id: 'a', display_name: 'Frank', entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
+      centroid_embedding: voiceprintStorage.sealCentroid(new Float32Array([1, 0])) },
+    { id: 'b', display_name: 'Anna', entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
+      centroid_embedding: voiceprintStorage.sealCentroid(centroidWithSimilarity(0.99)) },
+  ];
+  assert.equal(service.reevaluationPairs(rows, config, { repair: true }).length, 0,
+    'a name the user set outranks any similarity score');
+});
