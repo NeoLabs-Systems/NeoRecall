@@ -133,6 +133,58 @@ with no attached UI.
 Signing out clears every widget: they fall back to asking for a sign-in rather
 than continuing to show the previous account's memories.
 
+## Wear OS
+
+NeoRecall for Wear OS is a separate APK that shares the phone app's application
+id and signing key. The watch records on its own microphone, in the same 30
+second AAC chunks the rest of the pipeline uses, and holds every chunk in a
+local ledger until the phone returns a terminal receipt proving the transcript
+was persisted and the server audio deleted. A watch that is out of range keeps
+recording; nothing is deleted early, and the app screen says how many clips are
+being held rather than treating the backlog as a fault.
+
+The watch has two screens. The first is the record control, the elapsed time,
+and what is still owed to the phone. Swiping through the day card opens the
+second: one scrolling page holding the day's totals, the newest conversation
+with its write-up and transcript, the memories that were kept, and the open
+commitments. The digest is pushed from the phone over the Wear Data Layer — the
+watch never contacts the server, and nothing it shows can change what the phone
+does with audio.
+
+| Surface | Shows |
+| --- | --- |
+| **App** | Record control, elapsed time, held clips, phone link, and the full day digest |
+| **Record tile** | Start and stop capture in one gesture from the watch face |
+| **Today tile** | Talk time, memories kept, open commitments, and the newest headline |
+| **Recording complication** | Whether NeoRecall is listening, and for how long |
+| **Today complication** | What is overdue, due today, or open |
+
+Neither complication takes an action: a watch face is read at a glance and
+pressed by accident, so starting or stopping the microphone is confined to the
+tile, which is looked at before it is touched.
+
+The digest is trimmed to fit a Data Layer item: at most the last 40 transcript
+lines of the newest conversation, and a bounded number of memories and
+commitments. When lines are left behind the watch says how many are still on the
+phone rather than implying the conversation ends where the payload does.
+
+### Installing it
+
+The watch app is not distributed through the Play Store. Each release publishes
+`NeoRecall-WearOS-<version>.apk`, which is sideloaded onto the watch once:
+
+1. Download the APK onto a computer on the same network as the watch.
+2. On the watch, enable developer options, then ADB debugging and wireless
+   debugging. The watch shows its IP address there.
+3. `adb connect WATCH_IP:5555`, then
+   `adb -s WATCH_IP:5555 install -r NeoRecall-WearOS.apk`.
+4. Open it once on the watch and allow the microphone.
+
+**Settings → Watch** in the phone app lists every paired watch and says whether
+NeoRecall is installed on it, repeats these steps, and can push the current day
+to a watch that was just set up. Developer options can be turned back off
+afterwards.
+
 ## Importing existing audio
 
 Choose **Import audio** on the Record screen. Large files use the multipart import protocol and enter the same VAD, transcription, diarization, search, and memory pipeline as live capture. Selecting the same file again after an interrupted transfer resumes its missing parts for the same account and server. Failed imports expire according to the server TTL because a browser may no longer retain access to the original file.

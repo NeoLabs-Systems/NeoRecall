@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'background_hold.dart';
 import 'background_live_status.dart';
+import '../watch/paired_watch.dart';
+import '../watch/watch_digest.dart';
 import 'home_widget_snapshot.dart';
 
 export 'background_hold.dart';
@@ -66,6 +68,18 @@ abstract class BackgroundCaptureService {
   /// an unchanged snapshot is a no-op, which keeps a chatty notifyListeners()
   /// from redrawing every widget on every frame.
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  /// Hands a paired Wear OS watch everything it is allowed to show.
+  ///
+  /// The same relationship the widgets have, over a link that can be absent for
+  /// hours: the watch renders the last digest it was given and never asks for
+  /// another. Sending an unchanged digest is a no-op unless [force] is set,
+  /// which is what a watch that has just been installed needs.
+  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {}
+
+  /// The Wear OS devices paired with this phone, and whether NeoRecall is on
+  /// them. Empty on every platform that has no companion watch API at all.
+  Future<List<PairedWatch>> pairedWatches() async => const <PairedWatch>[];
 
   /// Atomically claims every widget tap that could not be served at the time.
   ///
@@ -206,6 +220,12 @@ class PlatformManagedBackgroundCaptureService
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
 
   @override
+  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {}
+
+  @override
+  Future<List<PairedWatch>> pairedWatches() async => const <PairedWatch>[];
+
+  @override
   Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>
       const <HomeWidgetAction>[];
 
@@ -293,6 +313,7 @@ class AndroidBackgroundCaptureService
   String? _lastMessage;
   BackgroundLiveStatus? _liveStatus;
   String? _widgetPayload;
+  String? _watchPayload;
 
   @override
   bool get isRunning => _state.running;
@@ -410,6 +431,41 @@ class AndroidBackgroundCaptureService
       // must never disturb capture. The next publish resends it anyway, so
       // clear the cache to make sure that retry actually goes out.
       _widgetPayload = null;
+    }
+  }
+
+  @override
+  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {
+    final payload = digest.encode();
+    if (!force && payload == _watchPayload) return;
+    _watchPayload = payload;
+    try {
+      await _channel.invokeMethod<void>('publishWatchDigest', <String, Object?>{
+        'payload': payload,
+        'force': force,
+      });
+    } catch (_) {
+      // A watch that is out of range, absent, or running an older build must
+      // never disturb capture on the phone. Clearing the cache is what makes
+      // the next publish an actual retry rather than a skipped no-op.
+      _watchPayload = null;
+    }
+  }
+
+  @override
+  Future<List<PairedWatch>> pairedWatches() async {
+    try {
+      final rows = await _channel.invokeListMethod<dynamic>('pairedWatches');
+      return rows
+              ?.whereType<Map<Object?, Object?>>()
+              .map(PairedWatch.fromMap)
+              .where((watch) => watch.id.isNotEmpty)
+              .toList(growable: false) ??
+          const <PairedWatch>[];
+    } catch (_) {
+      // A phone with no Play services, or an older build of the host, simply
+      // has no watch to report. This is a setup screen, not a capture path.
+      return const <PairedWatch>[];
     }
   }
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NeoRecall</string>
+    <string name="tile_capture_label">NeoRecall Record</string>
+    <string name="tile_today_label">NeoRecall Today</string>
+    <string name="complication_capture_label">NeoRecall recording</string>
+    <string name="complication_today_label">NeoRecall today</string>
+</resources>

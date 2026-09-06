@@ -13,20 +13,38 @@
     <application
         android:allowBackup="true"
         android:icon="@drawable/neorecall_logo"
-        android:label="NeoRecall"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
         android:theme="@style/Theme.NeoRecall.Wear">
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="false" />
 
+        <!-- singleTop: the Record tile reaches this activity by intent, and a
+             second copy of the app behind the first would be a screen the
+             wearer has to dismiss twice. -->
         <activity
             android:name=".WatchMainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NeoRecall.Wear">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Exported because a tile's tap is delivered by the system tile
+             renderer. It takes one boolean and starts or stops the service the
+             app already exposes through its own notification. -->
+        <activity
+            android:name=".tiles.TileActionActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NeoRecall.Wear.Invisible" />
 
         <service
             android:name=".recording.WatchRecordingService"
@@ -44,6 +62,78 @@
                     android:host="*"
                     android:pathPrefix="/neorecall/watch/acks/" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:path="/neorecall/watch/digest" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".tiles.CaptureTileService"
+            android:exported="true"
+            android:label="@string/tile_capture_label"
+            android:description="@string/tile_capture_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview_capture" />
+        </service>
+
+        <service
+            android:name=".tiles.TodayTileService"
+            android:exported="true"
+            android:label="@string/tile_today_label"
+            android:description="@string/tile_today_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview_today" />
+        </service>
+
+        <service
+            android:name=".complications.CaptureComplicationService"
+            android:exported="true"
+            android:label="@string/complication_capture_label"
+            android:icon="@drawable/ic_watch_recording"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT" />
+            <!-- Redrawn by the app whenever capture changes; the period is only
+                 a floor for the running clock while recording. -->
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="300" />
+        </service>
+
+        <service
+            android:name=".complications.TodayComplicationService"
+            android:exported="true"
+            android:label="@string/complication_today_label"
+            android:icon="@drawable/neorecall_logo"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT" />
+            <!-- Digests arrive by push, so this never needs its own poll. -->
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="0" />
         </service>
 
         <receiver

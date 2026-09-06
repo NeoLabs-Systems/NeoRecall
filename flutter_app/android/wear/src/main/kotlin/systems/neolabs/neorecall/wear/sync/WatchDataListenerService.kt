@@ -7,16 +7,32 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import systems.neolabs.neorecall.wear.digest.WatchDigestStore
+import systems.neolabs.neorecall.wear.protocol.WearDigestProtocol
 import systems.neolabs.neorecall.wear.protocol.WearTransferProtocol
 import systems.neolabs.neorecall.wear.storage.WatchRecordingStore
+import systems.neolabs.neorecall.wear.surfaces.WatchSurfaces
 import java.time.Instant
 
+/**
+ * Everything the phone sends the watch, in one listener.
+ *
+ * Two unrelated things arrive here: the terminal receipts that release held
+ * audio, and the day digest the watch displays. They are kept in one service
+ * because the Data Layer delivers them through one callback, and kept strictly
+ * apart inside it because only the first is allowed to delete a recording.
+ */
 class WatchDataListenerService : WearableListenerService() {
   override fun onDataChanged(events: DataEventBuffer) {
     events.forEach { event ->
       if (event.type != DataEvent.TYPE_CHANGED) return@forEach
       val item = event.dataItem
-      if (!item.uri.path.orEmpty().startsWith(WearTransferProtocol.ACK_PATH_PREFIX)) return@forEach
+      val path = item.uri.path.orEmpty()
+      if (path == WearDigestProtocol.DIGEST_PATH) {
+        acceptDigest(DataMapItem.fromDataItem(item).dataMap)
+        return@forEach
+      }
+      if (!path.startsWith(WearTransferProtocol.ACK_PATH_PREFIX)) return@forEach
       val map = DataMapItem.fromDataItem(item).dataMap
       val recordingId = map.getString(WearTransferProtocol.KEY_RECORDING_ID).orEmpty()
       if (recordingId.isEmpty() || !hasTerminalProof(map)) return@forEach
@@ -35,6 +51,24 @@ class WatchDataListenerService : WearableListenerService() {
             .build(),
         )
       }
+    }
+  }
+
+  /**
+   * Stores a digest and redraws everything that shows one.
+   *
+   * A digest is display only: it is never allowed to influence what the watch
+   * holds or releases, so an unreadable or future-versioned one is simply
+   * ignored and the previous day stays on screen.
+   */
+  private fun acceptDigest(map: com.google.android.gms.wearable.DataMap) {
+    if (map.getInt(WearDigestProtocol.KEY_VERSION) != WearDigestProtocol.VERSION) return
+    val payload = map.getString(WearDigestProtocol.KEY_PAYLOAD).orEmpty()
+    if (payload.isBlank()) return
+    val publishedAt = map.getLong(WearDigestProtocol.KEY_PUBLISHED_AT_MS)
+      .takeIf { it > 0L } ?: System.currentTimeMillis()
+    if (WatchDigestStore.publish(this, payload, publishedAt)) {
+      WatchSurfaces.refreshAll(this)
     }
   }
 

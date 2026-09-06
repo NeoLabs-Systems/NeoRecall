@@ -11,10 +11,15 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
+import systems.neolabs.neorecall.wear.R
 import systems.neolabs.neorecall.wear.WatchMainActivity
+import systems.neolabs.neorecall.wear.surfaces.WatchSurfaces
 import systems.neolabs.neorecall.wear.storage.WatchRecordingStore
 import systems.neolabs.neorecall.wear.sync.WatchSyncManager
 import java.util.UUID
@@ -75,7 +80,7 @@ class WatchRecordingService : Service() {
     ServiceCompat.startForeground(
       this,
       NOTIFICATION_ID,
-      notification(),
+      notification(sessionStartedAt),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
     )
     if (!newSession) {
@@ -177,31 +182,59 @@ class WatchRecordingService : Service() {
     super.onDestroy()
   }
 
-  private fun notification() = NotificationCompat.Builder(this, CHANNEL_ID)
-    .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-    .setContentTitle("NeoRecall is recording")
-    .setContentText("Audio stays safe on your watch until it is processed.")
-    .setOngoing(true)
-    .setCategory(NotificationCompat.CATEGORY_SERVICE)
-    .setContentIntent(
-      PendingIntent.getActivity(
-        this,
-        0,
-        Intent(this, WatchMainActivity::class.java),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-      ),
+  /**
+   * The ongoing notification, and the watch-face chip that goes with it.
+   *
+   * An [OngoingActivity] is what puts NeoRecall on the watch face while the
+   * microphone is open, next to a run or a call — on a device meant to be worn
+   * all day, that visible mark is the honest way to record, and the fastest way
+   * back to the stop button.
+   */
+  private fun notification(startedAtMs: Long): android.app.Notification {
+    val open = PendingIntent.getActivity(
+      this,
+      0,
+      Intent(this, WatchMainActivity::class.java),
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
-    .addAction(
-      android.R.drawable.ic_media_pause,
-      "Stop",
-      PendingIntent.getService(
-        this,
-        1,
-        Intent(this, WatchRecordingService::class.java).setAction(ACTION_STOP),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-      ),
-    )
-    .build()
+    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+      .setSmallIcon(R.drawable.ic_watch_recording)
+      .setContentTitle("NeoRecall is recording")
+      .setContentText("Audio stays safe on your watch until it is processed.")
+      .setOngoing(true)
+      .setCategory(NotificationCompat.CATEGORY_SERVICE)
+      .setContentIntent(open)
+      .addAction(
+        R.drawable.ic_watch_stop,
+        "Stop",
+        PendingIntent.getService(
+          this,
+          1,
+          Intent(this, WatchRecordingService::class.java).setAction(ACTION_STOP),
+          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        ),
+      )
+    OngoingActivity.Builder(this, NOTIFICATION_ID, builder)
+      .setStaticIcon(R.drawable.ic_watch_recording)
+      .setTouchIntent(open)
+      .setStatus(
+        Status.Builder()
+          .addTemplate("Recording #duration#")
+          // The session start is a wall clock; a stopwatch part is read against
+          // elapsedRealtime(), so it has to be restated in that base or the
+          // watch face counts up from the epoch.
+          .addPart(
+            "duration",
+            Status.StopwatchPart(
+              SystemClock.elapsedRealtime() - (System.currentTimeMillis() - startedAtMs),
+            ),
+          )
+          .build(),
+      )
+      .build()
+      .apply(this)
+    return builder.build()
+  }
 
   private fun createNotificationChannel() {
     (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(
@@ -209,8 +242,13 @@ class WatchRecordingService : Service() {
     )
   }
 
+  /**
+   * One announcement for every surface: the open app hears the broadcast, and
+   * the tiles and complications are asked to redraw behind it.
+   */
   private fun broadcastState() {
     sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
+    WatchSurfaces.refreshAll(this)
   }
 
   companion object {
@@ -230,6 +268,17 @@ class WatchRecordingService : Service() {
     fun isRecording(context: Context): Boolean = context
       .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .getBoolean(KEY_ACTIVE, false)
+
+    /**
+     * When the current session began, for the surfaces that show a running
+     * clock. Null whenever nothing is being recorded, so a stale preference
+     * from a finished session can never be counted up from.
+     */
+    fun sessionStartedAt(context: Context): Long? {
+      val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      if (!preferences.getBoolean(KEY_ACTIVE, false)) return null
+      return preferences.getLong(KEY_STARTED_AT, 0L).takeIf { it > 0L }
+    }
 
     /** Finalizes an interrupted tail but never starts the boot-prohibited mic FGS. */
     fun recoverAfterBoot(context: Context) {

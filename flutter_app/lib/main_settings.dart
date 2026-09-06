@@ -8,6 +8,7 @@ import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/settings/integrations_section.dart';
 import 'src/settings/security_section.dart';
+import 'src/settings/watch_section.dart';
 import 'src/settings/settings_navigation.dart';
 import 'src/install/admin_key_store.dart';
 import 'src/install/admin_provider_client.dart';
@@ -18,6 +19,7 @@ enum SettingsSection {
   recording,
   memory,
   speakers,
+  watch,
   devices,
   services,
   integrations,
@@ -252,6 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _savingUploadPolicy ||
                       settings == null ||
                       _customVocabularyError != null ||
+                      selectedSection == SettingsSection.watch ||
                       selectedSection == SettingsSection.devices ||
                       selectedSection == SettingsSection.services ||
                       selectedSection == SettingsSection.integrations
@@ -269,6 +272,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         selected: selectedSection,
                         compact: true,
                         onSelected: _select,
+                        watchSupported: widget.controller.isMobileCapturePlatform,
                       ),
                       const SizedBox(height: AppSpacing.md + 2),
                       Expanded(child: _content()),
@@ -283,6 +287,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           selected: selectedSection,
                           compact: false,
                           onSelected: _select,
+                          watchSupported:
+                              widget.controller.isMobileCapturePlatform,
                         ),
                       ),
                       const SizedBox(width: AppSpacing.lg),
@@ -311,6 +317,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _content() {
     if (settings == null &&
+        selectedSection != SettingsSection.watch &&
         selectedSection != SettingsSection.devices &&
         selectedSection != SettingsSection.services &&
         selectedSection != SettingsSection.integrations) {
@@ -324,6 +331,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
+      SettingsSection.watch => WatchSection(controller: widget.controller),
       SettingsSection.devices => _devicesSettings(),
       SettingsSection.services => _servicesSettings(),
       SettingsSection.integrations => IntegrationsSection(

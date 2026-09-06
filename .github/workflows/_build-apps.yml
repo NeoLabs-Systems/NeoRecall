@@ -223,9 +223,28 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/NeoRecall-Android-${VERSION}.apk"
           ls -la ../dist
 
+      - name: Build Wear OS APK
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="commit-${GITHUB_SHA:0:12}"
+          fi
+          # The watch APK is a separate application that shares the phone's
+          # applicationId and signature, so it installs alongside it and can be
+          # sideloaded onto a watch without the phone build being touched.
+          (cd android && ./gradlew :wear:assembleRelease)
+          cp build/wear/outputs/apk/release/wear-release.apk \
+            "../dist/NeoRecall-WearOS-${VERSION}.apk"
+          ls -la ../dist
+
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
           name: neorecall-android-app
-          path: dist/NeoRecall-Android-*.apk
+          path: |
+            dist/NeoRecall-Android-*.apk
+            dist/NeoRecall-WearOS-*.apk
           if-no-files-found: error

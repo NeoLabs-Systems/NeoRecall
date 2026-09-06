@@ -8,6 +8,8 @@ import 'package:neorecall/src/capture/capture_source.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/devices/device_session_controller.dart';
 import 'package:neorecall/src/recording/recorder_mobile.dart';
+import 'package:neorecall/src/watch/paired_watch.dart';
+import 'package:neorecall/src/watch/watch_digest.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeAdapter implements AudioDeviceAdapter {
@@ -107,6 +109,15 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
 
   @override
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  @override
+  Future<void> publishWatchDigest(
+    WatchDigest digest, {
+    bool force = false,
+  }) async {}
+
+  @override
+  Future<List<PairedWatch>> pairedWatches() async => const <PairedWatch>[];
 
   @override
   Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>

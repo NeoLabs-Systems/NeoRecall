@@ -45,6 +45,9 @@ import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
 import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
+import 'src/watch/paired_watch.dart';
+import 'src/watch/watch_digest.dart';
+import 'src/watch/watch_digest_publisher.dart';
 
 part 'src/controller/auth_controller.dart';
 part 'src/controller/diagnostics_controller.dart';
@@ -249,6 +252,9 @@ class NeoRecallController extends ChangeNotifier
   String? _notice;
   Timer? _noticeTimer;
   bool _liveStatusScheduled = false;
+
+  /// What the last digest sent to a paired watch was built from.
+  String? _publishedWatchFingerprint;
   bool _storageExhausted = false;
   static const Duration _noticeLifetime = Duration(seconds: 5);
 
@@ -275,9 +281,98 @@ class NeoRecallController extends ChangeNotifier
     await mobile.background.updateLiveStatus(status);
     // Home-screen widgets read the same state the ongoing notification does,
     // so the two surfaces are updated from one place and cannot disagree.
-    await mobile.background.publishWidgetSnapshot(
-      buildHomeWidgetSnapshot(status),
+    final snapshot = buildHomeWidgetSnapshot(status);
+    await mobile.background.publishWidgetSnapshot(snapshot);
+    // A paired watch is fed from the same snapshot, plus the transcript no
+    // widget shows. Encoding it costs more than a preferences write, so it is
+    // only rebuilt when something the watch actually displays has moved.
+    final fingerprint = _watchDigestFingerprint(snapshot);
+    if (fingerprint != _publishedWatchFingerprint) {
+      _publishedWatchFingerprint = fingerprint;
+      await mobile.background.publishWatchDigest(buildWatchDigest(snapshot));
+    }
+  }
+
+  /// The Wear OS devices paired with this phone, for the watch setup screen.
+  Future<List<PairedWatch>> loadPairedWatches() async {
+    final active = recorder;
+    if (active is! MobileRecallRecorder) return const <PairedWatch>[];
+    return active.background.pairedWatches();
+  }
+
+  /// Re-sends the digest even when nothing about it has changed.
+  ///
+  /// The automatic path deliberately skips unchanged content; a watch that was
+  /// just installed, or reset, has nothing to compare against and needs the
+  /// current day pushed to it once.
+  Future<void> resendWatchDigest() async {
+    final active = recorder;
+    if (active is! MobileRecallRecorder) return;
+    _publishedWatchFingerprint = null;
+    await active.background.publishWatchDigest(buildWatchDigest(), force: true);
+  }
+
+  /// The newest conversation, which is the one the watch shows.
+  TimelineMoment? get latestMoment {
+    if (moments.isEmpty) return null;
+    var newest = moments.first;
+    for (final moment in moments) {
+      if (moment.startedAt.isAfter(newest.startedAt)) newest = moment;
+    }
+    return newest;
+  }
+
+  /// The digest a paired Wear OS watch renders.
+  ///
+  /// Exposed rather than private for the same reason as
+  /// [buildHomeWidgetSnapshot]: what the watch is allowed to see, and how much
+  /// of a conversation it is given, should be readable without a running app.
+  WatchDigest buildWatchDigest([HomeWidgetSnapshot? snapshot]) {
+    final moment = latestMoment;
+    return const WatchDigestPublisher().build(
+      snapshot: snapshot ?? buildHomeWidgetSnapshot(),
+      now: DateTime.now(),
+      moment: moment,
+      fullTranscript: moment?.id == null
+          ? null
+          : momentTranscripts[moment!.id],
     );
+  }
+
+  /// Everything the watch draws, reduced to a string that is cheap to compare.
+  ///
+  /// Deliberately coarse: it tracks what changed, not what it changed to, so a
+  /// running clock in the capture line cannot make every frame look like new
+  /// content worth sending over a Bluetooth link.
+  String _watchDigestFingerprint(HomeWidgetSnapshot snapshot) {
+    final moment = latestMoment;
+    final transcript = moment?.id == null
+        ? null
+        : momentTranscripts[moment!.id];
+    return <Object?>[
+      snapshot.signedIn,
+      snapshot.capture.phase,
+      snapshot.capture.recording,
+      snapshot.capture.issue,
+      snapshot.today.talkSeconds,
+      snapshot.today.memories,
+      snapshot.today.highlights,
+      snapshot.today.openTasks,
+      snapshot.today.dueToday,
+      snapshot.today.overdue,
+      snapshot.dayInReview,
+      snapshot.memories.isEmpty ? null : snapshot.memories.first.id,
+      snapshot.memories.length,
+      snapshot.highlights.isEmpty ? null : snapshot.highlights.first.id,
+      snapshot.highlights.length,
+      moment?.key,
+      moment?.state,
+      moment?.titleEn,
+      moment?.summaryEn,
+      moment?.segmentCount,
+      moment?.segments.length,
+      transcript?.length,
+    ].join('|');
   }
 
   /// Today's day summary, and only today's.

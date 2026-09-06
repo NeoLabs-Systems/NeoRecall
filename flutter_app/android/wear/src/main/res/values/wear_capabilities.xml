@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Advertised to the phone so it can tell an installed watch from a paired
+         one that has never had NeoRecall sideloaded onto it. -->
+    <string-array name="android_wear_capabilities">
+        <item>neorecall_watch_app</item>
+    </string-array>
+</resources>

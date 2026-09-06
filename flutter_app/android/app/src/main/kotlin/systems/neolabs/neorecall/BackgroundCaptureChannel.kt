@@ -110,6 +110,31 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
         }
         "takePendingWidgetActions" -> result.success(WidgetStore.takeActions(context))
+        "publishWatchDigest" -> {
+          val payload = call.argument<String>("payload")
+          if (payload == null) {
+            result.error("INVALID_WATCH_DIGEST", "Watch digest payload is missing.", null)
+          } else {
+            // Answered once the put has been queued, not once a watch has drawn
+            // it: a watch that is out of range must not stall the Dart caller.
+            PhoneWearDigestPublisher.get(context).publish(
+              payload,
+              force = call.argument<Boolean>("force") == true,
+            ) { error ->
+              if (error != null) {
+                android.util.Log.w("NeoRecall", "Watch digest not published: $error")
+              }
+            }
+            result.success(true)
+          }
+        }
+        "pairedWatches" -> {
+          // Play services answers this off the main thread; the reply has to
+          // come back onto it before Flutter is allowed to hear it.
+          PhoneWearDigestPublisher.get(context).nodes { nodes ->
+            Handler(Looper.getMainLooper()).post { result.success(nodes) }
+          }
+        }
         "takePendingWatchRecordings" -> try {
           result.success(PhoneWearTransferManager.get(context).pending())
         } catch (error: Exception) {

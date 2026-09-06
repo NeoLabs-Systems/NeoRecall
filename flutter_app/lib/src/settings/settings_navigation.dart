@@ -9,11 +9,23 @@ class SettingsNavigation extends StatelessWidget {
     required this.selected,
     required this.compact,
     required this.onSelected,
+    this.watchSupported = false,
   });
 
   final SettingsSection selected;
   final bool compact;
   final ValueChanged<SettingsSection> onSelected;
+
+  /// Whether this build can talk to a Wear OS watch at all. Offering the area
+  /// on a desktop would only ever answer "no watch found", which reads as a
+  /// fault rather than as a platform that has no watches.
+  final bool watchSupported;
+
+  List<_SettingsNavigationItem> get _visibleItems => items
+      .where(
+        (item) => item.section != SettingsSection.watch || watchSupported,
+      )
+      .toList(growable: false);
 
   static const items = <_SettingsNavigationItem>[
     _SettingsNavigationItem(
@@ -47,6 +59,12 @@ class SettingsNavigation extends StatelessWidget {
       description: 'Diarization and matching',
     ),
     _SettingsNavigationItem(
+      section: SettingsSection.watch,
+      icon: Icons.watch_outlined,
+      label: 'Watch',
+      description: 'Wear OS setup and digest',
+    ),
+    _SettingsNavigationItem(
       section: SettingsSection.devices,
       icon: Icons.devices_other_outlined,
       label: 'Account devices',
@@ -77,7 +95,7 @@ class SettingsNavigation extends StatelessWidget {
           labelText: 'Settings area',
           prefixIcon: Icon(Icons.settings_outlined),
         ),
-        items: items
+        items: _visibleItems
             .map(
               (item) => DropdownMenuItem<SettingsSection>(
                 value: item.section,
@@ -118,7 +136,7 @@ class SettingsNavigation extends StatelessWidget {
                 ),
               ),
             ),
-            for (final item in items)
+            for (final item in _visibleItems)
               _SettingsNavigationButton(
                 item: item,
                 selected: item.section == selected,
