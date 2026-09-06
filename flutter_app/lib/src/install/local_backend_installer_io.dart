@@ -347,6 +347,44 @@ class LocalBackendInstaller {
               'again.',
         );
       }
+      // Updating means reset --hard and clean -fd. That is right for an install
+      // directory and ruinous for a working checkout, which is easy to pick by
+      // accident when a developer's clone sits at the default path. Refuse
+      // anything holding work that this would destroy.
+      final dirty = await _runQuiet(git, <String>[
+        '-C',
+        directory.path,
+        'status',
+        '--porcelain',
+      ]);
+      if ('${dirty?.stdout ?? ''}'.trim().isNotEmpty) {
+        throw LocalBackendInstallerException(
+          'SETUP_CHECKOUT_DIRTY',
+          '${directory.path} has uncommitted changes.',
+          retryable: false,
+          remedy: 'Installing here would discard them. Commit or stash them '
+              'first, or choose a different install directory.',
+        );
+      }
+      final published = await _runQuiet(git, <String>[
+        '-C',
+        directory.path,
+        'branch',
+        '--remotes',
+        '--contains',
+        'HEAD',
+      ]);
+      if (published != null &&
+          published.exitCode == 0 &&
+          '${published.stdout}'.trim().isEmpty) {
+        throw LocalBackendInstallerException(
+          'SETUP_CHECKOUT_UNPUSHED',
+          '${directory.path} holds commits that are not on any remote branch.',
+          retryable: false,
+          remedy: 'Installing here would discard them. Push them first, or '
+              'choose a different install directory.',
+        );
+      }
       _emit(
         LocalBackendInstallStage.download,
         'started',

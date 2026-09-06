@@ -44,6 +44,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   String? _errorRemedy;
   bool _showDetails = false;
   bool _connecting = false;
+  bool _keyRemembered = true;
   AdminProviderClient? _adminClient;
 
   @override
@@ -108,8 +109,19 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         installDirectory: _directory.text,
       );
       final adminApiKey = result.adminApiKey;
+      var keyRemembered = adminApiKey != null;
       if (adminApiKey != null) {
-        await const AdminKeyStore().save(result.backendUrl, adminApiKey);
+        // Best-effort: the keychain can refuse or prompt, and a server that is
+        // installed and running must not be reported as a failed setup because
+        // its key could not be filed away. Without it, this session still
+        // configures providers; only Settings on a later launch cannot.
+        try {
+          await const AdminKeyStore()
+              .save(result.backendUrl, adminApiKey)
+              .timeout(const Duration(seconds: 10));
+        } on Object {
+          keyRemembered = false;
+        }
       }
       if (!mounted) return;
       setState(() {
@@ -123,6 +135,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
               );
         // Without the administrator key there is nothing this screen can
         // configure, so it goes straight to the finish step.
+        _keyRemembered = keyRemembered;
         _phase = adminApiKey == null
             ? _LocalInstallPhase.done
             : _LocalInstallPhase.providers;
@@ -134,6 +147,16 @@ class _LocalInstallViewState extends State<LocalInstallView> {
       setState(() {
         _errorMessage = '${error.message} (${error.code})';
         _errorRemedy = error.remedy;
+        _phase = _LocalInstallPhase.failed;
+      });
+    } on Object catch (error) {
+      // Anything unexpected still has to land somewhere the person can act on.
+      // Leaving it uncaught stranded this screen on its last progress line with
+      // a spinner that never stopped.
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'NeoRecall setup could not finish: $error';
+        _errorRemedy = null;
         _phase = _LocalInstallPhase.failed;
       });
     }
@@ -416,6 +439,16 @@ class _LocalInstallViewState extends State<LocalInstallView> {
             ),
           ],
         ),
+        if (!_keyRemembered) ...<Widget>[
+          const SizedBox(height: 12),
+          const InlineMessage(
+            message:
+                'This computer would not store the administrator key, so these '
+                'services can be set up now but not changed from Settings later. '
+                'The admin dashboard at /admin can still change them.',
+            icon: Icons.info_outline,
+          ),
+        ],
         const SizedBox(height: 18),
         ProviderSetupPanel(
           client: client,
