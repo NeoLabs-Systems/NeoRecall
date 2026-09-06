@@ -52,6 +52,12 @@ class SettingsNavigation extends StatelessWidget {
       label: 'Account devices',
       description: 'Sessions and access',
     ),
+    _SettingsNavigationItem(
+      section: SettingsSection.integrations,
+      icon: Icons.hub_outlined,
+      label: 'Integrations',
+      description: 'NeoAgent and MCP',
+    ),
   ];
 
   @override

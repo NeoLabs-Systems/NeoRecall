@@ -26,6 +26,20 @@ extension BackgroundLivePhaseWire on BackgroundLivePhase {
     BackgroundLivePhase.idle => 'idle',
     BackgroundLivePhase.storageFull => 'storageFull',
   };
+
+  /// Lock-screen Live Update / Live Activity. Idle wearable link, reconnect,
+  /// and a silent queue sit in the shade as a normal notification instead.
+  bool get promotesLiveSurface => switch (this) {
+    BackgroundLivePhase.recording ||
+    BackgroundLivePhase.watchTransfer ||
+    BackgroundLivePhase.uploading ||
+    BackgroundLivePhase.transcribing ||
+    BackgroundLivePhase.finalizing ||
+    BackgroundLivePhase.storageFull => true,
+    BackgroundLivePhase.queued ||
+    BackgroundLivePhase.connected ||
+    BackgroundLivePhase.idle => false,
+  };
 }
 
 class BackgroundLiveStatus {
@@ -53,9 +67,11 @@ class BackgroundLiveStatus {
 
   bool get isRecording => phase == BackgroundLivePhase.recording;
   bool get isStorageFull => phase == BackgroundLivePhase.storageFull;
+  bool get promotesLiveSurface => phase.promotesLiveSurface;
 
   Map<String, Object?> toMap() => <String, Object?>{
     'phase': phase.wireName,
+    'promoted': promotesLiveSurface,
     'shortLabel': switch (phase) {
       BackgroundLivePhase.recording => 'REC',
       BackgroundLivePhase.watchTransfer => 'WATCH',

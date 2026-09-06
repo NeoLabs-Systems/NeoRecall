@@ -373,6 +373,17 @@ class _RecordScreenState extends State<RecordScreen> {
           widget.controller.preferredDeviceIsOfflineFirst &&
           !widget.controller.preferredDeviceStreamsLive);
 
+  /// Offline-first sync is only useful once the wearable is actually linked
+  /// (or a connect attempt has faulted). A remembered preferred device must
+  /// not paint the card, and live capture must not claim the device is missing.
+  bool get _showOfflineSyncCard =>
+      bluetoothPreferred &&
+      widget.controller.preferredDeviceIsOfflineFirst &&
+      !widget.controller.isRecording &&
+      (widget.controller.deviceConnected ||
+          widget.controller.audioDeviceSessions.state ==
+              DeviceTransportState.faulted);
+
   String? get _stageFootnote {
     if (!_showRecordButton) {
       return 'This device records by itself — there is no live capture. '
@@ -420,7 +431,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   'You are offline. Capture continues locally and queued audio uploads automatically when the connection returns.',
               icon: Icons.cloud_off_rounded,
             ),
-          if (bluetoothPreferred && controller.preferredDeviceIsOfflineFirst)
+          if (_showOfflineSyncCard)
             OfflineDeviceSyncCard(controller: controller),
         ];
 
@@ -735,9 +746,9 @@ class _RecordScreenState extends State<RecordScreen> {
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              controller.preferredDeviceLabel == null
-                  ? 'Connect a supported wearable before starting this source.'
-                  : 'Preferred device: ${controller.preferredDeviceLabel}',
+              connected && controller.preferredDeviceLabel != null
+                  ? controller.preferredDeviceLabel!
+                  : 'Connect a supported wearable before starting this source.',
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
           ),

@@ -160,6 +160,34 @@ void main() {
   );
 
   test(
+    'background reconnect does not raise a connect-failure banner',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final adapter = _SlowAdapter()
+        ..connectError = TimeoutException('background timeout');
+      final registry = AudioDeviceAdapterRegistry()..register(adapter);
+      final sessions = DeviceSessionController(registry: registry);
+      await sessions.bindAccount('acct-1');
+      sessions.preferredDevice = const AudioDeviceDescriptor(
+        adapterId: 'fake',
+        deviceKey: 'dev-1',
+        displayName: 'PKT01',
+        transport: 'bluetooth_le',
+      );
+      sessions.activeAdapter = adapter;
+      final banners = <String>[];
+      final sub = sessions.messages.listen(banners.add);
+
+      expect(await sessions.connectPreferred(), isFalse);
+      await Future<void>.delayed(Duration.zero);
+      expect(banners, isEmpty);
+
+      await sub.cancel();
+      await sessions.dispose();
+    },
+  );
+
+  test(
     'an in-flight failure cannot re-arm Bluetooth after phone selection',
     () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});

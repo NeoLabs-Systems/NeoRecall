@@ -6,8 +6,10 @@ import ActivityKit
 #endif
 
 /// The only iOS renderer for NeoRecall's shared Dart live-status payload.
-/// ActivityKit owns the glanceable ongoing surface; UserNotifications is used
-/// only for the storage-full transition that genuinely needs attention.
+/// ActivityKit owns the glanceable ongoing surface for active work;
+/// UserNotifications is used only for the storage-full transition that
+/// genuinely needs attention. Idle wearable link / reconnect / queued
+/// phases stay off the Live Activity so they do not sit on the lock screen.
 final class LiveStatusCoordinator {
   static let shared = LiveStatusCoordinator()
 
@@ -38,10 +40,10 @@ final class LiveStatusCoordinator {
         issue: payload["issue"] as? String
       )
       Task { @MainActor in
-        if phase == "idle" {
-          await self.endActivities(finalState: state)
-        } else {
+        if Self.isPromoted(payload, phase: phase) {
           await self.upsertActivity(state: state)
+        } else {
+          await self.endActivities()
         }
       }
     }
@@ -96,6 +98,22 @@ final class LiveStatusCoordinator {
     return Date(timeIntervalSince1970: value.doubleValue / 1_000)
   }
 
+  private static func isPromoted(_ payload: [String: Any], phase: String) -> Bool {
+    if let value = payload["promoted"] as? Bool {
+      return value
+    }
+    if let number = payload["promoted"] as? NSNumber {
+      return number.boolValue
+    }
+    switch phase {
+    case "recording", "watchTransfer", "uploading", "transcribing", "finalizing",
+      "storageFull":
+      return true
+    default:
+      return false
+    }
+  }
+
   #if canImport(ActivityKit)
   @available(iOS 16.1, *)
   @MainActor
@@ -122,9 +140,9 @@ final class LiveStatusCoordinator {
 
   @available(iOS 16.1, *)
   @MainActor
-  private func endActivities(finalState: NeoRecallLiveStatusAttributes.ContentState) async {
+  private func endActivities() async {
     for activity in Activity<NeoRecallLiveStatusAttributes>.activities {
-      await activity.end(using: finalState, dismissalPolicy: .immediate)
+      await activity.end(using: nil, dismissalPolicy: .immediate)
     }
   }
   #endif

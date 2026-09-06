@@ -53,6 +53,17 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // opus_codec_android and the Plaud AAR both ship libopus.so. Keep one copy
+    // so assembleRelease can merge native libs. Plaud's liblame.so is 4 KB
+    // aligned; the app jniLibs copy is rebuilt for 16 KB pages.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+            pickFirsts += "**/libopus.so"
+            pickFirsts += "**/liblame.so"
+        }
+    }
 }
 
 flutter {

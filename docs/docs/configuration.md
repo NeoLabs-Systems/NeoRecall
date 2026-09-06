@@ -310,23 +310,30 @@ Both are validated within the product's 1–10 second storage contract.
 `NEORECALL_SPEAKER_DISPLAY_MIN_PREVIEW_MS` controls when a profile is mature
 enough to appear on the Speakers screen and defaults to a full 10 seconds.
 
-## NeoAgent connection
+## NeoAgent and MCP connections
 
 NeoAgent connects through NeoRecall's companion OAuth flow. In NeoAgent, open
 **Integrations**, select **NeoRecall**, and enter this server's base URL. The
 browser then returns to NeoRecall for sign-in and explicit consent.
 
+Claude, ChatGPT (MCP), Cursor, and other MCP clients connect to the same
+read-only tools through Streamable HTTP MCP. In NeoRecall, open **Settings →
+Integrations** and copy the MCP URL (`{origin}/mcp`). Paste that URL into the
+client. It registers itself, then the browser returns to NeoRecall for sign-in
+and the same explicit consent.
+
 The issued access is limited to `search:read`, `memories:read`, and
 `recordings:read`. PKCE is mandatory, refresh tokens rotate on every use, and
-the authorization page shows the exact NeoAgent callback URL. NeoAgent cannot
+the authorization page shows the exact callback URL. Connected apps cannot
 upload audio, change memories, start consolidation, or call NeoRecall Ask.
 
-Companion bootstrap advertises authorize/token endpoints using the host
-NeoAgent used to reach NeoRecall, so a LAN or reverse-proxy hostname works even
-when `NEORECALL_PUBLIC_URL` is still `localhost`. Set `NEORECALL_PUBLIC_URL` to
-the externally reachable HTTPS origin when NeoRecall is behind a reverse proxy
-for other public-facing links. Local HTTP URLs remain suitable when both
-services run on a trusted private host.
+Companion bootstrap and MCP discovery advertise authorize/token/MCP endpoints
+using the host the client used to reach NeoRecall, so a LAN or reverse-proxy
+hostname works even when `NEORECALL_PUBLIC_URL` is still `localhost`. Set
+`NEORECALL_PUBLIC_URL` to the externally reachable HTTPS origin when NeoRecall
+is behind a reverse proxy for other public-facing links. Local HTTP URLs remain
+suitable when both services run on a trusted private host.
 
 NeoAgent's `PUBLIC_URL` must resolve in the browser that completes OAuth; that
-callback path is always `/api/integrations/oauth/callback`.
+callback path is always `/api/integrations/oauth/callback`. MCP clients register
+their own HTTPS redirect URIs through `/oauth/register`.

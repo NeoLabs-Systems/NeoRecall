@@ -5,6 +5,7 @@ const authService = require('../services/auth/auth_service');
 const {
   SCOPES,
   createCompanionClient,
+  registerPublicClient,
   validateAuthorizationRequest,
   createAuthorizationCode,
   exchangeAuthorizationCode,
@@ -14,8 +15,10 @@ const {
   createBrowserGrant,
   authenticateBrowserGrant,
 } = require('../services/auth/oauth_service');
+const {
+  publicBaseUrl, callerBaseUrl, authorizationServerMetadata, protectedResourceMetadata,
+} = require('../services/auth/oauth_urls');
 const { slidingWindow } = require('../middleware/rate_limit');
-const { getConfig } = require('../config');
 
 const router = express.Router();
 const OAUTH_COOKIE = 'neorecall_oauth_session';
@@ -25,22 +28,6 @@ function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
-}
-
-function publicBaseUrl(req) {
-  return String(getConfig().publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-}
-
-function callerBaseUrl(req) {
-  // Prefer the host NeoAgent actually used to reach this server. A mis-set
-  // NEORECALL_PUBLIC_URL of localhost breaks browser OAuth when the companion
-  // connects over a LAN IP or reverse-proxy hostname.
-  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
-  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
-  const host = forwardedHost || String(req.get('host') || '').trim();
-  if (!host) return publicBaseUrl(req);
-  const protocol = forwardedProto || req.protocol || 'http';
-  return `${protocol}://${host}`.replace(/\/+$/, '');
 }
 
 function appendRedirect(url, values) {
@@ -106,9 +93,13 @@ function shell(title, eyebrow, content) {
 
 function renderSignIn(continuePath, error = '', account = '', password = '', requiresTwoFactor = false) {
   if (requiresTwoFactor) {
-    return shell('Two-factor authentication', 'NEOAGENT CONNECTION', `<h1>Two-factor authentication</h1><p>Enter the 6-digit code from your authenticator app, or a recovery code. Spaces and dashes are fine.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in" autocomplete="on"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><input type="hidden" name="account" value="${escapeHtml(account)}"><input type="hidden" name="password" value="${escapeHtml(password)}"><div class="field"><label for="two_factor_code">Authenticator or recovery code</label><input id="two_factor_code" name="two_factor_code" type="text" inputmode="text" autocomplete="one-time-code" maxlength="32" placeholder="123 456" spellcheck="false" autocorrect="off" autocapitalize="none" required autofocus></div><div class="actions"><button class="primary" type="submit">Verify and continue</button></div><div style="margin-top:14px;text-align:center;"><a href="/oauth/sign-in?continue=${encodeURIComponent(continuePath)}" style="color:var(--ink-2);font-size:12px;text-decoration:none;">← Back</a></div></form>`);
+    return shell('Two-factor authentication', 'CONNECTION', `<h1>Two-factor authentication</h1><p>Enter the 6-digit code from your authenticator app, or a recovery code. Spaces and dashes are fine.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in" autocomplete="on"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><input type="hidden" name="account" value="${escapeHtml(account)}"><input type="hidden" name="password" value="${escapeHtml(password)}"><div class="field"><label for="two_factor_code">Authenticator or recovery code</label><input id="two_factor_code" name="two_factor_code" type="text" inputmode="text" autocomplete="one-time-code" maxlength="32" placeholder="123 456" spellcheck="false" autocorrect="off" autocapitalize="none" required autofocus></div><div class="actions"><button class="primary" type="submit">Verify and continue</button></div><div style="margin-top:14px;text-align:center;"><a href="/oauth/sign-in?continue=${encodeURIComponent(continuePath)}" style="color:var(--ink-2);font-size:12px;text-decoration:none;">← Back</a></div></form>`);
   }
-  return shell('Sign in', 'NEOAGENT CONNECTION', `<h1>Sign in to approve access</h1><p>Use your NeoRecall account. Your password is verified by this NeoRecall server and is never sent to NeoAgent. If 2FA is enabled, you will be asked for a code next.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><div class="field"><label for="account">Username or email</label><input id="account" name="account" autocomplete="username" value="${escapeHtml(account)}" required ${!account ? 'autofocus' : ''}></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required ${account ? 'autofocus' : ''}></div><div class="actions"><button class="primary" type="submit">Sign in securely</button></div></form>`);
+  return shell('Sign in', 'CONNECTION', `<h1>Sign in to approve access</h1><p>Use your NeoRecall account. Your password is verified by this NeoRecall server and is never sent to the application requesting access. If 2FA is enabled, you will be asked for a code next.</p>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<form method="post" action="/oauth/sign-in"><input type="hidden" name="continue" value="${escapeHtml(continuePath)}"><div class="field"><label for="account">Username or email</label><input id="account" name="account" autocomplete="username" value="${escapeHtml(account)}" required ${!account ? 'autofocus' : ''}></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required ${account ? 'autofocus' : ''}></div><div class="actions"><button class="primary" type="submit">Sign in securely</button></div></form>`);
+}
+
+function isNeoAgentClient(client) {
+  return String(client?.description || '') === 'companion:neoagent';
 }
 
 function renderConsent(authorize) {
@@ -123,7 +114,15 @@ function renderConsent(authorize) {
     'recordings:read': ['Read transcript evidence', 'Read conversations and transcript evidence; audio is never available.'],
   };
   const scopes = authorize.scopes.map((scope) => `<div class="scope"><i></i><div><b>${escapeHtml(labels[scope]?.[0] || scope)}</b><span>${escapeHtml(labels[scope]?.[1] || scope)}</span></div></div>`).join('');
-  return shell('Authorize NeoAgent', 'EXPLICIT CONSENT', `<h1>Connect NeoAgent?</h1><p>NeoAgent requests read-only access to this account. It cannot record audio, modify memories, or trigger NeoRecall’s LLM.</p><div>${scopes}</div><p>After approval, return credentials only to:</p><div class="redirect">${escapeHtml(authorize.redirectUri)}</div><form method="post" action="/oauth/authorize">${hidden}<div class="actions"><button class="primary" type="submit" name="decision" value="approve">Authorize NeoAgent</button><button class="secondary" type="submit" name="decision" value="deny">Deny</button></div></form>`);
+  const name = String(authorize.client.name || 'this application');
+  const neoagent = isNeoAgentClient(authorize.client);
+  const title = neoagent ? 'Authorize NeoAgent' : `Authorize ${name}`;
+  const heading = neoagent ? 'Connect NeoAgent?' : `Connect ${name}?`;
+  const intro = neoagent
+    ? 'NeoAgent requests read-only access to this account. It cannot record audio, modify memories, or trigger NeoRecall’s LLM.'
+    : `${escapeHtml(name)} requests read-only access to this account. It cannot record audio, modify memories, or trigger NeoRecall’s LLM.`;
+  const approve = neoagent ? 'Authorize NeoAgent' : `Authorize ${name}`;
+  return shell(title, 'EXPLICIT CONSENT', `<h1>${escapeHtml(heading)}</h1><p>${intro}</p><div>${scopes}</div><p>After approval, return credentials only to:</p><div class="redirect">${escapeHtml(authorize.redirectUri)}</div><form method="post" action="/oauth/authorize">${hidden}<div class="actions"><button class="primary" type="submit" name="decision" value="approve">${escapeHtml(approve)}</button><button class="secondary" type="submit" name="decision" value="deny">Deny</button></div></form>`);
 }
 
 router.post('/api/oauth/companion/neoagent/bootstrap', slidingWindow({ windowMs: 15 * 60_000, limit: 80 }), (req, res) => {
@@ -142,13 +141,21 @@ router.post('/api/oauth/companion/neoagent/bootstrap', slidingWindow({ windowMs:
 });
 
 router.get('/.well-known/oauth-authorization-server', (req, res) => {
-  const root = publicBaseUrl(req);
-  res.json({
-    issuer: root, authorization_endpoint: `${root}/oauth/authorize`, token_endpoint: `${root}/oauth/token`,
-    revocation_endpoint: `${root}/oauth/revoke`, userinfo_endpoint: `${root}/oauth/userinfo`,
-    grant_types_supported: ['authorization_code', 'refresh_token'], response_types_supported: ['code'],
-    code_challenge_methods_supported: ['S256'], scopes_supported: SCOPES,
-  });
+  res.json(authorizationServerMetadata(callerBaseUrl(req), SCOPES));
+});
+
+function sendProtectedResource(req, res) {
+  res.json(protectedResourceMetadata(callerBaseUrl(req), SCOPES));
+}
+router.get('/.well-known/oauth-protected-resource', sendProtectedResource);
+router.get('/.well-known/oauth-protected-resource/mcp', sendProtectedResource);
+
+router.post('/oauth/register', slidingWindow({ windowMs: 15 * 60_000, limit: 80 }), (req, res) => {
+  try {
+    return res.status(201).json(registerPublicClient(req.body || {}));
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ error: 'invalid_client_metadata', error_description: error.message });
+  }
 });
 
 router.get('/oauth/sign-in', (req, res) => {

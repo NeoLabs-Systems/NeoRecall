@@ -227,12 +227,15 @@ void main() {
         );
     controller.preferBluetoothCapture = true;
     controller.preferredDeviceLabel = 'Pocket recorder';
+    controller.audioDeviceSessions.state =
+        DeviceTransportState.connectedStandby;
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
     expect(find.text('Pocket recorder records on its own'), findsOneWidget);
     expect(find.text('Start recording'), findsNothing);
+    expect(find.textContaining('Preferred device:'), findsNothing);
 
     final phoneMicrophone = find.text('Phone microphone');
     await tester.ensureVisible(phoneMicrophone);
@@ -260,6 +263,8 @@ void main() {
         );
     controller.preferBluetoothCapture = true;
     controller.preferredDeviceLabel = 'Memoket Gem';
+    controller.audioDeviceSessions.state =
+        DeviceTransportState.connectedStandby;
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
@@ -267,8 +272,42 @@ void main() {
 
     expect(find.text('Start recording'), findsOneWidget);
     expect(find.text('Memoket Gem records on its own'), findsOneWidget);
+    expect(find.textContaining('Preferred device:'), findsNothing);
     expect(
       find.textContaining('Start from the app or the device'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a remembered wearable does not show sync until it is linked', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController(
+      recorder: _IdleRecorder(),
+      audioDeviceRegistry: AudioDeviceAdapterRegistry(),
+    );
+    await controller.audioDeviceSessions.bindAccount('account-1');
+    controller.audioDeviceSessions.preferredDevice =
+        const AudioDeviceDescriptor(
+          adapterId: 'omi_family',
+          deviceKey: 'pocket-1',
+          displayName: 'PKT01_BLUE',
+          transport: 'bluetooth_le',
+          metadata: <String, Object?>{'type': 'heyPocket'},
+        );
+    controller.preferBluetoothCapture = true;
+    controller.preferredDeviceLabel = 'PKT01';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('PKT01_BLUE records on its own'), findsNothing);
+    expect(find.textContaining('Preferred device:'), findsNothing);
+    expect(
+      find.text('Connect a supported wearable before starting this source.'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

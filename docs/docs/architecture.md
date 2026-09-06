@@ -238,10 +238,15 @@ A validation failure records the specific reason it failed, not only a code, so 
 
 Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the configured external language model, with result citations.
 
-## NeoAgent boundary
+## NeoAgent and MCP boundary
 
-NeoAgent is an OAuth client of NeoRecall, not another processing worker. It
-receives seven read-only tools for on-demand local search and evidence access.
+NeoAgent is an OAuth client of NeoRecall, not another processing worker. Remote
+MCP clients (Claude, ChatGPT, Cursor, and any other MCP-capable app) use the
+same authorization server and the same seven read-only tools for on-demand
+local search and evidence access. The tools are `search`, `list_memories`,
+`get_memory`, `list_mini_memories`, `list_daily_summaries`,
+`list_conversations`, and `get_conversation`.
+
 Ingest, settings, memory mutation, consolidation orchestration, and Ask remain
 inside NeoRecall; only the explicitly configured inference endpoints receive
 audio or transcript text. This avoids duplicated memory stores and prevents an

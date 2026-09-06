@@ -5,10 +5,19 @@ import 'main_devices.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'src/settings/integrations_section.dart';
 import 'src/settings/security_section.dart';
 import 'src/settings/settings_navigation.dart';
 
-enum SettingsSection { general, security, recording, memory, speakers, devices }
+enum SettingsSection {
+  general,
+  security,
+  recording,
+  memory,
+  speakers,
+  devices,
+  integrations,
+}
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -184,7 +193,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _savingUploadPolicy ||
                       settings == null ||
                       _customVocabularyError != null ||
-                      selectedSection == SettingsSection.devices
+                      selectedSection == SettingsSection.devices ||
+                      selectedSection == SettingsSection.integrations
                   ? null
                   : save,
               icon: const Icon(Icons.save_outlined, size: 18),
@@ -230,7 +240,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _content() {
-    if (settings == null && selectedSection != SettingsSection.devices) {
+    if (settings == null &&
+        selectedSection != SettingsSection.devices &&
+        selectedSection != SettingsSection.integrations) {
       return const Center(child: CircularProgressIndicator());
     }
     return switch (selectedSection) {
@@ -242,6 +254,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
       SettingsSection.devices => _devicesSettings(),
+      SettingsSection.integrations => IntegrationsSection(
+        controller: widget.controller,
+      ),
     };
   }
 

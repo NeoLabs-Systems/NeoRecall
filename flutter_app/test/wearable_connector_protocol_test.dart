@@ -362,6 +362,27 @@ void main() {
         isTrue,
       );
 
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode('20260905_223100_2.opus'),
+        ],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        buttons
+            .where(
+              (event) => event.first == WearableControlCodes.startRecording,
+            )
+            .length,
+        1,
+        reason: 'a late start ack after stop must not open another take',
+      );
+
       await buttonSub.cancel();
       await audioSub.cancel();
       await connector.dispose();

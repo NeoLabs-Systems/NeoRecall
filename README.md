@@ -49,7 +49,7 @@ Read the [installation guide](docs/docs/installation.md) before exposing the ser
 - **Long recordings remain bounded.** Memories are written as soon as a conversation ends, and a transcript longer than the configured external model context is read in windows and folded back into one memory.
 - **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.
 - **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
-- **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) to search memories and transcript evidence through read-only, token-free retrieval tools.
+- **Native NeoAgent and MCP recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) or paste the MCP URL into Claude, ChatGPT, or Cursor to search memories and transcript evidence through the same read-only retrieval tools.
 
 ## 📚 Documentation
 

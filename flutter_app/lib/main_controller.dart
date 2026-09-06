@@ -48,6 +48,7 @@ part 'src/controller/diagnostics_controller.dart';
 part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
 part 'src/controller/context_controller.dart';
+part 'src/controller/integrations_controller.dart';
 
 enum RecallPage {
   record,
@@ -71,7 +72,8 @@ class NeoRecallController extends ChangeNotifier
         DeviceSyncController,
         DiagnosticsController,
         LibraryController,
-        ContextController {
+        ContextController,
+        IntegrationsController {
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
@@ -217,6 +219,7 @@ class NeoRecallController extends ChangeNotifier
   bool online = true;
   bool consentAccepted = false;
   bool _stoppingRecording = false;
+  bool _startingRecording = false;
   bool _resumingMobileCapture = false;
   bool _switchingMobileSource = false;
   Future<bool>? _widgetPhoneRecordingOperation;
@@ -1281,6 +1284,7 @@ class NeoRecallController extends ChangeNotifier
     await _preferences?.remove('username');
     accountTwoFactor = const <String, dynamic>{};
     securityKeys = const <Map<String, dynamic>>[];
+    integrations = const <Map<String, dynamic>>[];
     notifyListeners();
   }
 
@@ -1508,181 +1512,191 @@ class NeoRecallController extends ChangeNotifier
     if (!consentAccepted) {
       throw StateError('Recording consent must be acknowledged first.');
     }
-    final useBluetooth =
-        bluetooth ?? (!microphone && !systemAudio && preferBluetoothCapture);
-    ExternalAudioCaptureDevice? externalDevice;
-    if (useBluetooth) {
-      final descriptor = audioDeviceSessions.preferredDevice;
-      final adapter =
-          audioDeviceSessions.activeAdapter ??
-          (descriptor == null
-              ? null
-              : audioDeviceRegistry[descriptor.adapterId]);
-      if (descriptor == null || adapter == null) {
-        throw StateError(
-          'Connect a supported Bluetooth device before starting capture.',
-        );
-      }
-      final transportReady =
-          audioDeviceSessions.state == DeviceTransportState.connectedStandby ||
-          audioDeviceSessions.state == DeviceTransportState.recording ||
-          await audioDeviceSessions.connectPreferred();
-      if (!transportReady) {
-        throw StateError(
-          'The Bluetooth device could not be connected. Keep it nearby and try again.',
-        );
-      }
-      // A live capture and an offline drain must never run together (they share
-      // the BLE channel/buffer on several wearables). If a device-storage sync
-      // is in flight, stop it before taking the stream over for live capture.
-      await _stopDeviceStorageSyncForCapture(adapter);
-      externalDevice = ExternalAudioCaptureDevice(
-        adapter: adapter,
-        descriptor: descriptor,
-      );
-      microphone = false;
-      systemAudio = false;
-    }
-    if (isMobileCapturePlatform) {
-      // Mobile never uses desktop system-audio capture.
-      systemAudio = false;
-      if (!useBluetooth) microphone = true;
-    }
-    if (!microphone && !systemAudio && externalDevice == null) {
-      throw StateError('Select at least one capture source.');
-    }
-    error = null;
-    warning = null;
-    notifyListeners();
-    var ledgerStored = false;
+    // Stop must win: a late hardware-start or durable-resume must not reopen
+    // a take the user just finalized. A second start while one is running is
+    // the "Recorder is already active" loop.
+    if (_stoppingRecording || _startingRecording || isRecording) return;
+    _startingRecording = true;
     try {
-      final settings = await _settings();
-      final schedule = RecordingSchedule(
-        enabled: settings['recordingScheduleEnabled'] as bool? ?? false,
-        startMinute: settings['recordingStartMinute'] as int? ?? 0,
-        endMinute: settings['recordingEndMinute'] as int? ?? 0,
-      );
-      if (!schedule.allows(DateTime.now())) {
-        _armRecordingSchedule();
-        throw StateError(
-          'Recording is outside the configured daily recording window.',
-        );
-      }
-      final recordingAccountId = accountId;
-      if (recordingAccountId == null) {
-        throw StateError('Sign in before starting a recording.');
-      }
-      final identity = await _deviceIdentity(recordingAccountId);
-      final deviceId = identity.id;
-      final clientUuid = identity.clientUuid;
-      final now = DateTime.now().toUtc();
-      recordingStartedAt = now;
-      final sessionId = _uuid.v4();
-      final sourceId = _uuid.v4();
-      final requestedKind = microphone && systemAudio
-          ? 'combined'
-          : systemAudio
-          ? 'system'
-          : useBluetooth
-          ? 'wearable'
-          : 'microphone';
-      _activeSession = LocalRecordingDeclaration(
-        id: sessionId,
-        accountId: recordingAccountId,
-        sourceId: sourceId,
-        deviceId: deviceId,
-        deviceClientUuid: clientUuid,
-        deviceName: _deviceName,
-        platform: _platform,
-        startedAt: now,
-        timezone: settings['timezone'] as String? ?? 'UTC',
-        consentAttestedAt: now,
-        sourceKind: requestedKind,
-        channelLayout: microphone && systemAudio
-            ? 'microphone_left_system_right'
-            : 'mono',
-        // This reservation is not eligible for upload. Capture negotiation
-        // replaces it with the actual device sample rate and source layout.
-        synced: true,
-      );
-      _sequence = 0;
-      await store.putSession(_activeSession!);
-      ledgerStored = true;
-      capability = await recorder.start(
-        microphone: microphone,
-        systemAudio: systemAudio,
-        chunkMs:
-            settings['chunkTargetMs'] as int? ??
-            _fallbackSettings['chunkTargetMs']! as int,
-        overlapMs:
-            settings['chunkOverlapMs'] as int? ??
-            _fallbackSettings['chunkOverlapMs']! as int,
-        externalDevice: externalDevice,
-      );
-      warning = capability!.warning;
-      final layout = capability!.systemAudio && capability!.microphone
-          ? 'microphone_left_system_right'
-          : 'mono';
-      _activeSession = LocalRecordingDeclaration(
-        id: sessionId,
-        accountId: recordingAccountId,
-        sourceId: sourceId,
-        deviceId: deviceId,
-        deviceClientUuid: clientUuid,
-        deviceName: _deviceName,
-        platform: _platform,
-        startedAt: now,
-        timezone: settings['timezone'] as String? ?? 'UTC',
-        consentAttestedAt: now,
-        sourceKind: capability!.sourceKind,
-        channelLayout: layout,
-        sampleRate: capability!.sampleRate,
-      );
-      await store.putSession(_activeSession!);
-      await activateRecordingContext(sessionId);
-      if (_supportsDurableMobileResume) {
-        await _preferences!.setString(
-          _mobileCaptureIntentKey(recordingAccountId),
-          capability!.sourceKind == 'wearable' ? 'bluetooth' : 'microphone',
-        );
-      }
-      sync.pump.pump();
-      _armRecordingSchedule();
-    } catch (exception) {
-      error = exception.toString();
-      // Capture never took the device, so release the claim — otherwise a failed
-      // start would silently disable automatic sync for the rest of the session.
-      _deviceClaimedForCapture = false;
-      if (recorder.isRecording) await recorder.stop();
-      await _partialWrite;
-      await Future<void>.delayed(Duration.zero);
-      await _chunkWrite;
-      if (ledgerStored && _activeSession != null) {
-        try {
-          await store.putSession(
-            _activeSession!.copyWith(
-              endedAt: DateTime.now().toUtc(),
-              finalSequence: _sequence - 1,
-              interrupted: true,
-              synced: false,
-            ),
+      final useBluetooth =
+          bluetooth ?? (!microphone && !systemAudio && preferBluetoothCapture);
+      ExternalAudioCaptureDevice? externalDevice;
+      if (useBluetooth) {
+        final descriptor = audioDeviceSessions.preferredDevice;
+        final adapter =
+            audioDeviceSessions.activeAdapter ??
+            (descriptor == null
+                ? null
+                : audioDeviceRegistry[descriptor.adapterId]);
+        if (descriptor == null || adapter == null) {
+          throw StateError(
+            'Connect a supported Bluetooth device before starting capture.',
           );
-          sync.pump.pump();
-        } catch (_) {
-          // Preserve the original capture failure. Startup recovery will close
-          // the already-durable session on the next application launch.
         }
+        final transportReady =
+            audioDeviceSessions.state ==
+                DeviceTransportState.connectedStandby ||
+            audioDeviceSessions.state == DeviceTransportState.recording ||
+            await audioDeviceSessions.connectPreferred();
+        if (!transportReady) {
+          throw StateError(
+            'The Bluetooth device could not be connected. Keep it nearby and try again.',
+          );
+        }
+        // A live capture and an offline drain must never run together (they share
+        // the BLE channel/buffer on several wearables). If a device-storage sync
+        // is in flight, stop it before taking the stream over for live capture.
+        await _stopDeviceStorageSyncForCapture(adapter);
+        externalDevice = ExternalAudioCaptureDevice(
+          adapter: adapter,
+          descriptor: descriptor,
+        );
+        microphone = false;
+        systemAudio = false;
       }
-      _activeSession = null;
-      deactivateRecordingContext();
-      recordingStartedAt = null;
-      audioLevel = 0;
-      if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
-        await (recorder as MobileRecallRecorder).finishBackgroundHost();
+      if (isMobileCapturePlatform) {
+        // Mobile never uses desktop system-audio capture.
+        systemAudio = false;
+        if (!useBluetooth) microphone = true;
       }
-      rethrow;
-    } finally {
+      if (!microphone && !systemAudio && externalDevice == null) {
+        throw StateError('Select at least one capture source.');
+      }
+      error = null;
+      warning = null;
       notifyListeners();
+      var ledgerStored = false;
+      try {
+        final settings = await _settings();
+        final schedule = RecordingSchedule(
+          enabled: settings['recordingScheduleEnabled'] as bool? ?? false,
+          startMinute: settings['recordingStartMinute'] as int? ?? 0,
+          endMinute: settings['recordingEndMinute'] as int? ?? 0,
+        );
+        if (!schedule.allows(DateTime.now())) {
+          _armRecordingSchedule();
+          throw StateError(
+            'Recording is outside the configured daily recording window.',
+          );
+        }
+        final recordingAccountId = accountId;
+        if (recordingAccountId == null) {
+          throw StateError('Sign in before starting a recording.');
+        }
+        final identity = await _deviceIdentity(recordingAccountId);
+        final deviceId = identity.id;
+        final clientUuid = identity.clientUuid;
+        final now = DateTime.now().toUtc();
+        recordingStartedAt = now;
+        final sessionId = _uuid.v4();
+        final sourceId = _uuid.v4();
+        final requestedKind = microphone && systemAudio
+            ? 'combined'
+            : systemAudio
+            ? 'system'
+            : useBluetooth
+            ? 'wearable'
+            : 'microphone';
+        _activeSession = LocalRecordingDeclaration(
+          id: sessionId,
+          accountId: recordingAccountId,
+          sourceId: sourceId,
+          deviceId: deviceId,
+          deviceClientUuid: clientUuid,
+          deviceName: _deviceName,
+          platform: _platform,
+          startedAt: now,
+          timezone: settings['timezone'] as String? ?? 'UTC',
+          consentAttestedAt: now,
+          sourceKind: requestedKind,
+          channelLayout: microphone && systemAudio
+              ? 'microphone_left_system_right'
+              : 'mono',
+          // This reservation is not eligible for upload. Capture negotiation
+          // replaces it with the actual device sample rate and source layout.
+          synced: true,
+        );
+        _sequence = 0;
+        await store.putSession(_activeSession!);
+        ledgerStored = true;
+        capability = await recorder.start(
+          microphone: microphone,
+          systemAudio: systemAudio,
+          chunkMs:
+              settings['chunkTargetMs'] as int? ??
+              _fallbackSettings['chunkTargetMs']! as int,
+          overlapMs:
+              settings['chunkOverlapMs'] as int? ??
+              _fallbackSettings['chunkOverlapMs']! as int,
+          externalDevice: externalDevice,
+        );
+        warning = capability!.warning;
+        final layout = capability!.systemAudio && capability!.microphone
+            ? 'microphone_left_system_right'
+            : 'mono';
+        _activeSession = LocalRecordingDeclaration(
+          id: sessionId,
+          accountId: recordingAccountId,
+          sourceId: sourceId,
+          deviceId: deviceId,
+          deviceClientUuid: clientUuid,
+          deviceName: _deviceName,
+          platform: _platform,
+          startedAt: now,
+          timezone: settings['timezone'] as String? ?? 'UTC',
+          consentAttestedAt: now,
+          sourceKind: capability!.sourceKind,
+          channelLayout: layout,
+          sampleRate: capability!.sampleRate,
+        );
+        await store.putSession(_activeSession!);
+        await activateRecordingContext(sessionId);
+        if (_supportsDurableMobileResume) {
+          await _preferences!.setString(
+            _mobileCaptureIntentKey(recordingAccountId),
+            capability!.sourceKind == 'wearable' ? 'bluetooth' : 'microphone',
+          );
+        }
+        sync.pump.pump();
+        _armRecordingSchedule();
+      } catch (exception) {
+        error = exception.toString();
+        // Capture never took the device, so release the claim — otherwise a failed
+        // start would silently disable automatic sync for the rest of the session.
+        _deviceClaimedForCapture = false;
+        if (recorder.isRecording) await recorder.stop();
+        await _partialWrite;
+        await Future<void>.delayed(Duration.zero);
+        await _chunkWrite;
+        if (ledgerStored && _activeSession != null) {
+          try {
+            await store.putSession(
+              _activeSession!.copyWith(
+                endedAt: DateTime.now().toUtc(),
+                finalSequence: _sequence - 1,
+                interrupted: true,
+                synced: false,
+              ),
+            );
+            sync.pump.pump();
+          } catch (_) {
+            // Preserve the original capture failure. Startup recovery will close
+            // the already-durable session on the next application launch.
+          }
+        }
+        _activeSession = null;
+        deactivateRecordingContext();
+        recordingStartedAt = null;
+        audioLevel = 0;
+        if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
+          await (recorder as MobileRecallRecorder).finishBackgroundHost();
+        }
+        rethrow;
+      } finally {
+        notifyListeners();
+      }
+    } finally {
+      _startingRecording = false;
     }
   }
 
@@ -2055,6 +2069,7 @@ class NeoRecallController extends ChangeNotifier
     if (!preferBluetoothCapture) return false;
     if (isRecording ||
         _stoppingRecording ||
+        _startingRecording ||
         _resumingMobileCapture ||
         _switchingMobileSource) {
       return false;
@@ -2105,7 +2120,9 @@ class NeoRecallController extends ChangeNotifier
     if (ownerAccountId == null ||
         !authenticated ||
         !consentAccepted ||
-        isRecording) {
+        isRecording ||
+        _stoppingRecording ||
+        _startingRecording) {
       return;
     }
     final mode = _preferences?.getString(
@@ -2162,7 +2179,11 @@ class NeoRecallController extends ChangeNotifier
   void _handleDeviceControlEvent(DeviceControlEvent event) {
     switch (event.type) {
       case DeviceControlEventType.startRecording:
-        if (!isRecording && authenticated && consentAccepted) {
+        if (!isRecording &&
+            !_startingRecording &&
+            !_stoppingRecording &&
+            authenticated &&
+            consentAccepted) {
           unawaited(_startFromDeviceControl());
         }
       case DeviceControlEventType.stopRecording:
@@ -2216,7 +2237,10 @@ class NeoRecallController extends ChangeNotifier
         state == DeviceTransportState.connectedStandby ||
         state == DeviceTransportState.recording;
     if (!isRecording) {
-      if (_supportsDurableMobileResume && connected) {
+      if (_supportsDurableMobileResume &&
+          connected &&
+          !_stoppingRecording &&
+          !_startingRecording) {
         unawaited(_resumeMobileCaptureIfRequested());
       }
       return;

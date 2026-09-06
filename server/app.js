@@ -42,6 +42,7 @@ function createApp() {
       vector: isVectorReady(), vectorVersion: expectedVecVersion });
   }));
   app.use(require('./routes/oauth'));
+  app.use(require('./routes/mcp'));
   app.use(['/api/v1', '/admin/api/v1'], slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
   app.use('/api/v1', require('./routes'));
   app.use('/admin/api/v1', require('./routes/admin'));

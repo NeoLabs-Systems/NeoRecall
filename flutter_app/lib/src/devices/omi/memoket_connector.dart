@@ -26,6 +26,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   static const Duration _deleteTimeout = Duration(seconds: 3);
   static const int _downloadAttempts = 3;
   static const Duration _commandGap = Duration(milliseconds: 40);
+  static const Duration _hardwareStartHoldoff = Duration(seconds: 3);
 
   final StreamController<WearableSyncProgress> _progress =
       StreamController<WearableSyncProgress>.broadcast();
@@ -34,6 +35,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   bool _sawControl = false;
   bool _drainCancelled = false;
   bool _deviceLive = false;
+  DateTime? _holdHardwareStartUntil;
   String? _firmware;
   int _lastBattery = -1;
   String? _liveFilename;
@@ -145,9 +147,11 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     // Hardware already started the take — do not send 01 again.
     if (_deviceLive) {
       recording = true;
+      _holdHardwareStart();
       return;
     }
     recording = true;
+    _holdHardwareStart();
     _liveFilename = null;
     final started = Completer<String>();
     _started = started;
@@ -172,6 +176,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Future<void> stopRecording() async {
     if (!recording && !_deviceLive) return;
     recording = false;
+    _holdHardwareStart();
     final needRemoteStop = _deviceLive;
     _deviceLive = false;
     if (needRemoteStop) {
@@ -224,11 +229,12 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         final started = _started;
         if (started != null && !started.isCompleted) {
           started.complete(name ?? '');
-        } else if (!recording) {
+        } else if (!recording && !_holdingHardwareStart) {
           _emitDeviceControl(WearableControlCodes.startRecording);
         }
       case MemoketProtocol.opRecordStop:
         _deviceLive = false;
+        _holdHardwareStart();
         final name = MemoketProtocol.recordingFilename(data);
         if (name != null) _liveFilename = name;
         final stopped = _stopped;
@@ -268,6 +274,14 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     if (buttonEvents.isClosed) return;
     buttonEvents.add(<int>[code]);
   }
+
+  void _holdHardwareStart() {
+    _holdHardwareStartUntil = DateTime.now().add(_hardwareStartHoldoff);
+  }
+
+  bool get _holdingHardwareStart =>
+      _holdHardwareStartUntil != null &&
+      DateTime.now().isBefore(_holdHardwareStartUntil!);
 
   void _handleFileChunk(List<int> data) {
     final buffer = _downloadBuffer;

@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# LAME is fetched only to rebuild the 16 KB-aligned liblame.so
+/android/lame16k/lame-3.100/
+/android/lame16k/lame-3.100.tar.gz
+/android/lame16k/build/

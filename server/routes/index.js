@@ -14,6 +14,7 @@ router.get('/meta', requireAuth, (req, res) => {
     user: req.user,
     capabilities: { localTranscription: false, diarization: false, semanticSearch: true, recordingContext: true,
       displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true,
+      mcp: true,
       gzipAudioUpload: true,
       plaudEmbedded: Boolean(config.plaudClientId && config.plaudClientSecret) },
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,
@@ -51,4 +52,5 @@ router.get('/processing-status', requireAuth, (req, res, next) => {
     .then((value) => res.json(value)).catch(next);
 });
 router.use('/sources', require('./sources'));
+router.use('/integrations', require('./integrations'));
 module.exports = router;

@@ -13,6 +13,7 @@ const CODE_TTL_SECONDS = 10 * 60;
 function statusError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
+  error.status = statusCode;
   return error;
 }
 
@@ -58,20 +59,26 @@ function isPrivateOrLoopbackHost(hostname) {
     value.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(value);
 }
 
-function createCompanionClient({ redirectUri, appName }) {
+function canonicalizeRedirectUri(value, { requireNeoAgentPath = false } = {}) {
   let parsed;
   try {
-    parsed = new URL(String(redirectUri || '').trim());
+    parsed = new URL(String(value || '').trim());
   } catch {
-    throw statusError('redirectUri must be a valid HTTP or HTTPS URL.');
+    throw statusError('redirect_uri must be a valid HTTP or HTTPS URL.');
   }
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.hash || parsed.search ||
-      (parsed.protocol === 'http:' && !isPrivateOrLoopbackHost(parsed.hostname)) ||
-      parsed.pathname !== '/api/integrations/oauth/callback') {
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.hash
+      || (parsed.protocol === 'http:' && !isPrivateOrLoopbackHost(parsed.hostname))) {
+    throw statusError('redirect_uri must be HTTPS, or HTTP on a private/loopback address.');
+  }
+  if (requireNeoAgentPath && (parsed.search || parsed.pathname !== '/api/integrations/oauth/callback')) {
     throw statusError('redirectUri must be an HTTPS NeoAgent callback, or HTTP on a private/loopback address.');
   }
+  return parsed.toString();
+}
+
+function createCompanionClient({ redirectUri, appName }) {
   if (appName && String(appName).trim() !== 'NeoAgent') throw statusError('Only the NeoAgent companion is supported.');
-  const canonicalRedirect = parsed.toString();
+  const canonicalRedirect = canonicalizeRedirectUri(redirectUri, { requireNeoAgentPath: true });
   const existing = getDatabase().prepare(`SELECT * FROM oauth_clients
     WHERE description='companion:neoagent' AND client_type='public' AND revoked_at IS NULL`).all()
     .find((client) => parseJsonArray(client.redirect_uris_json).length === 1 &&
@@ -83,6 +90,72 @@ function createCompanionClient({ redirectUri, appName }) {
     (id,name,description,client_type,redirect_uris_json,scopes_json) VALUES (?,?,?,?,?,?)`)
     .run(id, 'NeoAgent', 'companion:neoagent', 'public', JSON.stringify([canonicalRedirect]), JSON.stringify(SCOPES));
   return { client: activeClient(id), created: true };
+}
+
+function sanitizeClientName(value) {
+  const name = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
+  return name || 'MCP client';
+}
+
+function registerPublicClient(body = {}) {
+  const method = String(body.token_endpoint_auth_method || 'none').trim();
+  if (method !== 'none') throw statusError('Only public clients (token_endpoint_auth_method=none) are supported.');
+  const grantTypes = Array.isArray(body.grant_types) ? body.grant_types.map(String) : ['authorization_code', 'refresh_token'];
+  if (grantTypes.some((grant) => !['authorization_code', 'refresh_token'].includes(grant))) {
+    throw statusError('Unsupported grant_type.');
+  }
+  const rawRedirects = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
+  if (!rawRedirects.length || rawRedirects.length > 8) throw statusError('redirect_uris must contain 1–8 URIs.');
+  const redirectUris = [...new Set(rawRedirects.map((uri) => canonicalizeRedirectUri(uri)))];
+  const scopes = parseScopes(body.scope);
+  const name = sanitizeClientName(body.client_name);
+  const id = `nrc_${randomToken(18)}`;
+  getDatabase().prepare(`INSERT INTO oauth_clients
+    (id,name,description,client_type,redirect_uris_json,scopes_json) VALUES (?,?,?,?,?,?)`)
+    .run(id, name, 'mcp:dcr', 'public', JSON.stringify(redirectUris), JSON.stringify(scopes));
+  const client = activeClient(id);
+  return {
+    client_id: client.id,
+    client_id_issued_at: Math.floor(Date.parse(client.created_at) / 1000),
+    client_name: client.name,
+    redirect_uris: redirectUris,
+    token_endpoint_auth_method: 'none',
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    scope: scopes.join(' '),
+  };
+}
+
+function listUserIntegrations(userId) {
+  const now = new Date().toISOString();
+  return getDatabase().prepare(`SELECT c.id, c.name, c.description, c.created_at,
+      (SELECT MAX(t.last_used_at) FROM oauth_access_tokens t
+        WHERE t.client_id=c.id AND t.user_id=?) AS last_used_at
+    FROM oauth_clients c
+    WHERE c.revoked_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM oauth_access_tokens t
+          WHERE t.client_id=c.id AND t.user_id=? AND t.revoked_at IS NULL AND t.expires_at>?)
+        OR EXISTS (SELECT 1 FROM oauth_refresh_tokens r
+          WHERE r.client_id=c.id AND r.user_id=? AND r.revoked_at IS NULL AND r.expires_at>?)
+      )
+    ORDER BY c.name COLLATE NOCASE, c.created_at`).all(userId, userId, now, userId, now);
+}
+
+function revokeUserClient(userId, clientId) {
+  const client = getDatabase().prepare('SELECT id FROM oauth_clients WHERE id=? AND revoked_at IS NULL')
+    .get(String(clientId || '').trim());
+  if (!client) throw statusError('OAuth client not found.', 404);
+  const result = getDatabase().transaction(() => {
+    const access = getDatabase().prepare(`UPDATE oauth_access_tokens
+      SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE client_id=? AND user_id=? AND revoked_at IS NULL`).run(client.id, userId);
+    const refresh = getDatabase().prepare(`UPDATE oauth_refresh_tokens
+      SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE client_id=? AND user_id=? AND revoked_at IS NULL`).run(client.id, userId);
+    return access.changes + refresh.changes;
+  })();
+  if (!result) throw statusError('OAuth client not found.', 404);
 }
 
 function validateAuthorizationRequest(params = {}) {
@@ -215,7 +288,8 @@ function authenticateAccessToken(token) {
 }
 
 module.exports = {
-  SCOPES, createCompanionClient, validateAuthorizationRequest, createAuthorizationCode,
+  SCOPES, createCompanionClient, registerPublicClient, listUserIntegrations, revokeUserClient,
+  validateAuthorizationRequest, createAuthorizationCode,
   createBrowserGrant, authenticateBrowserGrant,
   exchangeAuthorizationCode, refreshTokenSet, revokeToken, authenticateAccessToken,
 };
