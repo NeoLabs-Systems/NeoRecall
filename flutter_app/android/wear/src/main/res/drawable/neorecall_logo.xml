@@ -1,18 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- NeoRecall mark, flattened: VectorDrawable has no gradients or dash arrays. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="44dp"
     android:height="44dp"
-    android:viewportWidth="64"
-    android:viewportHeight="64">
+    android:viewportWidth="100"
+    android:viewportHeight="100">
     <path
-        android:fillColor="#151922"
-        android:pathData="M16,0 H48 A16,16 0,0 1,64 16 V48 A16,16 0,0 1,48 64 H16 A16,16 0,0 1,0 48 V16 A16,16 0,0 1,16 0 Z" />
+        android:fillColor="#2A5740"
+        android:pathData="M22.5,0 H77.5 A22.5,22.5 0 0 1 100,22.5 V77.5 A22.5,22.5 0 0 1 77.5,100 H22.5 A22.5,22.5 0 0 1 0,77.5 V22.5 A22.5,22.5 0 0 1 22.5,0 Z" />
     <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M32,18 A14,14 0,1 1,31.99 18"
-        android:strokeColor="#E3B655"
-        android:strokeWidth="4" />
+        android:pathData="M67.78,24.61 A31,31 0 1 1 32.22,24.61"
+        android:strokeColor="#EFE7D6"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round" />
     <path
-        android:fillColor="#D98AA6"
-        android:pathData="M32,27 A5,5 0,1 1,31.99 27" />
+        android:fillColor="#D3A85F"
+        android:pathData="M50,12.8 A6.2,6.2 0 1 1 49.99,12.8 Z" />
+    <path
+        android:fillColor="#EEE3CC"
+        android:pathData="M41,38 A9,9 0 0 1 59,38 V52 A9,9 0 0 1 41,52 Z" />
+    <path
+        android:pathData="M34.5,51 A15.5,15.5 0 0 0 65.5,51"
+        android:strokeColor="#EFE7D6"
+        android:strokeWidth="5.2"
+        android:strokeLineCap="round" />
 </vector>

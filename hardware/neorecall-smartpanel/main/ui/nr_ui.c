@@ -67,7 +67,11 @@ static lv_obj_t *mk_card(lv_obj_t *parent, int w, int h)
     return c;
 }
 
-// A small NeoRecall mark: gold ring around a rose dot.
+// A small NeoRecall mark: the brand ring around a cream core.
+//
+// The full mark has a microphone and a gold record light inside the ring; at
+// 26px, built from LVGL primitives, only the ring and the core survive — so
+// this is the closest honest reduction rather than a redrawing of it.
 //
 // Even outer/content/dot sizes keep the center on whole pixels. An odd-sized
 // 7px dot inside a 20px content box lands at +6.5 and snaps one pixel off.
@@ -81,7 +85,7 @@ static void mk_logo(lv_obj_t *parent, int x, int y)
     lv_obj_set_size(ring, outer, outer);
     lv_obj_set_pos(ring, x, y);
     lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ring, lv_color_hex(0x151922), 0);
+    lv_obj_set_style_bg_color(ring, lv_color_hex(0x2A5740), 0);
     lv_obj_set_style_border_color(ring, NRC_GOLD, 0);
     lv_obj_set_style_border_width(ring, border, 0);
     lv_obj_set_style_pad_all(ring, 0, 0);
@@ -92,7 +96,7 @@ static void mk_logo(lv_obj_t *parent, int x, int y)
     lv_obj_t *dot = lv_obj_create(ring);
     lv_obj_set_size(dot, dot_d, dot_d);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot, NRC_ROSE, 0);
+    lv_obj_set_style_bg_color(dot, lv_color_hex(0xEEE3CC), 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(dot, 0, 0);
     lv_obj_set_style_pad_all(dot, 0, 0);
