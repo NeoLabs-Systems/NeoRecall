@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:neorecall/main_record.dart';
+import 'package:neorecall/src/record/sync_cards.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 
 /// A full Omi ring takes minutes to transfer — a live drain measured 30 249

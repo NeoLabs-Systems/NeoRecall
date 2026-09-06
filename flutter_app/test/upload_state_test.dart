@@ -57,6 +57,7 @@ class _Store implements ChunkStore {
   _Store(this.chunk);
   AudioChunk chunk;
   bool audioDeleted = false;
+  bool purged = false;
   final List<String> requestedAccounts = <String>[];
   List<LocalRecordingDeclaration> sessions = <LocalRecordingDeclaration>[];
   @override
@@ -111,6 +112,11 @@ class _Store implements ChunkStore {
   Future<int> pendingBytes(String accountId) async => 0;
   @override
   Future<void> close() async {}
+  @override
+  Future<void> purgeAll() async {
+    purged = true;
+    sessions = <LocalRecordingDeclaration>[];
+  }
 }
 
 class _QueueStore implements ChunkStore {
@@ -175,6 +181,8 @@ class _QueueStore implements ChunkStore {
 
   @override
   Future<void> close() async {}
+  @override
+  Future<void> purgeAll() async => chunks.clear();
 }
 
 AudioChunk _chunk({

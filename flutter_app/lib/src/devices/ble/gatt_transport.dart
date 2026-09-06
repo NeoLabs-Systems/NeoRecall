@@ -280,9 +280,9 @@ class UniversalGattTransport implements GattTransport {
 
   @override
   Future<List<String>> discoverServices(String deviceId) async =>
-      (await UniversalBle.discoverServices(deviceId))
-          .map((service) => service.uuid.toLowerCase())
-          .toList(growable: false);
+      (await UniversalBle.discoverServices(
+        deviceId,
+      )).map((service) => service.uuid.toLowerCase()).toList(growable: false);
 
   @override
   Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(

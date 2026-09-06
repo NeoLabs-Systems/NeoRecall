@@ -83,6 +83,7 @@ class MobileRecallRecorder implements RecallRecorder {
     _subs.add(
       devices.linkIntents.listen((_) => unawaited(applyBackgroundHolds())),
     );
+    _subs.add(devices.states.listen((_) => unawaited(applyBackgroundHolds())));
     _subs.add(
       background.events.listen((event) {
         final message = event.message;
@@ -123,6 +124,7 @@ class MobileRecallRecorder implements RecallRecorder {
       BackgroundRuntimeRequest(
         holds: holds,
         deviceLabel: devices.preferredDevice?.displayName,
+        deviceConnected: devices.isConnected,
       ),
     );
   }

@@ -26,9 +26,6 @@ class SourcePlatformCopy {
 enum SourceCategory {
   /// Sources that capture audio while a call is active.
   liveCapture,
-
-  /// Wearable / import accounts (PLAUD).
-  import,
 }
 
 const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
@@ -40,16 +37,6 @@ const List<SourcePlatformCopy> kStaticIntegrations = <SourcePlatformCopy>[
         'Joins voice channels as your bot and records when people you list are present.',
     auth: 'manual',
     category: SourceCategory.liveCapture,
-    connectLabel: 'Setup',
-  ),
-  SourcePlatformCopy(
-    id: 'plaud',
-    name: 'PLAUD',
-    icon: Icons.cloud_sync_outlined,
-    description:
-        'Import recordings from your PLAUD wearable via your PLAUD account.',
-    auth: 'manual',
-    category: SourceCategory.import,
     connectLabel: 'Setup',
   ),
 ];

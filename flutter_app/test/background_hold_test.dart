@@ -18,6 +18,7 @@ void main() {
 
     expect(status.toMap(), <String, Object?>{
       'phase': 'recording',
+      'promoted': true,
       'shortLabel': 'REC',
       'title': 'Recording from Phone microphone',
       'detail': 'Recording safely',
@@ -111,10 +112,19 @@ void main() {
     const link = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{BackgroundHold.wearableLink},
       deviceLabel: 'HeyPocket',
+      deviceConnected: true,
     );
     expect(link.notificationTitle, 'NeoRecall stays connected');
     expect(link.notificationText, contains('HeyPocket'));
     expect(link.notificationText, contains('sync'));
+
+    const reconnecting = BackgroundRuntimeRequest(
+      holds: <BackgroundHold>{BackgroundHold.wearableLink},
+      deviceLabel: 'PK01_BLUE',
+    );
+    expect(reconnecting.notificationTitle, 'NeoRecall is reconnecting');
+    expect(reconnecting.notificationText, 'Waiting for PK01_BLUE to reconnect');
+    expect(reconnecting.notificationText, isNot(contains('stays linked')));
 
     const wearable = BackgroundRuntimeRequest(
       holds: <BackgroundHold>{BackgroundHold.wearableCapture},
@@ -148,6 +158,22 @@ void main() {
       holds: <BackgroundHold>{BackgroundHold.wearableLink},
     );
     expect(unnamed.notificationText, isNot(contains('null')));
+  });
+
+  test('idle wearable and queued work stay off the live surface', () {
+    expect(BackgroundLivePhase.connected.promotesLiveSurface, isFalse);
+    expect(BackgroundLivePhase.idle.promotesLiveSurface, isFalse);
+    expect(BackgroundLivePhase.queued.promotesLiveSurface, isFalse);
+    expect(BackgroundLivePhase.recording.promotesLiveSurface, isTrue);
+    expect(BackgroundLivePhase.uploading.promotesLiveSurface, isTrue);
+    expect(
+      const BackgroundLiveStatus(
+        phase: BackgroundLivePhase.connected,
+        title: 'NeoRecall stays connected',
+        detail: 'Waiting for HeyPocket to reconnect',
+      ).toMap()['promoted'],
+      isFalse,
+    );
   });
 
   test('platform state parses holds and ignores unknown identifiers', () {

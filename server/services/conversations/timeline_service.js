@@ -52,7 +52,7 @@ function segmentsFor(userId, conversationId) {
   return readSegments(userId, conversationId, PREVIEW_SEGMENTS);
 }
 
-/// Everything said in one moment, for a reader who opened it.
+// Everything said in one moment, for a reader who opened it.
 function segments(userId, conversationId) {
   const { segments: rows, segmentCount } = readSegments(userId, conversationId, MAX_SEGMENTS_PER_MOMENT);
   if (conversationId !== PENDING_ID) {
@@ -63,11 +63,11 @@ function segments(userId, conversationId) {
   return { segments: rows, segmentCount, truncated: segmentCount > rows.length };
 }
 
-/// Speech that has been transcribed but not yet grouped into a conversation.
-///
-/// This is what was recorded moments ago. It belongs at the top of the first
-/// page: leaving it out would mean the newest thing someone said is the one
-/// thing the timeline cannot show.
+// Speech that has been transcribed but not yet grouped into a conversation.
+//
+// This is what was recorded moments ago. It belongs at the top of the first
+// page: leaving it out would mean the newest thing someone said is the one
+// thing the timeline cannot show.
 function pendingMoment(userId) {
   const { segments: rows, segmentCount } = readSegments(userId, PENDING_ID, PREVIEW_SEGMENTS);
   if (!rows.length) return null;

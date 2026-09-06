@@ -78,7 +78,18 @@ test('idempotent upload becomes terminal only after transcript commit and audio 
     insertSearch.run(userId, 'mini_memory', String(miniId), null, 'A project exists.', segment.started_at, 4, crypto.randomUUID());
     insertSearch.run(userId, 'daily_summary', summaryId, '2026-07-13', 'A project was discussed.', segment.started_at, 5, crypto.randomUUID());
   })();
+  const contextId = crypto.randomUUID();
+  const contextPath = path.join(process.env.NEORECALL_HOME, `${contextId}.txt`);
+  const contextBytes = Buffer.from('Attached recording context');
+  fs.writeFileSync(contextPath, contextBytes);
+  db.prepare(`INSERT INTO recording_context_items
+    (id,user_id,session_id,kind,captured_offset_ms,captured_at,original_name,content_type,byte_size,sha256,original_path,analysis_state)
+    VALUES (?,?,?,'document',0,?,'context.txt','text/plain',?,?,?,'pending')`)
+    .run(contextId, userId, sessionId, segment.started_at, contextBytes.length,
+      crypto.createHash('sha256').update(contextBytes).digest('hex'), contextPath);
   await request(app).delete(`/api/v1/recordings/${sessionId}`).set(auth).expect(204);
+  assert.equal(fs.existsSync(contextPath), false);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM recording_context_items WHERE id=?').get(contextId).count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM recording_sessions WHERE id=?').get(sessionId).count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM memories WHERE user_id=?').get(userId).count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM mini_memories WHERE user_id=?').get(userId).count, 0);

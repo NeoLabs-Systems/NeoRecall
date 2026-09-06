@@ -99,14 +99,14 @@ async function complete(userId, id) {
   return get(userId, id);
 }
 
-/// Imports a complete audio file that already lives on this server's disk.
-///
-/// Server-side sources (cloud integrations) receive whole recordings rather than
-/// the live chunk stream the capture pipeline expects, so they reuse the very
-/// same durable import path a user's manual upload takes: declare -> parts ->
-/// complete -> process_import job. Passing a stable [importId] makes the call
-/// idempotent — re-polling a source that already imported a recording resolves
-/// to the existing import instead of creating a duplicate.
+// Imports a complete audio file that already lives on this server's disk.
+//
+// Server-side sources (cloud integrations) receive whole recordings rather than
+// the live chunk stream the capture pipeline expects, so they reuse the very
+// same durable import path a user's manual upload takes: declare -> parts ->
+// complete -> process_import job. Passing a stable [importId] makes the call
+// idempotent — re-polling a source that already imported a recording resolves
+// to the existing import instead of creating a duplicate.
 async function importLocalFile(userId, filename, input) {
   const stats = fs.statSync(filename);
   const digest = await shaFile(filename);

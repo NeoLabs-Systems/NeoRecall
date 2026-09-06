@@ -1,13 +1,27 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_devices.dart';
+import 'main_provider_setup.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'src/settings/integrations_section.dart';
+import 'src/settings/security_section.dart';
+import 'src/settings/settings_navigation.dart';
+import 'src/install/admin_key_store.dart';
+import 'src/install/admin_provider_client.dart';
 
-enum SettingsSection { general, security, recording, memory, speakers, devices }
+enum SettingsSection {
+  general,
+  security,
+  recording,
+  memory,
+  speakers,
+  devices,
+  services,
+  integrations,
+}
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -26,8 +40,40 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? settings;
   final timezone = TextEditingController();
+  final customVocabulary = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
   bool _savingUploadPolicy = false;
+  int _loadedContextRetentionDays = 7;
+  AdminProviderClient? _adminClient;
+
+  List<String> get _customVocabularyTerms {
+    final unique = <String, String>{};
+    for (final term
+        in customVocabulary.text
+            .split('\n')
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty)) {
+      unique.putIfAbsent(term.toLowerCase(), () => term);
+    }
+    return unique.values.toList();
+  }
+
+  String? get _customVocabularyError {
+    final current = settings;
+    if (current == null) return null;
+    final maximumTerms = current['customVocabularyMaxTerms'] as int? ?? 100;
+    final maximumLength =
+        current['customVocabularyMaxTermLength'] as int? ?? 120;
+    if (_customVocabularyTerms.length > maximumTerms) {
+      return 'Remove ${_customVocabularyTerms.length - maximumTerms} terms to save.';
+    }
+    if (_customVocabularyTerms.any(
+      (term) => term.runes.length > maximumLength,
+    )) {
+      return 'Each term must be $maximumLength characters or fewer.';
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -35,6 +81,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     widget.controller.loadSettings().then((value) {
       if (!mounted) return;
       timezone.text = value['timezone'] as String? ?? 'UTC';
+      customVocabulary.text =
+          (value['customVocabulary'] as List<dynamic>? ?? const <dynamic>[])
+              .map((term) => term.toString())
+              .join('\n');
+      _loadedContextRetentionDays =
+          value['contextOriginalRetentionDays'] as int? ?? 7;
       setState(() => settings = value);
     });
     // fetchTwoFactorStatus flips a flag and notifies synchronously; deferring to
@@ -50,12 +102,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     timezone.dispose();
+    customVocabulary.dispose();
+    _adminClient?.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
     final current = settings;
-    if (current == null) return;
+    if (current == null || _customVocabularyError != null) return;
+    final retention = current['contextOriginalRetentionDays'] as int? ?? 7;
+    if (retention < _loadedContextRetentionDays) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Shorten original-file retention?'),
+          content: Text(
+            'Original context files older than $retention days will be permanently deleted during the next cleanup. Extracted text and AI descriptions remain.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Shorten retention'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     await widget.controller.updateSettings(<String, dynamic>{
       'consolidationIntervalMs': current['consolidationIntervalMs'],
       'timezone': current['timezone'],
@@ -67,7 +144,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'recordingScheduleEnabled': current['recordingScheduleEnabled'],
       'recordingStartMinute': current['recordingStartMinute'],
       'recordingEndMinute': current['recordingEndMinute'],
+      'customVocabulary': _customVocabularyTerms,
+      'vocabularyCorrectionEnabled':
+          current['vocabularyCorrectionEnabled'] as bool? ?? true,
+      'contextOriginalRetentionDays': retention,
     });
+    _loadedContextRetentionDays = retention;
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
@@ -101,22 +183,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.rail;
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < AppBreakpoints.rail;
+    // The same gutter every other page uses. Settings had its own 28, which is
+    // why it never quite lined up with the rest of the app.
+    final gutter = width < AppBreakpoints.mobile
+        ? AppSpacing.lg - 4
+        : AppSpacing.lg;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+      padding: EdgeInsets.fromLTRB(
+        gutter,
+        compact ? 20 : 28,
+        gutter,
+        0,
+      ),
       child: Column(
         children: <Widget>[
           ScreenHeader(
-            eyebrow: 'SETTINGS',
             title: 'Settings',
             description:
-                'Recording, memory, speakers, and capture devices in one place.',
+                'Capture behaviour, memory, and account security in one place.',
             trailing: FilledButton.icon(
               onPressed:
                   widget.controller.loading ||
                       _savingUploadPolicy ||
                       settings == null ||
-                      selectedSection == SettingsSection.devices
+                      _customVocabularyError != null ||
+                      selectedSection == SettingsSection.devices ||
+                      selectedSection == SettingsSection.services ||
+                      selectedSection == SettingsSection.integrations
                   ? null
                   : save,
               icon: const Icon(Icons.save_outlined, size: 18),
@@ -127,12 +222,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: compact
                 ? Column(
                     children: <Widget>[
-                      _SettingsNavigation(
+                      SettingsNavigation(
                         selected: selectedSection,
                         compact: true,
                         onSelected: _select,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: AppSpacing.md + 2),
                       Expanded(child: _content()),
                     ],
                   )
@@ -141,14 +236,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: <Widget>[
                       SizedBox(
                         width: 240,
-                        child: _SettingsNavigation(
+                        child: SettingsNavigation(
                           selected: selectedSection,
                           compact: false,
                           onSelected: _select,
                         ),
                       ),
-                      const SizedBox(width: 24),
-                      Expanded(child: _content()),
+                      const SizedBox(width: AppSpacing.lg),
+                      // Capped, not stretched: a settings row spanning a
+                      // 2000px window is unreadable.
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 720),
+                            child: _content(),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
           ),
@@ -162,33 +267,155 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _content() {
-    if (settings == null && selectedSection != SettingsSection.devices) {
+    if (settings == null &&
+        selectedSection != SettingsSection.devices &&
+        selectedSection != SettingsSection.services &&
+        selectedSection != SettingsSection.integrations) {
       return const Center(child: CircularProgressIndicator());
     }
     return switch (selectedSection) {
       SettingsSection.general => _generalSettings(),
-      SettingsSection.security => _securitySettings(),
+      SettingsSection.security => SecuritySection(
+        controller: widget.controller,
+      ),
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
-      SettingsSection.devices => DevicesPanel(controller: widget.controller),
+      SettingsSection.devices => _devicesSettings(),
+      SettingsSection.services => _servicesSettings(),
+      SettingsSection.integrations => IntegrationsSection(
+        controller: widget.controller,
+      ),
     };
   }
 
+  Widget _devicesSettings() {
+    final palette = neoRecallPaletteOf(context);
+    return _sectionList(<Widget>[
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Signed-in devices',
+                  style: TextStyle(
+                    color: palette.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Review access or revoke an old client. Set up, connect, and control capture hardware from Record.',
+                  style: TextStyle(
+                    color: palette.textMuted,
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          TextButton.icon(
+            onPressed: () => widget.controller.selectPage(RecallPage.record),
+            icon: const Icon(Icons.mic_none_rounded, size: 18),
+            label: const Text('Open Record'),
+          ),
+        ],
+      ),
+      const SizedBox(height: AppSpacing.md),
+      DevicesPanel(controller: widget.controller, scrollable: false),
+    ]);
+  }
+
+  /// One settings pane. Sections are spaced by this list rather than by each
+  /// section remembering to add a gap after itself — four cards that each
+  /// forgot were what made the recording pane read as one long slab.
+  /// One client per server and key: rebuilds must not leak a new HTTP client on
+  /// every frame.
+  AdminProviderClient _adminClientFor(String key) {
+    final existing = _adminClient;
+    if (existing != null &&
+        existing.apiKey == key &&
+        existing.backendUrl ==
+            widget.controller.backendUrl.replaceFirst(RegExp(r'/$'), '')) {
+      return existing;
+    }
+    existing?.dispose();
+    final client = AdminProviderClient(
+      backendUrl: widget.controller.backendUrl,
+      apiKey: key,
+    );
+    _adminClient = client;
+    return client;
+  }
+
+  /// Transcription and memory-writing services, configured through the admin
+  /// API with the key stored when this app installed the server. Servers this
+  /// app did not install have no stored key, and say so rather than showing an
+  /// empty form.
+  Widget _servicesSettings() {
+    final palette = neoRecallPaletteOf(context);
+    return _sectionList(<Widget>[
+      FutureBuilder<String?>(
+        future: const AdminKeyStore().read(widget.controller.backendUrl),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final key = snapshot.data;
+          if (key == null) {
+            return InlineMessage(
+              message:
+                  'These services are set on the server itself. This app has no '
+                  'administrator key for ${widget.controller.backendUrl}, so ask '
+                  'whoever runs that server to configure transcription and '
+                  'memory writing there.',
+              icon: Icons.info_outline,
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Services',
+                style: TextStyle(
+                  color: palette.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              ProviderSetupPanel(client: _adminClientFor(key)),
+            ],
+          );
+        },
+      ),
+    ]);
+  }
+
   Widget _sectionList(List<Widget> children) {
-    return ListView(
-      padding: const EdgeInsets.only(right: 2, bottom: 32),
-      children: <Widget>[..._statusMessages(), ...children],
+    final blocks = <Widget>[..._statusMessages(), ...children];
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+      itemCount: blocks.length,
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm + 2),
+      itemBuilder: (context, index) => blocks[index],
     );
   }
 
   List<Widget> _statusMessages() => <Widget>[
     // Transient notices now render in the app-wide status bar (see main_shell),
     // so they are not duplicated here; errors stay inline with the settings form.
-    if (widget.controller.error != null) ...<Widget>[
+    if (widget.controller.error != null)
       InlineMessage(message: widget.controller.error!, error: true),
-      const SizedBox(height: 14),
-    ],
   ];
 
   Widget _generalSettings() {
@@ -225,404 +452,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ]);
-  }
-
-  Widget _securitySettings() {
-    final palette = neoRecallPaletteOf(context);
-    final ctrl = widget.controller;
-    final tfStatus = ctrl.accountTwoFactor;
-    final isEnabled = tfStatus['enabled'] == true;
-    final recoveryCodesRemaining =
-        tfStatus['recoveryCodesRemaining'] as int? ?? 0;
-
-    return _sectionList(<Widget>[
-      SectionCard(
-        eyebrow: 'SECURITY',
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Two-factor authentication',
-              style: TextStyle(
-                color: palette.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Protect your account with an authenticator app.',
-              style: TextStyle(color: palette.textSecondary, height: 1.45),
-            ),
-            const SizedBox(height: 16),
-            if (ctrl.isConfiguringTwoFactor)
-              const Center(child: CircularProgressIndicator())
-            else if (isEnabled) ...<Widget>[
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: palette.accent, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    '2FA is enabled ($recoveryCodesRemaining recovery codes remaining)',
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  OutlinedButton(
-                    onPressed: () => _disableTwoFactor(ctrl),
-                    child: const Text('Disable 2FA'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () => _regenerateRecoveryCodes(ctrl),
-                    child: const Text('Regenerate codes'),
-                  ),
-                ],
-              ),
-            ] else ...<Widget>[
-              Row(
-                children: [
-                  const Icon(
-                    Icons.warning_amber_rounded,
-                    color: Colors.amber,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '2FA is not enabled',
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => _setupTwoFactor(ctrl),
-                child: const Text('Enable 2FA'),
-              ),
-            ],
-          ],
-        ),
-      ),
-      SectionCard(
-        eyebrow: 'SECURITY KEYS',
-        child: _securityKeysCard(palette, ctrl),
-      ),
-    ]);
-  }
-
-  Widget _securityKeysCard(NeoRecallPalette palette, NeoRecallController ctrl) {
-    final keys = ctrl.securityKeys;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          'Security keys',
-          style: TextStyle(
-            color: palette.textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Sign in with a hardware key or passkey instead of your password. A key that asks for a PIN or a fingerprint also replaces your two-factor code.',
-          style: TextStyle(color: palette.textSecondary, height: 1.45),
-        ),
-        const SizedBox(height: 16),
-        if (keys.isEmpty)
-          Text(
-            'No security keys registered.',
-            style: TextStyle(color: palette.textSecondary),
-          )
-        else
-          ...keys.map((key) => _securityKeyRow(palette, ctrl, key)),
-        const SizedBox(height: 16),
-        // Keys registered elsewhere stay manageable here; only adding one needs
-        // an authenticator this device can actually talk to.
-        if (ctrl.supportsSecurityKeys)
-          FilledButton.icon(
-            onPressed: ctrl.loading ? null : () => _addSecurityKey(ctrl),
-            icon: const Icon(Icons.key_rounded),
-            label: const Text('Add security key'),
-          )
-        else
-          Text(
-            'This device cannot register security keys. Open NeoRecall in a browser over HTTPS to add one.',
-            style: TextStyle(color: palette.textSecondary, height: 1.45),
-          ),
-      ],
-    );
-  }
-
-  Widget _securityKeyRow(
-    NeoRecallPalette palette,
-    NeoRecallController ctrl,
-    Map<String, dynamic> key,
-  ) {
-    final lastUsedAt = key['lastUsedAt'] as String?;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: <Widget>[
-          Icon(Icons.key_rounded, size: 20, color: palette.textSecondary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  key['label'] as String? ?? 'Security key',
-                  style: TextStyle(
-                    color: palette.textPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  lastUsedAt == null
-                      ? 'Never used'
-                      : 'Last used ${lastUsedAt.split('T').first}',
-                  style: TextStyle(color: palette.textSecondary, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          PopupMenuButton<String>(
-            enabled: !ctrl.loading,
-            icon: Icon(Icons.more_horiz_rounded, color: palette.textSecondary),
-            onSelected: (action) => action == 'rename'
-                ? _renameSecurityKey(ctrl, key)
-                : ctrl.removeSecurityKey(key['id'] as String),
-            itemBuilder: (context) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(value: 'rename', child: Text('Rename')),
-              PopupMenuItem<String>(value: 'remove', child: Text('Remove')),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addSecurityKey(NeoRecallController ctrl) async {
-    final label = await _promptDialog(
-      'Name this key',
-      'Give the key a name you will recognise, for example "YubiKey".',
-    );
-    if (label == null) return;
-    final name = label.trim().isEmpty
-        ? 'Security key ${ctrl.securityKeys.length + 1}'
-        : label.trim();
-    await ctrl.registerSecurityKey(name);
-    if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-    }
-  }
-
-  Future<void> _renameSecurityKey(
-    NeoRecallController ctrl,
-    Map<String, dynamic> key,
-  ) async {
-    final label = await _promptDialog(
-      'Rename security key',
-      'Enter a new name for "${key['label']}".',
-    );
-    if (label == null || label.trim().isEmpty) return;
-    await ctrl.renameSecurityKey(key['id'] as String, label.trim());
-    if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-    }
-  }
-
-  Future<void> _disableTwoFactor(NeoRecallController ctrl) async {
-    final password = await _promptDialog(
-      'Enter password',
-      'Your current password is required to disable 2FA',
-      obscure: true,
-    );
-    if (password == null || password.isEmpty) return;
-    await ctrl.disableTwoFactor(password: password);
-    if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-    }
-  }
-
-  Future<void> _regenerateRecoveryCodes(NeoRecallController ctrl) async {
-    final password = await _promptDialog(
-      'Enter password',
-      'Your current password is required.',
-      obscure: true,
-    );
-    if (password == null || password.isEmpty) return;
-    final code = await _promptDialog(
-      'Enter 2FA code',
-      'Enter your current authenticator code.',
-    );
-    if (code == null || code.isEmpty) return;
-    final codes = await ctrl.regenerateTwoFactorCodes(
-      password: password,
-      code: code,
-    );
-    if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-      return;
-    }
-    if (codes.isNotEmpty && mounted) {
-      _showRecoveryCodesDialog(codes);
-    }
-  }
-
-  Future<void> _setupTwoFactor(NeoRecallController ctrl) async {
-    final setup = await ctrl.beginTwoFactorSetup();
-    if (setup == null || !mounted) return;
-    final code = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        final codeController = TextEditingController();
-        return AlertDialog(
-          title: const Text('Enable 2FA'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Scan this QR code in your authenticator app.'),
-              const SizedBox(height: 16),
-              if (setup['qrDataUrl'] != null)
-                Image.memory(
-                  base64Decode((setup['qrDataUrl'] as String).split(',').last),
-                  width: 200,
-                  height: 200,
-                ),
-              const SizedBox(height: 8),
-              SelectableText(setup['manualKey'] as String? ?? ''),
-              const SizedBox(height: 16),
-              TextField(
-                controller: codeController,
-                decoration: const InputDecoration(
-                  labelText: 'Authenticator code',
-                ),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, codeController.text),
-              child: const Text('Verify'),
-            ),
-          ],
-        );
-      },
-    );
-    if (code == null || code.isEmpty) return;
-    final codes = await ctrl.enableTwoFactor(code);
-    if (ctrl.error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-      return;
-    }
-    if (codes.isNotEmpty && mounted) {
-      _showRecoveryCodesDialog(codes);
-    }
-  }
-
-  void _showRecoveryCodesDialog(List<String> codes) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Recovery Codes'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Save these codes in a secure place. They are shown only once.',
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: codes
-                  .map(
-                    (c) => Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withAlpha(25),
-                      ),
-                      child: Text(
-                        c,
-                        style: const TextStyle(fontFamily: 'monospace'),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<String?> _promptDialog(
-    String title,
-    String message, {
-    bool obscure = false,
-  }) {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(message),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              obscureText: obscure,
-              autofocus: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _recordingSettings() {
@@ -755,6 +584,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+      SectionCard(
+        eyebrow: 'TRANSCRIPTION',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TextField(
+              controller: customVocabulary,
+              onChanged: (_) => setState(() {}),
+              minLines: 4,
+              maxLines: 10,
+              decoration: InputDecoration(
+                labelText: 'Words and phrases to recognize',
+                hintText: 'NeoRecall\nProduct or company name\nTechnical term',
+                helperText: 'One entry per line. Duplicates are ignored.',
+                errorText: _customVocabularyError,
+                counterText:
+                    '${_customVocabularyTerms.length}/${current['customVocabularyMaxTerms'] ?? 100} terms',
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: current['vocabularyCorrectionEnabled'] as bool? ?? true,
+              onChanged: (value) => setState(
+                () => current['vocabularyCorrectionEnabled'] = value,
+              ),
+              title: const Text('Correct close transcription misspellings'),
+              subtitle: Text(
+                'For providers without native vocabulary matching, only unambiguous single words of '
+                '${current['vocabularyCorrectionMinimumLength'] ?? 8}+ characters are corrected.',
+              ),
+            ),
+            if ((current['automaticSpeakerVocabulary'] as List<dynamic>? ??
+                    const <dynamic>[])
+                .isNotEmpty) ...<Widget>[
+              const Divider(height: 28),
+              Text(
+                'Added automatically from named speakers',
+                style: TextStyle(
+                  color: palette.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children:
+                    (current['automaticSpeakerVocabulary'] as List<dynamic>)
+                        .map(
+                          (name) => Chip(
+                            avatar: const Icon(Icons.person_outline, size: 16),
+                            label: Text(name.toString()),
+                          ),
+                        )
+                        .toList(),
+              ),
+            ],
+          ],
+        ),
+      ),
+      SectionCard(
+        eyebrow: 'RECORDING CONTEXT',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Keep original photos and documents for ${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'After this period NeoRecall deletes the original bytes but keeps extracted text, image descriptions, and source links.',
+              style: TextStyle(color: palette.textSecondary, height: 1.45),
+            ),
+            const SizedBox(height: 14),
+            Slider(
+              key: const ValueKey<String>('context-retention-days'),
+              min: 1,
+              max: 365,
+              divisions: 364,
+              label:
+                  '${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              value: (current['contextOriginalRetentionDays'] as int? ?? 7)
+                  .toDouble(),
+              onChanged: (value) => setState(
+                () => current['contextOriginalRetentionDays'] = value.round(),
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <int>[1, 3, 7, 14, 30, 90, 365]
+                  .map(
+                    (days) => ChoiceChip(
+                      label: Text(days == 365 ? '1 year' : '$days days'),
+                      selected:
+                          (current['contextOriginalRetentionDays'] as int? ??
+                              7) ==
+                          days,
+                      onSelected: (_) => setState(
+                        () => current['contextOriginalRetentionDays'] = days,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+            if ((current['contextOriginalRetentionDays'] as int? ?? 7) <
+                _loadedContextRetentionDays) ...<Widget>[
+              const SizedBox(height: 12),
+              const InlineMessage(
+                message:
+                    'Shortening retention can permanently delete existing originals on the next server cleanup.',
+                icon: Icons.warning_amber_rounded,
+              ),
+            ],
+          ],
+        ),
+      ),
     ]);
   }
 
@@ -777,9 +730,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => settings![key] = selected.hour * 60 + selected.minute);
   }
 
+  /// How long finished material waits before it is written up.
+  ///
+  /// The floor comes from the server's own configuration, not from the value
+  /// currently chosen: keying the slider's minimum off the *effective* interval
+  /// meant every save raised the floor to whatever had just been saved, so the
+  /// interval could only ever be increased.
   Widget _memorySettings() {
     final palette = neoRecallPaletteOf(context);
     final current = settings!;
+    const hour = 3600000;
+    const maximum = 24 * hour;
+    final floor = (current['minConsolidationIntervalMs'] as int? ?? 0).clamp(
+      0,
+      maximum,
+    );
+    final chosen = (current['consolidationIntervalMs'] as int? ?? floor).clamp(
+      floor,
+      maximum,
+    );
+    // Whole hours, so the label never reads 3.1 hours. The floor stops at 23
+    // so the slider always has a range to move through, even on an install
+    // configured to write up at most once a day.
+    final floorHours = (floor / hour).ceil().clamp(0, 23);
+    final chosenHours = (chosen / hour).round().clamp(floorHours, 24);
+
     return _sectionList(<Widget>[
       SectionCard(
         eyebrow: 'MEMORY',
@@ -787,25 +762,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Consolidation interval: ${((current['consolidationIntervalMs'] as int) / 3600000).toStringAsFixed(1)} hours',
+              'Consolidation interval',
               style: TextStyle(
-                color: palette.textSecondary,
+                color: palette.textPrimary,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 4),
+            Text(
+              chosenHours == 0
+                  ? 'As soon as there is enough material'
+                  : 'Wait at least $chosenHours '
+                        '${chosenHours == 1 ? 'hour' : 'hours'} between write-ups',
+              style: TextStyle(
+                color: palette.textMuted,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 4),
             Slider(
-              min: (current['effectiveConsolidationIntervalMs'] as int)
-                  .toDouble(),
-              max: 24 * 3600000,
-              divisions: 23,
-              value: (current['consolidationIntervalMs'] as int)
-                  .clamp(
-                    current['effectiveConsolidationIntervalMs'] as int,
-                    24 * 3600000,
-                  )
-                  .toDouble(),
+              min: floorHours.toDouble(),
+              max: 24,
+              divisions: 24 - floorHours,
+              label: chosenHours == 0 ? 'Immediate' : '${chosenHours}h',
+              value: chosenHours.toDouble(),
               onChanged: (value) => setState(
-                () => current['consolidationIntervalMs'] = value.round(),
+                () => current['consolidationIntervalMs'] =
+                    value.round() * hour,
+              ),
+            ),
+            Text(
+              floorHours == 0
+                  ? 'Memories are written when enough has been said, without '
+                        'waiting for a conversation to end.'
+                  : 'This server will not write up more often than every '
+                        '$floorHours ${floorHours == 1 ? 'hour' : 'hours'}.',
+              style: TextStyle(
+                color: palette.textMuted,
+                fontSize: 11.5,
+                height: 1.4,
               ),
             ),
           ],
@@ -836,11 +833,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              value: available &&
-                  (current['diarizationEnabled'] as bool? ?? true),
+              value:
+                  available && (current['diarizationEnabled'] as bool? ?? true),
               onChanged: available
                   ? (value) =>
-                      setState(() => current['diarizationEnabled'] = value)
+                        setState(() => current['diarizationEnabled'] = value)
                   : null,
               title: const Text('Speaker diarization'),
               subtitle: const Text(
@@ -850,11 +847,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              value: available &&
+              value:
+                  available &&
                   (current['recurringSpeakerMatching'] as bool? ?? true),
               onChanged: available
                   ? (value) => setState(
-                      () => current['recurringSpeakerMatching'] = value)
+                      () => current['recurringSpeakerMatching'] = value,
+                    )
                   : null,
               title: const Text('Recurring speaker matching'),
               subtitle: const Text(
@@ -866,196 +865,4 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ]);
   }
-}
-
-class _SettingsNavigation extends StatelessWidget {
-  const _SettingsNavigation({
-    required this.selected,
-    required this.compact,
-    required this.onSelected,
-  });
-
-  final SettingsSection selected;
-  final bool compact;
-  final ValueChanged<SettingsSection> onSelected;
-
-  static const items = <_SettingsNavigationItem>[
-    _SettingsNavigationItem(
-      section: SettingsSection.general,
-      icon: Icons.tune,
-      label: 'General',
-      description: 'Time and locale',
-    ),
-    _SettingsNavigationItem(
-      section: SettingsSection.security,
-      icon: Icons.security,
-      label: 'Security',
-      description: 'Passwords and 2FA',
-    ),
-    _SettingsNavigationItem(
-      section: SettingsSection.recording,
-      icon: Icons.graphic_eq_outlined,
-      label: 'Recording',
-      description: 'Schedule, network, chunks',
-    ),
-    _SettingsNavigationItem(
-      section: SettingsSection.memory,
-      icon: Icons.auto_awesome_outlined,
-      label: 'Memory',
-      description: 'Consolidation timing',
-    ),
-    _SettingsNavigationItem(
-      section: SettingsSection.speakers,
-      icon: Icons.record_voice_over_outlined,
-      label: 'Speakers',
-      description: 'Diarization and matching',
-    ),
-    _SettingsNavigationItem(
-      section: SettingsSection.devices,
-      icon: Icons.devices_other_outlined,
-      label: 'Devices',
-      description: 'Capture endpoints',
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (compact) {
-      return DropdownButtonFormField<SettingsSection>(
-        key: ValueKey<SettingsSection>(selected),
-        initialValue: selected,
-        isExpanded: true,
-        decoration: const InputDecoration(
-          labelText: 'Settings area',
-          prefixIcon: Icon(Icons.settings_outlined),
-        ),
-        items: items
-            .map(
-              (item) => DropdownMenuItem<SettingsSection>(
-                value: item.section,
-                child: Text(item.label),
-              ),
-            )
-            .toList(),
-        onChanged: (section) {
-          if (section != null) onSelected(section);
-        },
-      );
-    }
-
-    final palette = neoRecallPaletteOf(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: palette.bgSecondary,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: palette.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
-            child: Text(
-              'Settings areas',
-              style: TextStyle(
-                color: palette.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          for (final item in items)
-            _SettingsNavigationButton(
-              item: item,
-              selected: item.section == selected,
-              onTap: () => onSelected(item.section),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsNavigationButton extends StatelessWidget {
-  const _SettingsNavigationButton({
-    required this.item,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final _SettingsNavigationItem item;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Material(
-        color: selected
-            ? palette.accent.withValues(alpha: 0.12)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Icon(
-                  item.icon,
-                  size: 20,
-                  color: selected ? palette.accent : palette.textSecondary,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        item.label,
-                        style: TextStyle(
-                          color: selected
-                              ? palette.accent
-                              : palette.textPrimary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        item.description,
-                        style: TextStyle(
-                          color: palette.textSecondary,
-                          fontSize: 11,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsNavigationItem {
-  const _SettingsNavigationItem({
-    required this.section,
-    required this.icon,
-    required this.label,
-    required this.description,
-  });
-
-  final SettingsSection section;
-  final IconData icon;
-  final String label;
-  final String description;
 }

@@ -22,6 +22,7 @@ class HeyPocketStoredFile {
   String get id => '$date/$fileId';
   String get contentType => 'audio/mpeg';
   String get filename => 'heypocket-$date-$fileId.mp3';
+
   /// When the device recorded this file, in UTC.
   ///
   /// The time lives in [fileId] (`YYYYMMDDHHMMSS`), not in [date]. Using the
@@ -30,8 +31,9 @@ class HeyPocketStoredFile {
   /// every recording of one day onto a single instant. Both made a synced
   /// recording impossible to find on the timeline.
   DateTime? get capturedAt {
-    final stamp = RegExp(r'^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})')
-        .firstMatch(fileId);
+    final stamp = RegExp(
+      r'^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})',
+    ).firstMatch(fileId);
     if (stamp != null) {
       // The device stamps its own local wall clock, which the sync preamble
       // (`APP&T&…`) sets from this phone — so it is read back as local time.
@@ -94,6 +96,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   static const String _batteryResponsePrefix = 'MCU&BAT&';
 
   bool _authenticated = false;
+
   /// Set by cancelStoredSync so the sweep stops between files. Aborting only
   /// the in-flight download let the loop continue with the next file, so a
   /// cancel issued to free the channel for live capture never actually ended
@@ -374,7 +377,8 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
         'heypocket_no_response',
         level: 'warning',
         details: <String, Object?>{
-          'hint': 'Session-key handshake (APP&SK) not acknowledged; the device '
+          'hint':
+              'Session-key handshake (APP&SK) not acknowledged; the device '
               'accepts no commands. Check the device is on and in range.',
         },
       );

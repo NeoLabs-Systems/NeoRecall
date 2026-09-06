@@ -85,6 +85,7 @@ test('one consolidation pass creates English memories and a durable interval gat
   assert.deepEqual(outboundBody.response_format.json_schema.schema.properties.conversationSections.items.properties.sourceSegmentIds.items.enum, ['s1', 's2']);
   // The completion budget is always sent; its size is configuration, not contract.
   assert.equal(outboundBody.max_tokens, require('../../server/config').getConfig().aiConsolidationMaxOutputTokens);
+  assert.equal(outboundBody.temperature, require('../../server/config').getConfig().llmTemperature);
   assert.equal(outboundBody.messages[1].content.includes(conversationId), false);
   assert.equal(outboundBody.messages[1].content.includes(segmentPublicId), false);
   const storedMemory = db.prepare('SELECT title_en,started_at,ended_at FROM memories WHERE user_id=?').get(userId);
@@ -165,9 +166,10 @@ test('a self-introduction identified during consolidation names the voiceprint a
     assert.equal(queued.queued, true);
     await service.execute(queued.runId);
 
-    const voiceprint = db.prepare('SELECT display_name,entity_id FROM voiceprints WHERE id=?').get(voiceprintId);
+    const voiceprint = db.prepare('SELECT display_name,display_name_source,entity_id FROM voiceprints WHERE id=?').get(voiceprintId);
     const entity = db.prepare('SELECT id,canonical_name_en FROM entities WHERE user_id=?').get(userId);
     assert.equal(voiceprint.display_name, 'Alex');
+    assert.equal(voiceprint.display_name_source, 'inferred');
     assert.equal(voiceprint.entity_id, entity.id);
     assert.equal(entity.canonical_name_en, 'Alex');
   } finally {

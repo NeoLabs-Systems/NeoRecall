@@ -106,7 +106,17 @@ and streams audio into the ordinary ingest pipeline.
 - **Discord** — each user pastes their own bot token and trigger usernames.
   When a listed person joins a voice channel, the bot joins and records every
   speaker until they leave.
-PLAUD remains a separate import connector for finished wearable files.
+
+Plaud Note Pro and NotePin S pair as wearables on iOS and Android through Plaud
+Embedded: the phone binds the pin over BLE, drains finished files, and runs them
+through the ordinary ingest pipeline. Handshake tokens are minted on the
+NeoRecall server; audio is not uploaded to Plaud. Binding a device unbinds the
+consumer Plaud app. Desktop and the browser cannot complete Plaud's encrypted
+handshake — there is no Plaud SDK for those platforms.
+
+Memoket Gem uses the shared wearable GATT adapter: a local connector speaks its
+control opcodes, streams live Opus while the app (or the hardware button) is
+recording, and drains stored files over a separate notify characteristic.
 
 ## Processing pipeline
 
@@ -228,10 +238,15 @@ A validation failure records the specific reason it failed, not only a code, so 
 
 Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the configured external language model, with result citations.
 
-## NeoAgent boundary
+## NeoAgent and MCP boundary
 
-NeoAgent is an OAuth client of NeoRecall, not another processing worker. It
-receives seven read-only tools for on-demand local search and evidence access.
+NeoAgent is an OAuth client of NeoRecall, not another processing worker. Remote
+MCP clients (Claude, ChatGPT, Cursor, and any other MCP-capable app) use the
+same authorization server and the same seven read-only tools for on-demand
+local search and evidence access. The tools are `search`, `list_memories`,
+`get_memory`, `list_mini_memories`, `list_daily_summaries`,
+`list_conversations`, and `get_conversation`.
+
 Ingest, settings, memory mutation, consolidation orchestration, and Ask remain
 inside NeoRecall; only the explicitly configured inference endpoints receive
 audio or transcript text. This avoids duplicated memory stores and prevents an

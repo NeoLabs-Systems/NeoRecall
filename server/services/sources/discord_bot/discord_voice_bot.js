@@ -17,6 +17,7 @@ const {
 
 const { getDatabase } = require('../../../db/database');
 const ingest = require('../../ingest/ingest_service');
+const { createLogger } = require('../../../utils/logger');
 const {
   SAMPLE_RATE,
   WAV_HEADER_BYTES,
@@ -24,6 +25,8 @@ const {
   createSilenceResource,
   hashFile,
 } = require('./audio_pipeline');
+
+const logger = createLogger('sources.discord-bot');
 
 // Discord treats a speaker as "stopped" after a gap; capture ends this long
 // after the last packet, closing out one utterance into one chunk.
@@ -76,11 +79,11 @@ class DiscordVoiceBot {
     this.client = client;
 
     client.once(Events.ClientReady, (readyClient) => {
-      console.log(`[DiscordBot] Logged in as ${readyClient.user.tag} for source ${this.source.id}`);
+      logger.info('Logged in', { botTag: readyClient.user.tag, sourceId: this.source.id });
       this._followExistingTriggers();
     });
     client.on(Events.VoiceStateUpdate, (oldState, newState) => this._onVoiceStateUpdate(oldState, newState));
-    client.on(Events.Error, (error) => console.error('[DiscordBot] Client error:', error.message));
+    client.on(Events.Error, (error) => logger.error('Client error', { sourceId: this.source.id, error }));
 
     await client.login(this.source.config.token);
   }
@@ -96,7 +99,7 @@ class DiscordVoiceBot {
       try {
         this.client.destroy();
       } catch (error) {
-        console.error('[DiscordBot] Error destroying client:', error.message);
+        logger.error('Error destroying client', { sourceId: this.source.id, error });
       }
       this.client = null;
     }
@@ -145,7 +148,7 @@ class DiscordVoiceBot {
         this._onTriggerLeft(channel);
       }
     } catch (error) {
-      console.error('[DiscordBot] voiceStateUpdate handling failed:', error.message);
+      logger.error('voiceStateUpdate handling failed', { sourceId: this.source.id, error });
     }
   }
 
@@ -169,13 +172,13 @@ class DiscordVoiceBot {
     });
     this.connection = connection;
 
-    connection.on('error', (error) => console.error('[DiscordBot] Voice connection error:', error.message));
+    connection.on('error', (error) => logger.error('Voice connection error', { sourceId: this.source.id, error }));
     connection.on(VoiceConnectionStatus.Disconnected, () => this._handleDisconnect(connection));
 
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, READY_TIMEOUT_MS);
     } catch (error) {
-      console.error(`[DiscordBot] Voice connection to ${channel.id} never became ready:`, error.message);
+      logger.error('Voice connection never became ready', { channelId: channel.id, error });
       if (this.connection === connection) this._leaveVoice();
       return;
     }
@@ -185,7 +188,7 @@ class DiscordVoiceBot {
     this.silencePlayer.play(createSilenceResource());
     connection.subscribe(this.silencePlayer);
 
-    console.log(`[DiscordBot] Recording voice channel ${channel.id} (${channel.name})`);
+    logger.info('Recording voice channel', { channelId: channel.id, channelName: channel.name });
     this._startSession();
     this._attachReceiver(connection);
   }
@@ -197,7 +200,7 @@ class DiscordVoiceBot {
     const triggerRemaining = channel.members.some((member) => this._memberIsTrigger(member));
     if (triggerRemaining) return;
 
-    console.log(`[DiscordBot] All trigger users left channel ${channel.id}. Disconnecting.`);
+    logger.info('All trigger users left; disconnecting', { channelId: channel.id });
     this._leaveVoice();
     this._endSession();
   }
@@ -292,9 +295,9 @@ class DiscordVoiceBot {
         },
         { path: wavPath, size },
       );
-      console.log(`[DiscordBot] Ingested chunk ${sequence} for ${this._describeUser(discordUserId)} (${durationMs}ms)`);
+      logger.debug('Ingested chunk', { sequence, speaker: this._describeUser(discordUserId), durationMs });
     } catch (error) {
-      console.error(`[DiscordBot] Capture failed for user ${discordUserId}:`, error.message);
+      logger.error('Capture failed', { discordUserId, error });
     } finally {
       this.capturing.delete(discordUserId);
     }
@@ -352,7 +355,7 @@ class DiscordVoiceBot {
     try {
       ingest.closeSession(this.ownerUserId, this.sessionId, { endedAt: new Date().toISOString() });
     } catch (error) {
-      console.error('[DiscordBot] Failed to close session:', error.message);
+      logger.error('Failed to close session', { sourceId: this.source.id, error });
     }
     this.sessionId = null;
     this.ingestSources.clear();

@@ -11,8 +11,8 @@ const router = express.Router();
 const speakerId = z.string().min(1);
 router.use(requireAuth);
 router.get('/', requireScope('speakers:read'), (req, res) => res.json({ speakers: service.list(req.auth.userId) }));
-router.post('/reevaluate', requireScope('speakers:write'), (req, res, next) => {
-  try { res.json(service.reevaluate(req.auth.userId)); } catch (error) { next(error); }
+router.post('/reevaluate', requireScope('speakers:write'), (req, res) => {
+  res.json(service.reevaluate(req.auth.userId));
 });
 router.get('/:id/preview', requireScope('speakers:read'), (req, res, next) => {
   try {
@@ -30,23 +30,23 @@ router.get('/:id/preview', requireScope('speakers:read'), (req, res, next) => {
   }
 });
 router.patch('/:id', requireScope('speakers:write'), validate(z.object({ displayName: z.string().min(1).max(120).nullable().optional(), matchingEnabled: z.boolean().optional() })),
-  (req, res, next) => { try { res.json(service.update(req.auth.userId, req.params.id, req.body)); } catch (error) { next(error); } });
+  (req, res) => { res.json(service.update(req.auth.userId, req.params.id, req.body)); });
 router.post('/:id/merge', requireScope('speakers:write'), validate(z.object({ sourceId: speakerId })),
-  (req, res, next) => { try { res.json(service.merge(req.auth.userId, req.params.id, req.body.sourceId)); } catch (error) { next(error); } });
+  (req, res) => { res.json(service.merge(req.auth.userId, req.params.id, req.body.sourceId)); });
 router.post('/merge', requireScope('speakers:write'), validate(z.object({
   targetId: speakerId,
   sourceIds: z.array(speakerId).min(1).max(20),
-})), (req, res, next) => {
-  try { res.json(service.mergeMany(req.auth.userId, req.body.targetId, req.body.sourceIds)); } catch (error) { next(error); }
+})), (req, res) => {
+  res.json(service.mergeMany(req.auth.userId, req.body.targetId, req.body.sourceIds));
 });
 router.post('/bulk', requireScope('speakers:write'), validate(z.object({
   ids: z.array(speakerId).min(1).max(100),
   action: z.enum(['delete']),
-})), (req, res, next) => {
-  try { res.json(service.bulkRemove(req.auth.userId, req.body.ids)); } catch (error) { next(error); }
+})), (req, res) => {
+  res.json(service.bulkRemove(req.auth.userId, req.body.ids));
 });
 router.post('/:id/assignments', requireScope('speakers:write'), validate(z.object({ turnIds: z.array(speakerId).min(1).max(1000) })),
-  (req, res, next) => { try { res.json(service.assign(req.auth.userId, req.params.id, req.body.turnIds)); } catch (error) { next(error); } });
+  (req, res) => { res.json(service.assign(req.auth.userId, req.params.id, req.body.turnIds)); });
 router.delete('/:id', requireScope('speakers:write'),
-  (req, res, next) => { try { res.json(service.remove(req.auth.userId, req.params.id)); } catch (error) { next(error); } });
+  (req, res) => { res.json(service.remove(req.auth.userId, req.params.id)); });
 module.exports = router;

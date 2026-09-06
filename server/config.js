@@ -1,51 +1,46 @@
 'use strict';
 
-function integer(name, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) {
-  const raw = process.env[name];
-  const value = raw === undefined || raw === '' ? fallback : Number(raw);
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
-  }
-  return value;
-}
+const { integer, number, boolean, jsonObject } = require('./config/env');
+const { validateConfig } = require('./config/validate');
 
-function number(name, fallback, { min = -Infinity, max = Infinity } = {}) {
-  const raw = process.env[name];
-  const value = raw === undefined || raw === '' ? fallback : Number(raw);
-  if (!Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`${name} must be a number between ${min} and ${max}.`);
-  }
-  return value;
-}
 
-function jsonObject(name) {
-  const raw = String(process.env[name] || '').trim();
-  if (!raw) return null;
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch (error) {
-    throw new Error(`${name} must be valid JSON: ${error.message}`);
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${name} must be a JSON object, for example {"chat_template_kwargs":{"enable_thinking":false}}.`);
-  }
-  return parsed;
-}
-
-function boolean(name, fallback) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  if (['1', 'true', 'yes', 'on'].includes(raw.toLowerCase())) return true;
-  if (['0', 'false', 'no', 'off'].includes(raw.toLowerCase())) return false;
-  throw new Error(`${name} must be true or false.`);
-}
-
-/// Context kept aside from every request for the chat template and for the gap
-/// between a character-based estimate of the prompt and the real tokenizer.
-/// Exported so the input budget and the configuration check that guards it use
-/// the same number.
+// Context kept aside from every request for the chat template and for the gap
+// between a character-based estimate of the prompt and the real tokenizer.
+// Exported so the input budget and the configuration check that guards it use
+// the same number.
 const LLM_PROMPT_RESERVE_TOKENS = 512;
 
+// Every environment variable buildConfig reads, by prefix.
+const CONFIG_ENV = /^(NEORECALL_|AI_|LLM_|TRANSCRIPTION_|MAX_UPLOAD_BYTES$|NODE_ENV$)/;
+
+let cachedConfig = null;
+let cachedFingerprint = null;
+
+// Identifies the environment buildConfig would read, so a changed variable
+// rebuilds and an unchanged one does not.
+//
+// Cheaper than rebuilding: getConfig has ~70 call sites, several of them
+// per-chunk (vad, diarization, audio decoding), and each uncached call
+// re-validates roughly 120 variables before freezing a fresh object. Keeping
+// the fingerprint rather than caching outright means tests that assign to
+// process.env still see their own values with no reset call.
+function environmentFingerprint() {
+  const parts = [];
+  for (const key of Object.keys(process.env)) {
+    if (CONFIG_ENV.test(key)) parts.push(key, process.env[key]);
+  }
+  return parts.join('\u0000');
+}
+
 function getConfig() {
+  const fingerprint = environmentFingerprint();
+  if (cachedConfig && fingerprint === cachedFingerprint) return cachedConfig;
+  cachedConfig = buildConfig();
+  cachedFingerprint = fingerprint;
+  return cachedConfig;
+}
+
+function buildConfig() {
   const chunkMinMs = integer('NEORECALL_CHUNK_MIN_MS', 15_000, { min: 1_000 });
   const chunkMaxMs = integer('NEORECALL_CHUNK_MAX_MS', 120_000, { min: chunkMinMs });
   const speakerPreviewMinimumMs = integer('NEORECALL_SPEAKER_PREVIEW_MIN_MS', 1_000, { min: 1_000, max: 10_000 });
@@ -66,6 +61,11 @@ function getConfig() {
     sessionTtlMs: integer('NEORECALL_SESSION_TTL_MS', 30 * 24 * 60 * 60 * 1000, { min: 60_000 }),
     registrationEnabled: boolean('NEORECALL_REGISTRATION_ENABLED', true),
     maxUploadBytes: integer('MAX_UPLOAD_BYTES', 32 * 1024 * 1024, { min: 1024 }),
+    contextMaxFileBytes: integer('NEORECALL_CONTEXT_MAX_FILE_BYTES', 32 * 1024 * 1024, { min: 1024 }),
+    contextNoteMaxCharacters: integer('NEORECALL_CONTEXT_NOTE_MAX_CHARACTERS', 20_000, { min: 1 }),
+    contextExtractionMaxCharacters: integer('NEORECALL_CONTEXT_EXTRACTION_MAX_CHARACTERS', 500_000, { min: 1_000 }),
+    contextMaxItems: integer('NEORECALL_CONTEXT_MAX_ITEMS', 200, { min: 1, max: 10_000 }),
+    contextImageAnalysisMaxBytes: integer('NEORECALL_CONTEXT_IMAGE_ANALYSIS_MAX_BYTES', 5 * 1024 * 1024, { min: 1024 }),
     chunkTargetMs: integer('NEORECALL_CHUNK_TARGET_MS', 30_000, { min: chunkMinMs, max: chunkMaxMs }),
     chunkMinMs,
     chunkMaxMs,
@@ -90,6 +90,18 @@ function getConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
+    customVocabularyMaxTerms: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS', 100, { min: 1, max: 1_000 }),
+    customVocabularyMaxTermLength: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH', 120, { min: 1, max: 500 }),
+    vocabularyCorrectionMinimumLength: integer('NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH', 8, { min: 4, max: 100 }),
+    vocabularyCorrectionMaximumDistance: integer('NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE', 2, { min: 1, max: 5 }),
+    vocabularyCorrectionSimilarity: number('NEORECALL_VOCABULARY_CORRECTION_SIMILARITY', 0.84, { min: 0.5, max: 1 }),
+    vocabularyCorrectionAmbiguityMargin: number('NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN', 0.08, { min: 0, max: 1 }),
+    // Backups. Local by default; the destination layer accepts remote targets
+    // without a change here beyond a new NEORECALL_BACKUP_DESTINATION value.
+    backupEnabled: boolean('NEORECALL_BACKUP_ENABLED', true),
+    backupDestination: process.env.NEORECALL_BACKUP_DESTINATION || 'local',
+    backupIntervalHours: integer('NEORECALL_BACKUP_INTERVAL_HOURS', 24, { min: 1, max: 24 * 30 }),
+    backupRetain: integer('NEORECALL_BACKUP_RETAIN', 3, { min: 1, max: 365 }),
     // VAD and diarization run locally; see docs/docs/configuration.md.
     diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
     // Native threads for the audio models.
@@ -113,8 +125,10 @@ function getConfig() {
     speakerClusterThreshold: number('NEORECALL_SPEAKER_CLUSTER_THRESHOLD', 0.52, { min: -1, max: 1 }),
     // Two clusters this alike in one recording are merged back into one.
     speakerClusterMergeThreshold: number('NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD', 0.55, { min: -1, max: 1 }),
-    // Speech shorter than this may join an existing voice but never founds a new one.
-    speakerMinimumTurnMs: integer('NEORECALL_SPEAKER_MINIMUM_TURN_MS', 2_000, { min: 0, max: 60_000 }),
+    // Speech shorter than this may join an existing voice but never founds a new
+    // one. Half a second filters brief diarization blips while favoring a
+    // possibly imperfect speaker label over leaving real short speech unlabeled.
+    speakerMinimumTurnMs: integer('NEORECALL_SPEAKER_MINIMUM_TURN_MS', 500, { min: 0, max: 60_000 }),
     // A cluster match this close to the runner-up is ambiguous, not confident.
     // Without a margin, a single fixed threshold occasionally lets a distinct new
     // speaker's embedding score just above it against some unrelated existing
@@ -141,6 +155,14 @@ function getConfig() {
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
+    // ASR services occasionally fill a short timestamp with the same token
+    // template dozens of times. Detect that structurally and only when the
+    // resulting speaking rate is implausible; no vocabulary or phrase list is
+    // involved. The original first occurrence remains as evidence.
+    transcriptRepetitionMinimumRepeats: integer('NEORECALL_TRANSCRIPT_REPETITION_MIN_REPEATS', 8, { min: 3, max: 1_000 }),
+    transcriptRepetitionMaximumPatternWords: integer('NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS', 8, { min: 1, max: 32 }),
+    transcriptRepetitionMinimumCoverage: number('NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE', 0.8, { min: 0.5, max: 1 }),
+    transcriptMaximumWordsPerSecond: number('NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND', 5, { min: 1, max: 50 }),
     conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
     conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
     conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),
@@ -277,6 +299,12 @@ function getConfig() {
     // recording continuity and transcript meaning still decide whether the
     // model claims any candidate, and no numeric similarity score merges data.
     maxMemoryContinuationCandidates: integer('NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES', 8, { min: 0, max: 32 }),
+    // Cross-recording fragments can belong to one occasion even when the
+    // capture client briefly stopped or reconnected. Candidate retrieval uses
+    // this wider, bounded horizon so the model can see those fragments; it
+    // still has to identify the same continuing sitting from transcript,
+    // timing and recurring-speaker evidence before anything is merged.
+    memoryContinuationLookbackMs: integer('NEORECALL_MEMORY_CONTINUATION_LOOKBACK_MS', 2 * 60 * 60_000, { min: 0 }),
     // Manual consolidation is structural work first and an optional prose
     // rewrite second. Keep the request bounded for database/query safety while
     // allowing a person to clean up a substantial backlog in one operation.
@@ -301,34 +329,14 @@ function getConfig() {
     diagnosticRetentionDays: integer('NEORECALL_DIAGNOSTIC_RETENTION_DAYS', 7, { min: 1, max: 90 }),
     diagnosticMaxEventsPerUser: integer('NEORECALL_DIAGNOSTIC_MAX_EVENTS_PER_USER', 500, { min: 50, max: 10_000 }),
     diagnosticExportMaxEvents: integer('NEORECALL_DIAGNOSTIC_EXPORT_MAX_EVENTS', 250, { min: 10, max: 1_000 }),
+    // Plaud Embedded partner credentials. Used only to mint per-user JWTs so
+    // the mobile client can bind Note Pro / NotePin S over BLE. Audio never
+    // goes to Plaud; leave both unset to hide the pairing session endpoint.
+    plaudClientId: process.env.NEORECALL_PLAUD_CLIENT_ID || '',
+    plaudClientSecret: process.env.NEORECALL_PLAUD_CLIENT_SECRET || '',
+    plaudApiHost: (process.env.NEORECALL_PLAUD_API_HOST || 'platform-us.plaud.ai').replace(/^https?:\/\//, '').replace(/\/+$/, ''),
   };
-  if (config.speakerClusterContinuityThreshold > config.speakerClusterThreshold) {
-    throw new Error('NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD must not exceed NEORECALL_SPEAKER_CLUSTER_THRESHOLD.');
-  }
-  if (config.conversationSoftGapMs >= config.conversationHardGapMs) {
-    throw new Error('NEORECALL_CONVERSATION_SOFT_GAP_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
-  }
-  if (config.conversationMinimumMs >= config.conversationHardGapMs) {
-    throw new Error('NEORECALL_CONVERSATION_MINIMUM_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
-  }
-  if (config.conversationMaximumMs <= config.conversationMinimumMs) {
-    throw new Error('NEORECALL_CONVERSATION_MAXIMUM_MS must be longer than NEORECALL_CONVERSATION_MINIMUM_MS.');
-  }
-  if (config.conversationMaximumCharacters > config.maxConsolidationInputChars) {
-    throw new Error('NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS must not exceed NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS.');
-  }
-  if (config.conversationPreviewMinCharacters > config.conversationMaximumCharacters) {
-    throw new Error('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS must not exceed NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS.');
-  }
-  // An output budget the context cannot also hold a prompt beside would leave
-  // nothing to send. Caught at startup, where it is a one-line fix, rather than
-  // as a scheduler exception on the first conversation of the day.
-  for (const name of ['AI_CONSOLIDATION_MAX_OUTPUT_TOKENS', 'AI_PREVIEW_MAX_OUTPUT_TOKENS']) {
-    const budget = name === 'AI_CONSOLIDATION_MAX_OUTPUT_TOKENS' ? config.aiConsolidationMaxOutputTokens : config.aiPreviewMaxOutputTokens;
-    if (budget + LLM_PROMPT_RESERVE_TOKENS >= config.llmContextSize) {
-      throw new Error(`${name} (${budget}) leaves no room for input inside LLM_CONTEXT_SIZE (${config.llmContextSize}).`);
-    }
-  }
+  validateConfig(config, { promptReserveTokens: LLM_PROMPT_RESERVE_TOKENS });
   return Object.freeze(config);
 }
 

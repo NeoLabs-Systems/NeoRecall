@@ -23,6 +23,7 @@ function paths(env = process.env) {
     models: path.join(home, 'models'),
     audioTmp: path.join(home, 'audio_tmp'),
     importTmp: path.join(home, 'import_tmp'),
+    context: path.join(home, 'context'),
     logs: path.join(home, 'logs'),
     backups: path.join(home, 'backups'),
     database: env.NEORECALL_DATABASE_PATH || path.join(home, 'data', 'neorecall.sqlite3'),
@@ -54,7 +55,7 @@ function ensurePrivateDirectory(dir) {
 
 function ensureRuntimeDirs(env = process.env) {
   const result = paths(env);
-  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.importTmp, result.logs, result.backups]) {
+  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.importTmp, result.context, result.logs, result.backups]) {
     ensurePrivateDirectory(directory);
   }
   return result;

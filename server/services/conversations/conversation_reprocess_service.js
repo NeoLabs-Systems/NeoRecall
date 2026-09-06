@@ -15,12 +15,12 @@ const logger = createLogger('memories');
 // everything the model derived from it: the conversation's own title and
 // summary, and the memory it produced.
 
-/// Memories that came from this conversation alone.
-///
-/// A memory built from several conversations is left in place: this
-/// conversation is the only one being written up again, and deleting a memory
-/// that also describes conversations nobody asked to redo would lose material
-/// that will never be regenerated.
+// Memories that came from this conversation alone.
+//
+// A memory built from several conversations is left in place: this
+// conversation is the only one being written up again, and deleting a memory
+// that also describes conversations nobody asked to redo would lose material
+// that will never be regenerated.
 function memoriesOwnedBy(database, userId, conversationId) {
   return database.prepare(`SELECT m.id, m.public_id FROM memories m
     WHERE m.user_id=? AND EXISTS (

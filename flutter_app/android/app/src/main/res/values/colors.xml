@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget text tokens for theme "auto" in day mode; mirrors the app light palette. -->
+<resources>
+    <color name="widget_accent">#FFB07D2B</color>
+    <color name="widget_accent_alt">#FF5E6B4C</color>
+    <color name="widget_danger">#FFAE473C</color>
+    <color name="widget_info">#FF2F7D6E</color>
+    <color name="widget_on_accent">#FFFFFFFF</color>
+    <color name="widget_success">#FF527C4F</color>
+    <color name="widget_text_muted">#FF7E8470</color>
+    <color name="widget_text_primary">#FF1C2117</color>
+    <color name="widget_text_secondary">#FF49503F</color>
+    <color name="widget_track">#1A1C2117</color>
+    <color name="widget_warning">#FF9A6B1E</color>
+    <color name="widget_config_bg">#FFF4F1E8</color>
+</resources>

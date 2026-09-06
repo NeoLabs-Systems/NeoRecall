@@ -34,23 +34,26 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
 
     setState(() => _saving = true);
     try {
-      await widget.controller.api.request('POST', '/api/v1/sources', body: {
-        'type': 'discord',
-        'name': name,
-        'config': {
-          'token': token,
-          'triggerUsernames': users,
+      await widget.controller.api.request(
+        'POST',
+        '/api/v1/sources',
+        body: {
+          'type': 'discord',
+          'name': name,
+          'config': {'token': token, 'triggerUsernames': users},
+          'enabled': true,
         },
-        'enabled': true,
-      });
+      );
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error: $error'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $error'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
       }
     }
   }
@@ -96,7 +99,10 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
             const SizedBox(height: 16),
             const ExpansionTile(
               tilePadding: EdgeInsets.zero,
-              title: Text('How to create the bot', style: TextStyle(fontSize: 13)),
+              title: Text(
+                'How to create the bot',
+                style: TextStyle(fontSize: 13),
+              ),
               children: [
                 Text(
                   '1. Open the Discord Developer Portal and create an application.\n'
@@ -121,7 +127,11 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('Connect Account'),
         ),
       ],

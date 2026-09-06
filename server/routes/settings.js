@@ -6,13 +6,13 @@ const auth = require('../services/auth/auth_service');
 const webauthn = require('../services/auth/webauthn_service');
 const { requireAuth, requireScope, requireSession } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 const { z } = require('zod');
 const qrcode = require('qrcode');
 const router = express.Router();
-const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 router.use(requireAuth);
 router.get('/', requireScope('settings:read'), (req, res) => res.json({ settings: service.get(req.auth.userId) }));
-router.put('/', requireScope('settings:write'), (req, res, next) => { try { res.json({ settings: service.update(req.auth.userId, req.body) }); } catch (error) { next(error); } });
+router.put('/', requireScope('settings:write'), (req, res) => { res.json({ settings: service.update(req.auth.userId, req.body) }); });
 
 router.get('/2fa', requireScope('settings:read'), (req, res) => res.json(auth.getTwoFactorStatus(req.auth.userId)));
 router.post('/2fa/setup', requireScope('settings:write'), asyncRoute(async (req, res) => {

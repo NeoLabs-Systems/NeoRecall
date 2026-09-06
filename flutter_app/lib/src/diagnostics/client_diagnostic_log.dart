@@ -134,9 +134,7 @@ class ClientDiagnosticLog {
           .toList(growable: false);
     }
     if (value is Map) {
-      return _sanitizeMap(
-        value.map((key, value) => MapEntry('$key', value)),
-      );
+      return _sanitizeMap(value.map((key, value) => MapEntry('$key', value)));
     }
     return _safeText(value.toString());
   }

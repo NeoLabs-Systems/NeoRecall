@@ -1,0 +1,13 @@
+[Unit]
+Description=Write a NeoRecall Desk diagnostic report periodically
+
+[Timer]
+# Once shortly after boot, then hourly. Cheap insurance: when the network is the
+# thing that is broken, a report already sitting on the boot partition is the
+# only one anybody will ever read.
+OnBootSec=3min
+OnUnitActiveSec=1h
+Unit=neorecall-desk-diagnostics.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Update NeoRecall Desk
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The installer and the updater are the same script. That is the point: the
+# update path is exercised by every install, instead of being the code nobody
+# runs until the day it has to work.
+ExecStart=/usr/local/lib/neorecall-desk/install.sh --update
+# An update that fails leaves the working version running, so a failure here is
+# a log line rather than a broken appliance.
+SuccessExitStatus=0

@@ -73,6 +73,83 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/neorecall_record_widget_info"/>
         </receiver>
+        <receiver
+            android:name=".widgets.StatusWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_status_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/neorecall_status_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".widgets.HighlightsWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_highlights_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/neorecall_highlights_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".widgets.MemoriesWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_memories_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/neorecall_memories_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".widgets.TodayWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_today_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/neorecall_today_widget_info"/>
+        </receiver>
+        <!-- Row adapters for the two scrolling widgets. BIND_REMOTEVIEWS keeps
+             them callable by the launcher and by nothing else. -->
+        <service
+            android:name=".widgets.HighlightsWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <service
+            android:name=".widgets.MemoriesWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <!-- Widget settings, reachable both while placing a widget and from the
+             gear on one already on the home screen. -->
+        <activity
+            android:name=".widgets.WidgetConfigureActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/widget_configure_description"
+            android:taskAffinity=""
+            android:theme="@style/WidgetConfigureTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+            </intent-filter>
+        </activity>
+        <!-- Taps that must not open the app land here and finish without ever
+             drawing. An activity start is the only kind of start a launcher can
+             reliably hand us; a receiver could not go on to do this work. -->
+        <activity
+            android:name=".widgets.WidgetTapActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/WidgetTapTheme" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -191,24 +191,83 @@ async function regenerateRecoveryCodes(userId, password, code) {
   return codes;
 }
 
-async function deleteAccount(userId, password, code) {
-  const db = getDatabase();
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  if (!user || !(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'INVALID_PASSWORD', 'The password is incorrect.');
-  verifySecondFactor(userId, code);
-  const paths = [
+// Every file this account put on disk. Rows are deleted inside a transaction,
+// but files are not transactional, so they are unlinked first: a half-deleted
+// account that still holds audio is the worse of the two failure modes.
+function storedFilePaths(db, userId) {
+  return [
     ...db.prepare('SELECT temporary_path FROM audio_chunks WHERE user_id=? AND temporary_path IS NOT NULL').all(userId),
     ...db.prepare('SELECT temporary_path FROM imports WHERE user_id=? AND temporary_path IS NOT NULL').all(userId),
     ...db.prepare('SELECT p.temporary_path FROM import_parts p JOIN imports i ON i.id=p.import_id WHERE i.user_id=?').all(userId),
+    ...db.prepare('SELECT original_path temporary_path FROM recording_context_items WHERE user_id=? AND original_path IS NOT NULL').all(userId),
   ];
+}
+
+// What "your content" means, parent-first so foreign keys cascade the rest.
+// Deliberately excludes the account itself, its credentials, its settings and
+// its paired devices: erasing content is starting over, not signing out.
+const CONTENT_TABLES = Object.freeze([
+  'recording_sessions',
+  'imports',
+  'recording_context_items',
+  'consolidation_runs',
+  'memories',
+  'conversations',
+  'voiceprints',
+  'speaker_clusters',
+  'entities',
+  'daily_summaries',
+  'search_documents',
+  'ai_requests',
+  'jobs',
+  'event_outbox',
+  'processing_metrics',
+  'ask_quota_events',
+  'diagnostic_request_events',
+]);
+
+async function verifyIdentity(db, userId, password, code) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user || !(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'INVALID_PASSWORD', 'The password is incorrect.');
+  verifySecondFactor(userId, code);
+  return user;
+}
+
+/// Erases everything this account has recorded while leaving the account
+/// itself, its settings and its paired devices in place.
+async function eraseContent(userId, password, code) {
+  const db = getDatabase();
+  await verifyIdentity(db, userId, password, code);
+  const paths = storedFilePaths(db, userId);
+  for (const row of paths) require('../ingest/temp_audio_service').unlinkStrict(row.temporary_path);
+  db.transaction(() => {
+    // Before the rows go: the FTS index is maintained by triggers that a
+    // foreign-key cascade does not fire, so it has to be cleared explicitly.
+    require('../../embeddings/search_index_service').removeForUser(db, userId);
+    for (const table of CONTENT_TABLES) {
+      db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
+    }
+  })();
+  return { files: paths.length };
+}
+
+async function deleteAccount(userId, password, code) {
+  const db = getDatabase();
+  await verifyIdentity(db, userId, password, code);
+  const paths = storedFilePaths(db, userId);
   for (const row of paths) require('../ingest/temp_audio_service').unlinkStrict(row.temporary_path);
   db.transaction(() => {
     require('../../embeddings/search_index_service').removeForUser(db, userId);
+    // The audit trail is kept for its own legitimate reasons, but it must not
+    // keep naming somebody who asked to be erased. `affected_user_id` is nulled
+    // by its foreign key; `actor_id` is a bare string and would otherwise carry
+    // the deleted account's identifier forward.
+    db.prepare("UPDATE audit_log SET actor_id=NULL WHERE actor_type='user' AND actor_id=?").run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   })();
 }
 
 module.exports = {
   publicUser, register, login, createSession, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
-  beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, verifySecondFactor, getTwoFactorStatus, regenerateRecoveryCodes,
+  beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, eraseContent, verifySecondFactor, getTwoFactorStatus, regenerateRecoveryCodes,
 };

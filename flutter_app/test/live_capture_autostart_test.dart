@@ -36,7 +36,8 @@ void main() {
   }) {
     final controller = NeoRecallController(
       recorder: recorder ?? _StubRecorder(),
-      audioDeviceRegistry: AudioDeviceAdapterRegistry()..register(_StubAdapter()),
+      audioDeviceRegistry: AudioDeviceAdapterRegistry()
+        ..register(_StubAdapter()),
     );
     // authenticated is derived from a real token + account, so both are set
     // rather than faked; that is exactly the state a signed-in app is in.
@@ -70,8 +71,9 @@ void main() {
   });
 
   test('never for an offline-first recorder, whose sync is the point', () {
-    // HeyPocket records to its own flash; there is no live stream to start and
-    // claiming the channel would only stall the drain.
+    // HeyPocket has no live stream. Memoket does stream, but autostart would
+    // still steal the channel from drain and start a take the user did not ask
+    // for — live starts from the app button or the hardware button instead.
     const heyPocket = AudioDeviceDescriptor(
       adapterId: 'stub',
       deviceKey: 'dev-2',
@@ -80,6 +82,16 @@ void main() {
       metadata: <String, Object?>{'type': 'heyPocket'},
     );
     expect(armed(device: heyPocket).shouldAutoStartLiveCapture, isFalse);
+    expect(armed(device: heyPocket).preferredDeviceStreamsLive, isFalse);
+    const memoket = AudioDeviceDescriptor(
+      adapterId: 'stub',
+      deviceKey: 'dev-3',
+      displayName: 'Memoket Gem',
+      transport: 'bluetooth_le',
+      metadata: <String, Object?>{'type': 'memoket'},
+    );
+    expect(armed(device: memoket).shouldAutoStartLiveCapture, isFalse);
+    expect(armed(device: memoket).preferredDeviceStreamsLive, isTrue);
   });
 
   test('never without a remembered device', () {
@@ -157,7 +169,9 @@ class _StubAdapter implements AudioDeviceAdapter {
   @override
   Future<void> initialize() async {}
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {}
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
   @override
   Future<void> stopScan() async {}
   @override

@@ -18,6 +18,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square" alt="AGPL-3.0 license"></a>
 </p>
 
+> [!IMPORTANT]
+> **npm registry distribution has been shut down.** Install NeoRecall directly
+> from GitHub using the repository installer below. The npm command is still
+> used locally to install Node.js dependencies and link the CLI to the checkout.
+
 <p align="center">
   <a href="https://discord.gg/f59rg2RwUT"><img src="https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Join the NeoLabs Discord"></a>
 </p>
@@ -30,26 +35,27 @@
 
 ## 🚀 Install
 
+The repository installer clones NeoRecall directly from GitHub (requires Git,
+Node.js 20+, and npm for dependencies):
+
 ```bash
-npm i -g github:NeoLabs-Systems/NeoRecall
-neorecall install
-neorecall setup
-neorecall start
+bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 ```
 
-Open `http://localhost:4500` and `/app/`. Use `neorecall update` to install newer GitHub releases for the setup-selected `beta` or `stable` channel.
-
-Read the [installation guide](docs/docs/installation.md) before exposing the service to a network.
+Open `http://localhost:4500` once `neorecall status` reports a
+running service. The macOS and Windows apps can do all of this without a
+terminal: **Set up NeoRecall on this computer** installs the server, then asks
+for the transcription and language-model services and tests both.
 
 ## ✨ What makes it different
 
 - **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
-- **Inference stays replaceable.** NeoRecall bundles no speech-recognition or language model. Use a hosted provider or a compatible service you deploy elsewhere; provider and model choices are configurable in `.env` and the admin dashboard.
+- **Inference stays replaceable.** NeoRecall bundles no speech-recognition or language model. Use a hosted provider or a compatible service you deploy elsewhere; provider and model choices are configurable in the desktop app, `.env`, and the admin dashboard.
 - **Voices are recognized on your machine.** A transcription service returns words, never who said them, so NeoRecall detects speech and tells speakers apart itself — 31 MB of models, not gigabytes. Silence is never sent anywhere, and the same voice is still recognized weeks later.
 - **Long recordings remain bounded.** Memories are written as soon as a conversation ends, and a transcript longer than the configured external model context is read in windows and folded back into one memory.
 - **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.
 - **Offline first.** Browser and desktop clients buffer independently decodable chunks and resume idempotent uploads when the server returns.
-- **Native NeoAgent recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) to search memories and transcript evidence through read-only, token-free retrieval tools.
+- **Native NeoAgent and MCP recall.** Connect from [NeoAgent](https://github.com/NeoLabs-Systems/NeoAgent) or paste the MCP URL into Claude, ChatGPT, or Cursor to search memories and transcript evidence through the same read-only retrieval tools.
 
 ## 📚 Documentation
 

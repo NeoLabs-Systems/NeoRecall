@@ -15,7 +15,10 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `NEORECALL_PORT` | HTTP port | `4500` |
 | `NEORECALL_TRUST_PROXY` | Trust one reverse-proxy hop | `false` |
 | `MAX_UPLOAD_BYTES` | Maximum live chunk upload | `33554432` |
+| `NEORECALL_CONTEXT_MAX_FILE_BYTES` | Maximum original context-file upload | `33554432` |
+| `NEORECALL_CONTEXT_MAX_ITEMS` | Maximum context items per recording or memory | `200` |
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
+| `NEORECALL_PLAUD_CLIENT_ID` / `NEORECALL_PLAUD_CLIENT_SECRET` | Partner credentials so iOS and Android can bind Plaud Note Pro / NotePin S over BLE | unset (pairing hidden) |
 
 ## External inference providers
 
@@ -23,7 +26,27 @@ NeoRecall does not install or run a transcription or language model. Provider se
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
+Each account can add custom vocabulary under **Settings → Recording → Transcription**, one word or phrase per line. NeoRecall also includes speaker names the user has explicitly confirmed and shows those names separately in Settings. Names inferred by the language model remain available as display metadata but are deliberately excluded from transcription vocabulary, preventing an incorrect inferred name from biasing later recordings and creating a feedback loop. Existing names are treated as unconfirmed when this provenance tracking is introduced; saving a speaker name in the Speakers screen confirms it. The combined trusted list is sent as an OpenAI-compatible prompt, Deepgram keywords/keyterms, or AssemblyAI keyterms according to the selected provider. For prompt-only OpenAI-compatible providers, an account-level switch controls an additional conservative correction: NeoRecall rewrites a returned word only when it is a long, close, unambiguous match for one single-word vocabulary entry; multi-word phrases are never rewritten. Applied corrections are counted in server logs without logging transcript text or vocabulary. `NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS` and `NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH` control the list limits. The conservative fallback is configured with `NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH`, `NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE`, `NEORECALL_VOCABULARY_CORRECTION_SIMILARITY`, and `NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN`.
+
 For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`, `deepseek`, `openrouter`, `together`, or `openai_compatible`. Set `AI_API_MODEL` and either the provider-specific key from `.env.example` or `AI_API_KEY`. Custom OpenAI-compatible endpoints also require `AI_API_BASE_URL`.
+
+## Backups
+
+NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts it with the installation key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
+
+`NEORECALL_BACKUP_DESTINATION` selects where artifacts land. `local` (the default) writes to `~/.neorecall/backups`. Artifacts are encrypted before they leave the process, so a destination never handles plaintext.
+
+The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
+
+From the command line:
+
+```bash
+neorecall backup          # snapshot now
+neorecall backup list     # what is stored, and the schedule
+neorecall restore <key>   # decrypt one artifact beside the live database
+```
+
+`restore` refuses to run while NeoRecall is up, and never writes over the live database. It decrypts the artifact next to the original, runs an integrity check, reports the account count and checksum, and prints the two `mv` commands to put it into service. Verify a restore periodically — a backup that has never been restored is an assumption, not a control.
 
 The admin dashboard fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
 
@@ -38,6 +61,8 @@ Processing gates are off by default and remain available when an external deploy
 `NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS` defaults to `1`. Batching several conversations into one request used to amortize a per-request price; it also asked the model to hold several unrelated occasions in mind at once, which is the harder job and the one it does worse. One conversation per run is the accurate unit — it is what a memory is anchored to — and the next run starts on the next tick, so a backlog still drains continuously.
 
 `NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES` defaults to `8`. A run still reads one new provisional conversation, but it also shows the model a bounded set of recent or same-recording memory cards. The model must explicitly identify which, if any, are fragments of the same real-world occasion. Claimed fragments are updated or absorbed into one card while their transcript sources and existing highlights remain attached. Time and recording continuity only narrow the candidates; matching titles, keywords, or a similarity threshold never decide a merge, and a recurring lesson or meeting remains separate unless the model identifies it as the same continuous occasion.
+
+`NEORECALL_MEMORY_CONTINUATION_LOOKBACK_MS` defaults to two hours. It controls how far back cards from a different recording session remain available for that decision, covering recorder restarts, reconnects, and delayed sync without treating a three-minute conversation boundary as a merge horizon. Same-stream cards remain eligible independently of this window. The prompt also receives recurring-speaker overlap when it is available; neither overlap nor time performs a merge on its own.
 
 `NEORECALL_MEMORY_MERGE_MAX_ITEMS` defaults to `100` and bounds a manual merge request. The server advertises the effective value to clients, combines the selected evidence immediately, and leaves the optional title and summary rewrite to a background job.
 
@@ -199,6 +224,19 @@ turn it overlaps most, and that turn's embedding with it. A segment with a secon
 voice talking across more than a fifth of it is marked as overlapping rather than
 quietly credited to one person.
 
+Before persistence, a phrase-independent quality guard also catches the failure
+mode where an ASR provider fills a short timestamp with the same word or short
+token template dozens of times. It compacts a run only when it repeats at least
+`NEORECALL_TRANSCRIPT_REPETITION_MIN_REPEATS` times (default `8`), covers at least
+`NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE` of the segment (default `0.8`),
+and would require more than `NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND` (default
+`5`) to have actually been spoken. Patterns are bounded by
+`NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS` (default `8`). Numeric slots
+may vary between repetitions, which handles counter-like hallucinations without
+keying the detector to a word such as a speaker label. One occurrence remains in
+the transcript as evidence; normal emphasis, lists, and realistically paced
+repetition are preserved.
+
 A voice is fingerprinted from everything it said in the chunk, weighted by how
 long each turn lasted — not from a single turn. That matters more than any
 threshold. Measured against two known-different voices: with one second of speech
@@ -206,10 +244,11 @@ per fingerprint the same voice scored anywhere from 0.20 to 0.87 while two
 different voices reached 0.77, so the two populations are indistinguishable. With
 two seconds they separate cleanly — the same voice never below 0.55, different
 voices never above 0.50. `NEORECALL_SPEAKER_CLUSTER_THRESHOLD` sits at 0.52,
-inside that gap, and `NEORECALL_SPEAKER_MINIMUM_TURN_MS` refuses to found a new
-speaker on less than two seconds of pooled speech. Below that bar a turn may still
-join a voice that already exists; it cannot invent one, so a half-second of noise
-never becomes a person.
+inside that gap. `NEORECALL_SPEAKER_MINIMUM_TURN_MS` defaults to `500`: this
+deliberately favors giving real short speech a possibly imperfect speaker label
+over leaving it unlabeled, while still preventing the briefest diarization blips
+from founding a profile. Below that duration a turn may join a voice that already
+exists, but it cannot invent one.
 
 A match needs `NEORECALL_SPEAKER_CLUSTER_MARGIN` over the runner-up only when that
 runner-up is itself *below* the threshold — the case the margin exists for, where a
@@ -226,6 +265,16 @@ component's first speech begins within `NEORECALL_SPEAKER_CONTINUITY_GAP_MS` of
 where its last known turn ended, that cluster may be kept at the relaxed
 `NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a near-tie,
 so a genuine speaker change at the boundary still resolves on its own.
+
+Recurring matching also reconciles duplicate profiles automatically after new
+speech is persisted and during hourly maintenance, so profiles already present
+when a server is upgraded are cleaned up as well. Mutually nearest profiles above the configured voice-match
+threshold are folded together unless their explicit names or linked person
+entities conflict. Inside one recording, session clusters that resolve to the
+same recurring voiceprint are collapsed immediately; while that derived cleanup
+runs, all such clusters already share one conversation-local label. Cluster
+cleanup is best-effort and never delays transcript persistence, server-side
+audio deletion, or the terminal receipt.
 
 If one person still appears as several, lower `NEORECALL_SPEAKER_CLUSTER_THRESHOLD`;
 if different people are being merged, raise it. Note that
@@ -261,17 +310,30 @@ Both are validated within the product's 1–10 second storage contract.
 `NEORECALL_SPEAKER_DISPLAY_MIN_PREVIEW_MS` controls when a profile is mature
 enough to appear on the Speakers screen and defaults to a full 10 seconds.
 
-## NeoAgent connection
+## NeoAgent and MCP connections
 
 NeoAgent connects through NeoRecall's companion OAuth flow. In NeoAgent, open
 **Integrations**, select **NeoRecall**, and enter this server's base URL. The
 browser then returns to NeoRecall for sign-in and explicit consent.
 
+Claude, ChatGPT (MCP), Cursor, and other MCP clients connect to the same
+read-only tools through Streamable HTTP MCP. In NeoRecall, open **Settings →
+Integrations** and copy the MCP URL (`{origin}/mcp`). Paste that URL into the
+client. It registers itself, then the browser returns to NeoRecall for sign-in
+and the same explicit consent.
+
 The issued access is limited to `search:read`, `memories:read`, and
 `recordings:read`. PKCE is mandatory, refresh tokens rotate on every use, and
-the authorization page shows the exact NeoAgent callback URL. NeoAgent cannot
+the authorization page shows the exact callback URL. Connected apps cannot
 upload audio, change memories, start consolidation, or call NeoRecall Ask.
 
-Set `NEORECALL_PUBLIC_URL` to the externally reachable HTTPS origin when
-NeoRecall is behind a reverse proxy. Local HTTP URLs remain suitable when both
-services run on a trusted private host.
+Companion bootstrap and MCP discovery advertise authorize/token/MCP endpoints
+using the host the client used to reach NeoRecall, so a LAN or reverse-proxy
+hostname works even when `NEORECALL_PUBLIC_URL` is still `localhost`. Set
+`NEORECALL_PUBLIC_URL` to the externally reachable HTTPS origin when NeoRecall
+is behind a reverse proxy for other public-facing links. Local HTTP URLs remain
+suitable when both services run on a trusted private host.
+
+NeoAgent's `PUBLIC_URL` must resolve in the browser that completes OAuth; that
+callback path is always `/api/integrations/oauth/callback`. MCP clients register
+their own HTTPS redirect URIs through `/oauth/register`.

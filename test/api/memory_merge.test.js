@@ -45,6 +45,19 @@ test('manual merge accepts a large selection and preserves one combined card', a
       `2026-08-26T09:${minute}:00.000Z`, `2026-08-26T09:${minute}:30.000Z`, runId);
     return publicId;
   });
+  const memoryRows = db.prepare('SELECT id,public_id FROM memories WHERE user_id=? ORDER BY id').all(userId);
+  const sharedContextId = crypto.randomUUID();
+  const absorbedContextId = crypto.randomUUID();
+  const insertContext = db.prepare(`INSERT INTO recording_context_items
+    (id,user_id,memory_id,kind,captured_at,note_text,analysis_state) VALUES (?,?,?,'note',?,?,'ready')`);
+  insertContext.run(sharedContextId, userId, memoryRows[0].id, '2026-08-26T09:00:05.000Z', 'Shared context');
+  insertContext.run(absorbedContextId, userId, memoryRows[1].id, '2026-08-26T09:01:05.000Z', 'Absorbed memory context');
+  db.prepare('INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai) VALUES (?,?,0)')
+    .run(memoryRows[0].id, sharedContextId);
+  db.prepare('INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai) VALUES (?,?,1)')
+    .run(memoryRows[1].id, sharedContextId);
+  db.prepare('INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai) VALUES (?,?,1)')
+    .run(memoryRows[1].id, absorbedContextId);
 
   const originalReady = aiProviders.ready;
   aiProviders.ready = () => false;
@@ -53,6 +66,11 @@ test('manual merge accepts a large selection and preserves one combined card', a
     assert.equal(response.body.absorbedIds.length, 25);
     assert.equal(db.prepare('SELECT COUNT(*) count FROM memories WHERE user_id=?').get(userId).count, 1);
     assert.match(response.body.memory.summary_en, /Summary 26\./);
+    const targetId = db.prepare('SELECT id FROM memories WHERE user_id=?').get(userId).id;
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM recording_context_items WHERE user_id=? AND memory_id=?').get(userId, targetId).count, 2);
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM memory_context_sources WHERE memory_id=?').get(targetId).count, 2);
+    assert.equal(db.prepare('SELECT used_by_ai FROM memory_context_sources WHERE memory_id=? AND context_item_id=?')
+      .get(targetId, sharedContextId).used_by_ai, 1);
   } finally {
     aiProviders.ready = originalReady;
   }

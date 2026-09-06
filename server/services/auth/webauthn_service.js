@@ -39,10 +39,10 @@ function normalizeLabel(value, fallback) {
   return label;
 }
 
-/// A credential is bound to the exact hostname it was created on, so the relying
-/// party comes from the origin the ceremony actually runs on rather than from a
-/// single configured public URL. Only the server's own origin and the origins
-/// the CORS layer already trusts are accepted.
+// A credential is bound to the exact hostname it was created on, so the relying
+// party comes from the origin the ceremony actually runs on rather than from a
+// single configured public URL. Only the server's own origin and the origins
+// the CORS layer already trusts are accepted.
 function resolveRelyingParty({ origin, selfOrigin }) {
   const configured = (process.env.NEORECALL_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean);
   const effective = String(origin || '').trim() || selfOrigin;
@@ -95,8 +95,8 @@ function storeChallenge({ purpose, userId, challenge, rp }) {
   return id;
 }
 
-/// Challenges are single use: the row is removed as it is read, so a captured
-/// assertion cannot be replayed against the same challenge.
+// Challenges are single use: the row is removed as it is read, so a captured
+// assertion cannot be replayed against the same challenge.
 function consumeChallenge({ challengeId, purpose, rp }) {
   const db = getDatabase();
   const row = db.prepare('SELECT * FROM webauthn_challenges WHERE id = ? AND purpose = ?').get(String(challengeId || ''), purpose);

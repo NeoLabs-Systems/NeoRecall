@@ -148,3 +148,18 @@ test('reevaluate does not merge explicitly distinct or disabled profiles', () =>
   assert.equal(result.mergedCount, 0);
   assert.equal(result.remainingCount, 3);
 });
+
+test('reevaluate collapses a dense group of mutually nearest duplicate profiles', () => {
+  const database = getDatabase();
+  migrate(database);
+  const userId = makeUser(database);
+  makeVoiceprint(database, userId, { embedding: [1, 0] });
+  makeVoiceprint(database, userId, { embedding: [0.999, 0.001] });
+  makeVoiceprint(database, userId, { embedding: [0.998, 0.002] });
+
+  const result = service.reevaluate(userId);
+
+  assert.equal(result.mergedCount, 2,
+    'runner-up ambiguity among near-identical profiles must not create a permanent duplicate island');
+  assert.equal(result.remainingCount, 1);
+});

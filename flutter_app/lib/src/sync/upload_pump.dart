@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import '../api_client.dart';
 import '../models/chunk.dart';
 import 'chunk_store.dart';
+import '../diagnostics/client_diagnostic_log.dart';
 
 class UploadPump {
   UploadPump({
@@ -455,7 +456,20 @@ class UploadPump {
       await store.release(id);
       try {
         await api.releaseChunks(<String>[receipt['chunkId'] as String]);
-      } catch (_) {}
+      } catch (error) {
+        // Local audio is already released, so this is not worth failing the
+        // pump for — but the server still believes it owns the chunk, and that
+        // is only diagnosable if it leaves a trace.
+        ClientDiagnosticLog.instance.record(
+          'upload',
+          'server_release_failed',
+          level: 'warn',
+          details: <String, Object?>{
+            'chunkId': receipt['chunkId'],
+            'reason': error.toString(),
+          },
+        );
+      }
     } else if (state == 'reupload_required') {
       final previousAttempts =
           (chunk.receipt?[_reuploadAttemptKey] as num?)?.toInt() ?? 0;

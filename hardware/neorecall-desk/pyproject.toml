@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neorecall-desk"
+version = "0.1.0"
+description = "NeoRecall Desk appliance service (Raspberry Pi Zero 2 W + Waveshare WM8960)"
+requires-python = ">=3.11"
+# Only what the appliance cannot record without. Everything here has wheels for
+# every architecture a Pi runs, and numpy is expected to come from the
+# distribution rather than be built on a Zero 2 W.
+dependencies = [
+    "requests>=2.31",
+    "numpy>=1.24",
+    "cbor2>=5.6",
+]
+
+[project.optional-dependencies]
+# Bluetooth is how the app talks to the appliance, but a box with no working
+# Bluetooth is still a USB sound card and a recorder — and the service already
+# starts without it. Making this optional means a missing wheel costs the
+# control channel, not the whole installation.
+bluetooth = ["dbus-fast>=2.21"]
+
+# libgpiod 2.x from PyPI needs headers Debian Bookworm does not have: it ships
+# libgpiod 1.6, whose Python API arrives through the `python3-libgpiod` package
+# instead. The button speaks both, so this extra is for systems new enough to
+# want it, and installing it is never required.
+gpio = ["gpiod>=2.1"]
+
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+neorecall-desk = "neorecall_desk.cli:main"
+neorecall-desk-relay = "neorecall_desk.audio.relay:main"
+neorecall-desk-selftest = "neorecall_desk.audio.selftest:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# D-Bus type signatures ("ay", "a{sv}", ...) are string annotations dbus-fast
+# reads at run time, not Python forward references.
+# UP037 would strip those quotes and turn the signatures into names.
+"src/neorecall_desk/control/gatt.py" = ["F722", "UP037"]

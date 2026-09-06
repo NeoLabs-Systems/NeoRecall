@@ -14,11 +14,11 @@ function provider() {
   return require(module);
 }
 
-/// Whether generation can be attempted at all.
-///
-/// For a configured endpoint this means there is somewhere to send the request.
-/// Callers use it to
-/// decide whether to queue work rather than to let every job fail one by one.
+// Whether generation can be attempted at all.
+//
+// For a configured endpoint this means there is somewhere to send the request.
+// Callers use it to
+// decide whether to queue work rather than to let every job fail one by one.
 function ready() {
   try { return provider().ready(); } catch { return false; }
 }

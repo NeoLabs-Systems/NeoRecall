@@ -2,12 +2,14 @@ package systems.neolabs.neorecall
 
 import android.app.Activity
 import android.app.Application
+import android.content.res.Configuration
 import android.os.Bundle
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugins.GeneratedPluginRegistrant
+import systems.neolabs.neorecall.widgets.WidgetUpdater
 
 /**
  * Owns one process-scoped Flutter engine.
@@ -60,6 +62,20 @@ class NeoRecallApplication : Application() {
       DartExecutor.DartEntrypoint.createDefault(),
     )
     FlutterEngineCache.getInstance().put(ENGINE_ID, flutterEngine)
+  }
+
+  /**
+   * Widgets configured to follow the system theme resolve their colours in this
+   * process, so a light/dark switch has to reach them from here. The launcher
+   * does not redraw a widget on a configuration change on its own.
+   */
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    try {
+      WidgetUpdater.refreshAll(this)
+    } catch (_: Exception) {
+      // Cosmetic; never worth taking the process down for.
+    }
   }
 
   private val activityTracker = object : ActivityLifecycleCallbacks {

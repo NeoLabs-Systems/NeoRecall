@@ -6,6 +6,8 @@ import 'package:neorecall/src/devices/ble/gatt_connector_transport.dart';
 import 'package:neorecall/src/devices/ble/gatt_transport.dart';
 import 'package:neorecall/src/devices/omi/device_models.dart';
 import 'package:neorecall/src/devices/omi/heypocket_connector.dart';
+import 'package:neorecall/src/devices/omi/memoket_connector.dart';
+import 'package:neorecall/src/devices/omi/memoket_protocol.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
 import 'package:neorecall/src/devices/omi/ring_protocol.dart';
@@ -21,71 +23,74 @@ void main() {
     await connector.dispose();
   });
 
-  test('HeyPocket separates ASCII control frames from binary MP3 audio', () async {
-    final transport = _FakeWearableTransport();
-    final connector = HeyPocketConnector(
-      device: _device(WearableDeviceType.heyPocket),
-      transport: transport,
-    );
-    // The device ignores commands until the APP&SK session-key handshake is
-    // acknowledged; replies are routed by content, not by which channel.
-    transport.onWrite = (service, characteristic, value) {
-      if (characteristic == WearableDeviceUuids.heyPocketControlWrite &&
-          ascii.decode(value).startsWith('APP&SK&')) {
-        scheduleMicrotask(
-          () => transport.emit(
-            WearableDeviceUuids.heyPocketService,
-            WearableDeviceUuids.heyPocketAudioNotify,
-            ascii.encode('MCU&SK&OK'),
-          ),
-        );
-      }
-    };
-    await connector.connect();
-    expect(connector.codec, WearableAudioCodec.mp3);
+  test(
+    'HeyPocket separates ASCII control frames from binary MP3 audio',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = HeyPocketConnector(
+        device: _device(WearableDeviceType.heyPocket),
+        transport: transport,
+      );
+      // The device ignores commands until the APP&SK session-key handshake is
+      // acknowledged; replies are routed by content, not by which channel.
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic == WearableDeviceUuids.heyPocketControlWrite &&
+            ascii.decode(value).startsWith('APP&SK&')) {
+          scheduleMicrotask(
+            () => transport.emit(
+              WearableDeviceUuids.heyPocketService,
+              WearableDeviceUuids.heyPocketAudioNotify,
+              ascii.encode('MCU&SK&OK'),
+            ),
+          );
+        }
+      };
+      await connector.connect();
+      expect(connector.codec, WearableAudioCodec.mp3);
 
-    // A battery response updates the battery stream (routed by content).
-    final batteryFuture = connector.batteryLevels.stream.first;
-    transport.emit(
-      WearableDeviceUuids.heyPocketService,
-      WearableDeviceUuids.heyPocketControlNotify,
-      ascii.encode('MCU&BAT&87'),
-    );
-    expect(await batteryFuture, 87);
+      // A battery response updates the battery stream (routed by content).
+      final batteryFuture = connector.batteryLevels.stream.first;
+      transport.emit(
+        WearableDeviceUuids.heyPocketService,
+        WearableDeviceUuids.heyPocketControlNotify,
+        ascii.encode('MCU&BAT&87'),
+      );
+      expect(await batteryFuture, 87);
 
-    // Recording enables the audio stream and issues the documented command.
-    await connector.startRecording();
-    expect(
-      transport.writes.map((write) => ascii.decode(write.value)),
-      contains('APP&STA'),
-    );
+      // Recording enables the audio stream and issues the documented command.
+      await connector.startRecording();
+      expect(
+        transport.writes.map((write) => ascii.decode(write.value)),
+        contains('APP&STA'),
+      );
 
-    final frames = <List<int>>[];
-    final audioSub = connector.audioBytes.stream.listen(frames.add);
-    final mp3Frame = <int>[0xFF, 0xFB, 0x90, 0x00, 0x11, 0x22];
-    transport.emit(
-      WearableDeviceUuids.heyPocketService,
-      WearableDeviceUuids.heyPocketAudioNotify,
-      mp3Frame,
-    );
-    // An ASCII control frame arriving on the audio path is parsed, not captured.
-    transport.emit(
-      WearableDeviceUuids.heyPocketService,
-      WearableDeviceUuids.heyPocketAudioNotify,
-      ascii.encode('MCU&STO'),
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(frames, <List<int>>[mp3Frame]);
+      final frames = <List<int>>[];
+      final audioSub = connector.audioBytes.stream.listen(frames.add);
+      final mp3Frame = <int>[0xFF, 0xFB, 0x90, 0x00, 0x11, 0x22];
+      transport.emit(
+        WearableDeviceUuids.heyPocketService,
+        WearableDeviceUuids.heyPocketAudioNotify,
+        mp3Frame,
+      );
+      // An ASCII control frame arriving on the audio path is parsed, not captured.
+      transport.emit(
+        WearableDeviceUuids.heyPocketService,
+        WearableDeviceUuids.heyPocketAudioNotify,
+        ascii.encode('MCU&STO'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(frames, <List<int>>[mp3Frame]);
 
-    await connector.stopRecording();
-    expect(
-      transport.writes.map((write) => ascii.decode(write.value)),
-      contains('APP&STO'),
-    );
+      await connector.stopRecording();
+      expect(
+        transport.writes.map((write) => ascii.decode(write.value)),
+        contains('APP&STO'),
+      );
 
-    await audioSub.cancel();
-    await connector.dispose();
-  });
+      await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
 
   test(
     'HeyPocket offline drain lists, downloads until MCU&OFF, and deletes',
@@ -172,15 +177,24 @@ void main() {
     // one that never synced: the user looks where they recorded and finds
     // nothing. The time is in the file id, not in the listing date.
     test('comes from the file id, not just the day', () {
-      const file = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731180000');
+      const file = HeyPocketStoredFile(
+        date: '2026-07-31',
+        fileId: '20260731180000',
+      );
       final captured = file.capturedAt!;
       expect(captured.isUtc, isTrue);
       expect(captured, DateTime(2026, 7, 31, 18).toUtc());
     });
 
     test('two recordings from one day do not collapse onto one instant', () {
-      const morning = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731080000');
-      const evening = HeyPocketStoredFile(date: '2026-07-31', fileId: '20260731203000');
+      const morning = HeyPocketStoredFile(
+        date: '2026-07-31',
+        fileId: '20260731080000',
+      );
+      const evening = HeyPocketStoredFile(
+        date: '2026-07-31',
+        fileId: '20260731203000',
+      );
       expect(morning.capturedAt, isNot(evening.capturedAt));
       expect(
         evening.capturedAt!.difference(morning.capturedAt!),
@@ -193,6 +207,230 @@ void main() {
       expect(file.capturedAt, DateTime.tryParse('2026-07-31')?.toUtc());
     });
   });
+
+  test(
+    'Memoket remote start/stop and live frames follow the HCI capture',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+
+      await connector.connect();
+      expect(connector.codec, WearableAudioCodec.opus);
+      expect(await connector.readBatteryLevel(), 78);
+
+      await connector.startRecording();
+      expect(
+        transport.writes.any(
+          (write) =>
+              write.value.toString() == <int>[0x01, 0x00, 0x00].toString(),
+        ),
+        isTrue,
+      );
+
+      final frames = <List<int>>[];
+      final audioSub = connector.audioBytes.stream.listen(frames.add);
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        <int>[0, 0, 0, 0, 3, 0xbc, 0x62, 0x11],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(frames, <List<int>>[
+        <int>[0xbc, 0x62, 0x11],
+      ]);
+
+      await connector.stopRecording();
+      expect(
+        transport.writes.any(
+          (write) => write.value.toString() == <int>[0x02, 0x00].toString(),
+        ),
+        isTrue,
+      );
+      expect(
+        transport.writes.any(
+          (write) =>
+              write.value.first == MemoketProtocol.opDelete &&
+              ascii
+                  .decode(write.value.sublist(2))
+                  .contains('20260905_222343_2.opus'),
+        ),
+        isTrue,
+        reason:
+            'a live take must be deleted so the next drain does not re-import it',
+      );
+
+      await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket hardware start/stop raises control events without a phone command',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+
+      await connector.connect();
+
+      final buttons = <List<int>>[];
+      final frames = <List<int>>[];
+      final buttonSub = connector.buttonEvents.stream.listen(buttons.add);
+      final audioSub = connector.audioBytes.stream.listen(frames.add);
+
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode('20260905_223000_2.opus'),
+        ],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(buttons, <List<int>>[
+        <int>[WearableControlCodes.startRecording],
+      ]);
+
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        <int>[0, 0, 0, 0, 3, 0xbc, 0x62, 0x11],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(frames, <List<int>>[
+        <int>[0xbc, 0x62, 0x11],
+      ]);
+
+      final writesBeforeAttach = List<_GattWrite>.from(transport.writes);
+      await connector.startRecording();
+      expect(
+        transport.writes
+            .skip(writesBeforeAttach.length)
+            .any(
+              (write) =>
+                  write.value.toString() == <int>[0x01, 0x00, 0x00].toString(),
+            ),
+        isFalse,
+        reason: 'a take the Gem already started must not be started again',
+      );
+
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStop,
+          0x00,
+          0x01,
+          0x00,
+          ...ascii.encode('20260905_223000_2.opus'),
+        ],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(buttons.last, <int>[WearableControlCodes.stopRecording]);
+
+      final writesBeforeStop = transport.writes.length;
+      await connector.stopRecording();
+      expect(
+        transport.writes
+            .skip(writesBeforeStop)
+            .any(
+              (write) => write.value.toString() == <int>[0x02, 0x00].toString(),
+            ),
+        isFalse,
+        reason: 'a take the Gem already stopped must not be stopped again',
+      );
+      expect(
+        transport.writes
+            .skip(writesBeforeStop)
+            .any(
+              (write) =>
+                  write.value.isNotEmpty &&
+                  write.value.first == MemoketProtocol.opDelete &&
+                  ascii
+                      .decode(write.value.sublist(2), allowInvalid: true)
+                      .contains('20260905_223000_2.opus'),
+            ),
+        isTrue,
+      );
+
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode('20260905_223100_2.opus'),
+        ],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        buttons
+            .where(
+              (event) => event.first == WearableControlCodes.startRecording,
+            )
+            .length,
+        1,
+        reason: 'a late start ack after stop must not open another take',
+      );
+
+      await buttonSub.cancel();
+      await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket offline drain lists, downloads, wraps Opus, and deletes',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      final chunk = List<int>.filled(480, 0xbc);
+      _bindMemoketReplies(transport, fileChunk: chunk);
+
+      await connector.connect();
+
+      final captured = <List<int>>[];
+      final audioSub = connector.audioBytes.stream.listen(captured.add);
+      final recordings = <WearableRecording>[];
+      final count = await connector.drainStoredAudio((recording) async {
+        recordings.add(recording);
+      });
+
+      expect(count, 1);
+      expect(recordings.single.contentType, 'audio/ogg');
+      expect(recordings.single.filename, 'memoket-20260905_222817_2.ogg');
+      expect(recordings.single.bytes.sublist(0, 4), ascii.encode('OggS'));
+      expect(captured, isEmpty);
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDownload,
+        ),
+        isTrue,
+      );
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDelete,
+        ),
+        isTrue,
+      );
+
+      await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
 
   test('HeyPocket readBatteryLevel round-trips APP&BAT/MCU&BAT', () async {
     final transport = _FakeWearableTransport();
@@ -237,7 +475,22 @@ void main() {
       // the connector's fallback is Opus, matching real hardware.
       transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
       transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
-        0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
       ];
       await connector.connect();
       expect(connector.codec, WearableAudioCodec.pcm8);
@@ -300,7 +553,8 @@ void main() {
         // The ring cursor must NOT have advanced yet: ingest happens first.
         advancesAtIngest = transport.writes
             .where(
-              (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+              (w) =>
+                  w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
             )
             .length;
       });
@@ -324,76 +578,105 @@ void main() {
     },
   );
 
-  test('Omi ring drain does not advance the cursor when ingest fails', () async {
-    final transport = _FakeWearableTransport();
-    final connector = OmiConnector(
-      device: _device(WearableDeviceType.omi),
-      transport: transport,
-    );
-    // PCM8 (codec id 1) so the drain decodes without a native Opus codec.
-    transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
-    transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
-      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-    ];
-    await connector.connect();
-    final frame = List<int>.filled(8, 0x40);
-    final payload = <int>[
-      frame.length,
-      ...frame,
-      ...List<int>.filled(440 - (frame.length + 1), 0),
-    ];
-    final record = <int>[0, 0, 0, 1, ...payload];
-    transport.onWrite = (service, characteristic, value) {
-      if (characteristic != WearableDeviceUuids.omiStorageData ||
-          value.isEmpty) {
-        return;
-      }
-      void emit(List<int> notification) => scheduleMicrotask(
-        () => transport.emit(
-          WearableDeviceUuids.omiStorageService,
-          WearableDeviceUuids.omiStorageData,
-          notification,
-        ),
+  test(
+    'Omi ring drain does not advance the cursor when ingest fails',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = OmiConnector(
+        device: _device(WearableDeviceType.omi),
+        transport: transport,
       );
-      switch (value[0]) {
-        case RingProtocol.cmdInfo:
-          emit(<int>[
-            RingProtocol.notifyInfo,
-            ...List<int>.filled(7, 0), 0,
-            ...List<int>.filled(7, 0), 1,
-            0, 0, 0, 0,
-            ...List<int>.filled(8, 0),
-            0, 0,
-          ]);
-        case RingProtocol.cmdRead:
-          // Real firmware announces the transfer size first.
-          emit(<int>[
-            RingProtocol.notifyReadBegin,
-            ...List<int>.filled(8, 0),
-            0, 0, 0, 1, // packetCount = 1
-          ]);
-          emit(<int>[RingProtocol.notifyData, ...record]);
-          emit(<int>[RingProtocol.notifyDone, 0, ...List<int>.filled(7, 0), 1]);
-      }
-    };
+      // PCM8 (codec id 1) so the drain decodes without a native Opus codec.
+      transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
+      transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+      ];
+      await connector.connect();
+      final frame = List<int>.filled(8, 0x40);
+      final payload = <int>[
+        frame.length,
+        ...frame,
+        ...List<int>.filled(440 - (frame.length + 1), 0),
+      ];
+      final record = <int>[0, 0, 0, 1, ...payload];
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.omiStorageData ||
+            value.isEmpty) {
+          return;
+        }
+        void emit(List<int> notification) => scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.omiStorageService,
+            WearableDeviceUuids.omiStorageData,
+            notification,
+          ),
+        );
+        switch (value[0]) {
+          case RingProtocol.cmdInfo:
+            emit(<int>[
+              RingProtocol.notifyInfo,
+              ...List<int>.filled(7, 0),
+              0,
+              ...List<int>.filled(7, 0),
+              1,
+              0,
+              0,
+              0,
+              0,
+              ...List<int>.filled(8, 0),
+              0,
+              0,
+            ]);
+          case RingProtocol.cmdRead:
+            // Real firmware announces the transfer size first.
+            emit(<int>[
+              RingProtocol.notifyReadBegin,
+              ...List<int>.filled(8, 0),
+              0, 0, 0, 1, // packetCount = 1
+            ]);
+            emit(<int>[RingProtocol.notifyData, ...record]);
+            emit(<int>[
+              RingProtocol.notifyDone,
+              0,
+              ...List<int>.filled(7, 0),
+              1,
+            ]);
+        }
+      };
 
-    // An ingest failure must leave the records on the device (no advance), so
-    // the range is re-drained next sync rather than lost.
-    await expectLater(
-      connector.drainStoredAudio((recording) async {
-        throw StateError('ingest failed');
-      }),
-      throwsA(isA<StateError>()),
-    );
-    final advances = transport.writes
-        .where(
-          (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-        )
-        .toList();
-    expect(advances, isEmpty);
+      // An ingest failure must leave the records on the device (no advance), so
+      // the range is re-drained next sync rather than lost.
+      await expectLater(
+        connector.drainStoredAudio((recording) async {
+          throw StateError('ingest failed');
+        }),
+        throwsA(isA<StateError>()),
+      );
+      final advances = transport.writes
+          .where(
+            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+          )
+          .toList();
+      expect(advances, isEmpty);
 
-    await connector.dispose();
-  });
+      await connector.dispose();
+    },
+  );
 
   test('a drain that loses a notification is retried, never ingested', () async {
     // The ring arrives as one unframed byte stream, so a single notification
@@ -408,12 +691,30 @@ void main() {
     );
     transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
     transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
-      0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
     ];
     await connector.connect();
     final frame = List<int>.filled(8, 0x40);
     final record = <int>[
-      0, 0, 0, 1,
+      0,
+      0,
+      0,
+      1,
       frame.length,
       ...frame,
       ...List<int>.filled(440 - (frame.length + 1), 0),
@@ -434,18 +735,27 @@ void main() {
         case RingProtocol.cmdInfo:
           emit(<int>[
             RingProtocol.notifyInfo,
-            ...List<int>.filled(7, 0), 0,
-            ...List<int>.filled(7, 0), 2,
-            0, 0, 0, 0,
+            ...List<int>.filled(7, 0),
+            0,
+            ...List<int>.filled(7, 0),
+            2,
+            0,
+            0,
+            0,
+            0,
             ...List<int>.filled(8, 0),
-            0, 0,
+            0,
+            0,
           ]);
         case RingProtocol.cmdRead:
           // Two packets announced...
           emit(<int>[
             RingProtocol.notifyReadBegin,
             ...List<int>.filled(8, 0),
-            0, 0, 0, 2,
+            0,
+            0,
+            0,
+            2,
           ]);
           // ...but only one arrives: the second is dropped in transit.
           emit(<int>[RingProtocol.notifyData, ...record]);
@@ -516,7 +826,22 @@ void main() {
       );
       transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
       transport.readValues[WearableDeviceUuids.omiStorageControl] = <int>[
-        0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
       ];
       await connector.connect();
       await connector.startRecording();
@@ -537,6 +862,15 @@ void main() {
       await connector.dispose();
     });
 
+    test('Memoket refuses it: control is shared with the drain', () async {
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: _FakeWearableTransport(),
+      );
+      expect(connector.supportsConcurrentCapture, isFalse);
+      await connector.dispose();
+    });
+
     test('HeyPocket refuses it: one notify channel carries both', () async {
       // HeyPocket routes binary notifications to the download buffer while a
       // transfer is active and to live audio otherwise — the two are told apart
@@ -551,6 +885,81 @@ void main() {
       await connector.dispose();
     });
   });
+}
+
+void _bindMemoketReplies(
+  _FakeWearableTransport transport, {
+  List<int>? fileChunk,
+}) {
+  const filename = '20260905_222817_2.opus';
+  const liveName = '20260905_222343_2.opus';
+  void ctrl(List<int> value) => scheduleMicrotask(
+    () => transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketControlNotify,
+      value,
+    ),
+  );
+  transport.onWrite = (service, characteristic, value) {
+    if (characteristic != WearableDeviceUuids.memoketControlWrite) return;
+    if (value.isEmpty) return;
+    switch (value.first) {
+      case MemoketProtocol.opPing:
+        ctrl(<int>[MemoketProtocol.opPing, 0x00]);
+      case MemoketProtocol.opBattery:
+        ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+      case MemoketProtocol.opFirmware:
+        ctrl(<int>[MemoketProtocol.opFirmware, ...ascii.encode('01.42.01.10')]);
+      case MemoketProtocol.opTimeQuery:
+        ctrl(<int>[MemoketProtocol.opTimeQuery, 0x68, 0, 0, 0, 0]);
+      case MemoketProtocol.opSetTime:
+        ctrl(<int>[MemoketProtocol.opSetTime, 0x01]);
+      case MemoketProtocol.opStorage:
+        ctrl(<int>[MemoketProtocol.opStorage, 0x0d, 0x00]);
+      case MemoketProtocol.opRecordStart:
+        ctrl(<int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode(liveName),
+        ]);
+      case MemoketProtocol.opRecordStop:
+        ctrl(<int>[
+          MemoketProtocol.opRecordStop,
+          0x00,
+          0x01,
+          0x00,
+          0x02,
+          ...ascii.encode(liveName),
+        ]);
+      case MemoketProtocol.opListFiles:
+        ctrl(<int>[
+          MemoketProtocol.opListFiles,
+          0x01,
+          0x00,
+          0x00,
+          0x0a,
+          filename.length,
+          ...ascii.encode(filename),
+          0x00,
+          0x00,
+          0x01,
+          0xe0,
+        ]);
+        ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
+      case MemoketProtocol.opDownload:
+        scheduleMicrotask(() {
+          transport.emit(
+            WearableDeviceUuids.memoketService,
+            WearableDeviceUuids.memoketFileNotify,
+            fileChunk ?? List<int>.filled(480, 0xbc),
+          );
+          ctrl(<int>[MemoketProtocol.opDownload, 0x02]);
+        });
+      case MemoketProtocol.opDelete:
+        ctrl(<int>[MemoketProtocol.opDelete, 0x01]);
+    }
+  };
 }
 
 DiscoveredWearable _device(WearableDeviceType type) =>

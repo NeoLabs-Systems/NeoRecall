@@ -13,6 +13,7 @@ const searchIndex = require('../../embeddings/search_index_service');
 const memoryContinuity = require('./memory_continuity_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
+const contextMaterial = require('../context/context_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
 const { createLogger } = require('../../utils/logger');
 
@@ -46,21 +47,21 @@ function lastOutbound(userId) {
   return getDatabase().prepare("SELECT sent_at FROM ai_requests WHERE user_id=? AND purpose='consolidation' AND sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1").get(userId);
 }
 
-/// How long to wait after a run that failed, growing with each failure in a row.
-///
-/// Without this, a consolidation that fails for a reason nothing about the input
-/// can fix — an endpoint that is down, a model name that does not exist, a
-/// context set larger than the server allows — is attempted again on the very
-/// next scheduler tick, and the one after that. Observed on a real installation:
-/// three language-model requests a minute, every minute, all failing, for hours.
-/// It produces nothing, fills the request log so the actual first failure cannot
-/// be found, and hammers an endpoint that is already unwell.
-///
-/// It backs off rather than giving up, because most of these causes are
-/// temporary and the recording is still waiting to become a memory. One minute,
-/// then two, four, eight, up to half an hour — so an outage costs a handful of
-/// attempts instead of hundreds, and recovery still happens on its own within
-/// half an hour of the cause being fixed. Asking by hand ignores it entirely.
+// How long to wait after a run that failed, growing with each failure in a row.
+//
+// Without this, a consolidation that fails for a reason nothing about the input
+// can fix — an endpoint that is down, a model name that does not exist, a
+// context set larger than the server allows — is attempted again on the very
+// next scheduler tick, and the one after that. Observed on a real installation:
+// three language-model requests a minute, every minute, all failing, for hours.
+// It produces nothing, fills the request log so the actual first failure cannot
+// be found, and hammers an endpoint that is already unwell.
+//
+// It backs off rather than giving up, because most of these causes are
+// temporary and the recording is still waiting to become a memory. One minute,
+// then two, four, eight, up to half an hour — so an outage costs a handful of
+// attempts instead of hundreds, and recovery still happens on its own within
+// half an hour of the cause being fixed. Asking by hand ignores it entirely.
 const FAILURE_BACKOFF_BASE_MS = 60_000;
 const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
 
@@ -88,16 +89,17 @@ function failureBackoff(userId) {
 
 function candidateConversations(userId) {
   return material.listByState(userId, ['closed'])
-    .filter((conversation) => material.isComplete(userId, conversation.id));
+    .filter((conversation) => material.isComplete(userId, conversation.id))
+    .filter((conversation) => contextMaterial.sessionComplete(userId, conversation.session_id));
 }
 
-/// True when the most recent consolidation could not be validated.
-///
-/// Candidates are always taken oldest-first, so a conversation the model cannot
-/// partition would otherwise reappear in every later run and stop memory
-/// generation for good. After such a failure the next run carries a single
-/// conversation, which both isolates the cause and stops a whole batch from
-/// being blamed for one bad member.
+// True when the most recent consolidation could not be validated.
+//
+// Candidates are always taken oldest-first, so a conversation the model cannot
+// partition would otherwise reappear in every later run and stop memory
+// generation for good. After such a failure the next run carries a single
+// conversation, which both isolates the cause and stops a whole batch from
+// being blamed for one bad member.
 function narrowingAfterFailure(userId) {
   const previous = getDatabase().prepare('SELECT state,error_code FROM consolidation_runs WHERE user_id=? ORDER BY reserved_at DESC LIMIT 1').get(userId);
   return Boolean(previous && previous.state === 'failed' && VALIDATION_FAILURE_CODES.includes(previous.error_code));
@@ -117,6 +119,7 @@ function buildCandidates(userId) {
     characters += size;
   }
   const audioMs = output.reduce((sum, conversation) => sum + material.durationMs(conversation), 0);
+  contextMaterial.attach(userId, output);
   return { conversations: output, characters, audioMs, narrowed };
 }
 
@@ -161,17 +164,17 @@ function eligibility(userId, { ignoreBackoff = false } = {}) {
   return { eligible: true, nextEligibleAt, ...candidates };
 }
 
-/// Records that a consolidation could not be validated.
-///
-/// Only the conversations the run actually carried are charged, and a
-/// conversation that reaches the configured limit is quarantined: it keeps its
-/// transcript and stays readable, but it no longer enters candidate sets, so one
-/// unpartitionable conversation cannot stop every later memory.
+// Records that a consolidation could not be validated.
+//
+// Only the conversations the run actually carried are charged, and a
+// conversation that reaches the configured limit is quarantined: it keeps its
+// transcript and stays readable, but it no longer enters candidate sets, so one
+// unpartitionable conversation cannot stop every later memory.
 function recordValidationFailure(userId, conversationIds, errorCode) {
   if (!conversationIds.length) return { quarantined: [] };
   const db = getDatabase();
   const limit = processingSettings.get().consolidationMaxFailures;
-  db.transaction(() => {
+  return db.transaction(() => {
     const quarantined = [];
     for (const conversationId of conversationIds) {
       const row = db.prepare(`UPDATE conversations SET consolidation_failures=consolidation_failures+1,
@@ -249,11 +252,11 @@ function evidenceForSegmentIds(segmentIds, stats) {
   return { durationMs, characters };
 }
 
-/// Demote thin conversation sections the model over-promoted to memory-worthy.
-///
-/// Brief exchanges still get a title and summary on the timeline; they must not
-/// become episodic memory cards. Atomic facts from short speech are what
-/// mini-memories are for — and those only attach under a worthy parent memory.
+// Demote thin conversation sections the model over-promoted to memory-worthy.
+//
+// Brief exchanges still get a title and summary on the timeline; they must not
+// become episodic memory cards. Atomic facts from short speech are what
+// mini-memories are for — and those only attach under a worthy parent memory.
 function applyMemoryWorthinessFloors(output, conversations, floors = processingSettings.get()) {
   const minMs = Number(floors.minMemoryEvidenceMs ?? 0);
   const minChars = Number(floors.minMemoryEvidenceChars ?? 0);
@@ -375,6 +378,15 @@ function persistMemory(database, { userId, runId, memory, refined, entityIds }) 
   for (const segmentPublicId of memory.sourceSegmentIds) {
     attachSource(memoryId, null, segmentId.get(segmentPublicId, userId).id);
   }
+  const sourceIds = new Set(memory.sourceSegmentIds);
+  const contextIds = refined.inputConversations
+    .filter((conversation) => conversation.segments.some((segment) => sourceIds.has(segment.id)))
+    .flatMap((conversation) => (conversation.contextItems || [])
+      .filter((item) => !item.sourceSegmentId || sourceIds.has(item.sourceSegmentId))
+      .map((item) => item.id));
+  const contextInsert = database.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
+    VALUES (?,?,1) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=1`);
+  for (const contextId of new Set(contextIds)) contextInsert.run(memoryId, contextId);
   const topicInsert = database.prepare('INSERT OR IGNORE INTO memory_topics (memory_id,topic) VALUES (?,?)');
   for (const topic of memory.topics) topicInsert.run(memoryId, topic.trim());
   const memoryEntityInsert = database.prepare('INSERT OR IGNORE INTO memory_entities (memory_id,entity_id,role) VALUES (?,?,?)');
@@ -428,6 +440,7 @@ function persist(userId, runId, output, conversations, aiRequestId, speakerClust
       output.conversationSections,
       conversations,
     );
+    refined.inputConversations = conversations;
     const worthyConversations = refined.conversations.filter((conversation) => conversation.memoryWorthy);
     for (const entity of output.entities) {
       const identity = normalizeIdentity(entity.canonicalNameEn);

@@ -1,21 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Widget picker entries -->
     <string name="widget_name">NeoRecall recorder</string>
-    <string name="widget_description">Start persistent phone recording from the home screen</string>
-    <string name="widget_brand">NEORECALL</string>
+    <string name="widget_record_description">Start or stop persistent recording, with the live elapsed time</string>
+    <string name="widget_status_name">NeoRecall capture status</string>
+    <string name="widget_status_description">What capture and processing are doing right now</string>
+    <string name="widget_highlights_name">NeoRecall commitments</string>
+    <string name="widget_highlights_description">Open tasks and promises, tickable from the home screen</string>
+    <string name="widget_memories_name">NeoRecall memories</string>
+    <string name="widget_memories_description">The memories your conversations turned into, newest first</string>
+    <string name="widget_today_name">NeoRecall today</string>
+    <string name="widget_today_description">Today at a glance, against the week behind it</string>
+
+    <!-- Recorder states. The rest of every widget is filled from live data. -->
     <string name="widget_status_ready">READY</string>
     <string name="widget_status_starting">STARTING</string>
     <string name="widget_status_live">LIVE</string>
+    <string name="widget_status_paused">PAUSED</string>
     <string name="widget_title_ready">Record with phone</string>
     <string name="widget_title_starting">Preparing capture…</string>
-    <string name="widget_title_recording">Phone recording is active</string>
+    <string name="widget_title_recording">Recording</string>
     <string name="widget_compact_title_ready">Record</string>
     <string name="widget_compact_title_starting">Starting…</string>
     <string name="widget_compact_title_recording">Recording</string>
     <string name="widget_subtitle_ready">One tap · persistent · private</string>
     <string name="widget_subtitle_starting">Opening NeoRecall securely</string>
-    <string name="widget_subtitle_recording">Persistent capture · tap to open</string>
-    <string name="widget_action_description">Open NeoRecall and start phone recording</string>
+    <string name="widget_subtitle_recording">Tap the square to stop</string>
+    <string name="widget_subtitle_recording_open">Tap to open NeoRecall</string>
+
+    <!-- Accessibility -->
+    <string name="widget_action_description">Start phone recording</string>
+    <string name="widget_action_stop_description">Stop recording</string>
+    <string name="widget_configure_description">Widget settings</string>
+    <string name="widget_row_complete_description">Mark done</string>
     <string name="widget_description_ready">NeoRecall is ready. Tap to open and start persistent phone recording.</string>
     <string name="widget_description_recording">NeoRecall is recording from the phone microphone. Tap to open.</string>
+
+    <!-- Shared empty and signed-out copy -->
+    <string name="widget_signed_out_title">Sign in to NeoRecall</string>
+    <string name="widget_signed_out_detail">Open the app once to connect this widget.</string>
+    <string name="widget_waiting_title">Waiting for NeoRecall</string>
+    <string name="widget_stale_label">NOT UPDATED TODAY · OPEN NEORECALL</string>
+    <string name="widget_waiting_detail">Open the app once so this widget has something to show.</string>
+    <string name="widget_empty_highlights">Nothing open here.</string>
+    <string name="widget_empty_memories">No memories match this filter yet.</string>
+
+    <!-- Configuration screen -->
+    <string name="widget_configure_eyebrow">WIDGET SETUP</string>
+    <string name="widget_configure_preview_note">LIVE PREVIEW · UPDATES AS YOU CHOOSE</string>
+    <string name="widget_configure_cancel">Cancel</string>
+    <string name="widget_configure_add">Add widget</string>
+    <string name="widget_configure_save">Save</string>
 </resources>

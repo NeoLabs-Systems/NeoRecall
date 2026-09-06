@@ -62,6 +62,13 @@ class DeviceSessionController {
   /// being recorded, so reconnect, device-storage sync, and upload keep running.
   bool get linkDesired => preferBluetooth && hasPreferredDevice;
 
+  /// Whether the transport is linked right now. A preferred device and an
+  /// active adapter only describe what should connect; neither proves that the
+  /// BLE link exists.
+  bool get isConnected =>
+      state == DeviceTransportState.connectedStandby ||
+      state == DeviceTransportState.recording;
+
   bool get hasPreferredDevice {
     final device = preferredDevice;
     return device != null && registry[device.adapterId] != null;
@@ -245,7 +252,6 @@ class DeviceSessionController {
     try {
       await adapter.connect(device);
       _reconnectAttempt = 0;
-      _messages.add('Connected to ${device.displayName}');
       return true;
     } catch (error) {
       ClientDiagnosticLog.instance.record(
@@ -259,11 +265,16 @@ class DeviceSessionController {
       );
       state = DeviceTransportState.faulted;
       _states.add(state);
-      _messages.add(
-        error is TimeoutException
-            ? 'Bluetooth connection timed out. Make sure ${device.displayName} is nearby, awake, and not connected to another phone.'
-            : 'Could not connect to ${device.displayName}. Check the device and try again.',
-      );
+      // Background reconnect must not paint a banner just because a remembered
+      // device is out of range. Surface the failure only when the user asked
+      // for this attempt (pair / explicit connect).
+      if (!scheduleReconnect) {
+        _messages.add(
+          error is TimeoutException
+              ? 'Bluetooth connection timed out. Make sure ${device.displayName} is nearby, awake, and not connected to another phone.'
+              : 'Could not connect to ${device.displayName}. Check the device and try again.',
+        );
+      }
       if (autoReconnect && scheduleReconnect && linkDesired) {
         _scheduleReconnect();
       }

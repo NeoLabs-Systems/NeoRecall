@@ -6,12 +6,12 @@ const search = require('../services/search/search_service');
 const ask = require('../services/search/ask_service');
 const { requireAuth, requireScope } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { asyncRoute } = require('../middleware/async_route');
 const { slidingWindow } = require('../middleware/rate_limit');
 const { getConfig } = require('../config');
 const { HttpError } = require('../middleware/error_handler');
 
 const router = express.Router();
-const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 router.use(requireAuth);
 router.get('/', requireScope('search:read'), asyncRoute(async (req, res) => {
   const q = String(req.query.q || '').trim();

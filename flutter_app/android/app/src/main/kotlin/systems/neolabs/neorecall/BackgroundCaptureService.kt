@@ -248,24 +248,29 @@ class BackgroundCaptureService : Service() {
     val capturing = requested.any { it in CAPTURE_HOLDS }
     val state = persisted()
     val title = state.getString(KEY_STATUS_TITLE, null)
-      ?: if (capturing) "NeoRecall is recording" else "NeoRecall stays connected"
+      ?: if (capturing) "NeoRecall is recording" else "NeoRecall background sync"
     val detail = state.getString(KEY_STATUS_DETAIL, null)
       ?: when {
           capturing -> "Audio is being captured"
           requested.contains(HOLD_WEARABLE_SYNC) -> "Syncing recordings from your device"
           requested.contains(HOLD_AUDIO_UPLOAD) -> "Uploading protected recordings"
-          else -> "Your device stays linked so recordings sync on their own"
+          else -> "Wearable connection and recording sync remain available"
         }
+    val promoted = if (state.contains(KEY_STATUS_PROMOTED)) {
+      state.getBoolean(KEY_STATUS_PROMOTED, false)
+    } else {
+      capturing
+    }
     val builder = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(detail)
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
-      // Android 16+ promotes eligible ongoing notifications into Live Updates
-      // (lock-screen card + status-bar chip). AndroidX safely ignores this on
-      // older releases, where the same object remains the FGS notification.
-      .setRequestPromotedOngoing(true)
+      // Android 16+ Live Updates (lock-screen card + status-bar chip) only
+      // for active capture/work. An idle or reconnecting wearable stay is a
+      // normal shade notification so it does not claim the chip.
+      .setRequestPromotedOngoing(promoted)
       .setShortCriticalText(state.getString(KEY_STATUS_SHORT_LABEL, null))
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setContentIntent(contentIntent)
@@ -362,6 +367,16 @@ class BackgroundCaptureService : Service() {
     /** Holds that stream audio, i.e. the ones the notification calls recording. */
     private val CAPTURE_HOLDS = setOf(HOLD_MICROPHONE, HOLD_WEARABLE_CAPTURE)
 
+    /** Fallback when Dart omits `promoted`. Matches [BackgroundLivePhase]. */
+    private val PROMOTED_PHASES = setOf(
+      "recording",
+      "watchTransfer",
+      "uploading",
+      "transcribing",
+      "finalizing",
+      "storageFull",
+    )
+
     /**
      * Holds whose work would be stretched across sleep cycles without the CPU:
      * live capture, and an in-flight transfer off a device. A merely linked
@@ -380,6 +395,7 @@ class BackgroundCaptureService : Service() {
     private const val KEY_HOLDS = "holds"
     private const val KEY_MICROPHONE_UNAVAILABLE = "microphoneUnavailable"
     private const val KEY_STATUS_PHASE = "statusPhase"
+    private const val KEY_STATUS_PROMOTED = "statusPromoted"
     private const val KEY_STATUS_TITLE = "statusTitle"
     private const val KEY_STATUS_DETAIL = "statusDetail"
     private const val KEY_STATUS_SHORT_LABEL = "statusShortLabel"
@@ -448,8 +464,11 @@ class BackgroundCaptureService : Service() {
       val startedAt = (status["recordingStartedAtMs"] as? Number)?.toLong() ?: 0L
       val progress = (status["progress"] as? Number)?.toDouble()
         ?.coerceIn(0.0, 1.0)?.times(100)?.toInt() ?: -1
+      val promoted = (status["promoted"] as? Boolean)
+        ?: phase in PROMOTED_PHASES
       prefs(context).edit()
         .putString(KEY_STATUS_PHASE, phase)
+        .putBoolean(KEY_STATUS_PROMOTED, promoted)
         .putString(KEY_STATUS_TITLE, title)
         .putString(KEY_STATUS_DETAIL, detail)
         .putString(KEY_STATUS_SHORT_LABEL, shortLabel)
@@ -471,6 +490,7 @@ class BackgroundCaptureService : Service() {
     fun clearLiveStatus(context: Context) {
       prefs(context).edit()
         .remove(KEY_STATUS_PHASE)
+        .remove(KEY_STATUS_PROMOTED)
         .remove(KEY_STATUS_TITLE)
         .remove(KEY_STATUS_DETAIL)
         .remove(KEY_STATUS_SHORT_LABEL)

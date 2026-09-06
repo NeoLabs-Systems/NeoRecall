@@ -6,24 +6,32 @@ const { getConfig } = require('../config');
 const { CHUNK_RECEIPT_BATCH_LIMIT } = require('../services/ingest/limits');
 
 const router = express.Router();
+const context = require('./context');
 router.get('/meta', requireAuth, (req, res) => {
   const config = getConfig();
   res.json({
     product: 'NeoRecall', version: require('../../package.json').version,
     user: req.user,
-    capabilities: { localTranscription: false, diarization: false, semanticSearch: true,
+    capabilities: { localTranscription: false, diarization: false, semanticSearch: true, recordingContext: true,
       displayAudio: 'client-dependent', wearableStreaming: false, oauthPublicRoutes: true,
-      gzipAudioUpload: true },
+      mcp: true,
+      gzipAudioUpload: true,
+      plaudEmbedded: Boolean(config.plaudClientId && config.plaudClientSecret) },
     limits: { maxUploadBytes: config.maxUploadBytes, chunkMinMs: config.chunkMinMs, chunkMaxMs: config.chunkMaxMs,
       chunkTargetMs: config.chunkTargetMs, chunkOverlapMs: config.chunkOverlapMs, importPartBytes: config.importPartBytes,
       minimumConsolidationIntervalMs: config.minConsolidationIntervalMs,
       memoryMergeMaxItems: config.memoryMergeMaxItems,
-      chunkReceiptBatch: CHUNK_RECEIPT_BATCH_LIMIT },
+      chunkReceiptBatch: CHUNK_RECEIPT_BATCH_LIMIT,
+      contextMaxFileBytes: config.contextMaxFileBytes,
+      contextNoteMaxCharacters: config.contextNoteMaxCharacters,
+      contextMaxItems: config.contextMaxItems },
   });
 });
 router.use('/auth', require('./auth'));
 router.use('/api-keys', require('./api_keys'));
 router.use('/devices', require('./devices'));
+router.use('/ingest/sessions/:sessionId/context', context.sessionRouter);
+router.use('/memories/:memoryId/context', context.memoryRouter);
 router.use('/ingest', require('./ingest'));
 router.use('/imports', require('./imports'));
 router.use('/recordings', require('./recordings'));
@@ -44,4 +52,5 @@ router.get('/processing-status', requireAuth, (req, res, next) => {
     .then((value) => res.json(value)).catch(next);
 });
 router.use('/sources', require('./sources'));
+router.use('/integrations', require('./integrations'));
 module.exports = router;

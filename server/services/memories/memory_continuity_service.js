@@ -13,20 +13,37 @@ function sourceSessionIds(database, memoryId) {
     WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL`).all(memoryId).map((row) => row.session_id);
 }
 
-/// Existing cards the consolidation model may decide the new material continues.
-///
-/// Candidate selection only keeps the prompt bounded; it never decides a merge.
-/// Same-stream cards remain eligible across provisional boundaries, while cards
-/// from another recording stream are eligible only across the same configured
-/// hard gap used by conversation detection. The model receives timestamps,
-/// stream overlap and semantics and makes the actual same-occasion decision.
+// Stable recurring-speaker identities attached to a card's transcript. Cluster
+// ids restart with a recording session, while a voiceprint deliberately spans
+// sessions; only the latter can provide cross-recording continuity evidence.
+function sourceSpeakerIdentities(database, memoryId) {
+  return database.prepare(`SELECT DISTINCT st.voiceprint_id id
+    FROM memory_sources ms
+    JOIN transcript_segments ts ON ts.id=ms.segment_id
+    JOIN speaker_turns st ON st.chunk_id=ts.chunk_id
+      AND st.cluster_id=ts.speaker_cluster_id
+      AND st.start_ms<=ts.chunk_start_ms
+      AND st.end_ms>=ts.chunk_end_ms
+    JOIN voiceprints v ON v.id=st.voiceprint_id AND v.matching_enabled=1
+    WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL AND st.voiceprint_id IS NOT NULL`)
+    .all(memoryId).map((row) => row.id);
+}
+
+// Existing cards the consolidation model may decide the new material continues.
+//
+// Candidate selection only keeps the prompt bounded; it never decides a merge.
+// Same-stream cards remain eligible across provisional boundaries, while cards
+// from another recording stream use their own configurable lookback. A capture
+// restart is not a conversational boundary and must not inherit the much
+// shorter hard-gap threshold. The model receives timestamps, stream overlap,
+// recurring speakers and semantics and makes the actual same-occasion decision.
 function findCandidates(userId, conversations, database = getDatabase(), options = processingSettings.get()) {
   if (!conversations.length || options.maxMemoryContinuationCandidates <= 0) return [];
   const inputSessionIds = [...new Set(conversations.map((conversation) => conversation.sessionId).filter(Boolean))];
   const firstStartedAt = conversations.reduce((earliest, conversation) => (
     !earliest || Date.parse(conversation.startedAt) < Date.parse(earliest) ? conversation.startedAt : earliest
   ), null);
-  const recentCutoff = new Date(Date.parse(firstStartedAt) - options.conversationHardGapMs).toISOString();
+  const recentCutoff = new Date(Date.parse(firstStartedAt) - options.memoryContinuationLookbackMs).toISOString();
   const sameStreamClause = inputSessionIds.length ? ` OR EXISTS (
     SELECT 1 FROM memory_sources ms
     JOIN transcript_segments ts ON ts.id=ms.segment_id
@@ -59,18 +76,19 @@ function findCandidates(userId, conversations, database = getDatabase(), options
       WHERE memory_id=? AND user_id=? ORDER BY importance DESC,id DESC LIMIT ?`)
       .all(row.id, userId, MINI_MEMORY_MAX_COUNT),
     sessionIds: sourceSessionIds(database, row.id),
+    speakerIdentities: sourceSpeakerIdentities(database, row.id),
   }));
 }
 
-/// Keep only claims that can be acted on.
-///
-/// A claim is the model's answer to "is this the same occasion", and the answer
-/// is worth acting on only when it names a card that was actually offered. An
-/// id that was never a candidate, or a card two output memories both claim,
-/// says nothing about the material itself — so the claim is dropped and the
-/// material becomes its own card, which is exactly what would have happened
-/// without the feature. Failing the run instead would put real recordings on
-/// the path to being set aside over a slip in one field.
+// Keep only claims that can be acted on.
+//
+// A claim is the model's answer to "is this the same occasion", and the answer
+// is worth acting on only when it names a card that was actually offered. An
+// id that was never a candidate, or a card two output memories both claim,
+// says nothing about the material itself — so the claim is dropped and the
+// material becomes its own card, which is exactly what would have happened
+// without the feature. Failing the run instead would put real recordings on
+// the path to being set aside over a slip in one field.
 function resolveClaims(memories, candidates) {
   const allowed = new Set(candidates.map((candidate) => candidate.publicId));
   const claimed = new Set();
@@ -88,14 +106,14 @@ function resolveClaims(memories, candidates) {
   return dropped;
 }
 
-/// Move one card's relations onto another without ever attaching the same
-/// thing twice.
-///
-/// `INSERT OR IGNORE` cannot be relied on here: memory_sources carries a NULL
-/// in whichever of its two reference columns does not apply, and SQLite treats
-/// NULLs as distinct in a UNIQUE index, so the same piece of evidence would be
-/// attached again and the card would show that line twice. `IS` compares NULLs
-/// as equal, which is what "already attached" means.
+// Move one card's relations onto another without ever attaching the same
+// thing twice.
+//
+// `INSERT OR IGNORE` cannot be relied on here: memory_sources carries a NULL
+// in whichever of its two reference columns does not apply, and SQLite treats
+// NULLs as distinct in a UNIQUE index, so the same piece of evidence would be
+// attached again and the card would show that line twice. `IS` compares NULLs
+// as equal, which is what "already attached" means.
 function copyRelations(database, table, columns, targetId, absorbedId) {
   const names = columns.join(',');
   const selected = columns.map((column) => column === 'memory_id' ? '?' : `source.${column}`).join(',');
@@ -108,8 +126,8 @@ function copyRelations(database, table, columns, targetId, absorbedId) {
     .run(targetId, absorbedId, targetId);
 }
 
-/// Fold already-persisted fragments into their oldest card inside the caller's
-/// transaction. Raw transcript rows are never changed or discarded.
+// Fold already-persisted fragments into their oldest card inside the caller's
+// transaction. Raw transcript rows are never changed or discarded.
 function absorbClaimed(database, userId, publicIds) {
   const ids = [...new Set(publicIds || [])];
   if (!ids.length) return null;
@@ -133,6 +151,13 @@ function absorbClaimed(database, userId, publicIds) {
     copyRelations(database, 'memory_topics', ['memory_id', 'topic'], target.id, memory.id);
     copyRelations(database, 'memory_entities', ['memory_id', 'entity_id', 'role'], target.id, memory.id);
     copyRelations(database, 'memory_sources', ['memory_id', 'conversation_id', 'segment_id'], target.id, memory.id);
+    const contextLinks = database.prepare('SELECT context_item_id,used_by_ai FROM memory_context_sources WHERE memory_id=?').all(memory.id);
+    const insertContext = database.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
+      VALUES (?,?,?) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=MAX(used_by_ai,excluded.used_by_ai)`);
+    for (const item of contextLinks) insertContext.run(target.id, item.context_item_id, item.used_by_ai);
+    database.prepare(`UPDATE recording_context_items SET memory_id=?,
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE memory_id=? AND user_id=?`)
+      .run(target.id, memory.id, userId);
   }
   if (absorbed.length) {
     searchIndex.removeBySources(database, userId, absorbed.map((memory) => ({ kind: 'memory', sourceId: memory.id })));
@@ -154,4 +179,4 @@ function absorbClaimed(database, userId, publicIds) {
   };
 }
 
-module.exports = { findCandidates, resolveClaims, absorbClaimed };
+module.exports = { findCandidates, resolveClaims, absorbClaimed, sourceSpeakerIdentities };

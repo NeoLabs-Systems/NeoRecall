@@ -17,6 +17,10 @@ const schema = z.object({
   speakerClusterContinuityThreshold: z.number().min(-1).max(1).optional(),
   dedupeTokenSimilarity: z.number().min(0).max(1).optional(),
   dedupeTimeToleranceMs: z.number().int().min(0).max(30_000).optional(),
+  transcriptRepetitionMinimumRepeats: z.number().int().min(3).max(1_000).optional(),
+  transcriptRepetitionMaximumPatternWords: z.number().int().min(1).max(32).optional(),
+  transcriptRepetitionMinimumCoverage: z.number().min(0.5).max(1).optional(),
+  transcriptMaximumWordsPerSecond: z.number().min(1).max(50).optional(),
   conversationHardGapMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
   conversationSoftGapMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
   conversationMinimumMs: z.number().int().min(1_000).max(60 * 60_000).optional(),
@@ -38,6 +42,7 @@ const schema = z.object({
   maxConsolidationInputChars: z.number().int().min(1_000).max(2_000_000).optional(),
   maxConsolidationConversations: z.number().int().min(1).max(200).optional(),
   maxMemoryContinuationCandidates: z.number().int().min(0).max(32).optional(),
+  memoryContinuationLookbackMs: z.number().int().min(0).max(30 * 24 * 60 * 60_000).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),
   consolidationMaxFailures: z.number().int().min(1).max(100).optional(),
 }).strict();

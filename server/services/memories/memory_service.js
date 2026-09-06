@@ -1,14 +1,17 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit } = require('../../utils/pagination');
+const { queryBoolean, Conditions } = require('../../utils/query');
 const searchIndex = require('../../embeddings/search_index_service');
 const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const jobs = require('../jobs/job_service');
+const { createLogger } = require('../../utils/logger');
 const {
   defaultEmojiForType, MEMORY_TYPES, TITLE_MAX_LENGTH, SUMMARY_MAX_LENGTH,
 } = require('../../ai/schemas/consolidation_schema');
@@ -17,6 +20,22 @@ const ALLOWED_TYPES = new Set(MEMORY_TYPES);
 const BULK_ACTIONS = new Set(['delete', 'pin', 'unpin', 'archive', 'unarchive']);
 const MERGE_MIN = 2;
 const MERGE_REWRITE_PRIORITY = 60;
+const logger = createLogger('memories');
+
+function directContextOriginals(database, userId, memoryIds) {
+  if (!memoryIds.length) return [];
+  return database.prepare(`SELECT original_path FROM recording_context_items
+    WHERE user_id=? AND memory_id IN (${memoryIds.map(() => '?').join(',')}) AND original_path IS NOT NULL`)
+    .all(userId, ...memoryIds).map((row) => row.original_path);
+}
+
+function unlinkContextOriginals(paths) {
+  for (const originalPath of paths) {
+    try { fs.unlinkSync(originalPath); } catch (error) {
+      if (error.code !== 'ENOENT') logger.error('Memory was deleted but an attached context file needs sweep cleanup', { error, path: originalPath });
+    }
+  }
+}
 
 function presentMemory(row) {
   if (!row) return row;
@@ -47,7 +66,7 @@ function memoryDetail(userId, id) {
   const memory = getDatabase().prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?').get(id, userId);
   if (!memory) throw new HttpError(404, 'NOT_FOUND', 'Memory not found.');
   const db = getDatabase();
-  return presentMemory({
+  const detail = presentMemory({
     ...memory,
     topics: db.prepare('SELECT topic FROM memory_topics WHERE memory_id=? ORDER BY topic').all(memory.id).map((row) => row.topic),
     miniMemories: db.prepare('SELECT * FROM mini_memories WHERE memory_id=? AND user_id=? ORDER BY id').all(memory.id, userId),
@@ -61,47 +80,36 @@ function memoryDetail(userId, id) {
       WHERE ms.memory_id=? AND ms.segment_id IS NOT NULL
       ORDER BY ts.started_at ASC`).all(memory.id),
   });
+  detail.contextItems = require('../context/context_service').listForMemory(userId, id);
+  return detail;
 }
 
 function list(userId, query = {}) {
-  const conditions = ['m.user_id=?'];
-  const parameters = [userId];
-  if (query.type) { conditions.push('m.type=?'); parameters.push(query.type); }
-  if (query.from) { conditions.push('m.ended_at>=?'); parameters.push(query.from); }
-  if (query.to) { conditions.push('m.started_at<=?'); parameters.push(query.to); }
+  const where = new Conditions('m.user_id=?');
+  where.parameters.push(userId);
+  where.when(query.type, 'm.type=?', query.type);
+  where.when(query.from, 'm.ended_at>=?', query.from);
+  where.when(query.to, 'm.started_at<=?', query.to);
   // Default to active memories so the consumer list is not cluttered with
   // archived items. Pass archived=all for a full inventory (e.g. client-side
   // filter chips that include an Archived view).
   if (query.archived === undefined || query.archived === '' || query.archived === 'false' || query.archived === '0') {
-    conditions.push('m.archived=0');
-  } else if (query.archived === 'all') {
-    // no archive constraint
-  } else {
-    conditions.push('m.archived=?');
-    parameters.push(query.archived === true || query.archived === '1' || query.archived === 'true' ? 1 : 0);
+    where.always('m.archived=0');
+  } else if (query.archived !== 'all') {
+    where.always('m.archived=?', queryBoolean(query.archived) ? 1 : 0);
   }
-  if (query.pinned !== undefined) {
-    conditions.push('m.pinned=?');
-    parameters.push(query.pinned === true || query.pinned === '1' || query.pinned === 'true' ? 1 : 0);
-  }
-  if (query.topic) {
-    conditions.push('EXISTS (SELECT 1 FROM memory_topics mt WHERE mt.memory_id=m.id AND mt.topic=? COLLATE NOCASE)');
-    parameters.push(query.topic);
-  }
-  if (query.entity) {
-    conditions.push('EXISTS (SELECT 1 FROM memory_entities me WHERE me.memory_id=m.id AND me.entity_id=?)');
-    parameters.push(query.entity);
-  }
+  if (query.pinned !== undefined) where.always('m.pinned=?', queryBoolean(query.pinned) ? 1 : 0);
+  where.when(query.topic, 'EXISTS (SELECT 1 FROM memory_topics mt WHERE mt.memory_id=m.id AND mt.topic=? COLLATE NOCASE)', query.topic);
+  where.when(query.entity, 'EXISTS (SELECT 1 FROM memory_entities me WHERE me.memory_id=m.id AND me.entity_id=?)', query.entity);
   if (query.q) {
     const needle = `%${String(query.q).trim()}%`;
-    conditions.push('(m.title_en LIKE ? COLLATE NOCASE OR m.summary_en LIKE ? COLLATE NOCASE)');
-    parameters.push(needle, needle);
+    where.always('(m.title_en LIKE ? COLLATE NOCASE OR m.summary_en LIKE ? COLLATE NOCASE)', needle, needle);
   }
   const items = getDatabase().prepare(`SELECT m.*,
       (SELECT COUNT(*) FROM mini_memories mm WHERE mm.memory_id=m.id) AS mini_count,
       (SELECT GROUP_CONCAT(mt.topic, '||') FROM memory_topics mt WHERE mt.memory_id=m.id) AS topics_csv
-    FROM memories m WHERE ${conditions.join(' AND ')}
-    ORDER BY m.pinned DESC, m.started_at DESC, m.id DESC LIMIT ?`).all(...parameters, pageLimit(query.limit));
+    FROM memories m WHERE ${where.sql}
+    ORDER BY m.pinned DESC, m.started_at DESC, m.id DESC LIMIT ?`).all(...where.parameters, pageLimit(query.limit));
   return { items: items.map(presentMemory) };
 }
 
@@ -166,6 +174,7 @@ function remove(userId, id) {
   const memory = getDatabase().prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?').get(id, userId);
   if (!memory) throw new HttpError(404, 'NOT_FOUND', 'Memory not found.');
   const db = getDatabase();
+  const contextOriginals = directContextOriginals(db, userId, [memory.id]);
   db.transaction(() => {
     const miniIds = db.prepare('SELECT id FROM mini_memories WHERE memory_id=? AND user_id=?').all(memory.id, userId);
     searchIndex.removeBySources(db, userId, [
@@ -174,6 +183,7 @@ function remove(userId, id) {
     ]);
     db.prepare('DELETE FROM memories WHERE id=? AND user_id=?').run(memory.id, userId);
   })();
+  unlinkContextOriginals(contextOriginals);
 }
 
 function bulk(userId, { ids, action }) {
@@ -192,6 +202,7 @@ function bulk(userId, { ids, action }) {
     throw new HttpError(404, 'NOT_FOUND', 'One or more memories were not found.');
   }
   if (action === 'delete') {
+    const contextOriginals = directContextOriginals(db, userId, rows.map((memory) => memory.id));
     db.transaction(() => {
       for (const memory of rows) {
         const miniIds = db.prepare('SELECT id FROM mini_memories WHERE memory_id=? AND user_id=?').all(memory.id, userId);
@@ -202,6 +213,7 @@ function bulk(userId, { ids, action }) {
         db.prepare('DELETE FROM memories WHERE id=? AND user_id=?').run(memory.id, userId);
       }
     })();
+    unlinkContextOriginals(contextOriginals);
     return { action, count: rows.length, ids: uniqueIds };
   }
   const pinned = action === 'pin' ? 1 : action === 'unpin' ? 0 : null;
@@ -216,23 +228,13 @@ function bulk(userId, { ids, action }) {
 }
 
 function listMini(userId, query = {}) {
-  const conditions = ['mm.user_id=?'];
-  const parameters = [userId];
-  if (query.kind) { conditions.push('mm.kind=?'); parameters.push(query.kind); }
-  if (query.status) { conditions.push('mm.status=?'); parameters.push(query.status); }
-  if (query.memoryId) {
-    conditions.push('m.public_id=?');
-    parameters.push(query.memoryId);
-  }
-  if (query.entity) {
-    conditions.push('EXISTS (SELECT 1 FROM mini_memory_entities mme WHERE mme.mini_memory_id=mm.id AND mme.entity_id=?)');
-    parameters.push(query.entity);
-  }
-  if (query.q) {
-    const needle = `%${String(query.q).trim()}%`;
-    conditions.push('mm.text_en LIKE ? COLLATE NOCASE');
-    parameters.push(needle);
-  }
+  const where = new Conditions('mm.user_id=?');
+  where.parameters.push(userId);
+  where.when(query.kind, 'mm.kind=?', query.kind);
+  where.when(query.status, 'mm.status=?', query.status);
+  where.when(query.memoryId, 'm.public_id=?', query.memoryId);
+  where.when(query.entity, 'EXISTS (SELECT 1 FROM mini_memory_entities mme WHERE mme.mini_memory_id=mm.id AND mme.entity_id=?)', query.entity);
+  if (query.q) where.always('mm.text_en LIKE ? COLLATE NOCASE', `%${String(query.q).trim()}%`);
   // Timeline order: when it happened, then when it is due, then when it was created.
   const items = getDatabase().prepare(`SELECT mm.*,
       m.public_id AS memory_public_id,
@@ -242,9 +244,9 @@ function listMini(userId, query = {}) {
       COALESCE(mm.occurred_at, mm.due_at, mm.created_at) AS timeline_at
     FROM mini_memories mm
     JOIN memories m ON m.id=mm.memory_id
-    WHERE ${conditions.join(' AND ')}
+    WHERE ${where.sql}
     ORDER BY timeline_at DESC, mm.id DESC
-    LIMIT ?`).all(...parameters, pageLimit(query.limit));
+    LIMIT ?`).all(...where.parameters, pageLimit(query.limit));
   return {
     items: items.map((row) => {
       const {
@@ -466,6 +468,16 @@ function applyStructuralMerge(userId, memories, prose) {
     const reparent = db.prepare('UPDATE mini_memories SET memory_id=?, updated_at=strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\') WHERE memory_id=? AND user_id=?');
     for (const memory of absorbed) reparent.run(target.id, memory.id, userId);
 
+    const contextLinks = db.prepare(`SELECT context_item_id,MAX(used_by_ai) used_by_ai
+      FROM memory_context_sources WHERE memory_id IN (${absorbed.map(() => '?').join(',')}) GROUP BY context_item_id`)
+      .all(...absorbed.map((memory) => memory.id));
+    const contextLink = db.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
+      VALUES (?,?,?) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=MAX(used_by_ai,excluded.used_by_ai)`);
+    for (const item of contextLinks) contextLink.run(target.id, item.context_item_id, item.used_by_ai);
+    const reparentContext = db.prepare(`UPDATE recording_context_items SET memory_id=?,
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE memory_id=? AND user_id=?`);
+    for (const memory of absorbed) reparentContext.run(target.id, memory.id, userId);
+
     db.prepare('DELETE FROM memory_topics WHERE memory_id=?').run(target.id);
     const topicInsert = db.prepare('INSERT OR IGNORE INTO memory_topics (memory_id, topic) VALUES (?, ?)');
     for (const topic of topics) topicInsert.run(target.id, topic);
@@ -533,8 +545,8 @@ function queueMergedProseRewrite(userId, structural, memories) {
   });
 }
 
-/// Apply the optional prose polish only if the merged card has not changed
-/// since it was queued. A rename or a later merge always wins over stale AI.
+// Apply the optional prose polish only if the merged card has not changed
+// since it was queued. A rename or a later merge always wins over stale AI.
 async function rewriteMergedProse(userId, payload) {
   const db = getDatabase();
   const current = db.prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?')
@@ -578,8 +590,8 @@ async function rewriteMergedProse(userId, payload) {
   return { updated, aiRequestId: response.requestId };
 }
 
-/// Merge evidence and highlights immediately. Optional AI prose polishing is a
-/// durable worker job, so a slow model never holds the user's request open.
+// Merge evidence and highlights immediately. Optional AI prose polishing is a
+// durable worker job, so a slow model never holds the user's request open.
 function merge(userId, { ids }) {
   if (!Array.isArray(ids)) throw new HttpError(400, 'INVALID_IDS', 'Provide memory ids to merge.');
   const memories = loadMemoriesForMerge(userId, ids);

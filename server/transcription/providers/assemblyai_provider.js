@@ -1,7 +1,8 @@
 'use strict';
 
-const fs = require('node:fs');
+const fs = require('node:fs/promises');
 const { TranscriptionProvider } = require('../transcription_provider');
+const { buildSegments } = require('../segment');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
 
@@ -9,21 +10,18 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 function normalizedSegments(payload) {
   if (Array.isArray(payload.utterances) && payload.utterances.length) {
-    return payload.utterances.filter((item) => String(item.text || '').trim()).map((item) => ({
-      text: String(item.text).trim(), language: payload.language_code || null,
-      startMs: Math.round(item.start || 0), endMs: Math.round(item.end || item.start || 0),
-      sourceComponent: 'combined', asrConfidence: item.confidence ?? null, diarizationSpeaker: item.speaker ?? null,
-      speakerEmbedding: null, speakerConfidence: null, overlappingSpeech: false,
-    }));
+    return buildSegments(payload.utterances.map((item) => ({
+      text: item.text || '', language: payload.language_code || null,
+      startMs: item.start, endMs: item.end || item.start,
+      asrConfidence: item.confidence ?? null, diarizationSpeaker: item.speaker ?? null,
+    })));
   }
   const words = payload.words || [];
-  const text = String(payload.text || '').trim();
-  return text ? [{
-    text, language: payload.language_code || null, startMs: Math.round(words[0]?.start || 0),
-    endMs: Math.round(words.at(-1)?.end || words[0]?.start || 0), sourceComponent: 'combined',
-    asrConfidence: payload.confidence ?? null, diarizationSpeaker: null, speakerEmbedding: null,
-    speakerConfidence: null, overlappingSpeech: false,
-  }] : [];
+  return buildSegments([{
+    text: payload.text || '', language: payload.language_code || null,
+    startMs: words[0]?.start, endMs: words.at(-1)?.end || words[0]?.start,
+    asrConfidence: payload.confidence ?? null,
+  }]);
 }
 
 class AssemblyAIProvider extends TranscriptionProvider {
@@ -41,7 +39,7 @@ class AssemblyAIProvider extends TranscriptionProvider {
     return payload;
   }
 
-  async transcribe({ filename }) {
+  async fetchSegments({ filename, vocabulary = [] }) {
     const config = getConfig();
     const settings = providerSettings.getRuntime().transcription;
     if (!settings.baseUrl || !settings.apiKey) {
@@ -50,15 +48,20 @@ class AssemblyAIProvider extends TranscriptionProvider {
     const headers = { Authorization: settings.apiKey };
     const deadline = Date.now() + config.transcriptionTimeoutMs;
     const uploaded = await this.request(`${settings.baseUrl}/v2/upload`, {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/octet-stream' }, body: fs.readFileSync(filename),
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/octet-stream' }, body: await fs.readFile(filename),
     }, deadline);
     const submitted = await this.request(`${settings.baseUrl}/v2/transcript`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio_url: uploaded.upload_url, ...(settings.model ? { speech_models: [settings.model] } : {}) }),
+      body: JSON.stringify({ audio_url: uploaded.upload_url, ...(settings.model ? { speech_models: [settings.model] } : {}),
+        ...(vocabulary.length ? { keyterms_prompt: vocabulary } : {}) }),
     }, deadline);
     let transcript = submitted;
     while (!['completed', 'error'].includes(transcript.status)) {
-      await sleep(Math.min(config.transcriptionPollIntervalMs, Math.max(0, deadline - Date.now())));
+      // Never a zero-length wait: at the deadline the next request throws
+      // TRANSCRIPTION_TIMEOUT, and polling flat out until it does would spin.
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw Object.assign(new Error('The AssemblyAI transcription request timed out.'), { code: 'TRANSCRIPTION_TIMEOUT' });
+      await sleep(Math.min(config.transcriptionPollIntervalMs, remaining));
       transcript = await this.request(`${settings.baseUrl}/v2/transcript/${submitted.id}`, { headers }, deadline);
     }
     if (transcript.status === 'error') throw Object.assign(new Error(transcript.error || 'AssemblyAI could not transcribe the audio.'), { code: 'TRANSCRIPTION_PROVIDER_ERROR', retryable: false });

@@ -51,17 +51,17 @@ function defaultEmojiForType(type) {
   return DEFAULT_MEMORY_EMOJI[type] || DEFAULT_MEMORY_EMOJI.other;
 }
 
-/// A display bound on prose the model wrote, enforced by trimming rather than by
-/// rejection.
-///
-/// These limits exist so a title fits a card and a summary fits a panel; nothing
-/// downstream is unsafe when a summary runs long. A provider may be constrained
-/// by a sampling grammar that can express "a string" but not "a string of at
-/// most two thousand characters", so an over-long field is the one contract
-/// violation it can still commit — and failing the whole consolidation over a
-/// summary that was fifty characters too generous would discard a correct answer
-/// and eventually quarantine the conversation. The ellipsis keeps the trim
-/// visible instead of making the text look like it simply stopped.
+// A display bound on prose the model wrote, enforced by trimming rather than by
+// rejection.
+//
+// These limits exist so a title fits a card and a summary fits a panel; nothing
+// downstream is unsafe when a summary runs long. A provider may be constrained
+// by a sampling grammar that can express "a string" but not "a string of at
+// most two thousand characters", so an over-long field is the one contract
+// violation it can still commit — and failing the whole consolidation over a
+// summary that was fifty characters too generous would discard a correct answer
+// and eventually quarantine the conversation. The ellipsis keeps the trim
+// visible instead of making the text look like it simply stopped.
 function boundedText(maximum) {
   return z.string().min(1).transform((value) => (
     value.length > maximum ? `${value.slice(0, maximum - 1).trimEnd()}…` : value

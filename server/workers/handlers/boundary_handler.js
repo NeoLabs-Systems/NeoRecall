@@ -24,13 +24,13 @@ function blocksForSegments(database, segments) {
 const BOUNDARY_METHOD = 'time-context-embedding';
 const BOUNDARY_VERSION = '2';
 
-/// Writes one detected group as a conversation.
-///
-/// A group that continues an existing conversation keeps that conversation's id
-/// rather than replacing it. Boundary detection re-runs every time new speech
-/// lands, and a still-open conversation is re-detected each time; minting a new
-/// id would discard its live insight and break every reference a client holds
-/// while the recording is still going.
+// Writes one detected group as a conversation.
+//
+// A group that continues an existing conversation keeps that conversation's id
+// rather than replacing it. Boundary detection re-runs every time new speech
+// lands, and a still-open conversation is re-detected each time; minting a new
+// id would discard its live insight and break every reference a client holds
+// while the recording is still going.
 function persistGroup(database, userId, group, state, { inheritId = null, characters = 0 } = {}) {
   const id = inheritId || group.id;
   if (inheritId) {

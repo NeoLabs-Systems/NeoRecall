@@ -21,8 +21,7 @@ Future<void> showDeviceDiagnosticsSheet(
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: neoRecallPaletteOf(context).surface,
-    builder: (sheetContext) =>
-        _DeviceDiagnosticsSheet(controller: controller),
+    builder: (sheetContext) => _DeviceDiagnosticsSheet(controller: controller),
   );
 }
 
@@ -120,7 +119,9 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
                 ),
               ),
               const SizedBox(height: 12),
-              Flexible(child: DeviceDiagnosticsLogView(controller: widget.controller)),
+              Flexible(
+                child: DeviceDiagnosticsLogView(controller: widget.controller),
+              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,

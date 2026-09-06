@@ -1,0 +1,15 @@
+[Unit]
+Description=NeoRecall Desk USB audio device
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+DefaultDependencies=no
+After=sysinit.target
+Before=sound.target pipewire.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/neorecall-desk/neorecall-usb-gadget.sh start
+ExecStop=/usr/local/lib/neorecall-desk/neorecall-usb-gadget.sh stop
+
+[Install]
+WantedBy=sysinit.target

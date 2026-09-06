@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../main_controller.dart';
+import '../../main_shared.dart';
+import '../../main_spacing.dart';
 import '../../main_theme.dart';
 import 'discord_setup_dialog.dart';
 import 'platform_copy.dart';
-import 'plaud_setup_dialog.dart';
 import 'source_platform_card.dart';
 
 class SourcesScreen extends StatefulWidget {
@@ -73,7 +74,6 @@ class _SourcesScreenState extends State<SourcesScreen>
   Future<void> _setupManual(String typeId) async {
     final Widget? dialog = switch (typeId) {
       'discord' => DiscordSetupDialog(controller: widget.controller),
-      'plaud' => PlaudSetupDialog(controller: widget.controller),
       _ => null,
     };
     if (dialog == null) return;
@@ -104,40 +104,6 @@ class _SourcesScreenState extends State<SourcesScreen>
     }
   }
 
-  Future<void> _syncSource(Map<String, dynamic> source) async {
-    final type = source['type'] as String? ?? '';
-    setState(() => _busyTypes.add(type));
-    try {
-      final result =
-          await widget.controller.api.request(
-                'POST',
-                '/api/v1/sources/${source['id']}/sync',
-              )
-              as Map;
-      if (mounted) {
-        final imported = result['imported'];
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              imported is num && imported > 0
-                  ? 'Imported $imported new recording${imported == 1 ? '' : 's'}.'
-                  : 'Sync complete. No new recordings.',
-            ),
-          ),
-        );
-      }
-      await _load(silent: true);
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Sync failed: $error')));
-      }
-      await _load(silent: true);
-    } finally {
-      if (mounted) setState(() => _busyTypes.remove(type));
-    }
-  }
 
   Future<void> _deleteSource(Map<String, dynamic> source) async {
     final palette = neoRecallPaletteOf(context);
@@ -208,119 +174,67 @@ class _SourcesScreenState extends State<SourcesScreen>
     return cards;
   }
 
-  Widget _section(
-    NeoRecallPalette palette,
-    String title,
-    String subtitle,
-    List<_CardModel> cards,
-  ) {
-    if (cards.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            color: palette.textPrimary,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: TextStyle(
-            color: palette.textMuted,
-            fontSize: 12.5,
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 10),
-        for (final card in cards)
-          SourcePlatformCard(
-            copy: card.copy,
-            available: card.available,
-            source: card.source,
-            accountEmail: card.accountEmail,
-            lastSyncAt: card.lastSyncAt,
-            error: card.error,
-            prerequisites: card.prerequisites,
-            busy: _busyTypes.contains(card.copy.id),
-            onConnect: () => _setupManual(card.copy.id),
-            onToggle: card.source == null
-                ? null
-                : (value) => _toggleSource(card.source!, value),
-            onSync: card.copy.id == 'plaud' && card.source != null
-                ? () => _syncSource(card.source!)
-                : null,
-            onDisconnect: card.source == null
-                ? null
-                : () => _deleteSource(card.source!),
-          ),
-        const SizedBox(height: 18),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
+    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.mobile;
+    final gutter = compact ? AppSpacing.lg - 4 : AppSpacing.lg;
 
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
 
     final live = _buildCards(SourceCategory.liveCapture);
-    final imports = _buildCards(SourceCategory.import);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: Text(
-          'External Sources',
-          style: TextStyle(
-            color: palette.textPrimary,
-            fontWeight: FontWeight.bold,
+    return RefreshIndicator(
+      onRefresh: () => _load(),
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 40),
+        children: <Widget>[
+          ScreenHeader(
+            title: 'Sources',
+            description:
+                'Services that can feed NeoRecall audio. Wearables and a '
+                'NeoRecall Desk are set up from Record.',
+            trailing: IconButton(
+              tooltip: 'Refresh',
+              onPressed: () => _load(),
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+            ),
           ),
-        ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => _load(),
-            icon: Icon(Icons.refresh, color: palette.textSecondary),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: () => _load(),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(
-              'Connect external recording services and run their audio through the same transcription pipeline as your devices.',
-              style: TextStyle(
-                color: palette.textSecondary,
-                fontSize: 13.5,
-                height: 1.4,
+          const SectionLabel(label: 'Live capture'),
+          const SizedBox(height: 6),
+          if (live.isEmpty)
+            const EmptyState(
+              icon: Icons.hub_outlined,
+              title: 'Nothing to connect yet',
+              message:
+                  'Live sources appear here as they become available for your '
+                  'account.',
+            )
+          else
+            for (final card in live)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: SourcePlatformCard(
+                  copy: card.copy,
+                  available: card.available,
+                  source: card.source,
+                  accountEmail: card.accountEmail,
+                  lastSyncAt: card.lastSyncAt,
+                  error: card.error,
+                  prerequisites: card.prerequisites,
+                  busy: _busyTypes.contains(card.copy.id),
+                  onConnect: () => _setupManual(card.copy.id),
+                  onToggle: card.source == null
+                      ? null
+                      : (value) => _toggleSource(card.source!, value),
+                  onSync: null,
+                  onDisconnect: card.source == null
+                      ? null
+                      : () => _deleteSource(card.source!),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            _section(
-              palette,
-              'Live capture',
-              'Discord voice — the bot joins a channel and records while people are present.',
-              live,
-            ),
-            _section(
-              palette,
-              'Imports',
-              'Pull finished recordings from a linked wearable account.',
-              imports,
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

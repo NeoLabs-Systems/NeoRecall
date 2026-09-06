@@ -27,9 +27,15 @@ function rebuildConversationSpeakers(database, userId, conversationId) {
     ORDER BY first_seen_at`).all(conversationId, userId);
   const insert = database.prepare(`INSERT INTO conversation_speakers
     (conversation_id,cluster_id,voiceprint_id,local_label) VALUES (?,?,?,?)`);
-  speakers.forEach((speaker, index) => {
-    insert.run(conversationId, speaker.cluster_id, speaker.voiceprint_id || null, `Speaker ${index + 1}`);
-  });
+  // Several session clusters may already resolve to one recurring voice. They
+  // must share one conversation-local label; numbering clusters instead of
+  // people is how a long recording used to reach labels such as Speaker 64.
+  const labels = new Map();
+  for (const speaker of speakers) {
+    const identity = speaker.voiceprint_id ? `voiceprint:${speaker.voiceprint_id}` : `cluster:${speaker.cluster_id}`;
+    if (!labels.has(identity)) labels.set(identity, `Speaker ${labels.size + 1}`);
+    insert.run(conversationId, speaker.cluster_id, speaker.voiceprint_id || null, labels.get(identity));
+  }
 }
 
 module.exports = { assignSegments, rebuildConversationSpeakers };

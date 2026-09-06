@@ -15,4 +15,25 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+    <!-- The widget configuration screen. NeoRecall ships no AppCompat or
+         Material dependency, so this inherits a platform theme and takes its
+         colours from the same tokens the widgets use. -->
+    <style name="WidgetConfigureTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/widget_config_bg</item>
+        <item name="android:statusBarColor">@color/widget_config_bg</item>
+        <item name="android:navigationBarColor">@color/widget_config_bg</item>
+        <item name="android:colorAccent">@color/widget_accent</item>
+        <item name="android:textColorPrimary">@color/widget_text_primary</item>
+        <item name="android:textColorSecondary">@color/widget_text_secondary</item>
+    </style>
+    <!-- Widget taps that must not show a UI. The activity finishes inside
+         onCreate, so nothing is ever drawn; this only stops the window from
+         flashing on its way past. -->
+    <style name="WidgetTapTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

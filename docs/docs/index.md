@@ -19,11 +19,12 @@ the privacy guide before recording anyone else.
 ## 🚀 Start here
 
 ```bash
-npm install -g github:NeoLabs-Systems/NeoRecall
-neorecall install
-neorecall setup
-neorecall start
+bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 ```
+
+The installer clones NeoRecall from GitHub, links the global `neorecall`
+command to that checkout, and runs the guided install. Desktop app users can do
+the same from **Set up NeoRecall on this computer** without a terminal.
 
 Open `http://localhost:4500` and `/app/` when setup finishes. Continue with:
 
@@ -38,7 +39,7 @@ has no bundled transcription or generation fallback.
 
 | Guide | Use it for |
 |---|---|
-| [Installation](installation.md) | Host requirements, npm and Docker install, service commands |
+| [Installation](installation.md) | Host requirements, repository installer, Docker, service commands |
 | [Recording](recording.md) | Web, macOS, and Windows capture behavior and offline sync |
 | [Configuration](configuration.md) | Environment variable reference |
 | [Privacy and consent](privacy-and-consent.md) | What the server stores and how to record responsibly |

@@ -5,6 +5,7 @@ const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const processingSettings = require('../settings/processing_settings_service');
 const vectors = require('../../transcription/speaker_embeddings');
+const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
 
 function list(userId) {
@@ -26,23 +27,26 @@ function getOwned(userId, id) {
 }
 
 function update(userId, id, changes) {
-  getOwned(userId, id);
-  getDatabase().prepare(`UPDATE voiceprints SET display_name=?,matching_enabled=COALESCE(?,matching_enabled),
+  const current = getOwned(userId, id);
+  const displayName = changes.displayName === undefined ? current.display_name : changes.displayName;
+  const displayNameSource = changes.displayName === undefined
+    ? current.display_name_source
+    : (changes.displayName === null ? null : 'manual');
+  getDatabase().prepare(`UPDATE voiceprints SET display_name=?,display_name_source=?,matching_enabled=COALESCE(?,matching_enabled),
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(
-    changes.displayName === undefined ? getOwned(userId, id).display_name : changes.displayName,
+    displayName, displayNameSource,
     changes.matchingEnabled === undefined ? null : Number(changes.matchingEnabled), id, userId);
   return getOwned(userId, id);
 }
 
-function floatVector(buffer) { return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4); }
 function mergedCentroid(first, second) {
-  const left = floatVector(first.centroid_embedding);
-  const right = floatVector(second.centroid_embedding);
+  const left = voiceprintStorage.readCentroid(first.centroid_embedding);
+  const right = voiceprintStorage.readCentroid(second.centroid_embedding);
   if (left.length !== right.length) throw new HttpError(409, 'MODEL_MISMATCH', 'Speaker profiles use incompatible embedding models.');
   const total = first.sample_count + second.sample_count;
   const output = new Float32Array(left.length);
   for (let i = 0; i < left.length; i += 1) output[i] = (left[i] * first.sample_count + right[i] * second.sample_count) / total;
-  return { buffer: Buffer.from(output.buffer), total };
+  return { buffer: voiceprintStorage.sealCentroid(output), total };
 }
 
 function merge(userId, targetId, sourceId) {
@@ -53,6 +57,8 @@ function merge(userId, targetId, sourceId) {
   const centroid = mergedCentroid(target, source);
   const db = getDatabase();
   db.transaction(() => {
+    const affectedConversations = db.prepare(`SELECT DISTINCT conversation_id FROM conversation_speakers
+      WHERE voiceprint_id IN (?,?)`).all(targetId, sourceId).map((row) => row.conversation_id);
     const targetPreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(targetId);
     const sourcePreview = db.prepare('SELECT * FROM speaker_previews WHERE voiceprint_id=?').get(sourceId);
     const sourceSelection = sourcePreview && {
@@ -64,6 +70,9 @@ function merge(userId, targetId, sourceId) {
       sourceSelection,
       getConfig().speakerDisplayMinimumPreviewMs,
     )) {
+      // The clip is copied between rows exactly as stored — still sealed, never
+      // decrypted — so a merge does no crypto work and cannot leak a plaintext
+      // clip into a transaction that might roll back.
       db.prepare(`INSERT INTO speaker_previews
         (voiceprint_id,user_id,audio,content_type,duration_ms,quality,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?)
@@ -75,9 +84,16 @@ function merge(userId, targetId, sourceId) {
     }
     db.prepare('UPDATE speaker_turns SET voiceprint_id=? WHERE voiceprint_id=? AND user_id=?').run(targetId, sourceId, userId);
     db.prepare('UPDATE conversation_speakers SET voiceprint_id=? WHERE voiceprint_id=?').run(targetId, sourceId);
-    db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=COALESCE(display_name,?),
-      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(centroid.buffer, centroid.total, source.display_name, targetId, userId);
+    const mergedDisplayName = target.display_name || source.display_name;
+    const mergedDisplayNameSource = target.display_name ? target.display_name_source : source.display_name_source;
+    db.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=?,display_name=?,display_name_source=?,
+      entity_id=COALESCE(entity_id,?),
+      updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?`).run(
+      centroid.buffer, centroid.total, mergedDisplayName, mergedDisplayNameSource, source.entity_id, targetId, userId,
+    );
     db.prepare('DELETE FROM voiceprints WHERE id=? AND user_id=?').run(sourceId, userId);
+    const membership = require('../conversations/conversation_membership_service');
+    for (const conversationId of affectedConversations) membership.rebuildConversationSpeakers(db, userId, conversationId);
   })();
   return getOwned(userId, targetId);
 }
@@ -91,32 +107,31 @@ function mergeMany(userId, targetId, sourceIds) {
 }
 
 function sameExplicitIdentity(first, second) {
+  if (first.entity_id && second.entity_id && first.entity_id !== second.entity_id) return false;
   const firstName = first.display_name?.trim();
   const secondName = second.display_name?.trim();
   return !firstName || !secondName || firstName === secondName;
 }
 
 function rankedPeers(row, rows) {
-  const centroid = vectors.fromBuffer(row.centroid_embedding);
+  const centroid = voiceprintStorage.readCentroid(row.centroid_embedding);
   return rows
     .filter((candidate) => candidate.id !== row.id
       && candidate.embedding_model === row.embedding_model
       && candidate.embedding_dimensions === row.embedding_dimensions)
     .map((candidate) => ({
       row: candidate,
-      score: vectors.cosine(centroid, vectors.fromBuffer(candidate.centroid_embedding)),
+      score: vectors.cosine(centroid, voiceprintStorage.readCentroid(candidate.centroid_embedding)),
     }))
     .sort((left, right) => right.score - left.score);
 }
 
-function reevaluationPairs(rows, { voiceMatchThreshold, voiceMatchMargin }) {
+function reevaluationPairs(rows, { voiceMatchThreshold }) {
   const matches = new Map();
   for (const row of rows) {
     const ranked = rankedPeers(row, rows);
     const best = ranked[0];
-    const runnerUp = ranked[1];
-    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold
-      && (!runnerUp || best.score - runnerUp.score >= voiceMatchMargin)) {
+    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold) {
       matches.set(row.id, best);
     }
   }

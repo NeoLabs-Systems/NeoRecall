@@ -19,6 +19,14 @@ test('dedupe removes only time-aligned duplicate leakage', () => {
   assert.deepEqual(result.map((item) => item.text), ['A later independent statement.']);
 });
 
+test('a reported Whisper logprob beats a duplicate that omitted confidence', () => {
+  const result = dedupe([
+    { text: 'The meeting starts at ten.', startMs: 1000, endMs: 3000, asrConfidence: null },
+    { text: 'The meeting starts at ten.', startMs: 1050, endMs: 3050, asrConfidence: -0.4 },
+  ], [], { similarityThreshold: 0.8, timeToleranceMs: 500 });
+  assert.deepEqual(result.map((item) => item.asrConfidence), [-0.4]);
+});
+
 test('cross-stream dedupe requires the same complete multi-word utterance and matching time', () => {
   assert.equal(exactSameUtterance('Danke schön!', 'DANKE schön', 2), true);
   assert.equal(exactSameUtterance('Thanks', 'thanks', 2), false);

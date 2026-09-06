@@ -11,6 +11,8 @@ const { conversationPreviewMessages } = require('./prompts/preview_conversation'
 const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
+const contextAnalysis = require('./prompts/analyze_context');
+const memoryContextRewrite = require('./prompts/rewrite_memory_context');
 const { inputBudgetCharacters } = require('./context_budget');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
@@ -19,17 +21,17 @@ function markValidationFailed(requestId, code) {
   getDatabase().prepare("UPDATE ai_requests SET state='failed',error_code=? WHERE id=?").run(code, requestId);
 }
 
-/// Failures that a fresh sample of the same request may simply not repeat.
-///
-/// Measured against a live model over three hours of real audio: two of seven
-/// consolidation requests failed on the first attempt, once with no message
-/// content at all and once with a completion that ran out of budget. Neither
-/// says anything is wrong with the input, and without a retry each one postpones
-/// every memory to the next scheduler tick.
-///
-/// A contract violation is deliberately not in this list. Resending an input the
-/// model could not partition reproduces the failure, which is what the narrowing
-/// and quarantine policy exists to handle instead.
+// Failures that a fresh sample of the same request may simply not repeat.
+//
+// Measured against a live model over three hours of real audio: two of seven
+// consolidation requests failed on the first attempt, once with no message
+// content at all and once with a completion that ran out of budget. Neither
+// says anything is wrong with the input, and without a retry each one postpones
+// every memory to the next scheduler tick.
+//
+// A contract violation is deliberately not in this list. Resending an input the
+// model could not partition reproduces the failure, which is what the narrowing
+// and quarantine policy exists to handle instead.
 const TRANSIENT_AI_CODES = Object.freeze([
   'AI_TIMEOUT', 'AI_HTTP_ERROR', 'AI_REQUEST_FAILED', 'AI_EMPTY_RESPONSE', 'AI_PROVIDER_ERROR',
 ]);
@@ -71,24 +73,13 @@ async function consolidateWindowOnce(userId, window, carryOver) {
   }
 }
 
-/// Makes a window's sections cover the window, exactly once, in order.
-///
-/// The contract asks the model to partition every segment it was given into
-/// contiguous sections, and validation rejects a consolidation that omits,
-/// duplicates or reorders one. A model does not always comply:
-/// measured against a real transcript, one window of thirty-five segments came
-/// back with fifteen of them cited and the rest simply missing, which would have
-/// thrown the whole run away.
-///
-/// So the model's partition is honoured where it made one, and completed where
-/// it did not. A segment nobody claimed joins the section that owns the segment
-/// before it — the conversation it actually adjoins — and a segment two sections
-/// both claimed stays with the first. Nothing is invented and no evidence is
-/// dropped: every segment ends up in exactly one section, in recording order,
-/// which is what makes the result addressable at all. The affected section's
-/// summary may not mention the segments that joined it; that is a smaller loss
-/// than discarding a correct answer and eventually quarantining the
-/// conversation.
+// Makes a window's sections cover the window exactly once, in order.
+//
+// The model is asked to partition every segment into contiguous sections and
+// does not always comply — measured: a 35-segment window came back citing 15.
+// Rather than discard the run, its partition is honoured where it made one and
+// completed where it did not: an unclaimed segment joins the section owning the
+// segment before it, a doubly-claimed one stays with the first.
 function completeCoverage(sections, segmentIds) {
   const owner = new Map();
   sections.forEach((section, index) => {
@@ -109,18 +100,12 @@ function completeCoverage(sections, segmentIds) {
   return sections.filter((section) => section.sourceSegmentIds.length > 0);
 }
 
-/// Folds one window's answer into the answer built from the windows before it.
-///
-/// The model marks the section it is carrying on from the previous window, and
-/// the memory built from that section, with continuesPrevious. Merging is
-/// therefore a join rather than a guess: cited segments are appended in order,
-/// and the prose written for the wider view replaces the prose written for the
-/// narrower one, because the model was asked to describe the whole occasion each
-/// time — the same rolling-description contract live previews already use.
-///
-/// Only the trailing section may be continued, so a claim anywhere else is
-/// ignored and becomes a new section. That keeps section coverage contiguous no
-/// matter what the model returns.
+// Folds one window's answer into the answer built from the windows before it.
+//
+// `continuesPrevious` marks what carries over, so this is a join rather than a
+// guess: cited segments append in order and the wider view's prose replaces the
+// narrower one's. Only the trailing section may be continued, which keeps
+// coverage contiguous whatever the model returns.
 function mergeWindow(merged, output, segmentIds = null) {
   const prefix = `w${merged.windowCount + 1}/`;
   const entityRef = (ref) => `${prefix}${ref}`;
@@ -173,13 +158,13 @@ function mergeWindow(merged, output, segmentIds = null) {
   return merged;
 }
 
-/// Writes the day's summary from the finished picture.
-///
-/// Deliberately its own request. A window only ever sees its own slice, so
-/// asking the last one to summarise the day asks it to write about material it
-/// was never shown — and when it declined, the missing summary failed the whole
-/// run. This reads the memory-worthy sections the run actually produced, which
-/// is short input and a short answer.
+// Writes the day's summary from the finished picture.
+//
+// Deliberately its own request. A window only ever sees its own slice, so
+// asking the last one to summarise the day asks it to write about material it
+// was never shown — and when it declined, the missing summary failed the whole
+// run. This reads the memory-worthy sections the run actually produced, which
+// is short input and a short answer.
 async function writeDailySummary(userId, { sections, previousDailySummary, timezone }) {
   const config = getConfig();
   return withRetries(async () => {
@@ -206,13 +191,13 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
   });
 }
 
-/// Reads one candidate set, in as many passes as the model's context requires.
-///
-/// A single window is the ordinary case and behaves exactly as one request. A
-/// transcript longer than the context is read in order, each pass told what the
-/// occasion looked like when the previous pass stopped, and the passes are folded
-/// back into one answer — so a four-hour lecture still becomes one section and
-/// one memory rather than one per pass.
+// Reads one candidate set, in as many passes as the model's context requires.
+//
+// A single window is the ordinary case and behaves exactly as one request. A
+// transcript longer than the context is read in order, each pass told what the
+// occasion looked like when the previous pass stopped, and the passes are folded
+// back into one answer — so a four-hour lecture still becomes one section and
+// one memory rather than one per pass.
 async function consolidate(userId, input) {
   const config = getConfig();
   const continuationCharacters = JSON.stringify(input.continuationCandidates || []).length;
@@ -267,14 +252,14 @@ async function previewConversation(userId, { conversation, previousInsight = nul
   return { value: parsed.data, requestId: response.requestId };
 }
 
-/// Trims retrieved context to what the model can actually read.
-///
-/// Search returns its results best-first, so dropping from the end drops the
-/// least relevant evidence — which is the right thing to lose when something has
-/// to go. Without this the prompt is whatever sixteen results happen to weigh:
-/// a handful of long memories and daily summaries can exceed a modest context on
-/// their own, and the request is then rejected outright rather than answered
-/// from slightly less evidence.
+// Trims retrieved context to what the model can actually read.
+//
+// Search returns its results best-first, so dropping from the end drops the
+// least relevant evidence — which is the right thing to lose when something has
+// to go. Without this the prompt is whatever sixteen results happen to weigh:
+// a handful of long memories and daily summaries can exceed a modest context on
+// their own, and the request is then rejected outright rather than answered
+// from slightly less evidence.
 function contextWithinBudget(context, budgetCharacters) {
   const kept = [];
   let used = 0;
@@ -307,9 +292,78 @@ async function answer(userId, question, context, beforeAttempt) {
   });
 }
 
-/// Rewrite title/summary/emoji/type for a user-initiated multi-memory merge.
-/// Small structured output; uses the preview token budget rather than full
-/// consolidation, because the answer is a single card of prose.
+async function analyzeContextText(userId, { name, content }) {
+  const config = getConfig();
+  const maximum = Math.max(1, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000);
+  const response = await provider().chatJSON({
+    userId,
+    purpose: 'context_analysis',
+    messages: contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: contextAnalysis.responseFormat,
+  });
+  const description = String(response.value?.descriptionEn || '').trim();
+  if (!description) throw Object.assign(new Error('Context analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  return { description, requestId: response.requestId };
+}
+
+async function analyzeContextImage(userId, { name, mediaType, data }) {
+  const config = getConfig();
+  const response = await provider().chatJSON({
+    userId,
+    purpose: 'context_analysis',
+    messages: contextAnalysis.imageMessages({ name, mediaType, data }),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: contextAnalysis.responseFormat,
+  });
+  const description = String(response.value?.descriptionEn || '').trim();
+  if (!description) throw Object.assign(new Error('Image analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  return { description, requestId: response.requestId };
+}
+
+async function rewriteMemoryWithContext(userId, { memory, segments, contextItems }) {
+  const config = getConfig();
+  const budget = Math.max(2_000, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 3_000);
+  // Context is the reason for the rewrite, so reserve most of the evidence
+  // budget for it. Any unused context room naturally flows to the transcript.
+  const boundedContext = contextWithinBudget(contextItems, Math.floor(budget * 0.6));
+  const contextCharacters = JSON.stringify(boundedContext).length;
+  const boundedSegments = contextWithinBudget(segments, Math.max(1_000, budget - contextCharacters));
+  const response = await provider().chatJSON({
+    userId, purpose: 'memory_context_rewrite',
+    messages: memoryContextRewrite.messages(memory, boundedSegments, boundedContext),
+    maxTokens: config.aiPreviewMaxOutputTokens,
+    responseFormat: { type: 'json_schema', json_schema: {
+      name: 'neorecall_memory_context_rewrite', strict: true, schema: memoryContextRewrite.jsonSchema,
+    } },
+  });
+  const parsed = memoryContextRewrite.schema.safeParse(response.value);
+  if (!parsed.success) {
+    markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+    throw Object.assign(new Error('Memory context rewrite did not match the required schema.'), {
+      code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
+    });
+  }
+  const available = new Set(boundedContext.map((item) => item.id));
+  if (parsed.data.sourceContextItemIds.some((id) => !available.has(id))) {
+    markValidationFailed(response.requestId, 'AI_REFERENCE_INVALID');
+    throw Object.assign(new Error('Memory context rewrite cited an unknown context item.'), {
+      code: 'AI_REFERENCE_INVALID', aiRequestId: response.requestId,
+    });
+  }
+  const availableSegments = new Set(boundedSegments.map((segment) => segment.public_id));
+  if (parsed.data.miniMemories.some((mini) => mini.sourceSegmentIds.some((id) => !availableSegments.has(id)))) {
+    markValidationFailed(response.requestId, 'AI_REFERENCE_INVALID');
+    throw Object.assign(new Error('Memory context rewrite cited an unknown transcript segment.'), {
+      code: 'AI_REFERENCE_INVALID', aiRequestId: response.requestId,
+    });
+  }
+  return { value: parsed.data, requestId: response.requestId };
+}
+
+// Rewrite title/summary/emoji/type for a user-initiated multi-memory merge.
+// Small structured output; uses the preview token budget rather than full
+// consolidation, because the answer is a single card of prose.
 async function rewriteMergedMemory(userId, memories) {
   const config = getConfig();
   return withRetries(async () => {
@@ -341,5 +395,6 @@ async function rewriteMergedMemory(userId, memories) {
 }
 
 module.exports = {
-  consolidate, previewConversation, answer, rewriteMergedMemory, writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
+  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, rewriteMergedMemory,
+  writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };

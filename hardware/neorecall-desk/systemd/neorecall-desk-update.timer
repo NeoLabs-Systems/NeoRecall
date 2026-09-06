@@ -1,0 +1,16 @@
+[Unit]
+Description=Check for NeoRecall Desk updates
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+
+[Timer]
+# Shortly after boot, then daily. The check itself is one small HTTPS request
+# that does nothing when the version has not changed, and it never interrupts a
+# recording: the updater postpones itself while one is in progress.
+OnBootSec=5min
+OnUnitActiveSec=24h
+RandomizedDelaySec=30min
+Persistent=true
+Unit=neorecall-desk-update.service
+
+[Install]
+WantedBy=timers.target

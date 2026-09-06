@@ -7,6 +7,7 @@ const {
   normalizeConsolidationTimestamps, GENERATED_MINI_MEMORY_KINDS,
 } = require('../../server/ai/schemas/consolidation_schema');
 const { localTimestamp, prepareConsolidationRequest, restoreReferenceIds } = require('../../server/ai/prompts/consolidate_memories');
+const { conversationPreviewMessages } = require('../../server/ai/prompts/preview_conversation');
 const { anchorMemoryRanges } = require('../../server/services/memories/consolidation_service');
 const { localDateTimeToUtc } = require('../../server/utils/time');
 
@@ -73,6 +74,38 @@ test('compactInput exposes speaker aliases in both directions so a response can 
     }],
   }] });
   assert.equal(prepared.references.reverseSpeakerAliases.get('speaker1'), 'cluster-abc');
+});
+
+test('recurring voice identity stays stable across sessions and continuation cards', () => {
+  const prepared = prepareConsolidationRequest({ timezone: 'UTC', previousDailySummary: null,
+    conversations: [{
+      id: 'conv-1', sessionId: 'new-session', startedAt: '2026-07-14T08:00:00.000Z', endedAt: '2026-07-14T08:01:00.000Z',
+      segments: [{ id: 'seg-1', started_at: '2026-07-14T08:00:00.000Z', ended_at: '2026-07-14T08:00:05.000Z',
+        text: 'Let us continue the design review.', language: 'en', speakerClusterId: 'new-cluster', speakerVoiceprintId: 'stable-voice' }],
+    }],
+    continuationCandidates: [{ publicId: 'memory-1', type: 'meeting', titleEn: 'Design review', summaryEn: 'The review began.',
+      startedAt: '2026-07-14T07:30:00.000Z', endedAt: '2026-07-14T07:53:00.000Z', topics: ['Design'], highlights: [],
+      sessionIds: ['old-session'], speakerIdentities: ['stable-voice'] }],
+  });
+  const payload = JSON.parse(prepared.windows[0].messages(null)[1].content);
+  const inputSpeaker = payload.conversations[0].segments[0].speaker;
+  assert.equal(payload.continuationCandidates[0].speakers[0], inputSpeaker,
+    'the model can see that the same anonymized voice occurs on both sides of a recording restart');
+  assert.equal(prepared.references.reverseSpeakerAliases.get(inputSpeaker), 'new-cluster');
+});
+
+test('preview and consolidation share title guidance that ignores capture artifacts', () => {
+  const conversation = { id: 'conv-1', startedAt: '2026-07-14T08:00:00.000Z', endedAt: '2026-07-14T08:01:00.000Z',
+    segments: [{ id: 'seg-1', started_at: '2026-07-14T08:00:00.000Z', ended_at: '2026-07-14T08:00:05.000Z',
+      text: 'We need to adjust the integrator circuit.', language: 'en', speakerClusterId: 'cluster-1' }] };
+  const prepared = prepareConsolidationRequest({ timezone: 'UTC', previousDailySummary: null, conversations: [conversation] });
+  const consolidationInstructions = prepared.windows[0].messages(null)[0].content;
+  const previewInstructions = conversationPreviewMessages({ conversation, timezone: 'UTC' })[0].content;
+  for (const instructions of [consolidationInstructions, previewInstructions]) {
+    assert.match(instructions, /human subject and purpose/);
+    assert.match(instructions, /Speaker fields are metadata/);
+    assert.match(instructions, /Do not diagnose the transcript in the title/);
+  }
 });
 
 test('dynamic consolidation schema restricts every transcript reference to compact segment aliases', () => {

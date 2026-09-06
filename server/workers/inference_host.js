@@ -15,7 +15,10 @@ const logger = createLogger('inference-host');
 async function transcribe(input) {
   const analysis = localAnalysis.analyze(input.filename);
   if (!analysis.hasSpeech) return [];
-  const segments = await getProvider().transcribe({ filename: input.filename, channelLayout: input.channelLayout });
+  const segments = await getProvider().transcribe({
+    filename: input.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
+    vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
+  });
   if (!analysis.analyzed || !analysis.turns.length) return segments;
   return alignSegments(segments, analysis.turns);
 }

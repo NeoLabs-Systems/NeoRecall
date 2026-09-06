@@ -12,19 +12,19 @@ import 'device_models.dart';
 import 'offline_sync.dart';
 
 /// Shared GATT adapter for every capture-capable wearable protocol (Omi,
-/// OmiGlass, HeyPocket, …).
+/// OmiGlass, HeyPocket, Memoket, …).
 ///
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
 /// every device's wire protocol in its own connector.
 class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
-  DeviceAdapter({GattTransport? gatt})
-    : _gatt = gatt ?? createGattTransport();
+  DeviceAdapter({GattTransport? gatt}) : _gatt = gatt ?? createGattTransport();
 
   /// Primary services used to select supported wearables during the scan.
   static const List<String> _serviceUuids = <String>[
     WearableDeviceUuids.omiService,
     WearableDeviceUuids.heyPocketService,
+    WearableDeviceUuids.memoketService,
   ];
 
   /// Secondary services the connectors access once connected. They never select
@@ -64,6 +64,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         ? connector as WearableOfflineSync
         : null;
   }
+
   WearableAudioDecoder? _decoder;
   WearableAudioDecoder? _frameDecoder;
   OmiFrameAssembler? _assembler;
@@ -129,9 +130,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         serviceUuids: _serviceUuids,
         optionalServiceUuids: _secondaryServiceUuids,
         namePrefixes: <String>[
-          'Pocket',
-          'HeyPocket',
-          'PKT01',
+          ...DiscoveredWearable.heyPocketNamePrefixes,
+          ...DiscoveredWearable.memoketNamePrefixes,
           // Omi/OmiGlass advertise their 128-bit service, but include the name
           // prefixes too so discovery still works on platforms/firmware that do
           // not put the service UUID in the advertisement (scan filters are OR).
@@ -176,8 +176,12 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         'locallyDecodable': locallyDecodable,
       },
     );
-    if ((!identityValidated || !locallyDecodable) &&
-        type != WearableDeviceType.custom) {
+    // Never list arbitrary nearby BLE peripherals. Compatibility probing used
+    // to happen only after a user tapped one of those rows, which filled the UI
+    // with unrelated watches, TVs, and accessories while the real PK01 name was
+    // missed. A supported device must identify itself by its protocol service
+    // or one of the protocol's advertised names before it reaches the UI.
+    if (!identityValidated || !locallyDecodable) {
       return;
     }
     _found[wearable.id] = wearable;
@@ -201,9 +205,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
             name.startsWith('openglass'),
       WearableDeviceType.heyPocket =>
         has(WearableDeviceUuids.heyPocketService) ||
-            name.contains('heypocket') ||
-            name.startsWith('pkt01') ||
-            name.startsWith('pocket'),
+            DiscoveredWearable.hasHeyPocketName(device.name),
+      WearableDeviceType.memoket =>
+        has(WearableDeviceUuids.memoketService) ||
+            DiscoveredWearable.hasMemoketName(device.name),
       WearableDeviceType.custom => false,
     };
   }
@@ -212,7 +217,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     return switch (type) {
       WearableDeviceType.omi ||
       WearableDeviceType.omiGlass ||
-      WearableDeviceType.heyPocket => true,
+      WearableDeviceType.heyPocket ||
+      WearableDeviceType.memoket => true,
       WearableDeviceType.custom => false,
     };
   }
@@ -225,7 +231,8 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       transport: transport,
       supportsHardwareButtons:
           device.type == WearableDeviceType.omi ||
-          device.type == WearableDeviceType.omiGlass,
+          device.type == WearableDeviceType.omiGlass ||
+          device.type == WearableDeviceType.memoket,
       supportsMicrophone: device.type != WearableDeviceType.custom,
       metadata: <String, Object?>{
         'type': device.type.name,
@@ -444,6 +451,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       2 => DeviceControlEventType.doublePress,
       3 => DeviceControlEventType.longPress,
       5 => DeviceControlEventType.buttonRelease,
+      WearableControlCodes.startRecording =>
+        DeviceControlEventType.startRecording,
+      WearableControlCodes.stopRecording =>
+        DeviceControlEventType.stopRecording,
       _ => DeviceControlEventType.custom,
     };
     if (!_controlEvents.isClosed) {

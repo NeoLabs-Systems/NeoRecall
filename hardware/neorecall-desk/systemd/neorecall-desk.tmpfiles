@@ -1,0 +1,5 @@
+# The state directory holds recordings that have not yet been proven stored on
+# the server. It must exist before the appliance starts and must never be
+# cleaned automatically — every file in it is audio nobody else has a copy of.
+d /var/lib/neorecall-desk       0700 neorecall neorecall -
+d /var/lib/neorecall-desk/pending_audio 0700 neorecall neorecall -

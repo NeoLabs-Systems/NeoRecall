@@ -31,6 +31,14 @@ test('NeoAgent companion uses consent, PKCE, read-only scopes, and rotating refr
   await request(app).post('/api/oauth/companion/neoagent/bootstrap')
     .send({ redirectUri: 'http://agent.example.test/api/integrations/oauth/callback', appName: 'NeoAgent' }).expect(400);
 
+  const lanBootstrap = await request(app)
+    .post('/api/oauth/companion/neoagent/bootstrap')
+    .set('Host', '192.168.1.50:4500')
+    .send({ redirectUri: callback, appName: 'NeoAgent' })
+    .expect(200);
+  assert.equal(lanBootstrap.body.authorizationEndpoint, 'http://192.168.1.50:4500/oauth/authorize');
+  assert.equal(lanBootstrap.body.tokenEndpoint, 'http://192.168.1.50:4500/oauth/token');
+
   const verifier = 'neoagent-pkce-verifier-long-enough-for-a-secure-test';
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const authorization = {

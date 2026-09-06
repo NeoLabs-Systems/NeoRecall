@@ -5,34 +5,16 @@ const aiProviders = require('../../ai/provider_registry');
 const transcriptionProviders = require('../../transcription/provider_registry');
 const consolidation = require('../memories/consolidation_service');
 
-/// Answers the one question a recorder has to be able to answer: "I recorded all
-/// day — where did it go?"
-///
-/// Everything needed to answer it already existed, scattered across chunk states,
-/// job rows, consolidation eligibility and provider configuration. What did not
-/// exist was anywhere the person who did the recording could see it, so a
-/// pipeline stalled at any stage looked exactly like one with nothing to do: an
-/// empty timeline. A whole day of speech could be safely stored, correctly
-/// transcribed, and waiting on a language model that was rejecting every
-/// request, and the app would say nothing at all.
-///
-/// Written for that person and nobody else. They are usually not the one who
-/// administers the server, so nothing here quotes what a service replied, names
-/// a setting, or tells them to change one — a stranger's HTTP status is not
-/// information to someone who cannot act on it, and instructions they cannot
-/// follow only make a stall feel like their fault.
-///
-/// What they get instead is the truthful shape of it: their audio is safe, this
-/// is being worked on or it is not, and whether anyone needs to be told. The
-/// technical cause is not lost — it goes to the logs and the admin dashboard,
-/// where somebody can act on it.
-///
-/// Severities mean: `blocked`, nothing progresses until someone with server
-/// access acts; `attention`, worth knowing while the rest keeps moving.
+// Answers "I recorded all day — where did it go?" for the person who did the
+// recording, not the operator: no HTTP statuses, no setting names, no
+// instructions they cannot act on. The technical cause goes to the logs and the
+// admin dashboard instead.
+//
+// Severities: `blocked`, nothing progresses until someone with server access
+// acts; `attention`, worth knowing while the rest keeps moving.
 
-/// How long queued work may sit before the queue looks stuck rather than busy.
-/// Transcribing a backlog is legitimately slow, so this is generous: it is meant
-/// to catch a worker that is not running at all.
+// Generous, because transcribing a backlog is legitimately slow: this is meant
+// to catch a worker that is not running at all.
 const STALLED_QUEUE_MS = 30 * 60_000;
 const WORKER_SILENT_MS = 5 * 60_000;
 
@@ -66,11 +48,11 @@ function plural(count, singular, many) {
   return `${count} ${count === 1 ? singular : many || `${singular}s`}`;
 }
 
-/// Why memories are not appearing, in the user's terms.
-///
-/// Most eligibility reasons are the system working — waiting for an interval, or
-/// for enough material — and produce no issue at all. Only what a person can act
-/// on, or would otherwise silently wonder about, is surfaced.
+// Why memories are not appearing, in the user's terms.
+//
+// Most eligibility reasons are the system working — waiting for an interval, or
+// for enough material — and produce no issue at all. Only what a person can act
+// on, or would otherwise silently wonder about, is surfaced.
 function memoryIssues(eligibility, data) {
   const issues = [];
   if (eligibility.reason === 'ai_not_configured') {
@@ -158,7 +140,7 @@ function issuesFor(data, eligibility, providers, alive) {
   return issues;
 }
 
-/// One sentence for someone who only wants to know whether to worry.
+// One sentence for someone who only wants to know whether to worry.
 function summarize(data, issues) {
   const blocked = issues.find((issue) => issue.severity === 'blocked');
   if (blocked) return blocked.title;
@@ -168,10 +150,10 @@ function summarize(data, issues) {
   return 'Everything you have recorded has been processed.';
 }
 
-/// Awaited, because the transcription provider reports readiness asynchronously
-/// and a promise is truthy. Reading it synchronously made an unconfigured
-/// service look configured, which would have hidden the very problem this exists
-/// to report.
+// Awaited, because the transcription provider reports readiness asynchronously
+// and a promise is truthy. Reading it synchronously made an unconfigured
+// service look configured, which would have hidden the very problem this exists
+// to report.
 async function transcriptionReady() {
   try { return Boolean(await transcriptionProviders.getProvider().ready()); } catch { return false; }
 }

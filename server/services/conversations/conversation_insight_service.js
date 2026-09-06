@@ -9,6 +9,7 @@ const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const { inputBudgetCharacters } = require('../../ai/context_budget');
 const material = require('./conversation_material_service');
+const contextMaterial = require('../context/context_material_service');
 
 // Live insight for a conversation consolidation will not describe.
 //
@@ -49,27 +50,27 @@ function thresholds() {
   };
 }
 
-/// Whether a conversation is one previews are responsible for.
-///
-/// An open conversation is still growing and consolidation has not seen it yet.
-/// A quarantined one is closed but consolidation has permanently given up on it.
-/// Everything else either already has a final insight or is about to get one.
+// Whether a conversation is one previews are responsible for.
+//
+// An open conversation is still growing and consolidation has not seen it yet.
+// A quarantined one is closed but consolidation has permanently given up on it.
+// Everything else either already has a final insight or is about to get one.
 function previewOwns(conversation) {
   if (conversation.state === 'open') return true;
   return conversation.state === 'closed' && Boolean(conversation.quarantined_at);
 }
 
-/// Whether this conversation is worth spending a preview request on right now.
-///
-/// The first preview needs enough transcript to describe, every later one needs
-/// enough *new* transcript to be worth re-describing, and two previews of the
-/// same conversation stay a minimum interval apart. On an uninterrupted stream
-/// those bounds are what keep preview cost proportional to new speech rather
-/// than to elapsed time.
-///
-/// The interval is measured from the last *attempt*, not the last success.
-/// Measuring successes would leave a conversation whose previews keep failing
-/// permanently due, and the scheduler would spend a request a minute on it.
+// Whether this conversation is worth spending a preview request on right now.
+//
+// The first preview needs enough transcript to describe, every later one needs
+// enough *new* transcript to be worth re-describing, and two previews of the
+// same conversation stay a minimum interval apart. On an uninterrupted stream
+// those bounds are what keep preview cost proportional to new speech rather
+// than to elapsed time.
+//
+// The interval is measured from the last *attempt*, not the last success.
+// Measuring successes would leave a conversation whose previews keep failing
+// permanently due, and the scheduler would spend a request a minute on it.
 function previewDue(conversation, characters, limits, now = Date.now()) {
   if (conversation.insight_state === FINAL) return false;
   // A short recording never reaches a model at all, however dense its speech.
@@ -92,11 +93,11 @@ function due(userId, database = getDatabase()) {
     .filter(({ conversation }) => material.isComplete(userId, conversation.id, database));
 }
 
-/// Queues a preview for every conversation that is due one.
-///
-/// Enqueueing is idempotent per conversation: the job table rejects a second
-/// active job for the same resource, so a scheduler tick during a running
-/// preview adds nothing.
+// Queues a preview for every conversation that is due one.
+//
+// Enqueueing is idempotent per conversation: the job table rejects a second
+// active job for the same resource, so a scheduler tick during a running
+// preview adds nothing.
 function request(userId, database = getDatabase()) {
   const queued = [];
   for (const { conversation } of due(userId, database)) {
@@ -112,13 +113,13 @@ function request(userId, database = getDatabase()) {
   return { queued };
 }
 
-/// Keeps the leading segments that fit in one request.
-///
-/// Truncation is from the end, never the beginning: a preview that describes the
-/// opening of a conversation and stops is a correct description of a prefix,
-/// which is exactly what a preview claims to be. The refresh path then rolls
-/// forward from where this one stopped, so the part left out here is described
-/// by the next request rather than lost.
+// Keeps the leading segments that fit in one request.
+//
+// Truncation is from the end, never the beginning: a preview that describes the
+// opening of a conversation and stops is a correct description of a prefix,
+// which is exactly what a preview claims to be. The refresh path then rolls
+// forward from where this one stopped, so the part left out here is described
+// by the next request rather than lost.
 function fitToBudget(segments, budgetCharacters) {
   const output = [];
   let used = 0;
@@ -131,9 +132,9 @@ function fitToBudget(segments, budgetCharacters) {
   return output;
 }
 
-/// How much of the conversation a preview over these segments will have
-/// described: everything from its start through the last segment sent, since a
-/// rolling refresh carries the earlier description forward with it.
+// How much of the conversation a preview over these segments will have
+// described: everything from its start through the last segment sent, since a
+// rolling refresh carries the earlier description forward with it.
 function describedCharacters(allSegments, sent) {
   if (!sent.length) return 0;
   const lastId = sent.at(-1).id;
@@ -145,21 +146,22 @@ function describedCharacters(allSegments, sent) {
   return total;
 }
 
-/// Chooses what to send for this refresh.
-///
-/// Below the full-read threshold the whole transcript goes out, which is exact.
-/// Above it, only the speech recorded since the last preview goes out together
-/// with the description written then, so the request stays the same size no
-/// matter how long the conversation has been running. A conversation that was
-/// split by boundary detection can end up not containing the text its previous
-/// preview described; that is detected here and falls back to a full read.
-///
-/// Either shape is finally cut to what the model can read at once. That bound
-/// only bites when a conversation grew far beyond the full-read threshold before
-/// its first successful preview, and it costs nothing then: the description
-/// continues on the next refresh instead of the request failing.
+// Chooses what to send for this refresh.
+//
+// Below the full-read threshold the whole transcript goes out, which is exact.
+// Above it, only the speech recorded since the last preview goes out together
+// with the description written then, so the request stays the same size no
+// matter how long the conversation has been running. A conversation that was
+// split by boundary detection can end up not containing the text its previous
+// preview described; that is detected here and falls back to a full read.
+//
+// Either shape is finally cut to what the model can read at once. That bound
+// only bites when a conversation grew far beyond the full-read threshold before
+// its first successful preview, and it costs nothing then: the description
+// continues on the next refresh instead of the request failing.
 function previewInput(userId, conversation, limits, database = getDatabase()) {
   const all = material.material(userId, conversation, database);
+  contextMaterial.attach(userId, [all], database);
   const rolling = conversation.insight_state === PROVISIONAL
     && conversation.insight_covered_through
     && conversation.title_en
@@ -182,10 +184,10 @@ function previewInput(userId, conversation, limits, database = getDatabase()) {
   };
 }
 
-/// Records that a request is about to go out, before it does.
-///
-/// Committed on its own so a request that never returns still counts as an
-/// attempt; otherwise a failing preview would be due again on the next tick.
+// Records that a request is about to go out, before it does.
+//
+// Committed on its own so a request that never returns still counts as an
+// attempt; otherwise a failing preview would be due again on the next tick.
 function markAttempted(userId, conversationId, database = getDatabase()) {
   database.prepare(`UPDATE conversations SET insight_attempted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
     WHERE id=? AND user_id=?`).run(conversationId, userId);

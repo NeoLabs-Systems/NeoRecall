@@ -129,8 +129,10 @@ class GattConnectorTransport implements WearableTransport {
     // assuming every optional service/characteristic is present.
     _discovered = await _gatt.discoverCharacteristics(deviceId);
     _discoveredKeys = _discovered
-        .map((characteristic) =>
-            _key(characteristic.serviceUuid, characteristic.uuid))
+        .map(
+          (characteristic) =>
+              _key(characteristic.serviceUuid, characteristic.uuid),
+        )
         .toSet();
     ClientDiagnosticLog.instance.record(
       'bluetooth',

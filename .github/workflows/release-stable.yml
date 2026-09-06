@@ -20,7 +20,7 @@ jobs:
       release_sha: ${{ steps.capture_release_sha.outputs.release_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
@@ -41,10 +41,9 @@ jobs:
           git merge --no-ff origin/beta -m "chore(release): promote beta to main [skip ci]"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
-          registry-url: https://registry.npmjs.org
           cache: npm
 
       - name: Set up Flutter
@@ -75,6 +74,8 @@ jobs:
         working-directory: flutter_app
         run: flutter analyze --no-pub && flutter test --no-pub
 
+      # The Git installer clones this branch and runs it directly, so the
+      # release commit has to carry a web client built from that same commit.
       - name: Build bundled web client
         run: npm run build:web
 
@@ -82,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add package.json package-lock.json
+          git add package.json package-lock.json flutter_app/build/web
           git commit -m "chore(release): ${{ steps.stable_version.outputs.release_tag }} [skip ci]"
           git tag "${{ steps.stable_version.outputs.release_tag }}" -m "Release ${{ steps.stable_version.outputs.release_tag }}"
 
@@ -149,65 +150,18 @@ jobs:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}
 
-  publish-package:
-    name: Publish stable package
-    needs: release
-    runs-on: ubuntu-latest
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-    steps:
-      - name: Checkout release
-        if: env.NODE_AUTH_TOKEN != ''
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release.outputs.release_sha }}
-
-      - name: Set up Node.js
-        if: env.NODE_AUTH_TOKEN != ''
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-          cache: npm
-
-      - name: Set up Flutter
-        if: env.NODE_AUTH_TOKEN != ''
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.35.5'
-          cache: true
-
-      - name: Install dependencies
-        if: env.NODE_AUTH_TOKEN != ''
-        run: npm ci
-
-      - name: Install Flutter dependencies
-        if: env.NODE_AUTH_TOKEN != ''
-        working-directory: flutter_app
-        run: flutter pub get
-
-      - name: Publish package
-        if: env.NODE_AUTH_TOKEN != ''
-        run: npm publish --tag latest
-
   publish-app-assets:
     name: Complete GitHub release
     # Only the release job (tag + draft release) is required. build-apps is
     # intentionally not checked: it fans out into independent per-platform
     # jobs, and _publish-app-assets.yml already tolerates partial platform
-    # failures, only hard-failing if zero assets came through. publish-package
-    # (npm) is unrelated to the GitHub release/binaries and must not be able
-    # to strand a draft release with working binaries — we still wait for it
-    # to finish (via `needs`) so it isn't racing the release, but an npm
-    # publish failure no longer blocks flipping the draft to published.
+    # failures, only hard-failing if zero assets came through.
     if: >-
       always() &&
       needs.release.result == 'success'
     needs:
       - release
       - build-apps
-      - publish-package
     uses: ./.github/workflows/_publish-app-assets.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}

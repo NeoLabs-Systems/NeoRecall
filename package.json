@@ -1,9 +1,10 @@
 {
   "name": "neorecall",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.9",
   "description": "Private, self-hosted audio memory for the NeoLabs Ecosystem",
   "license": "AGPL-3.0-only",
   "type": "commonjs",
+  "private": true,
   "main": "server/index.js",
   "bin": {
     "neorecall": "bin/neorecall.js"
@@ -47,7 +48,6 @@
     "flutter:test": "cd flutter_app && flutter test",
     "flutter:analyze": "cd flutter_app && flutter analyze",
     "build:web": "cd flutter_app && flutter build web --release --base-href /app/",
-    "prepublishOnly": "npm run build:web",
     "docs:dev": "cd docs && npm run start",
     "docs:build": "cd docs && npm run build",
     "manage": "node bin/neorecall.js"
@@ -69,9 +69,11 @@
     "express": "^4.22.2",
     "ffmpeg-static": "5.3.0",
     "libsodium-wrappers": "^0.8.4",
+    "mammoth": "^1.10.0",
     "multer": "^2.0.2",
     "opusscript": "^0.0.8",
     "otplib": "12.0.1",
+    "pdf-parse": "^1.1.1",
     "prism-media": "^1.3.5",
     "prompts": "2.4.2",
     "qrcode": "^1.5.4",

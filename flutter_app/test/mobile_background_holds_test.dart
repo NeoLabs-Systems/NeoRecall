@@ -11,6 +11,9 @@ import 'package:neorecall/src/recording/recorder_mobile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeAdapter implements AudioDeviceAdapter {
+  _FakeAdapter({this.connectSuccessfully = true});
+
+  final bool connectSuccessfully;
   final StreamController<AudioDeviceDescriptor> _discoveries =
       StreamController<AudioDeviceDescriptor>.broadcast();
   final StreamController<DeviceControlEvent> _controls =
@@ -46,6 +49,7 @@ class _FakeAdapter implements AudioDeviceAdapter {
   Future<void> stopScan() async {}
   @override
   Future<void> connect(AudioDeviceDescriptor device) async {
+    if (!connectSuccessfully) throw StateError('not in range');
     _states.add(DeviceTransportState.connectedStandby);
   }
 
@@ -100,6 +104,13 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
 
   @override
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
+
+  @override
+  Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
+
+  @override
+  Future<List<HomeWidgetAction>> takePendingWidgetActions() async =>
+      const <HomeWidgetAction>[];
 
   @override
   Future<List<Map<String, dynamic>>> takePendingWatchRecordings() async =>
@@ -185,6 +196,7 @@ void main() {
       final recorder = _buildRecorder(adapter, background);
 
       await recorder.initialize(accountId: 'account-1');
+      await Future<void>.delayed(Duration.zero);
 
       expect(
         background.active.holds,
@@ -192,6 +204,35 @@ void main() {
         reason: 'sync and reconnect must survive the UI being swiped away',
       );
       expect(background.active.deviceLabel, 'Fake wearable');
+      expect(background.active.deviceConnected, isTrue);
+      expect(background.active.notificationText, contains('stays linked'));
+      await recorder.dispose();
+    },
+  );
+
+  test(
+    'a saved but unavailable wearable is described as reconnecting',
+    () async {
+      _mockPreferredDevice();
+      final adapter = _FakeAdapter(connectSuccessfully: false);
+      final background = _RecordingBackgroundService();
+      final recorder = _buildRecorder(adapter, background);
+
+      await recorder.initialize(accountId: 'account-1');
+
+      expect(background.active.holds, <BackgroundHold>{
+        BackgroundHold.wearableLink,
+      });
+      expect(background.active.deviceConnected, isFalse);
+      expect(background.active.notificationTitle, 'NeoRecall is reconnecting');
+      expect(
+        background.active.notificationText,
+        'Waiting for Fake wearable to reconnect',
+      );
+      expect(
+        background.active.notificationText,
+        isNot(contains('stays linked')),
+      );
       await recorder.dispose();
     },
   );

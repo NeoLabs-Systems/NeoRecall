@@ -27,8 +27,10 @@ function start() {
       const delay = Math.min(backoff.get(role) ?? RESTART_BASE_MS, RESTART_MAX_MS);
       backoff.set(role, Math.min(delay * 2, RESTART_MAX_MS));
       logger.warn('Child process exited; restarting', { role, code, signal, delayMs: delay });
-      const timer = setTimeout(() => spawn(role, script), delay);
-      timer.unref();
+      // Keep the timer on the event loop: if both children have crashed, an
+      // unref'd restart is the only remaining handle and the supervisor would
+      // otherwise exit 0 instead of bringing them back.
+      setTimeout(() => { if (!stopping) spawn(role, script); }, delay);
     });
   }
   spawn('http', path.join(__dirname, 'index.js'));

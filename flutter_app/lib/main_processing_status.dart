@@ -37,7 +37,7 @@ class ProcessingStatusCard extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
-      child: GlassSurface(
+      child: AppPanel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -86,9 +86,9 @@ class ProcessingStatusCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   issue['action']!.toString(),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: tint,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: tint),
                 ),
               ],
             ],

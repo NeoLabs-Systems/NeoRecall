@@ -1,12 +1,14 @@
 /// Device types supported by the Omi connector port.
-enum WearableDeviceType {
-  omi,
-  omiGlass,
-  heyPocket,
-  custom,
-}
+enum WearableDeviceType { omi, omiGlass, heyPocket, memoket, custom }
 
 enum WearableAudioCodec { pcm8, pcm16, opus, opusFs320, aac, lc3, mp3, unknown }
+
+/// Values a connector puts on [WearableConnector.buttonEvents] so the shared
+/// adapter can raise start/stop without inventing a second event channel.
+class WearableControlCodes {
+  static const startRecording = 0x10;
+  static const stopRecording = 0x11;
+}
 
 class WearableDeviceUuids {
   static const omiService = '19b10000-e8f2-537e-4f6c-d104768a1214';
@@ -28,6 +30,13 @@ class WearableDeviceUuids {
   static const heyPocketControlNotify = '001120a1-2233-4455-6677-889912345678';
   static const heyPocketControlWrite = '001120a2-2233-4455-6677-889912345678';
   static const heyPocketAudioNotify = '001120a3-2233-4455-6677-889912345678';
+  // Memoket Gem. Control is a one-byte opcode plus optional payload; live
+  // Opus frames arrive on audioNotify and stored files on fileNotify.
+  static const memoketService = 'a1b2c300-4f5c-6e7d-df23-ab12cd34ef56';
+  static const memoketAudioNotify = 'a1b2c301-4f5c-6e7d-df23-ab12cd34ef56';
+  static const memoketControlWrite = 'a1b2c302-4f5c-6e7d-df23-ab12cd34ef56';
+  static const memoketControlNotify = 'a1b2c303-4f5c-6e7d-df23-ab12cd34ef56';
+  static const memoketFileNotify = 'a1b2c305-4f5c-6e7d-df23-ab12cd34ef56';
 }
 
 class DiscoveredWearable {
@@ -45,6 +54,29 @@ class DiscoveredWearable {
   final int rssi;
   final List<String> serviceUuids;
 
+  /// Advertised-name selectors used only when a platform omits service UUIDs.
+  /// The final identity decision is still repeated after discovery, so a broad
+  /// native scan callback cannot leak unrelated BLE peripherals into the UI.
+  static const List<String> heyPocketNamePrefixes = <String>[
+    'HeyPocket',
+    'PKT01',
+    'PK01',
+    'Pocket',
+  ];
+
+  static const List<String> memoketNamePrefixes = <String>['Memoket'];
+
+  static bool hasHeyPocketName(String name) {
+    final lower = name.trim().toLowerCase();
+    return lower.startsWith('heypocket') ||
+        lower.startsWith('pkt01') ||
+        lower.startsWith('pk01') ||
+        lower == 'pocket';
+  }
+
+  static bool hasMemoketName(String name) =>
+      name.trim().toLowerCase().startsWith('memoket');
+
   static WearableDeviceType classify({
     required String name,
     required List<String> serviceUuids,
@@ -53,11 +85,11 @@ class DiscoveredWearable {
     bool has(String uuid) =>
         serviceUuids.any((value) => value.toLowerCase() == uuid.toLowerCase());
 
-    if (has(WearableDeviceUuids.heyPocketService) ||
-        lower.contains('heypocket') ||
-        lower.startsWith('pkt01') ||
-        lower.startsWith('pocket')) {
+    if (has(WearableDeviceUuids.heyPocketService) || hasHeyPocketName(name)) {
       return WearableDeviceType.heyPocket;
+    }
+    if (has(WearableDeviceUuids.memoketService) || hasMemoketName(name)) {
+      return WearableDeviceType.memoket;
     }
     if (lower.startsWith('openglass') || lower.startsWith('omiglass')) {
       return WearableDeviceType.omiGlass;

@@ -34,7 +34,9 @@ Future<bool> _initializeOpus() async {
   try {
     _opusCodecLoadFuture ??= opus_codec.load();
     initOpus(
-      await _opusCodecLoadFuture!.timeout(wearableAudioCodecInitializationTimeout),
+      await _opusCodecLoadFuture!.timeout(
+        wearableAudioCodecInitializationTimeout,
+      ),
     );
     _opusInitializationError = null;
     _opusInitialized = true;
@@ -79,6 +81,8 @@ class WearableAudioDecoder {
   final bool stripBleHeader;
 
   SimpleOpusDecoder? _opus;
+  SimpleOpusDecoder? _opusStereo;
+  int? _opusChannels;
   Mp3StreamDecoder? _mp3;
   String? lastWarning;
 
@@ -117,14 +121,55 @@ class WearableAudioDecoder {
     }
   }
 
-  void _ensureOpus() {
+  SimpleOpusDecoder _opusDecoder(int channels) {
     if (!_opusInitialized) {
       throw StateError(
         'The bundled Opus decoder could not be loaded'
         '${_opusInitializationError == null ? '.' : ': $_opusInitializationError'}',
       );
     }
-    _opus ??= SimpleOpusDecoder(sampleRate: sampleRate, channels: 1);
+    if (channels == 2) {
+      return _opusStereo ??= SimpleOpusDecoder(
+        sampleRate: sampleRate,
+        channels: 2,
+      );
+    }
+    return _opus ??= SimpleOpusDecoder(sampleRate: sampleRate, channels: 1);
+  }
+
+  /// Memoket live frames are stereo Opus (TOC `0xbc`). A leading TOC-only
+  /// retry is a last resort if the wrapped frame still fails to decode.
+  static List<List<int>> opusFrameCandidates(List<int> payload) {
+    final frames = <List<int>>[payload];
+    if (payload.length > 1 && payload.first == 0xbc) {
+      frames.add(payload.sublist(1));
+    }
+    return frames;
+  }
+
+  static Uint8List pcm16FromOpusSamples(
+    List<int> samples, {
+    required int channels,
+  }) {
+    if (channels <= 1) {
+      final bytes = Uint8List(samples.length * 2);
+      final view = ByteData.sublistView(bytes);
+      for (var i = 0; i < samples.length; i += 1) {
+        view.setInt16(i * 2, samples[i], Endian.little);
+      }
+      return bytes;
+    }
+    final frames = samples.length ~/ 2;
+    final bytes = Uint8List(frames * 2);
+    final view = ByteData.sublistView(bytes);
+    for (var i = 0; i < frames; i += 1) {
+      final mixed = ((samples[i * 2] + samples[i * 2 + 1]) / 2).round().clamp(
+        -32768,
+        32767,
+      );
+      view.setInt16(i * 2, mixed, Endian.little);
+    }
+    return bytes;
   }
 
   /// Omi BLE packets: [packet_id_low, packet_id_high, packet_index, ...audio]
@@ -155,8 +200,9 @@ class WearableAudioDecoder {
         // stream decoder buffers, downmixes, and resamples to mono PCM16 @
         // sampleRate. A null result means bytes were buffered toward the next
         // frame, not an error, so no warning is set.
-        return (_mp3 ??= Mp3StreamDecoder(targetSampleRate: sampleRate))
-            .addChunk(payload);
+        return (_mp3 ??= Mp3StreamDecoder(
+          targetSampleRate: sampleRate,
+        )).addChunk(payload);
       case WearableAudioCodec.aac:
         lastWarning =
             'AAC wearable frames are received but not decoded in this build yet.';
@@ -183,19 +229,25 @@ class WearableAudioDecoder {
   }
 
   Uint8List? _decodeOpus(List<int> frame) {
-    try {
-      _ensureOpus();
-      final samples = _opus!.decode(input: Uint8List.fromList(frame));
-      final bytes = Uint8List(samples.length * 2);
-      final view = ByteData.sublistView(bytes);
-      for (var i = 0; i < samples.length; i += 1) {
-        view.setInt16(i * 2, samples[i], Endian.little);
+    Object? lastError;
+    final channelOrder = _opusChannels == 2
+        ? const <int>[2, 1]
+        : const <int>[1, 2];
+    for (final candidate in opusFrameCandidates(frame)) {
+      for (final channels in channelOrder) {
+        try {
+          final samples = _opusDecoder(
+            channels,
+          ).decode(input: Uint8List.fromList(candidate));
+          _opusChannels = channels;
+          return pcm16FromOpusSamples(samples, channels: channels);
+        } catch (error) {
+          lastError = error;
+        }
       }
-      return bytes;
-    } catch (error) {
-      lastWarning = 'Opus decode failed: $error';
-      return null;
     }
+    lastWarning = 'Opus decode failed: $lastError';
+    return null;
   }
 
   void dispose() {
@@ -203,6 +255,11 @@ class WearableAudioDecoder {
       _opus?.destroy();
     } catch (_) {}
     _opus = null;
+    try {
+      _opusStereo?.destroy();
+    } catch (_) {}
+    _opusStereo = null;
+    _opusChannels = null;
     _mp3?.dispose();
     _mp3 = null;
   }

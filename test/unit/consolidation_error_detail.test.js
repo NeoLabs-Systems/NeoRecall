@@ -89,12 +89,16 @@ test('a validation failure keeps its specific reason, not just its code', async 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   process.env.AI_API_BASE_URL = `http://127.0.0.1:${server.address().port}`;
 
-  await assert.rejects(() => consolidation.execute(runId));
+  await assert.rejects(() => consolidation.execute(runId), (error) => {
+    assert.equal(error.code, 'AI_REFERENCE_INVALID');
+    return true;
+  });
 
   const run = db.prepare('SELECT state,error_code,error_message FROM consolidation_runs WHERE id=?').get(runId);
   assert.equal(run.state, 'failed');
   assert.equal(run.error_code, 'AI_REFERENCE_INVALID');
   assert.equal(run.error_message, 'A memory cited an undefined entity.');
+  assert.equal(db.prepare('SELECT consolidation_failures FROM conversations WHERE id=?').get(conversationId).consolidation_failures, 1);
 
   // The same detail is what an operator sees through the ordinary API surface.
   const { run: latest } = consolidation.latest(userId);

@@ -1,0 +1,25 @@
+[Unit]
+Description=NeoRecall Desk audio relay
+Documentation=https://github.com/NeoLabs-Systems/NeoRecall
+# Refuse to run in anybody else's session. These are user units, and enabling a
+# user unit is easy to do for *every* account by accident; the result is a second
+# supervisor competing for the button, the codec and the Bluetooth adapter while
+# the first one still believes it is alone. One appliance, one owner.
+ConditionUser=neorecall
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/neorecall-desk/venv/bin/neorecall-desk-relay
+
+# The relay is what makes the box useful even to somebody who never sets up
+# NeoRecall, so it keeps trying. Short, because a deliberate exit is how the
+# relay reopens its stale audio handles after the computer replugs — somebody
+# is standing there waiting for sound. The relay itself heals the boot-order
+# race by restarting WirePlumber, so a long grace period buys nothing.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

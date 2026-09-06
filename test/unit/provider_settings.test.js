@@ -109,6 +109,7 @@ test('custom transcription sends the configured multipart language and verbose r
     assert.equal(options.method, 'POST');
     assert.equal(options.body.get('language'), 'de');
     assert.equal(options.body.get('response_format'), 'verbose_json');
+    assert.equal(options.body.get('prompt'), 'NeoRecall, Grace Hopper');
     assert.equal(options.body.get('model'), null);
     assert.equal(options.body.get('file').name, 'chunk.m4a');
     return new Response(JSON.stringify({ language: 'de', segments: [{ start: 0, end: 1, text: 'Aufnahme' }] }), {
@@ -117,11 +118,53 @@ test('custom transcription sends the configured multipart language and verbose r
   };
   try {
     const { OpenAICompatibleProvider } = require('../../server/transcription/providers/openai_compatible_provider');
-    const segments = await new OpenAICompatibleProvider().transcribe({ filename });
+    const segments = await new OpenAICompatibleProvider().transcribe({ filename, vocabulary: ['NeoRecall', 'Grace Hopper'] });
     assert.equal(segments[0].text, 'Aufnahme');
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('Deepgram sends vocabulary as repeated Nova-3 keyterms', async () => {
+  settings.update({ transcription: {
+    provider: 'deepgram', model: 'nova-3', baseUrl: 'https://api.deepgram.com', apiKey: 'deepgram-key',
+  } });
+  const filename = path.join(process.env.NEORECALL_HOME, 'deepgram.wav');
+  fs.writeFileSync(filename, Buffer.from('audio'));
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    assert.deepEqual(parsed.searchParams.getAll('keyterm'), ['NeoRecall', 'Grace Hopper']);
+    assert.deepEqual(parsed.searchParams.getAll('keywords'), []);
+    return new Response(JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: 'NeoRecall', words: [] }] }] } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const { DeepgramProvider } = require('../../server/transcription/providers/deepgram_provider');
+    assert.equal((await new DeepgramProvider().transcribe({ filename, vocabulary: ['NeoRecall', 'Grace Hopper'] }))[0].text, 'NeoRecall');
+  } finally { global.fetch = originalFetch; }
+});
+
+test('AssemblyAI sends vocabulary through its native keyterms prompt', async () => {
+  settings.update({ transcription: {
+    provider: 'assemblyai', model: null, baseUrl: 'https://api.assemblyai.com', apiKey: 'assembly-key',
+  } });
+  const filename = path.join(process.env.NEORECALL_HOME, 'assembly.wav');
+  fs.writeFileSync(filename, Buffer.from('audio'));
+  const originalFetch = global.fetch;
+  let call = 0;
+  global.fetch = async (_url, options) => {
+    call += 1;
+    if (call === 1) return new Response(JSON.stringify({ upload_url: 'https://upload.invalid/audio' }), { status: 200 });
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body.keyterms_prompt, ['NeoRecall', 'Grace Hopper']);
+    return new Response(JSON.stringify({ id: 'transcript', status: 'completed', text: 'NeoRecall', words: [] }), { status: 200 });
+  };
+  try {
+    const { AssemblyAIProvider } = require('../../server/transcription/providers/assemblyai_provider');
+    assert.equal((await new AssemblyAIProvider().transcribe({ filename, vocabulary: ['NeoRecall', 'Grace Hopper'] }))[0].text, 'NeoRecall');
+  } finally { global.fetch = originalFetch; }
 });
 
 test('reset removes admin overrides and their encrypted keys', () => {

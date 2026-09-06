@@ -1,0 +1,25 @@
+# NeoRecall Desk — boot configuration fragment.
+#
+# Appended to /boot/firmware/config.txt by the image build. Everything here is
+# required for the appliance to come up headless; nothing here is optional
+# tuning.
+
+# The Waveshare WM8960 Audio HAT: stereo microphones in, speakers out, over I2S
+# with control over I2C.
+dtparam=i2c_arm=on
+dtparam=i2s=on
+# Waveshare's own driver sets this alongside the soundcard overlay, and their
+# HAT is what this device is built around.
+dtoverlay=i2s-mmap
+dtoverlay=wm8960-soundcard
+
+# The Pi's own headphone jack would otherwise compete to be the default sink.
+dtparam=audio=off
+
+# Put the USB OTG port into peripheral mode so the appliance can present itself
+# to the laptop as a sound card. The same port also powers the board, which is
+# why there is only one cable.
+dtoverlay=dwc2,dr_mode=peripheral
+
+# Nothing is plugged into HDMI and nobody is looking at a console.
+disable_splash=1

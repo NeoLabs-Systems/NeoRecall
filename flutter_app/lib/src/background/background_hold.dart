@@ -59,6 +59,7 @@ class BackgroundRuntimeRequest {
   const BackgroundRuntimeRequest({
     this.holds = const <BackgroundHold>{},
     this.deviceLabel,
+    this.deviceConnected = false,
   });
 
   /// Nothing needs the host; it may shut down.
@@ -68,6 +69,12 @@ class BackgroundRuntimeRequest {
 
   /// Display name of the wearable involved, when one is.
   final String? deviceLabel;
+
+  /// Live transport truth, not merely whether a wearable is preferred.
+  ///
+  /// The link hold remains active while reconnecting, so the hold by itself
+  /// cannot support user-facing claims that the device "stays linked".
+  final bool deviceConnected;
 
   bool get isEmpty => holds.isEmpty;
   bool get isNotEmpty => holds.isNotEmpty;
@@ -120,7 +127,9 @@ class BackgroundRuntimeRequest {
       return 'Uploading protected recordings';
     }
     if (holds.contains(BackgroundHold.wearableLink)) {
-      return '$label stays linked so recordings sync on their own';
+      return deviceConnected
+          ? '$label stays linked so recordings sync on their own'
+          : 'Waiting for $label to reconnect';
     }
     return 'NeoRecall is idle';
   }
@@ -128,32 +137,46 @@ class BackgroundRuntimeRequest {
   /// Compatibility accessors for callers that still need a compact fallback.
   /// Native hosts no longer receive these independently; live UI uses the
   /// structured [BackgroundLiveStatus] payload instead.
-  String get notificationTitle =>
-      isCapturing ? 'NeoRecall is recording' : 'NeoRecall stays connected';
+  String get notificationTitle {
+    if (isCapturing) return 'NeoRecall is recording';
+    if (holds.contains(BackgroundHold.wearableLink) &&
+        !holds.contains(BackgroundHold.wearableSync) &&
+        !holds.contains(BackgroundHold.audioUpload) &&
+        !deviceConnected) {
+      return 'NeoRecall is reconnecting';
+    }
+    return 'NeoRecall stays connected';
+  }
+
   String get notificationText => statusDetail;
 
   BackgroundRuntimeRequest copyWith({
     Set<BackgroundHold>? holds,
     String? deviceLabel,
+    bool? deviceConnected,
   }) => BackgroundRuntimeRequest(
     holds: holds ?? this.holds,
     deviceLabel: deviceLabel ?? this.deviceLabel,
+    deviceConnected: deviceConnected ?? this.deviceConnected,
   );
 
   @override
   bool operator ==(Object other) =>
       other is BackgroundRuntimeRequest &&
       other.deviceLabel == deviceLabel &&
+      other.deviceConnected == deviceConnected &&
       other.holds.length == holds.length &&
       other.holds.containsAll(holds);
 
   @override
-  int get hashCode => Object.hash(deviceLabel, Object.hashAllUnordered(holds));
+  int get hashCode =>
+      Object.hash(deviceLabel, deviceConnected, Object.hashAllUnordered(holds));
 
   @override
   String toString() =>
       'BackgroundRuntimeRequest(${wireHolds.join('+')}'
-      '${deviceLabel == null ? '' : ', $deviceLabel'})';
+      '${deviceLabel == null ? '' : ', $deviceLabel'}'
+      '${deviceConnected ? ', connected' : ''})';
 }
 
 /// What the native host reports about itself at startup.
