@@ -460,6 +460,49 @@ void main() {
     await connector.dispose();
   });
 
+  test('a time-sync write is never counted as a ring advance', () async {
+    // The epoch goes out little-endian, so the first byte of the time-sync
+    // write is the low byte of the current second: for one second in every 256
+    // it is 0x12, which is also cmdAdvance. Counting advances by first byte
+    // alone therefore failed on the clock rather than on the code.
+    final transport = _FakeWearableTransport();
+    final connector = OmiConnector(
+      device: _device(WearableDeviceType.omi),
+      transport: transport,
+    );
+    transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
+    await connector.connect();
+
+    final timeSync = transport.writes.where(
+      (w) => w.characteristic == WearableDeviceUuids.timeSyncWrite,
+    );
+    expect(timeSync, isNotEmpty, reason: 'connect() syncs the device clock');
+    // Stand in for the unlucky second, whatever second the suite actually runs
+    // in, by writing the value that collides.
+    await transport.writeCharacteristic(
+      WearableDeviceUuids.timeSyncService,
+      WearableDeviceUuids.timeSyncWrite,
+      <int>[RingProtocol.cmdAdvance, 0, 0, 0],
+    );
+
+    expect(
+      transport.writes.where(
+        (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+      ),
+      isNotEmpty,
+      reason:
+          'the hazard is real: by first byte alone this write looks like one',
+    );
+    expect(
+      transport.ringAdvances,
+      isEmpty,
+      reason:
+          'a colliding first byte on another characteristic is not an advance',
+    );
+
+    await connector.dispose();
+  });
+
   test(
     'Omi ring drain advances the read cursor only after durable ingest',
     () async {
@@ -551,12 +594,7 @@ void main() {
       final count = await connector.drainStoredAudio((recording) async {
         recordings.add(recording);
         // The ring cursor must NOT have advanced yet: ingest happens first.
-        advancesAtIngest = transport.writes
-            .where(
-              (w) =>
-                  w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-            )
-            .length;
+        advancesAtIngest = transport.ringAdvances.length;
       });
 
       expect(count, 1);
@@ -566,11 +604,7 @@ void main() {
       // No advance had been written at the moment of ingest...
       expect(advancesAtIngest, 0);
       // ...and exactly one advance, targeting nextSeq = 1, was written after.
-      final advances = transport.writes
-          .where(
-            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-          )
-          .toList();
+      final advances = transport.ringAdvances.toList();
       expect(advances.length, 1);
       expect(advances.single.value.sublist(1), <int>[0, 0, 0, 0, 0, 0, 0, 1]);
 
@@ -667,11 +701,7 @@ void main() {
         }),
         throwsA(isA<StateError>()),
       );
-      final advances = transport.writes
-          .where(
-            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-          )
-          .toList();
+      final advances = transport.ringAdvances.toList();
       expect(advances, isEmpty);
 
       await connector.dispose();
@@ -779,9 +809,7 @@ void main() {
 
     expect(ingested, 0, reason: 'a short transfer must never reach the import');
     expect(
-      transport.writes.where(
-        (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-      ),
+      transport.ringAdvances,
       isEmpty,
       reason: 'the cursor stays put so the range is re-read intact next sweep',
     );
@@ -974,6 +1002,20 @@ class _GattWrite {
 }
 
 class _FakeWearableTransport implements WearableTransport {
+  /// Ring-cursor advances, and nothing else.
+  ///
+  /// Matching on the first byte alone counted the time-sync write too: it
+  /// carries the epoch as a little-endian uint32, so its first byte is the low
+  /// byte of the current second and equals cmdAdvance (0x12) for one second in
+  /// every 256. That turned these tests red on the clock rather than on the
+  /// code -- twice in CI, 256 seconds apart.
+  Iterable<_GattWrite> get ringAdvances => writes.where(
+    (w) =>
+        w.characteristic == WearableDeviceUuids.omiStorageData &&
+        w.value.isNotEmpty &&
+        w.value[0] == RingProtocol.cmdAdvance,
+  );
+
   final Map<String, StreamController<List<int>>> _streams =
       <String, StreamController<List<int>>>{};
   final StreamController<bool> _connections =
