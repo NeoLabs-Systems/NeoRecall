@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'local_backend_installer_models.dart';
 
 /// Desktop hosts can run the NeoRecall server themselves.
@@ -582,10 +584,13 @@ class LocalBackendInstaller {
 
   /// A window-server launch gives the app a minimal PATH, so every child
   /// process gets the resolved tool directories added back.
-  Map<String, String> _childEnvironment() {
+  Map<String, String> _childEnvironment({
+    Iterable<String> extraDirectories = const <String>[],
+  }) {
     final environment = Map<String, String>.from(Platform.environment);
     final separator = Platform.isWindows ? ';' : ':';
     final directories = <String>{
+      ...extraDirectories,
       for (final path in _resolvedExecutables.values)
         if (path != null && path.isNotEmpty) File(path).parent.path,
     };
@@ -631,6 +636,17 @@ class LocalBackendInstaller {
       for (final path in _existingPaths(viaShell)) {
         if (await _runs(path)) return path;
       }
+
+      // nvm, fnm and asdf define their shims in .zshrc or .bashrc, which a
+      // non-interactive shell never reads, so the login lookup above cannot see
+      // them however correct the user's setup is.
+      final viaInteractiveShell = await _runQuiet(shell, <String>[
+        '-ilc',
+        'command -v $command',
+      ]);
+      for (final path in _existingPaths(viaInteractiveShell)) {
+        if (await _runs(path)) return path;
+      }
     }
 
     for (final candidate in _candidatePaths(command)) {
@@ -645,8 +661,22 @@ class LocalBackendInstaller {
   /// one. `/usr/bin/git` exists on every Mac but is an Xcode shim: without the
   /// command line tools installed it only prints an error, and treating it as
   /// Git would fail the install halfway through instead of up front.
+  ///
+  /// The probe runs with the tool's own directory on PATH. npm is a script that
+  /// begins `#!/usr/bin/env node`, and a window-server launch hands the app a
+  /// PATH with neither on it -- probed bare, a perfectly good npm reports
+  /// `env: node: No such file or directory` and would be called missing.
+  @visibleForTesting
+  Future<bool> probeExecutable(String path) => _runs(path);
+
   Future<bool> _runs(String path) async {
-    final probe = await _runQuiet(path, <String>['--version']);
+    final probe = await _runQuiet(
+      path,
+      <String>['--version'],
+      environment: _childEnvironment(
+        extraDirectories: <String>[File(path).parent.path],
+      ),
+    );
     return probe != null && probe.exitCode == 0;
   }
 
@@ -685,18 +715,54 @@ class LocalBackendInstaller {
       '/usr/local/bin/$command',
       '/usr/bin/$command',
       '/bin/$command',
-      if (home.isNotEmpty) '$home/.volta/bin/$command',
-      if (home.isNotEmpty) '$home/.local/bin/$command',
-      if (home.isNotEmpty) '$home/.nix-profile/bin/$command',
+      if (home.isNotEmpty) ...<String>[
+        '$home/.volta/bin/$command',
+        '$home/.local/bin/$command',
+        '$home/.nix-profile/bin/$command',
+        '$home/.asdf/shims/$command',
+        ..._versionManagerPaths(home, command),
+      ],
     ];
+  }
+
+  /// Node installed through a version manager lives under a directory named for
+  /// the version, so the newest one is tried first.
+  List<String> _versionManagerPaths(String home, String command) {
+    const roots = <String, String>{
+      '.nvm/versions/node': 'bin',
+      '.fnm/node-versions': 'installation/bin',
+      '.local/share/fnm/node-versions': 'installation/bin',
+      'n/bin': '',
+    };
+    final paths = <String>[];
+    for (final entry in roots.entries) {
+      final root = Directory('$home/${entry.key}');
+      if (!root.existsSync()) continue;
+      if (entry.value.isEmpty) {
+        paths.add('${root.path}/$command');
+        continue;
+      }
+      final versions =
+          root.listSync().whereType<Directory>().toList(growable: false)
+            ..sort((a, b) => b.path.compareTo(a.path));
+      for (final version in versions) {
+        paths.add('${version.path}/${entry.value}/$command');
+      }
+    }
+    return paths;
   }
 
   Future<ProcessResult?> _runQuiet(
     String executable,
-    List<String> arguments,
-  ) async {
+    List<String> arguments, {
+    Map<String, String>? environment,
+  }) async {
     try {
-      return await Process.run(executable, arguments);
+      return await Process.run(
+        executable,
+        arguments,
+        environment: environment,
+      ).timeout(const Duration(seconds: 20));
     } on Object {
       return null;
     }
