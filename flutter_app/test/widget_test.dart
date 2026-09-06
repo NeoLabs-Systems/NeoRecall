@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:neorecall/main.dart';
 import 'package:neorecall/main_auth.dart';
 import 'package:neorecall/main_controller.dart';
+import 'package:neorecall/main_local_install.dart';
 import 'package:neorecall/main_memories.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
@@ -503,6 +504,39 @@ void main() {
     expect(find.byType(TextField), findsOneWidget);
     expect(find.text('Connect to this server'), findsOneWidget);
     expect(find.text('Back to sign in'), findsNothing);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('desktop backend setup offers the local installer', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    final controller = NeoRecallController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: NeoRecallAuthScreen(controller: controller),
+      ),
+    );
+
+    expect(find.text('Set up or connect NeoRecall'), findsOneWidget);
+    final install = find.text('Set up NeoRecall on this computer');
+    expect(install, findsOneWidget);
+
+    // The install view probes for git/node/npm on the real host, so the tap and
+    // the frame it schedules run outside the fake-async zone.
+    await tester.runAsync(() async {
+      await tester.tap(install);
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    });
+
+    expect(find.byType(LocalInstallView), findsOneWidget);
+    expect(find.text('LOCAL SETUP'), findsOneWidget);
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });

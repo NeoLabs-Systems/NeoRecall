@@ -4,6 +4,7 @@
   "description": "Private, self-hosted audio memory for the NeoLabs Ecosystem",
   "license": "AGPL-3.0-only",
   "type": "commonjs",
+  "private": true,
   "main": "server/index.js",
   "bin": {
     "neorecall": "bin/neorecall.js"
@@ -47,7 +48,6 @@
     "flutter:test": "cd flutter_app && flutter test",
     "flutter:analyze": "cd flutter_app && flutter analyze",
     "build:web": "cd flutter_app && flutter build web --release --base-href /app/",
-    "prepublishOnly": "npm run build:web",
     "docs:dev": "cd docs && npm run start",
     "docs:build": "cd docs && npm run build",
     "manage": "node bin/neorecall.js"

@@ -13,7 +13,11 @@ coverage/
 docs/build/
 docs/.docusaurus/
 flutter_app/.dart_tool/
-flutter_app/build/
+# The Git installer clones this repository and runs it directly, so the built
+# web client has to travel with the checkout. Every other build output stays
+# ignored.
+flutter_app/build/*
+!flutter_app/build/web/
 flutter_app/.flutter-plugins*
 runtime-data/
 models/downloads/

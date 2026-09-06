@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_local_install.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
+import 'src/install/local_backend_installer.dart';
 
 class NeoRecallAuthScreen extends StatefulWidget {
   const NeoRecallAuthScreen({super.key, required this.controller});
@@ -21,9 +24,24 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   bool registerMode = false;
   bool serverSetup = false;
   bool awaitingTwoFactor = false;
+  bool localInstall = false;
 
   bool get _canConfigureServer =>
       widget.controller.allowsBackendUrlConfiguration;
+
+  /// Only desktop hosts can run a NeoRecall server; the web client is already
+  /// served by one, and phones cannot host it. `defaultTargetPlatform` decides
+  /// this rather than `Platform`, so a desktop test host still renders the
+  /// mobile screen when it drives a mobile target.
+  bool get _canInstallLocally =>
+      _canConfigureServer &&
+      !kIsWeb &&
+      supportsLocalBackendInstall &&
+      const <TargetPlatform>{
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+        TargetPlatform.linux,
+      }.contains(defaultTargetPlatform);
 
   @override
   void initState() {
@@ -94,6 +112,17 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (localInstall) {
+      return LocalInstallView(
+        controller: widget.controller,
+        onBack: () => setState(() => localInstall = false),
+        onInstalled: () => setState(() {
+          localInstall = false;
+          serverSetup = false;
+          registerMode = true;
+        }),
+      );
+    }
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
     final compact = MediaQuery.sizeOf(context).width < 760;
@@ -289,12 +318,43 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
         const SizedBox(height: 22),
         Text('WELCOME TO NEORECALL', style: sectionEyebrowStyle(palette)),
         const SizedBox(height: 8),
-        Text('Connect NeoRecall', style: displayTitleStyle(palette, size: 34)),
+        Text(
+          _canInstallLocally ? 'Set up or connect NeoRecall' : 'Connect NeoRecall',
+          style: displayTitleStyle(palette, size: 34),
+        ),
         const SizedBox(height: 8),
         Text(
-          'Enter the address of the NeoRecall server this device should use.',
+          _canInstallLocally
+              ? 'Install NeoRecall on this computer without a terminal, or enter '
+                    'the address of a server that is already running.'
+              : 'Enter the address of the NeoRecall server this device should use.',
           style: TextStyle(color: palette.textSecondary, height: 1.5),
         ),
+        if (_canInstallLocally) ...<Widget>[
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: () => setState(() => localInstall = true),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(58),
+            ),
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Set up NeoRecall on this computer'),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: <Widget>[
+              Expanded(child: Divider(color: palette.borderLight)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or connect to a running server',
+                  style: TextStyle(color: palette.textMuted, fontSize: 12),
+                ),
+              ),
+              Expanded(child: Divider(color: palette.borderLight)),
+            ],
+          ),
+        ],
         if (controller.error != null) ...<Widget>[
           const SizedBox(height: 18),
           InlineMessage(message: controller.error!, error: true),

@@ -18,6 +18,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square" alt="AGPL-3.0 license"></a>
 </p>
 
+> [!IMPORTANT]
+> **npm registry distribution has been shut down.** Install NeoRecall directly
+> from GitHub using the repository installer below. The npm command is still
+> used locally to install Node.js dependencies and link the CLI to the checkout.
+
 <p align="center">
   <a href="https://discord.gg/f59rg2RwUT"><img src="https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Join the NeoLabs Discord"></a>
 </p>
@@ -30,16 +35,15 @@
 
 ## 🚀 Install
 
+The repository installer clones NeoRecall directly from GitHub (requires Git,
+Node.js 20+, and npm for dependencies):
+
 ```bash
-npm i -g github:NeoLabs-Systems/NeoRecall
-neorecall install
-neorecall setup
-neorecall start
+bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 ```
 
-Open `http://localhost:4500` and `/app/`. Use `neorecall update` to install newer GitHub releases for the setup-selected `beta` or `stable` channel.
-
-Read the [installation guide](docs/docs/installation.md) before exposing the service to a network.
+Open `http://localhost:4500` once `neorecall status` reports a
+running service.
 
 ## ✨ What makes it different
 
