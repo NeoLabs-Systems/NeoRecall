@@ -715,6 +715,14 @@ class LocalBackendInstaller {
       '/usr/local/bin/$command',
       '/usr/bin/$command',
       '/bin/$command',
+      // Apple ships git only through /usr/bin/git, which is a shim: it refuses
+      // to run when the command line tools are absent, and equally when Xcode
+      // is installed but its licence has not been accepted. The tools it stands
+      // in for work in both cases, so reach them directly.
+      if (Platform.isMacOS) ...<String>[
+        '/Library/Developer/CommandLineTools/usr/bin/$command',
+        '/Applications/Xcode.app/Contents/Developer/usr/bin/$command',
+      ],
       if (home.isNotEmpty) ...<String>[
         '$home/.volta/bin/$command',
         '$home/.local/bin/$command',
