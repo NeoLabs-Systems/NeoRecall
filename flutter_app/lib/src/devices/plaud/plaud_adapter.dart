@@ -172,7 +172,10 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   }
 
   @override
-  Future<void> stopScan() => _hardware.stopScan();
+  Future<void> stopScan() async {
+    if (!_initialized) return;
+    await _hardware.stopScan();
+  }
 
   @override
   Future<void> connect(AudioDeviceDescriptor device) async {
@@ -259,7 +262,10 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   @override
   Future<void> disconnect() async {
     try {
-      await _hardware.disconnect();
+      // Nothing was ever wired up to the native SDK, so there is no link to
+      // tear down — and on a host without the plugin the call would only
+      // raise a MissingPluginException.
+      if (_initialized) await _hardware.disconnect();
     } finally {
       _connectedKey = null;
       _setState(DeviceTransportState.disconnected);
@@ -423,7 +429,12 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       await sub.cancel();
     }
     _subs.clear();
-    await disconnect();
+    try {
+      await disconnect();
+    } catch (_) {
+      // Disposal must always release the streams below, even when the native
+      // side refuses or is already gone.
+    }
     await _discoveries.close();
     await _controlEvents.close();
     await _pcm.close();
