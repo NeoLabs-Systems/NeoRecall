@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
-import 'delete_account_dialog.dart';
+import 'destructive_confirm_dialog.dart';
 import 'settings_section_list.dart';
 
 /// The security area of settings: password, two-factor, security keys, and
@@ -216,14 +216,56 @@ class _SecuritySectionState extends State<SecuritySection> {
     );
   }
 
-  /// The only irreversible action in the app, so it is deliberately the last
-  /// thing in the last section rather than a menu item next to "Rename".
+  /// The two irreversible actions, deliberately the last thing in the last
+  /// section. They differ in one respect: whether the account survives.
+  Future<void> _eraseContent(NeoRecallController ctrl) async {
+    final erased = await DestructiveConfirmDialog.show(
+      context,
+      username: ctrl.username ?? 'your username',
+      twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
+      onConfirm: ctrl.eraseContent,
+      title: 'Erase everything you have recorded',
+      intro:
+          'This empties your library but keeps your account. There is no undo '
+          'and no backup you can ask to restore from.',
+      erased: const <String>[
+        'Every recording, transcript and conversation',
+        'All memories, highlights and daily summaries',
+        'Named speakers and their voice profiles',
+        'Imported audio and anything still waiting to upload',
+      ],
+      kept: const <String>[
+        'Your account, password and security keys',
+        'Your settings and paired devices',
+      ],
+      confirmLabel: 'Erase my data',
+    );
+    if (!erased || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Everything you had recorded was erased.'),
+      ),
+    );
+  }
+
   Future<void> _deleteAccount(NeoRecallController ctrl) async {
-    final deleted = await DeleteAccountDialog.show(
+    final deleted = await DestructiveConfirmDialog.show(
       context,
       username: ctrl.username ?? 'your username',
       twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
       onConfirm: ctrl.deleteAccount,
+      title: 'Delete your account',
+      intro:
+          'This removes everything, permanently, and closes the account. There '
+          'is no undo and no backup you can ask to restore from.',
+      erased: const <String>[
+        'Every transcript, conversation and memory',
+        'Named speakers and their voice profiles',
+        'Recordings still waiting to upload on this device',
+        'Connected devices, security keys and sign-in history',
+        'The account itself, and your ability to sign in',
+      ],
+      confirmLabel: 'Delete permanently',
     );
     if (!deleted || !mounted) return;
     // logout() has already cleared the session, so the app is back at sign-in.
@@ -240,35 +282,31 @@ class _SecuritySectionState extends State<SecuritySection> {
     return SectionCard(
       eyebrow: 'DANGER ZONE',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            'Delete account',
-            style: TextStyle(
-              color: palette.textPrimary,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-            ),
+          _DangerAction(
+            title: 'Erase everything you have recorded',
+            description:
+                'Empties your library — recordings, transcripts, memories, '
+                'highlights and voice profiles — and keeps your account, '
+                'settings and paired devices. This cannot be undone.',
+            actionLabel: 'Erase my data…',
+            icon: Icons.delete_sweep_outlined,
+            onPressed: ctrl.loading ? null : () => _eraseContent(ctrl),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Permanently erases your transcripts, memories, named speakers and '
-            'voice profiles from the server, along with anything still queued '
-            'on this device. This cannot be undone.',
-            style: TextStyle(color: palette.textSecondary, height: 1.45),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Container(height: 1, color: palette.border),
           ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: ctrl.loading ? null : () => _deleteAccount(ctrl),
-              icon: const Icon(Icons.delete_forever_outlined, size: 18),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: palette.danger,
-                side: BorderSide(color: palette.danger.withValues(alpha: 0.55)),
-              ),
-              label: const Text('Delete account…'),
-            ),
+          _DangerAction(
+            title: 'Delete your account',
+            description:
+                'Removes everything above and closes the account itself, '
+                'including your sign-in, security keys and connected devices. '
+                'Nothing identifying you is kept. This cannot be undone.',
+            actionLabel: 'Delete account…',
+            icon: Icons.delete_forever_outlined,
+            onPressed: ctrl.loading ? null : () => _deleteAccount(ctrl),
           ),
         ],
       ),
@@ -486,6 +524,63 @@ class _SecuritySectionState extends State<SecuritySection> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// One irreversible action: what it does, and the button that starts it.
+class _DangerAction extends StatelessWidget {
+  const _DangerAction({
+    required this.title,
+    required this.description,
+    required this.actionLabel,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String description;
+  final String actionLabel;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          title,
+          style: TextStyle(
+            color: palette.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          description,
+          style: TextStyle(
+            color: palette.textSecondary,
+            fontSize: 12.5,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, size: 18),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: palette.danger,
+              side: BorderSide(color: palette.danger.withValues(alpha: 0.55)),
+            ),
+            label: Text(actionLabel),
+          ),
+        ),
+      ],
     );
   }
 }

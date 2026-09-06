@@ -13,16 +13,36 @@ import '../../main_theme.dart';
 ///
 /// Errors render inside the dialog. A snackbar would appear behind the barrier,
 /// leaving a wrong password looking like a button that simply did nothing.
-class DeleteAccountDialog extends StatefulWidget {
-  const DeleteAccountDialog({
+/// The confirmation gate in front of an irreversible erasure.
+///
+/// Both danger-zone actions use it: password, second factor where one is
+/// enabled, and the account name typed out. The copy is passed in because the
+/// two differ in exactly one respect that matters — whether the account itself
+/// survives — and a reader has to be able to tell which one they are agreeing
+/// to without reading the button twice.
+class DestructiveConfirmDialog extends StatefulWidget {
+  const DestructiveConfirmDialog({
     super.key,
     required this.username,
     required this.twoFactorEnabled,
     required this.onConfirm,
+    required this.title,
+    required this.intro,
+    required this.erased,
+    required this.confirmLabel,
+    this.kept = const <String>[],
   });
 
   final String username;
   final bool twoFactorEnabled;
+  final String title;
+  final String intro;
+
+  /// What this action destroys, and — when the account survives — what it
+  /// deliberately leaves behind.
+  final List<String> erased;
+  final List<String> kept;
+  final String confirmLabel;
 
   /// Returns null when the account was deleted, or a message to display.
   final Future<String?> Function({
@@ -40,24 +60,35 @@ class DeleteAccountDialog extends StatefulWidget {
       String? twoFactorCode,
     })
     onConfirm,
+    required String title,
+    required String intro,
+    required List<String> erased,
+    required String confirmLabel,
+    List<String> kept = const <String>[],
   }) async {
-    final deleted = await showDialog<bool>(
+    final done = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => DeleteAccountDialog(
+      builder: (context) => DestructiveConfirmDialog(
         username: username,
         twoFactorEnabled: twoFactorEnabled,
         onConfirm: onConfirm,
+        title: title,
+        intro: intro,
+        erased: erased,
+        kept: kept,
+        confirmLabel: confirmLabel,
       ),
     );
-    return deleted ?? false;
+    return done ?? false;
   }
 
   @override
-  State<DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+  State<DestructiveConfirmDialog> createState() =>
+      _DestructiveConfirmDialogState();
 }
 
-class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
+class _DestructiveConfirmDialogState extends State<DestructiveConfirmDialog> {
   final _password = TextEditingController();
   final _code = TextEditingController();
   final _confirmation = TextEditingController();
@@ -108,7 +139,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
     final palette = neoRecallPaletteOf(context);
     return AlertDialog(
       icon: Icon(Icons.warning_amber_rounded, color: palette.danger, size: 32),
-      title: const Text('Delete your account'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -117,12 +148,23 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'This removes everything, permanently. There is no undo and no '
-                'backup you can ask us to restore from.',
+                widget.intro,
                 style: TextStyle(color: palette.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 16),
-              _ErasedList(palette: palette),
+              _OutcomeList(
+                palette: palette,
+                items: widget.erased,
+                removed: true,
+              ),
+              if (widget.kept.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                _OutcomeList(
+                  palette: palette,
+                  items: widget.kept,
+                  removed: false,
+                ),
+              ],
               const SizedBox(height: 20),
               TextField(
                 controller: _password,
@@ -203,7 +245,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _working ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Keep my account'),
+          child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: _canDelete ? _submit : null,
@@ -217,7 +259,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Delete permanently'),
+              : Text(widget.confirmLabel),
         ),
       ],
     );
@@ -226,23 +268,23 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog> {
 
 /// Named consequences, not a summary. "All your data" is easy to agree to
 /// without picturing what it contains.
-class _ErasedList extends StatelessWidget {
-  const _ErasedList({required this.palette});
+/// What goes and what stays, marked so the two cannot be misread for each other.
+class _OutcomeList extends StatelessWidget {
+  const _OutcomeList({
+    required this.palette,
+    required this.items,
+    required this.removed,
+  });
 
   final NeoRecallPalette palette;
-
-  static const _items = <String>[
-    'Every transcript, conversation and memory',
-    'Named speakers and their voice profiles',
-    'Recordings still waiting to upload on this device',
-    'Connected devices, security keys and sign-in history',
-  ];
+  final List<String> items;
+  final bool removed;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: _items
+      children: items
           .map(
             (item) => Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -252,16 +294,21 @@ class _ErasedList extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Icon(
-                      Icons.close_rounded,
+                      removed ? Icons.close_rounded : Icons.check_rounded,
                       size: 16,
-                      color: palette.danger,
+                      color: removed ? palette.danger : palette.success,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       item,
-                      style: TextStyle(color: palette.textPrimary, height: 1.4),
+                      style: TextStyle(
+                        color: removed
+                            ? palette.textPrimary
+                            : palette.textSecondary,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],

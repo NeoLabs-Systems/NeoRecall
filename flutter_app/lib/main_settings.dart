@@ -177,16 +177,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.rail;
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < AppBreakpoints.rail;
+    // The same gutter every other page uses. Settings had its own 28, which is
+    // why it never quite lined up with the rest of the app.
+    final gutter = width < AppBreakpoints.mobile
+        ? AppSpacing.lg - 4
+        : AppSpacing.lg;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+      padding: EdgeInsets.fromLTRB(
+        gutter,
+        compact ? 20 : 28,
+        gutter,
+        0,
+      ),
       child: Column(
         children: <Widget>[
           ScreenHeader(
-            eyebrow: 'SETTINGS',
             title: 'Settings',
             description:
-                'Recording, memory, speakers, and account access in one place.',
+                'Capture behaviour, memory, and account security in one place.',
             trailing: FilledButton.icon(
               onPressed:
                   widget.controller.loading ||
@@ -210,7 +220,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         compact: true,
                         onSelected: _select,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: AppSpacing.md + 2),
                       Expanded(child: _content()),
                     ],
                   )
@@ -225,8 +235,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onSelected: _select,
                         ),
                       ),
-                      const SizedBox(width: 24),
-                      Expanded(child: _content()),
+                      const SizedBox(width: AppSpacing.lg),
+                      // Capped, not stretched: a settings row spanning a
+                      // 2000px window is unreadable.
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 720),
+                            child: _content(),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
           ),
@@ -262,64 +282,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _devicesSettings() {
     final palette = neoRecallPaletteOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Signed-in devices',
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
+    return _sectionList(<Widget>[
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Signed-in devices',
+                  style: TextStyle(
+                    color: palette.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 5),
-                  Text(
-                    'Review access or revoke an old client. Set up, connect, and control capture hardware from Record.',
-                    style: TextStyle(
-                      color: palette.textMuted,
-                      fontSize: 12.5,
-                      height: 1.4,
-                    ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Review access or revoke an old client. Set up, connect, and control capture hardware from Record.',
+                  style: TextStyle(
+                    color: palette.textMuted,
+                    fontSize: 12.5,
+                    height: 1.4,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: AppSpacing.md),
-            TextButton.icon(
-              onPressed: () => widget.controller.selectPage(RecallPage.record),
-              icon: const Icon(Icons.mic_none_rounded, size: 18),
-              label: const Text('Open Record'),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Expanded(child: DevicesPanel(controller: widget.controller)),
-      ],
-    );
+          ),
+          const SizedBox(width: AppSpacing.md),
+          TextButton.icon(
+            onPressed: () => widget.controller.selectPage(RecallPage.record),
+            icon: const Icon(Icons.mic_none_rounded, size: 18),
+            label: const Text('Open Record'),
+          ),
+        ],
+      ),
+      const SizedBox(height: AppSpacing.md),
+      DevicesPanel(controller: widget.controller, scrollable: false),
+    ]);
   }
 
+  /// One settings pane. Sections are spaced by this list rather than by each
+  /// section remembering to add a gap after itself — four cards that each
+  /// forgot were what made the recording pane read as one long slab.
   Widget _sectionList(List<Widget> children) {
-    return ListView(
-      padding: const EdgeInsets.only(right: 2, bottom: 32),
-      children: <Widget>[..._statusMessages(), ...children],
+    final blocks = <Widget>[..._statusMessages(), ...children];
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+      itemCount: blocks.length,
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm + 2),
+      itemBuilder: (context, index) => blocks[index],
     );
   }
 
   List<Widget> _statusMessages() => <Widget>[
     // Transient notices now render in the app-wide status bar (see main_shell),
     // so they are not duplicated here; errors stay inline with the settings form.
-    if (widget.controller.error != null) ...<Widget>[
+    if (widget.controller.error != null)
       InlineMessage(message: widget.controller.error!, error: true),
-      const SizedBox(height: 14),
-    ],
   ];
 
   Widget _generalSettings() {
@@ -634,9 +655,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => settings![key] = selected.hour * 60 + selected.minute);
   }
 
+  /// How long finished material waits before it is written up.
+  ///
+  /// The floor comes from the server's own configuration, not from the value
+  /// currently chosen: keying the slider's minimum off the *effective* interval
+  /// meant every save raised the floor to whatever had just been saved, so the
+  /// interval could only ever be increased.
   Widget _memorySettings() {
     final palette = neoRecallPaletteOf(context);
     final current = settings!;
+    const hour = 3600000;
+    const maximum = 24 * hour;
+    final floor = (current['minConsolidationIntervalMs'] as int? ?? 0).clamp(
+      0,
+      maximum,
+    );
+    final chosen = (current['consolidationIntervalMs'] as int? ?? floor).clamp(
+      floor,
+      maximum,
+    );
+    // Whole hours, so the label never reads 3.1 hours. The floor stops at 23
+    // so the slider always has a range to move through, even on an install
+    // configured to write up at most once a day.
+    final floorHours = (floor / hour).ceil().clamp(0, 23);
+    final chosenHours = (chosen / hour).round().clamp(floorHours, 24);
+
     return _sectionList(<Widget>[
       SectionCard(
         eyebrow: 'MEMORY',
@@ -644,25 +687,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Consolidation interval: ${((current['consolidationIntervalMs'] as int) / 3600000).toStringAsFixed(1)} hours',
+              'Consolidation interval',
               style: TextStyle(
-                color: palette.textSecondary,
+                color: palette.textPrimary,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 4),
+            Text(
+              chosenHours == 0
+                  ? 'As soon as there is enough material'
+                  : 'Wait at least $chosenHours '
+                        '${chosenHours == 1 ? 'hour' : 'hours'} between write-ups',
+              style: TextStyle(
+                color: palette.textMuted,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 4),
             Slider(
-              min: (current['effectiveConsolidationIntervalMs'] as int)
-                  .toDouble(),
-              max: 24 * 3600000,
-              divisions: 23,
-              value: (current['consolidationIntervalMs'] as int)
-                  .clamp(
-                    current['effectiveConsolidationIntervalMs'] as int,
-                    24 * 3600000,
-                  )
-                  .toDouble(),
+              min: floorHours.toDouble(),
+              max: 24,
+              divisions: 24 - floorHours,
+              label: chosenHours == 0 ? 'Immediate' : '${chosenHours}h',
+              value: chosenHours.toDouble(),
               onChanged: (value) => setState(
-                () => current['consolidationIntervalMs'] = value.round(),
+                () => current['consolidationIntervalMs'] =
+                    value.round() * hour,
+              ),
+            ),
+            Text(
+              floorHours == 0
+                  ? 'Memories are written when enough has been said, without '
+                        'waiting for a conversation to end.'
+                  : 'This server will not write up more often than every '
+                        '$floorHours ${floorHours == 1 ? 'hour' : 'hours'}.',
+              style: TextStyle(
+                color: palette.textMuted,
+                fontSize: 11.5,
+                height: 1.4,
               ),
             ),
           ],

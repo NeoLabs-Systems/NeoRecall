@@ -3,9 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../main_shared.dart';
 import '../../../../main_spacing.dart';
 import '../../../../main_theme.dart';
-import '../../../record/record_controls.dart';
 import '../appliance_controller.dart';
 import '../appliance_link.dart';
 import '../appliance_protocol.dart';
@@ -19,125 +19,11 @@ typedef ApplianceDevice = Map<String, dynamic>;
 /// uploads independently. Keeping it beside (but visually separate from) the
 /// app's capture-source picker makes that distinction clear without inventing a
 /// second top-level device area.
-class ApplianceCaptureSection extends StatelessWidget {
-  const ApplianceCaptureSection({
-    super.key,
-    required this.controller,
-    required this.devices,
-    required this.onAdd,
-  });
-
-  final ApplianceController controller;
-  final List<ApplianceDevice> devices;
-  final Future<void> Function() onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final desks = visibleAppliances(devices, controller);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (desks.isEmpty)
-          _DeskIntroduction(onAdd: onAdd)
-        else ...<Widget>[
-          for (var index = 0; index < desks.length; index += 1) ...<Widget>[
-            if (index > 0) const SizedBox(height: AppSpacing.sm),
-            ApplianceDeviceTile(
-              controller: controller,
-              device: desks[index],
-              onTap: () =>
-                  openApplianceDevice(context, controller, desks[index]),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.sm),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              key: const ValueKey<String>('add-neorecall-desk'),
-              onPressed: onAdd,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add another'),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _DeskIntroduction extends StatelessWidget {
-  const _DeskIntroduction({required this.onAdd});
-
-  final Future<void> Function() onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-    return Material(
-      color: palette.bgSecondary.withValues(alpha: 0.5),
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      child: InkWell(
-        key: const ValueKey<String>('neorecall-desk-introduction'),
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        onTap: onAdd,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.card),
-            border: Border.all(color: palette.border),
-          ),
-          child: Row(
-            children: <Widget>[
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: palette.accentMuted,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.speaker_group_outlined,
-                  color: palette.accentHover,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'Set up a Desk recorder',
-                      style: TextStyle(
-                        color: palette.textPrimary,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Connect it to your account and Wi-Fi from here. No server address or access key to copy.',
-                      style: TextStyle(
-                        color: palette.textMuted,
-                        fontSize: 11.5,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Icon(Icons.chevron_right_rounded, color: palette.textMuted),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// One reusable Desk row, shared by Record and account device management.
-/// Live Bluetooth status wins while the app is nearby; otherwise server state
-/// keeps an active recording visible from anywhere.
+/// Desk hardware rows and the sheet they open.
+///
+/// The Record page used to render a Desk section of its own; a Desk is one of
+/// the sources in the record sheet now, and account-level management lives in
+/// Settings. What is left here is the row itself, shared by both.
 class ApplianceDeviceTile extends StatefulWidget {
   const ApplianceDeviceTile({
     super.key,

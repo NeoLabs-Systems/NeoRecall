@@ -1,29 +1,62 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
-import 'main_memories.dart';
+import 'main_library.dart';
 import 'main_navigation.dart';
 import 'main_record.dart';
 import 'main_search.dart';
 import 'main_settings.dart';
 import 'main_shared.dart';
 import 'main_sources.dart';
-import 'main_speakers.dart';
+import 'main_spacing.dart';
 import 'main_theme.dart';
-import 'main_timeline.dart';
 import 'src/record/sync_cards.dart';
 
-class NeoRecallShell extends StatelessWidget {
+class NeoRecallShell extends StatefulWidget {
   const NeoRecallShell({super.key, required this.controller});
 
   final NeoRecallController controller;
 
+  @override
+  State<NeoRecallShell> createState() => _NeoRecallShellState();
+}
+
+class _NeoRecallShellState extends State<NeoRecallShell> {
+  /// Which sidebar group is open. One at a time, like NeoAgent's rail: the
+  /// point of grouping is that the reader sees four things, not eleven.
+  NeoRecallNavigationGroup? _openGroup;
+
+  NeoRecallController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _openGroup = _groupFor(controller.page);
+  }
+
+  @override
+  void didUpdateWidget(covariant NeoRecallShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Navigating from anywhere else — a widget deep link, the status bar's
+    // "Open" — reveals the group that owns the destination, so the rail never
+    // shows a selected child inside a collapsed group.
+    final group = _groupFor(controller.page);
+    if (group != null && group != _openGroup && group.hasChildren) {
+      _openGroup = group;
+    }
+  }
+
+  NeoRecallNavigationGroup? _groupFor(RecallPage page) {
+    for (final group in neoRecallNavigationGroups) {
+      if (group.destinations.any((d) => d.page == page)) return group;
+    }
+    return null;
+  }
+
   Widget _screen() => switch (controller.page) {
     RecallPage.record => RecordScreen(controller: controller),
-    RecallPage.timeline => TimelineScreen(controller: controller),
-    RecallPage.memories => MemoriesScreen(controller: controller),
+    RecallPage.library => LibraryScreen(controller: controller),
     RecallPage.search => SearchScreen(controller: controller),
-    RecallPage.speakers => SpeakersScreen(controller: controller),
     RecallPage.sources => SourcesScreen(controller: controller),
     RecallPage.devices => SettingsScreen(
       controller: controller,
@@ -32,18 +65,32 @@ class NeoRecallShell extends StatelessWidget {
     RecallPage.settings => SettingsScreen(controller: controller),
   };
 
+  void _selectGroup(NeoRecallNavigationGroup group) {
+    if (group.hasChildren) {
+      setState(() => _openGroup = _openGroup == group ? null : group);
+      if (!group.isCurrent(controller)) group.primary.select(controller);
+      return;
+    }
+    group.primary.select(controller);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AmbientBackdrop(
+    return AppBackdrop(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 920;
+          final wide = constraints.maxWidth >= AppBreakpoints.rail;
           final content = AnimatedSwitcher(
-            duration: const Duration(milliseconds: 260),
+            duration: const Duration(milliseconds: 220),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
+            // A String, not a List: ValueKey compares its value with ==, and
+            // two equal Lists are not equal, so a list key rebuilt the whole
+            // screen on every notification and threw away its scroll position.
             child: KeyedSubtree(
-              key: ValueKey(controller.page),
+              key: ValueKey<String>(
+                '${controller.page.name}:${controller.libraryTab.name}',
+              ),
               child: _screen(),
             ),
           );
@@ -53,7 +100,11 @@ class NeoRecallShell extends StatelessWidget {
               backgroundColor: Colors.transparent,
               body: Row(
                 children: <Widget>[
-                  _Sidebar(controller: controller),
+                  _Sidebar(
+                    controller: controller,
+                    openGroup: _openGroup,
+                    onSelectGroup: _selectGroup,
+                  ),
                   Expanded(
                     child: Column(
                       children: <Widget>[
@@ -69,38 +120,16 @@ class NeoRecallShell extends StatelessWidget {
 
           return Scaffold(
             backgroundColor: Colors.transparent,
-            drawer: Drawer(
-              child: SafeArea(
-                child: _Sidebar(controller: controller, drawer: true),
-              ),
-            ),
-            appBar: AppBar(
-              toolbarHeight: 52,
-              titleSpacing: 0,
-              leadingWidth: 46,
-              title: Text(
-                neoRecallPageTitle(controller.page),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
             body: SafeArea(
-              top: false,
+              bottom: false,
               child: Column(
                 children: <Widget>[
                   _GlobalStatusBar(controller: controller),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(22),
-                        child: content,
-                      ),
-                    ),
-                  ),
+                  Expanded(child: ClipRect(child: content)),
                 ],
               ),
             ),
+            bottomNavigationBar: _TabBar(controller: controller),
           );
         },
       ),
@@ -108,16 +137,46 @@ class NeoRecallShell extends StatelessWidget {
   }
 }
 
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.controller, this.drawer = false});
+/// The phone tab bar. Four destinations, a hairline above, and nothing else —
+/// the drawer it replaces hid the whole product behind a hamburger.
+class _TabBar extends StatelessWidget {
+  const _TabBar({required this.controller});
 
   final NeoRecallController controller;
-  final bool drawer;
 
-  void _select(BuildContext context, RecallPage page) {
-    controller.selectPage(page);
-    if (drawer) Navigator.of(context).pop();
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: NavigationBar(
+        selectedIndex: neoRecallTabIndex(controller),
+        onDestinationSelected: (index) =>
+            neoRecallTabDestinations[index].select(controller),
+        destinations: <Widget>[
+          for (final destination in neoRecallTabDestinations)
+            NavigationDestination(
+              icon: Icon(destination.icon),
+              label: destination.label,
+            ),
+        ],
+      ),
+    );
   }
+}
+
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({
+    required this.controller,
+    required this.openGroup,
+    required this.onSelectGroup,
+  });
+
+  final NeoRecallController controller;
+  final NeoRecallNavigationGroup? openGroup;
+  final ValueChanged<NeoRecallNavigationGroup> onSelectGroup;
 
   @override
   Widget build(BuildContext context) {
@@ -131,15 +190,8 @@ class _Sidebar extends StatelessWidget {
     return Container(
       width: 276,
       decoration: BoxDecoration(
-        color: palette.bgSecondary.withValues(alpha: 0.96),
+        color: palette.bgSecondary,
         border: Border(right: BorderSide(color: palette.border)),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 24,
-            offset: const Offset(4, 0),
-          ),
-        ],
       ),
       child: Column(
         children: <Widget>[
@@ -150,14 +202,7 @@ class _Sidebar extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: palette.border),
-                gradient: LinearGradient(
-                  colors: <Color>[
-                    palette.bgCard.withValues(alpha: 0.9),
-                    palette.bgSecondary.withValues(alpha: 0.55),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: palette.bgCard,
               ),
               child: Row(
                 children: <Widget>[
@@ -182,7 +227,7 @@ class _Sidebar extends StatelessWidget {
                           'CONTROL SURFACE',
                           style: sectionEyebrowStyle(
                             palette,
-                          ).copyWith(color: palette.textMuted, fontSize: 9.5),
+                          ).copyWith(fontSize: 9.5, letterSpacing: 1.8),
                         ),
                       ],
                     ),
@@ -193,25 +238,59 @@ class _Sidebar extends StatelessWidget {
           ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               children: <Widget>[
-                for (final item in neoRecallNavigationItems)
+                for (final group in neoRecallNavigationGroups) ...<Widget>[
                   _SidebarButton(
-                    selected: controller.page == item.page,
-                    icon: item.icon,
-                    label: item.label,
-                    onTap: () => _select(context, item.page),
+                    selected: group.isCurrent(controller),
+                    icon: group.icon,
+                    label: group.label,
+                    trailing: group.hasChildren
+                        ? Icon(
+                            openGroup == group
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
+                            size: 16,
+                            color: palette.textMuted,
+                          )
+                        : null,
+                    onTap: () => onSelectGroup(group),
                   ),
+                  if (group.hasChildren && openGroup == group)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 2, 0, 4),
+                      child: Container(
+                        padding: const EdgeInsets.only(left: 12),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(color: palette.border),
+                          ),
+                        ),
+                        child: Column(
+                          children: <Widget>[
+                            for (final destination in group.destinations)
+                              _SidebarButton(
+                                selected: destination.isCurrent(controller),
+                                icon: destination.icon,
+                                label: destination.label,
+                                compact: true,
+                                onTap: () => destination.select(controller),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),
           Container(
-            margin: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-            padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+            margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: palette.border),
-              color: palette.bgCard.withValues(alpha: 0.72),
+              color: palette.bgCard,
             ),
             child: Row(
               children: <Widget>[
@@ -220,14 +299,8 @@ class _Sidebar extends StatelessWidget {
                   height: 30,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: controller.page == RecallPage.settings
-                        ? palette.accentMuted
-                        : palette.bgCard,
-                    border: Border.all(
-                      color: controller.page == RecallPage.settings
-                          ? palette.accent
-                          : palette.borderLight,
-                    ),
+                    color: palette.accentMuted,
+                    border: Border.all(color: palette.borderLight),
                   ),
                   alignment: Alignment.center,
                   child: Text(
@@ -255,16 +328,13 @@ class _Sidebar extends StatelessWidget {
                 _SidebarIconButton(
                   tooltip: 'Settings',
                   icon: Icons.settings_outlined,
-                  onTap: () => _select(context, RecallPage.settings),
+                  onTap: () => controller.selectPage(RecallPage.settings),
                 ),
                 const SizedBox(width: 4),
                 _SidebarIconButton(
                   tooltip: 'Sign out',
                   icon: Icons.logout,
-                  onTap: () async {
-                    if (drawer) Navigator.of(context).pop();
-                    await controller.logout();
-                  },
+                  onTap: () async => controller.logout(),
                 ),
               ],
             ),
@@ -281,12 +351,16 @@ class _SidebarButton extends StatefulWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.trailing,
+    this.compact = false,
   });
 
   final bool selected;
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final Widget? trailing;
+  final bool compact;
 
   @override
   State<_SidebarButton> createState() => _SidebarButtonState();
@@ -298,9 +372,9 @@ class _SidebarButtonState extends State<_SidebarButton> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final radius = BorderRadius.circular(11);
+    final radius = BorderRadius.circular(AppRadius.tag);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 3),
+      padding: const EdgeInsets.only(bottom: 2),
       child: MouseRegion(
         onEnter: (_) => setState(() => hovering = true),
         onExit: (_) => setState(() => hovering = false),
@@ -310,63 +384,43 @@ class _SidebarButtonState extends State<_SidebarButton> {
             borderRadius: radius,
             onTap: widget.onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
+              duration: const Duration(milliseconds: 150),
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+              padding: EdgeInsets.symmetric(
+                horizontal: 11,
+                vertical: widget.compact ? 7 : 9,
+              ),
               decoration: BoxDecoration(
                 borderRadius: radius,
                 color: widget.selected
-                    ? palette.bgCard.withValues(alpha: 0.96)
+                    ? palette.accentMuted
                     : hovering
-                    ? palette.bgTertiary.withValues(alpha: 0.66)
+                    ? palette.bgTertiary
                     : Colors.transparent,
-                gradient: widget.selected
-                    ? LinearGradient(
-                        colors: <Color>[
-                          palette.accent.withValues(alpha: 0.10),
-                          palette.bgCard.withValues(alpha: 0.96),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                border: Border.all(
-                  color: widget.selected
-                      ? palette.borderLight
-                      : hovering
-                      ? palette.border
-                      : Colors.transparent,
-                ),
-                boxShadow: widget.selected
-                    ? <BoxShadow>[
-                        BoxShadow(
-                          color: palette.accent.withValues(alpha: 0.05),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
-                    : null,
               ),
               child: Row(
                 children: <Widget>[
                   Icon(
                     widget.icon,
-                    size: 19,
+                    size: widget.compact ? 16 : 19,
                     color: widget.selected ? palette.accent : palette.textMuted,
                   ),
-                  const SizedBox(width: 11),
+                  SizedBox(width: widget.compact ? 9 : 11),
                   Expanded(
                     child: Text(
                       widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: widget.selected
                             ? palette.textPrimary
                             : palette.textSecondary,
-                        fontSize: 13.5,
+                        fontSize: widget.compact ? 13 : 13.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
+                  if (widget.trailing != null) widget.trailing!,
                 ],
               ),
             ),
@@ -403,8 +457,8 @@ class _SidebarIconButton extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: palette.bgSecondary.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(AppRadius.tag),
+              color: palette.bgTertiary,
               border: Border.all(color: palette.border),
             ),
             child: Icon(icon, size: 17, color: palette.textSecondary),

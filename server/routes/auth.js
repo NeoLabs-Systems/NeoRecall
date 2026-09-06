@@ -46,6 +46,10 @@ router.put('/password', validate(z.object({ currentPassword: z.string(), newPass
   asyncRoute(async (req, res) => { await auth.changePassword(req.auth.userId, req.body.currentPassword, req.body.newPassword); res.status(204).end(); }));
 router.delete('/account', validate(z.object({ password: z.string(), twoFactorCode: z.string().optional() })),
   asyncRoute(async (req, res) => { await auth.deleteAccount(req.auth.userId, req.body.password, req.body.twoFactorCode); res.status(204).end(); }));
+// Erasing content keeps the account, so it is a POST on the account rather than
+// a DELETE of it. Same identity bar as deletion: both are irreversible.
+router.post('/account/erase-content', validate(z.object({ password: z.string(), twoFactorCode: z.string().optional() })),
+  asyncRoute(async (req, res) => { res.json(await auth.eraseContent(req.auth.userId, req.body.password, req.body.twoFactorCode)); }));
 router.post('/2fa/setup', (req, res) => res.json(auth.beginTwoFactor(req.auth.userId, req.user.username)));
 router.post('/2fa/verify', validate(z.object({ code: z.string().min(6).max(64) })), (req, res) => {
   res.json({ recoveryCodes: auth.activateTwoFactor(req.auth.userId, req.body.code) });

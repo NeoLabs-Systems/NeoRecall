@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_theme.dart';
-import 'package:neorecall/src/settings/delete_account_dialog.dart';
+import 'package:neorecall/src/settings/destructive_confirm_dialog.dart';
 
 Future<void> _open(
   WidgetTester tester, {
   required bool twoFactorEnabled,
   required Future<String?> Function({required String password, String? twoFactorCode}) onConfirm,
+  List<String> kept = const <String>[],
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -14,11 +15,20 @@ Future<void> _open(
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () => DeleteAccountDialog.show(
+            onPressed: () => DestructiveConfirmDialog.show(
               context,
               username: 'frank',
               twoFactorEnabled: twoFactorEnabled,
               onConfirm: onConfirm,
+              title: 'Delete your account',
+              intro: 'This removes everything, permanently.',
+              erased: const <String>[
+                'Every transcript, conversation and memory',
+                'Named speakers and their voice profiles',
+                'Recordings still waiting to upload on this device',
+              ],
+              kept: kept,
+              confirmLabel: 'Delete permanently',
             ),
             child: const Text('open'),
           ),
@@ -94,13 +104,31 @@ void main() {
     expect(find.textContaining('waiting to upload'), findsOneWidget);
   });
 
+  testWidgets('what survives is named too, so the two actions cannot be '
+      'mistaken for each other', (tester) async {
+    await _open(
+      tester,
+      twoFactorEnabled: false,
+      kept: const <String>['Your account, password and security keys'],
+      onConfirm: ({required password, twoFactorCode}) async => null,
+    );
+    expect(find.textContaining('voice profiles'), findsOneWidget);
+    expect(
+      find.textContaining('Your account, password and security keys'),
+      findsOneWidget,
+    );
+    // Removed and kept are marked differently, not just listed together.
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.close_rounded), findsNWidgets(3));
+  });
+
   testWidgets('cancelling reports that nothing was deleted', (tester) async {
     var confirmed = false;
     await _open(tester, twoFactorEnabled: false, onConfirm: ({required password, twoFactorCode}) async {
       confirmed = true;
       return null;
     });
-    await tester.tap(find.text('Keep my account'));
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(confirmed, isFalse);
     expect(find.text('Delete your account'), findsNothing);

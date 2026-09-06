@@ -38,5 +38,8 @@ target_compile_options(mp3lame PRIVATE -w -include "${CMAKE_CURRENT_SOURCE_DIR}/
 add_library(lame SHARED jni_lame.c)
 target_include_directories(lame PRIVATE ${LAME_ROOT}/include)
 target_link_libraries(lame PRIVATE mp3lame log m)
-target_link_options(lame PRIVATE -Wl,-z,max-page-size=16384)
+target_link_options(lame PRIVATE
+    -Wl,-z,max-page-size=16384
+    -Wl,-z,common-page-size=16384
+)
 set_target_properties(lame PROPERTIES OUTPUT_NAME lame)

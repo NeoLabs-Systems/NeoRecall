@@ -11,7 +11,14 @@ import 'src/models/speaker.dart';
 import 'src/widgets/selection_mixin.dart';
 
 class SpeakersScreen extends StatefulWidget {
-  const SpeakersScreen({super.key, required this.controller});
+  const SpeakersScreen({
+    super.key,
+    required this.controller,
+    this.embedded = false,
+  });
+
+  /// True when Library owns the page title and padding.
+  final bool embedded;
 
   final NeoRecallController controller;
 
@@ -228,6 +235,35 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     }
   }
 
+  /// Re-evaluate and multi-select — the two things this page can do, kept in
+  /// one place so the standalone header and Library's row cannot diverge.
+  Widget _actions() => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      Tooltip(
+        message: 'Re-evaluate and merge matching speakers',
+        child: IconButton.filledTonal(
+          onPressed: selecting || _reevaluating ? null : _reevaluateSpeakers,
+          icon: _reevaluating
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.auto_awesome_rounded, size: 18),
+        ),
+      ),
+      const SizedBox(width: 6),
+      if (selecting)
+        TextButton(onPressed: exitSelect, child: const Text('Done'))
+      else
+        TextButton.icon(
+          onPressed: controller.speakers.isEmpty ? null : () => enterSelect(),
+          icon: const Icon(Icons.checklist_rounded, size: 18),
+          label: const Text('Select'),
+        ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
@@ -238,45 +274,20 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
+        padding: widget.embedded
+            ? const EdgeInsets.only(bottom: 40)
+            : const EdgeInsets.fromLTRB(24, 24, 24, 48),
         children: <Widget>[
-          ScreenHeader(
-            eyebrow: 'SPEAKERS',
-            title: 'Recurring voices',
-            description:
-                'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Tooltip(
-                  message: 'Re-evaluate and merge matching speakers',
-                  child: IconButton.filledTonal(
-                    onPressed: selecting || _reevaluating
-                        ? null
-                        : _reevaluateSpeakers,
-                    icon: _reevaluating
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_awesome_rounded, size: 18),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                if (selecting)
-                  TextButton(onPressed: exitSelect, child: const Text('Done'))
-                else
-                  TextButton.icon(
-                    onPressed: visibleSpeakers.isEmpty
-                        ? null
-                        : () => enterSelect(),
-                    icon: const Icon(Icons.checklist_rounded, size: 18),
-                    label: const Text('Select'),
-                  ),
-              ],
+          if (widget.embedded)
+            Align(alignment: Alignment.centerRight, child: _actions())
+          else
+            ScreenHeader(
+              title: 'Speakers',
+              description:
+                  'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
+              trailing: _actions(),
             ),
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
           if (selecting) ...<Widget>[
             _SpeakerSelectionBar(
               count: selectedCount,
@@ -290,7 +301,7 @@ class _SpeakersScreenState extends State<SpeakersScreen>
             const SizedBox(height: 14),
           ],
           if (visibleSpeakers.isEmpty)
-            const GlassSurface(
+            const AppPanel(
               child: EmptyState(
                 icon: Icons.record_voice_over_outlined,
                 title: 'No recurring speakers yet',
@@ -299,7 +310,7 @@ class _SpeakersScreenState extends State<SpeakersScreen>
               ),
             )
           else
-            GlassSurface(
+            AppPanel(
               padding: EdgeInsets.zero,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.panel - 1),
@@ -566,7 +577,7 @@ class _SpeakerSelectionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final enabled = count > 0;
-    return GlassSurface(
+    return AppPanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: <Widget>[

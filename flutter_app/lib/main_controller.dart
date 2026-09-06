@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import 'src/api_client.dart';
 import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
+import 'src/capture/capture_defaults.dart';
 import 'src/capture/capture_pipeline.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
@@ -52,14 +53,19 @@ part 'src/controller/integrations_controller.dart';
 
 enum RecallPage {
   record,
-  timeline,
-  memories,
+  library,
   search,
-  speakers,
   sources,
   devices,
   settings,
 }
+
+/// The three lists inside Library.
+///
+/// Moments, memories and speakers were three sidebar entries over three lists
+/// that already shared a shape. They are one page with a segmented control now,
+/// so the section a deep link wants is a tab, not a page.
+enum LibraryTab { moments, memories, highlights, speakers }
 
 bool canRestoreSessionForBackend({
   required bool web,
@@ -454,6 +460,11 @@ class NeoRecallController extends ChangeNotifier
 
   String? warning;
   RecallPage page = RecallPage.record;
+
+  /// Which list Library opens on. Deep links and home-screen widgets set this
+  /// alongside [page]; the screen itself keeps it in step when the reader taps
+  /// a segment, so returning to Library lands where they left it.
+  LibraryTab libraryTab = LibraryTab.moments;
   List<RecordingSession> recordings = <RecordingSession>[];
 
   /// The timeline reads as moments: one conversation with everything said in
@@ -722,6 +733,44 @@ class NeoRecallController extends ChangeNotifier
   /// Per account, so signing in as somebody else does not inherit their device.
   String _applianceKey() => 'applianceDeviceId:${accountId ?? ''}';
 
+  String _captureSourceKey() => 'captureSource:${accountId ?? ''}';
+  String _captureDeskKey() => 'captureDeskId:${accountId ?? ''}';
+
+  /// What the record button acted on last, and which Desk if it was a Desk.
+  ///
+  /// Null until a choice has been made, so the first run still falls back to
+  /// the platform default rather than to an arbitrary source.
+  CaptureSource? rememberedCaptureSource;
+  String? rememberedCaptureDeskId;
+
+  void _loadRememberedCaptureSource() {
+    rememberedCaptureSource = CaptureSource.fromName(
+      _preferences?.getString(_captureSourceKey()),
+    );
+    rememberedCaptureDeskId = _preferences?.getString(_captureDeskKey());
+  }
+
+  /// Remembers the chosen source so reopening Record — or the app — comes back
+  /// to the same one instead of resetting to the phone.
+  Future<void> rememberCaptureSource(
+    CaptureSource source, {
+    String? deskId,
+  }) async {
+    if (rememberedCaptureSource == source &&
+        rememberedCaptureDeskId == deskId) {
+      return;
+    }
+    rememberedCaptureSource = source;
+    rememberedCaptureDeskId = deskId;
+    _preferences ??= await SharedPreferences.getInstance();
+    await _preferences!.setString(_captureSourceKey(), source.name);
+    if (deskId == null) {
+      await _preferences!.remove(_captureDeskKey());
+    } else {
+      await _preferences!.setString(_captureDeskKey(), deskId);
+    }
+  }
+
   /// Create the access key the appliance will use, scoped to ingest alone.
   ///
   /// Doing this here is what removes the last thing a user would otherwise have
@@ -895,6 +944,7 @@ class NeoRecallController extends ChangeNotifier
         }
         _deviceRuntimeInitialized = true;
         preferBluetoothCapture = audioDeviceSessions.preferBluetooth;
+        _loadRememberedCaptureSource();
         preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
         _deviceStateSubscription = audioDeviceSessions.states.listen((state) {
           preferredDeviceLabel =
@@ -1240,6 +1290,7 @@ class NeoRecallController extends ChangeNotifier
       details: <String, Object?>{'platform': _platform},
     );
     preferBluetoothCapture = audioDeviceSessions.preferBluetooth;
+    _loadRememberedCaptureSource();
     preferredDeviceLabel = audioDeviceSessions.preferredDevice?.displayName;
     await _secureStorage.write(key: 'sessionToken', value: api.token);
     await _preferences?.setString('accountId', accountId!);
@@ -1324,6 +1375,45 @@ class NeoRecallController extends ChangeNotifier
     }
     await ClientDiagnosticLog.instance.clear();
     await logout();
+    return null;
+  }
+
+  /// Erases everything this account has recorded, keeping the account itself.
+  ///
+  /// Same shape as [deleteAccount] — errors are returned for the dialog rather
+  /// than raised into a snackbar behind it — but the session survives, so the
+  /// local spool and the in-memory library are cleared and reloaded instead of
+  /// being thrown away with the sign-in.
+  Future<String?> eraseContent({
+    required String password,
+    String? twoFactorCode,
+  }) async {
+    try {
+      if (isRecording) await stopRecording();
+      await api.request(
+        'POST',
+        '/api/v1/auth/account/erase-content',
+        body: {'password': password, 'twoFactorCode': ?twoFactorCode},
+      );
+    } catch (e) {
+      return _readableError(e);
+    }
+    try {
+      await store.purgeAll();
+    } catch (_) {
+      // Best effort: the server copy is already gone, and a spooled file that
+      // cannot be unlinked must not leave the account looking un-erased.
+    }
+    moments = <TimelineMoment>[];
+    memories = <RecallMemory>[];
+    miniMemories = <MiniMemory>[];
+    speakers = <RecallSpeaker>[];
+    dailySummaries = <Map<String, dynamic>>[];
+    searchResults = <Map<String, dynamic>>[];
+    askAnswer = null;
+    askCitations = <Map<String, dynamic>>[];
+    notifyListeners();
+    await refreshAll();
     return null;
   }
 
@@ -1957,12 +2047,14 @@ class NeoRecallController extends ChangeNotifier
         await updateMiniMemory(id, 'completed');
         return true;
       case HomeWidgetAction.openMemory:
-        page = RecallPage.memories;
+        page = RecallPage.library;
+        libraryTab = LibraryTab.memories;
         pendingWidgetHighlightsTab = false;
         pendingWidgetMemoryId = action.targetId;
         return true;
       case HomeWidgetAction.openHighlight:
-        page = RecallPage.memories;
+        page = RecallPage.library;
+        libraryTab = LibraryTab.memories;
         pendingWidgetHighlightsTab = true;
         pendingWidgetHighlightId = action.targetId;
         return true;
@@ -1970,6 +2062,8 @@ class NeoRecallController extends ChangeNotifier
         final target = _widgetPage(action.targetId);
         if (target == null) return false;
         page = target;
+        final tab = _widgetLibraryTab(action.targetId);
+        if (tab != null) libraryTab = tab;
         pendingWidgetHighlightsTab = action.targetId == 'highlights';
         return true;
       default:
@@ -1979,10 +2073,17 @@ class NeoRecallController extends ChangeNotifier
 
   RecallPage? _widgetPage(String? id) => switch (id) {
     'record' => RecallPage.record,
-    'timeline' => RecallPage.timeline,
-    'memories' || 'highlights' => RecallPage.memories,
+    'timeline' || 'memories' || 'highlights' => RecallPage.library,
     'search' => RecallPage.search,
     'devices' => RecallPage.devices,
+    _ => null,
+  };
+
+  /// Which Library list a widget target wants. Null for targets that are not
+  /// Library pages at all.
+  LibraryTab? _widgetLibraryTab(String? id) => switch (id) {
+    'timeline' => LibraryTab.moments,
+    'memories' || 'highlights' => LibraryTab.memories,
     _ => null,
   };
 
@@ -3032,6 +3133,14 @@ class NeoRecallController extends ChangeNotifier
 
   void selectPage(RecallPage value) {
     page = value;
+    notifyListeners();
+  }
+
+  /// Moves Library to one of its lists, selecting the page if it is not the
+  /// one on screen. One call so a caller cannot set the tab and forget the page.
+  void selectLibraryTab(LibraryTab tab) {
+    libraryTab = tab;
+    page = RecallPage.library;
     notifyListeners();
   }
 

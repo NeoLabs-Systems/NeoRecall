@@ -242,7 +242,7 @@ class SelectionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final enabled = count > 0;
-    return GlassSurface(
+    return AppPanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
@@ -345,7 +345,7 @@ class DailySummaryCard extends StatelessWidget {
     final palette = neoRecallPaletteOf(context);
     final date = summary['local_date'] as String? ?? '';
     final text = summary['summary_en'] as String? ?? '';
-    return GlassSurface(
+    return AppPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -428,15 +428,14 @@ class MemoryCard extends StatelessWidget {
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: palette.panelGradient,
+            color: selected ? palette.accentMuted : palette.bgCard,
             borderRadius: BorderRadius.circular(AppRadius.panel),
             border: Border.all(
               color: selected
                   ? palette.accent.withValues(alpha: 0.55)
-                  : palette.glassBorder,
+                  : palette.border,
               width: selected ? 1.5 : 1,
             ),
-            boxShadow: softPanelShadow(palette),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -645,7 +644,7 @@ class MiniTimeline extends StatelessWidget {
       groups[key]!.add(mini);
     }
 
-    return GlassSurface(
+    return AppPanel(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
         children: <Widget>[

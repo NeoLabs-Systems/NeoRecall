@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/src/capture/capture_defaults.dart';
 import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/recording/audio_frame.dart';
 import 'package:neorecall/src/recording/recorder.dart';
@@ -52,7 +53,7 @@ void main() {
     expect(find.text('Recording is visible and active'), findsOneWidget);
     expect(find.text('00:03:05'), findsOneWidget);
     expect(find.text('Stop and finalize'), findsOneWidget);
-    expect(find.text('Start recording'), findsNothing);
+    expect(find.byTooltip('Start recording'), findsNothing);
     expect(find.text('CAPTURE SOURCE'), findsNothing);
     expect(find.text('CAPTURE SOURCES'), findsNothing);
     expect(
@@ -207,7 +208,12 @@ void main() {
 
     expect(find.text('STANDBY'), findsOneWidget);
     expect(find.text('Ready to record'), findsOneWidget);
-    expect(find.text('Start recording'), findsOneWidget);
+    expect(find.byTooltip('Start recording'), findsOneWidget);
+    // The page names its source in one line; the picker itself is behind the
+    // sheet rather than laid out on the page.
+    expect(find.text('WHERE TO RECORD'), findsNothing);
+    expect(find.text('Record from'), findsNothing);
+    expect(find.text('change'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -233,15 +239,24 @@ void main() {
 
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
-    expect(find.text('Pocket recorder records on its own'), findsOneWidget);
-    expect(find.text('Start recording'), findsNothing);
+    // The chip and the source line carry the device; the page has no banner
+    // repeating the same sentence back.
+    expect(find.text('Pocket recorder'), findsWidgets);
+    expect(find.textContaining('records on its own'), findsNothing);
+    expect(find.byTooltip('Start recording'), findsNothing);
+    expect(find.text('Recordings sync from the device'), findsOneWidget);
     expect(find.textContaining('Preferred device:'), findsNothing);
 
+    await tester.tap(find.text('change'));
+    await tester.pumpAndSettle();
     final phoneMicrophone = find.text('Phone microphone');
     await tester.ensureVisible(phoneMicrophone);
     await tester.tap(phoneMicrophone);
     await tester.pumpAndSettle();
-    expect(find.text('Pocket recorder records on its own'), findsNothing);
+    Navigator.of(tester.element(find.byType(RecordScreen))).pop();
+    await tester.pumpAndSettle();
+    // Back on the phone, the record control returns.
+    expect(find.byTooltip('Start recording'), findsOneWidget);
     expect(controller.preferBluetoothCapture, isFalse);
     expect(tester.takeException(), isNull);
   });
@@ -270,8 +285,9 @@ void main() {
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Start recording'), findsOneWidget);
-    expect(find.text('Memoket Gem records on its own'), findsOneWidget);
+    expect(find.byTooltip('Start recording'), findsOneWidget);
+    expect(find.text('Memoket Gem'), findsWidgets);
+    expect(find.textContaining('records on its own'), findsNothing);
     expect(find.textContaining('Preferred device:'), findsNothing);
     expect(
       find.textContaining('Start from the app or the device'),
@@ -304,12 +320,11 @@ void main() {
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
 
-    expect(find.text('PKT01_BLUE records on its own'), findsNothing);
+    expect(find.textContaining('records on its own'), findsNothing);
     expect(find.textContaining('Preferred device:'), findsNothing);
-    expect(
-      find.text('Connect a supported wearable before starting this source.'),
-      findsOneWidget,
-    );
+    // The device chip is the honest report: remembered, not connected.
+    expect(find.text('PKT01'), findsWidgets);
+    expect(find.text('Not connected'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -337,18 +352,86 @@ void main() {
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pumpAndSettle();
 
-    // A peer in the picker...
-    expect(find.text('Records the room on its own'), findsOneWidget);
-    // ...and the phone is where the page starts, because it always works.
-    expect(find.textContaining('Nothing to connect'), findsOneWidget);
+    // The phone is where the page starts, because it always works.
+    expect(find.text('Phone microphone'), findsOneWidget);
+    // A Desk is a device, so the header chip stands for it even before it is
+    // the chosen source — an owner with only a Desk does not have "no device".
+    expect(find.text('NeoRecall Desk'), findsOneWidget);
 
-    // Choosing it swaps the detail underneath rather than adding a second block.
-    final Finder deskOption = find.text('NeoRecall Desk').first;
-    await tester.ensureVisible(deskOption);
+    await tester.tap(find.text('change'));
     await tester.pumpAndSettle();
+
+    // A peer in the list, not a parallel block with its own heading. Reached
+    // by its supporting line, which only the sheet's tile carries.
+    final Finder deskOption = find.text('Records the room on its own');
+    expect(deskOption, findsOneWidget);
+    await tester.ensureVisible(deskOption);
     await tester.tap(deskOption);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Nothing to connect'), findsNothing);
+    Navigator.of(tester.element(find.byType(RecordScreen))).pop();
+    await tester.pumpAndSettle();
+
+    // The page now records from the Desk: the chip and the source line agree.
+    expect(find.text('NeoRecall Desk'), findsNWidgets(2));
+    expect(find.text('Phone microphone'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the chosen source is remembered and reopened', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController()..accountId = 'account-1';
+    addTearDown(controller.dispose);
+    controller.devices = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'desk-1',
+        'kind': 'appliance',
+        'name': 'Studio Desk',
+        'platform': 'appliance',
+        'revoked_at': null,
+      },
+    ];
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    expect(find.text('Phone microphone'), findsOneWidget);
+
+    await tester.tap(find.text('change'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Records the room on its own'));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.byType(RecordScreen))).pop();
+    await tester.pumpAndSettle();
+
+    expect(controller.rememberedCaptureSource, CaptureSource.desk);
+    expect(controller.rememberedCaptureDeskId, 'desk-1');
+
+    // Leaving the page and coming back reopens on the Desk, not the phone.
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+    await tester.pump();
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    expect(find.text('Studio Desk'), findsNWidgets(2));
+    expect(find.text('Phone microphone'), findsNothing);
+  });
+
+  testWidgets('a remembered source that no longer exists falls back', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = NeoRecallController()..accountId = 'account-1';
+    addTearDown(controller.dispose);
+    // The Desk was removed from the account since the choice was made.
+    await controller.rememberCaptureSource(
+      CaptureSource.desk,
+      deskId: 'desk-gone',
+    );
+
+    await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
+    await tester.pumpAndSettle();
+
+    // Falls back rather than opening on a source that cannot record.
+    expect(find.text('Phone microphone'), findsOneWidget);
+    expect(find.byTooltip('Start recording'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -366,28 +449,25 @@ void main() {
       await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Microphone'), findsOneWidget);
-      expect(find.text('Device audio'), findsOneWidget);
-      expect(find.text('Wearable'), findsOneWidget);
+      // Desktop names both of its inputs in the one source line.
+      expect(find.text('Microphone and device audio'), findsOneWidget);
       expect(find.text('Phone microphone'), findsNothing);
-      expect(find.text('WHERE TO RECORD'), findsOneWidget);
-      expect(
-        find.byIcon(Icons.check_circle_rounded),
-        findsNWidgets(2),
-        reason: 'microphone and device audio should both start selected',
-      );
 
-      // Bluetooth is not selected until asked for, and selecting it reveals the
-      // device setup affordances.
-      await tester.tap(find.text('Wearable'));
+      await tester.tap(find.text('change'));
       await tester.pumpAndSettle();
-      expect(find.text('Scan for wearables'), findsOneWidget);
+
+      // Desktop can mix inputs, so the two toggles belong to the computer
+      // option rather than being separate entries in the list.
+      expect(find.text('This computer'), findsOneWidget);
+      expect(find.text('Microphone'), findsOneWidget);
       expect(
-        find.text(
-          'Connect a supported streaming wearable before starting this source.',
-        ),
+        find.text('Device audio — everything this machine plays'),
         findsOneWidget,
       );
+      expect(find.byType(Switch), findsNWidgets(2));
+      expect(find.text('Wearable'), findsOneWidget);
+      expect(find.text('No wearable connected yet'), findsOneWidget);
+      expect(find.text('Scan'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;

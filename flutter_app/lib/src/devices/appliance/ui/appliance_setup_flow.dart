@@ -219,7 +219,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
         for (final ApplianceCandidate candidate in found)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: GlassSurface(
+            child: AppPanel(
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: <Widget>[

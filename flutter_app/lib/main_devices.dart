@@ -12,16 +12,22 @@ import 'src/devices/appliance/ui/appliance_setup_flow.dart';
 /// [ApplianceDeviceTile], so status language, reconnecting, and the detail sheet
 /// cannot drift into a second implementation.
 class DevicesPanel extends StatelessWidget {
-  const DevicesPanel({super.key, required this.controller});
+  const DevicesPanel({super.key, required this.controller, this.scrollable = true});
 
   final NeoRecallController controller;
+
+  /// False when the caller already provides the scroll view. Settings does:
+  /// its sections are rows in one list, and a panel that insists on its own
+  /// viewport is what made this section overflow on a short window.
+  final bool scrollable;
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     if (controller.devices.isEmpty) {
-      return GlassSurface(
+      return AppPanel(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             const EmptyState(
               icon: Icons.devices_outlined,
@@ -38,15 +44,29 @@ class DevicesPanel extends StatelessWidget {
       );
     }
 
+    // One extra row at the end: adding a device belongs where devices are, not
+    // behind a sentence pointing at another screen.
+    final rows = <Widget>[
+      for (final device in controller.devices) _row(context, palette, device),
+      _addDeskButton(context, palette),
+    ];
+    if (!scrollable) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (var index = 0; index < rows.length; index++) ...<Widget>[
+            if (index > 0) const SizedBox(height: 10),
+            rows[index],
+          ],
+        ],
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.only(right: 2, bottom: 32),
-      // One extra row at the end: adding a device belongs where devices are, not
-      // behind a sentence pointing at another screen.
-      itemCount: controller.devices.length + 1,
+      itemCount: rows.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, index) => index == controller.devices.length
-          ? _addDeskButton(context, palette)
-          : _row(context, palette, controller.devices[index]),
+      itemBuilder: (context, index) => rows[index],
     );
   }
 
@@ -86,7 +106,7 @@ class DevicesPanel extends StatelessWidget {
       );
     }
 
-    return GlassSurface(
+    return AppPanel(
       padding: const EdgeInsets.all(16),
       child: Row(
         children: <Widget>[

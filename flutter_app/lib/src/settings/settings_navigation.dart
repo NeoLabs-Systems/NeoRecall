@@ -93,27 +93,33 @@ class SettingsNavigation extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: palette.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
-            child: Text(
-              'Settings areas',
-              style: TextStyle(
-                color: palette.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+      // The rail scrolls on its own: seven areas with descriptions are taller
+      // than a short desktop window, and a nav that overflows is a nav with an
+      // unreachable last entry.
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+              child: Text(
+                'Settings areas',
+                style: TextStyle(
+                  color: palette.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-          ),
-          for (final item in items)
-            _SettingsNavigationButton(
-              item: item,
-              selected: item.section == selected,
-              onTap: () => onSelected(item.section),
-            ),
-        ],
+            for (final item in items)
+              _SettingsNavigationButton(
+                item: item,
+                selected: item.section == selected,
+                onTap: () => onSelected(item.section),
+              ),
+          ],
+        ),
       ),
     );
   }

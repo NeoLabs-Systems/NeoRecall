@@ -12,9 +12,10 @@ if [ -z "$NDK" ]; then
   done
 fi
 if [ ! -d "$NDK" ]; then
-  echo "Set ANDROID_NDK_HOME to an NDK r27+ install." >&2
+  echo "Set ANDROID_NDK_HOME to an NDK r28+ install." >&2
   exit 1
 fi
+echo "using NDK $NDK"
 
 SRC="$ROOT/lame-3.100"
 if [ ! -f "$SRC/libmp3lame/lame.c" ]; then
@@ -32,6 +33,7 @@ for ABI in arm64-v8a x86_64; do
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ABI" \
     -DANDROID_PLATFORM="android-$API" \
+    -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON \
     -DCMAKE_BUILD_TYPE=Release
   cmake --build "$BUILD" --target lame
   mkdir -p "$DEST/$ABI"

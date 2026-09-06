@@ -1,5 +1,23 @@
 import 'package:flutter/foundation.dart';
 
+/// What the record button acts on.
+///
+/// One value, not a set of booleans that can disagree with each other. The Desk
+/// is a peer here rather than a section of its own: it is another answer to
+/// "where does this recording come from".
+enum CaptureSource {
+  phone,
+  wearable,
+  desk;
+
+  static CaptureSource? fromName(String? name) {
+    for (final value in CaptureSource.values) {
+      if (value.name == name) return value;
+    }
+    return null;
+  }
+}
+
 /// The initial capture-source policy shared by every recording entry point.
 ///
 /// Keeping this separate from widgets prevents quick capture and the full

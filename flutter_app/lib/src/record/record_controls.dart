@@ -55,24 +55,56 @@ class CaptureStatusPill extends StatelessWidget {
   }
 }
 
-class StatusDot extends StatelessWidget {
-  const StatusDot({super.key, required this.color, this.size = 7});
+/// The circular record control the redesign leads with.
+///
+/// A labelled pill and an audio-reactive orb stacked on top of each other were
+/// two round objects doing one job. This is the object: the label moves to a
+/// caption beneath it and survives as the semantic name, so screen readers and
+/// widget tests still address it by what it does.
+class RecordDial extends StatelessWidget {
+  const RecordDial({
+    super.key,
+    required this.recording,
+    required this.onPressed,
+    this.diameter = 108,
+  });
 
-  final Color color;
-  final double size;
+  final bool recording;
+  final VoidCallback onPressed;
+  final double diameter;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      color: color,
-      boxShadow: <BoxShadow>[
-        BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 7),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final color = recording ? palette.secondary : palette.accent;
+    final label = recording ? 'Stop and finalize' : 'Start recording';
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: color,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: SizedBox(
+              width: diameter,
+              height: diameter,
+              // The glyph fills roughly two thirds of its box, so the box has
+              // to be half the dial for the mark to read at the intended size.
+              child: Icon(
+                recording ? Icons.stop_rounded : Icons.fiber_manual_record,
+                size: diameter * (recording ? 0.36 : 0.5),
+                color: palette.onAccent,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class RecordButton extends StatelessWidget {
@@ -91,43 +123,28 @@ class RecordButton extends StatelessWidget {
     final color = recording ? palette.secondary : palette.accent;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 300),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: color.withValues(alpha: 0.32),
-              blurRadius: 24,
-              offset: const Offset(0, 9),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            foregroundColor: palette.onAccent,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 17),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
-          ],
-        ),
-        child: SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: palette.onAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 17),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.pill),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
-              ),
-              textStyle: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.1,
-              ),
+            textStyle: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.1,
             ),
-            onPressed: onPressed,
-            icon: Icon(
-              recording
-                  ? Icons.stop_rounded
-                  : Icons.fiber_manual_record_rounded,
-              size: 20,
-            ),
-            label: Text(recording ? 'Stop and finalize' : 'Start recording'),
           ),
+          onPressed: onPressed,
+          icon: Icon(
+            recording ? Icons.stop_rounded : Icons.fiber_manual_record_rounded,
+            size: 20,
+          ),
+          label: Text(recording ? 'Stop and finalize' : 'Start recording'),
         ),
       ),
     );

@@ -118,3 +118,18 @@ test('an API key cannot delete the account it can otherwise read', async () => {
   await request(app).delete('/api/v1/auth/account').set('Authorization', `Bearer ${key.body.token}`)
     .send({ password: PASSWORD }).expect(403);
 });
+
+test('deleting an account leaves no trace of it in the audit trail', async () => {
+  const { userId, token } = await accountWithData('audit-user');
+  const db = getDatabase();
+  db.prepare(`INSERT INTO audit_log (actor_type,actor_id,affected_user_id,action)
+    VALUES ('user',?,?,'test.action')`).run(userId, userId);
+
+  await request(app).delete('/api/v1/auth/account').set('Authorization', `Bearer ${token}`)
+    .send({ password: PASSWORD }).expect(204);
+
+  // The entry may be retained, but it must no longer name the erased account.
+  const naming = db.prepare(`SELECT COUNT(*) c FROM audit_log
+    WHERE actor_id=? OR affected_user_id=?`).get(userId, userId).c;
+  assert.equal(naming, 0, 'the audit trail still identifies the deleted account');
+});

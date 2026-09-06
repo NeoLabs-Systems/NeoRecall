@@ -8,9 +8,17 @@ import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
 
 class TimelineScreen extends StatefulWidget {
-  const TimelineScreen({super.key, required this.controller});
+  const TimelineScreen({
+    super.key,
+    required this.controller,
+    this.embedded = false,
+  });
 
   final NeoRecallController controller;
+
+  /// True when Library owns the page title and the surrounding padding. The
+  /// screen then contributes only its list.
+  final bool embedded;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -34,24 +42,27 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
+        padding: widget.embedded
+            ? const EdgeInsets.only(bottom: 40)
+            : const EdgeInsets.fromLTRB(24, 24, 24, 48),
         children: <Widget>[
-          ScreenHeader(
-            eyebrow: 'TIMELINE',
-            title: 'Your day, at a glance',
-            description:
-                'A compact stream of conversations. Expand only the moments you want to read in full.',
-            trailing: moments.isEmpty
-                ? null
-                : _TimelineCount(
-                    conversations: moments.length,
-                    segments: moments.fold<int>(
-                      0,
-                      (total, moment) => total + moment.segmentCount,
+          if (!widget.embedded) ...<Widget>[
+            ScreenHeader(
+              title: 'Moments',
+              description:
+                  'A compact stream of conversations. Expand only the ones you want to read in full.',
+              trailing: moments.isEmpty
+                  ? null
+                  : _TimelineCount(
+                      conversations: moments.length,
+                      segments: moments.fold<int>(
+                        0,
+                        (total, moment) => total + moment.segmentCount,
+                      ),
                     ),
-                  ),
-          ),
-          const SizedBox(height: 18),
+            ),
+            const SizedBox(height: 18),
+          ],
           ProcessingStatusCard(
             issues: controller.processingIssues,
             audioStillOnDevice: controller.audioStillOnDevice,
@@ -62,7 +73,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             // already said so, and telling someone who recorded all day to
             // "start a recording" is the message that makes them think their
             // audio was lost.
-            GlassSurface(
+            AppPanel(
               child: EmptyState(
                 icon: Icons.view_timeline_outlined,
                 title: controller.processingIssues.isEmpty
@@ -74,7 +85,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
             )
           else
-            GlassSurface(
+            AppPanel(
               padding: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
@@ -716,7 +727,7 @@ class _TimelinePager extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final busy = controller.isPagingMoments;
-    return GlassSurface(
+    return AppPanel(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,

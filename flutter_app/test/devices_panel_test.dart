@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_devices.dart';
 import 'package:neorecall/main_theme.dart';
-import 'package:neorecall/src/record/record_controls.dart';
+import 'package:neorecall/main_shared.dart';
 
 /// NeoRecall Desk registers as device kind "appliance"; the devices panel
 /// must render it distinctly from other kinds and clearly mark revocation.

@@ -53,7 +53,7 @@ void main() {
     expect(find.text('NeoRecall'), findsOneWidget);
   });
 
-  testWidgets('desktop exposes Bluetooth in the shared capture flow', (
+  testWidgets('the source sheet is where a wearable is chosen', (
     tester,
   ) async {
     final controller = NeoRecallController();
@@ -64,17 +64,24 @@ void main() {
         home: Scaffold(body: RecordScreen(controller: controller)),
       ),
     );
+    await tester.pumpAndSettle();
 
+    // The page itself says only what it is recording from; the picker is not
+    // laid out on it.
+    expect(find.text('Wearable'), findsNothing);
+    expect(find.text('Scan for wearables'), findsNothing);
+
+    await tester.tap(find.text('change'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Record from'), findsOneWidget);
     expect(find.text('Wearable'), findsOneWidget);
-    await tester.ensureVisible(find.text('Wearable'));
-    await tester.tap(find.text('Wearable'));
-    await tester.pump();
-    expect(find.text('Scan for wearables'), findsOneWidget);
+    expect(find.text('Import an audio file'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'mobile without a saved device exposes Bluetooth setup and microphone fallback',
+    'a wearable with nothing paired offers a scan instead of a selection',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       try {
@@ -87,28 +94,20 @@ void main() {
             home: Scaffold(body: RecordScreen(controller: controller)),
           ),
         );
+        await tester.pumpAndSettle();
 
-        expect(find.text('Wearable'), findsOneWidget);
+        // The phone is what the page starts on, because it always works.
         expect(find.text('Phone microphone'), findsOneWidget);
 
-        // The page opens on the phone, which needs nothing set up, so the
-        // wearable's controls are behind its own option rather than shown to
-        // everybody who has no wearable.
-        expect(find.text('Scan for wearables'), findsNothing);
-
-        final Finder wearable = find.text('Wearable');
-        await tester.ensureVisible(wearable);
-        await tester.pumpAndSettle();
-        await tester.tap(wearable);
+        await tester.tap(find.text('change'));
         await tester.pumpAndSettle();
 
-        expect(find.text('Scan for wearables'), findsOneWidget);
-        expect(
-          find.text(
-            'Connect a supported streaming wearable before starting this source.',
-          ),
-          findsOneWidget,
-        );
+        // Unavailable sources stay visible and dimmed, carrying the action that
+        // would make them available, rather than disappearing.
+        expect(find.text('No wearable connected yet'), findsOneWidget);
+        expect(find.text('Scan'), findsOneWidget);
+        expect(find.text('Not set up'), findsOneWidget);
+        expect(find.text('Set up'), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -258,7 +257,10 @@ void main() {
     expect(find.byTooltip('Sign out'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Settings'));
+    // Let the shell's page cross-fade finish: while it runs, the outgoing and
+    // incoming screens are both mounted and a tap lands on neither reliably.
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Settings areas'), findsOneWidget);
     expect(find.text('Account devices'), findsOneWidget);
 
@@ -270,6 +272,68 @@ void main() {
     expect(find.text('Add a NeoRecall Desk'), findsOneWidget);
     expect(find.textContaining('Backend URL'), findsNothing);
     expect(find.text('Client'), findsNothing);
+  });
+
+  testWidgets('the phone tab bar navigates and lights the right tab', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = NeoRecallController()..username = 'Neo';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildNeoRecallTheme(Brightness.dark),
+        home: AnimatedBuilder(
+          animation: controller,
+          builder: (_, _) => NeoRecallShell(controller: controller),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // A bar, not a drawer: the whole product is visible without a hamburger.
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(Drawer), findsNothing);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      0,
+    );
+
+    await tester.tap(find.text('Library'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(controller.page, RecallPage.library);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      1,
+    );
+
+    // Library remembers which list it was on, so returning to the tab does not
+    // snap back to Moments.
+    controller.selectLibraryTab(LibraryTab.speakers);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Search'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(controller.page, RecallPage.search);
+    await tester.tap(find.text('Library'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(controller.libraryTab, LibraryTab.speakers);
+
+    // Sources has no tab of its own; it belongs to the tab it is reached from.
+    controller.selectPage(RecallPage.sources);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      0,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('shared shell keeps the canonical web section structure', (
@@ -288,16 +352,21 @@ void main() {
       ),
     );
 
-    for (final label in <String>[
-      'Record',
-      'Timeline',
-      'Memories',
-      'Search',
-      'Speakers',
-      'Sources',
-    ]) {
+    // Four groups, not six flat entries. Capture is open because Record is the
+    // page on screen; the rest stay collapsed until asked for.
+    for (final label in <String>['Capture', 'Library', 'Search', 'Settings']) {
       expect(find.text(label), findsOneWidget);
     }
+    expect(find.text('Record'), findsOneWidget);
+    expect(find.text('Sources'), findsOneWidget);
+    // Library's children are behind its own group row.
+    expect(find.text('Memories'), findsNothing);
+    expect(find.text('Speakers'), findsNothing);
+
+    await tester.tap(find.text('Library'));
+    await tester.pumpAndSettle();
+    expect(find.text('Memories'), findsWidgets);
+    expect(find.text('Speakers'), findsWidgets);
     expect(find.text('New recording'), findsNothing);
   });
 

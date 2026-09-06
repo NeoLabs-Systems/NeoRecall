@@ -37,7 +37,7 @@ class ProcessingStatusCard extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
-      child: GlassSurface(
+      child: AppPanel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[

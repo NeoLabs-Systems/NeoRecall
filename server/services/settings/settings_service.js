@@ -88,6 +88,10 @@ function get(userId) {
     }
   }
   const config = getConfig();
+  // The installation's hard floor, reported separately from the effective
+  // value. A client that only sees the effective value cannot tell a floor from
+  // the current choice, so it ends up refusing to let the interval be lowered.
+  result.minConsolidationIntervalMs = config.minConsolidationIntervalMs;
   result.effectiveConsolidationIntervalMs = Math.max(result.consolidationIntervalMs, config.minConsolidationIntervalMs);
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;

@@ -171,7 +171,7 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     _configuringWindow = true;
     try {
       if (selectNotes && controller.page == RecallPage.record) {
-        controller.selectPage(RecallPage.timeline);
+        controller.selectLibraryTab(LibraryTab.moments);
       }
       if (mounted && _floatingMode) setState(() => _floatingMode = false);
       await _window.showLibrary(
@@ -270,7 +270,7 @@ class _NeoRecallSplashView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AmbientBackdrop(
+    return AppBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: Center(

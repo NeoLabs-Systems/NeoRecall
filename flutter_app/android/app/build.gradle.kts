@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "systems.neolabs.neorecall"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // r28 defaults to 16 KB pages and pads GNU_RELRO to a 16 KB boundary.
+    // Flutter 3.35 still pins r27, whose lld leaves RELRO on a 4 KB end.
+    ndkVersion = "28.2.13676358"
 
     signingConfigs {
         getByName("debug") {
@@ -62,6 +64,9 @@ android {
             useLegacyPackaging = false
             pickFirsts += "**/libopus.so"
             pickFirsts += "**/liblame.so"
+            // Debug Impeller validation layer; not needed on device and fails
+            // Pixel 16 KB RELRO checks.
+            excludes += "**/libVkLayer_khronos_validation.so"
         }
     }
 }
@@ -74,5 +79,22 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation(project(":wear-protocol"))
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    // Plaud still declares conscrypt; 2.6.2 is the first Maven build whose
+    // GNU_RELRO ends on a 16 KB page (2.5.3 only fixed LOAD alignment).
+    implementation("org.conscrypt:conscrypt-android:2.6.2")
+    implementation("androidx.datastore:datastore:1.2.1")
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
     testImplementation("junit:junit:4.13.2")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("org.conscrypt:conscrypt-android:2.6.2")
+        force("androidx.datastore:datastore:1.2.1")
+        force("androidx.datastore:datastore-android:1.2.1")
+        force("androidx.datastore:datastore-core:1.2.1")
+        force("androidx.datastore:datastore-core-android:1.2.1")
+        force("androidx.datastore:datastore-preferences:1.2.1")
+        force("androidx.datastore:datastore-preferences-android:1.2.1")
+    }
 }

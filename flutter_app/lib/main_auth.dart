@@ -98,7 +98,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     final controller = widget.controller;
     final compact = MediaQuery.sizeOf(context).width < 760;
 
-    final card = GlassSurface(
+    final card = AppPanel(
       radius: serverSetup && _canConfigureServer ? 34 : 32,
       padding: serverSetup && _canConfigureServer
           ? EdgeInsets.fromLTRB(
@@ -121,13 +121,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
               children: <Widget>[
                 const Center(child: BrandLockup(logoSize: 56)),
                 const SizedBox(height: 26),
-                Text(
-                  awaitingTwoFactor
-                      ? 'VERIFICATION'
-                      : (registerMode ? 'CREATE ACCOUNT' : 'SIGN IN'),
-                  style: sectionEyebrowStyle(palette),
-                ),
-                const SizedBox(height: 8),
+                // No eyebrow: it only ever restated the title underneath it.
                 Text(
                   awaitingTwoFactor
                       ? 'Enter 2FA code'
@@ -254,7 +248,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       resizeToAvoidBottomInset: true,
-      body: AmbientBackdrop(
+      body: AppBackdrop(
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) => SingleChildScrollView(

@@ -10,9 +10,21 @@ import 'src/models/memory.dart';
 import 'src/widgets/selection_mixin.dart';
 
 class MemoriesScreen extends StatefulWidget {
-  const MemoriesScreen({super.key, required this.controller});
+  const MemoriesScreen({
+    super.key,
+    required this.controller,
+    this.embedded = false,
+    this.tab,
+  });
 
   final NeoRecallController controller;
+
+  /// True when Library owns the page title and padding.
+  final bool embedded;
+
+  /// Which list to show. Library drives this from its segmented control; the
+  /// standalone screen keeps its own state.
+  final MemoriesTab? tab;
 
   @override
   State<MemoriesScreen> createState() => _MemoriesScreenState();
@@ -20,7 +32,9 @@ class MemoriesScreen extends StatefulWidget {
 
 class _MemoriesScreenState extends State<MemoriesScreen>
     with SelectionMixin<MemoriesScreen> {
-  MemoriesTab _tab = MemoriesTab.moments;
+  MemoriesTab _ownTab = MemoriesTab.moments;
+
+  MemoriesTab get _tab => widget.tab ?? _ownTab;
   MemoryFilter _filter = MemoryFilter.all;
   String _query = '';
   final TextEditingController _searchController = TextEditingController();
@@ -60,10 +74,14 @@ class _MemoriesScreenState extends State<MemoriesScreen>
       if (!mounted) return;
       if (controller.takePendingWidgetHighlightsTab() &&
           _tab != MemoriesTab.highlights) {
-        setState(() {
-          _tab = MemoriesTab.highlights;
-          exitSelect();
-        });
+        // Library owns the segment when embedded, so ask the controller rather
+        // than setting a tab the parent would immediately overwrite.
+        if (widget.embedded) {
+          controller.selectLibraryTab(LibraryTab.highlights);
+        } else {
+          setState(() => _ownTab = MemoriesTab.highlights);
+        }
+        if (mounted) setState(exitSelect);
       }
       final memoryId = controller.takePendingWidgetMemoryId();
       if (memoryId != null) {
@@ -341,21 +359,34 @@ class _MemoriesScreenState extends State<MemoriesScreen>
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
+        padding: widget.embedded
+            ? const EdgeInsets.only(bottom: 40)
+            : const EdgeInsets.fromLTRB(24, 24, 24, 48),
         children: <Widget>[
-          ScreenHeader(
-            eyebrow: 'MEMORIES',
-            title: 'Moments that matter',
-            description:
-                'Your conversations, distilled into clear memories and actionable highlights — automatically.',
-            trailing: selecting
-                ? TextButton(onPressed: exitSelect, child: const Text('Done'))
-                : TextButton.icon(
-                    onPressed: memories.isEmpty ? null : () => enterSelect(),
-                    icon: const Icon(Icons.checklist_rounded, size: 18),
-                    label: const Text('Select'),
-                  ),
-          ),
+          if (widget.embedded)
+            Align(
+              alignment: Alignment.centerRight,
+              child: selecting
+                  ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+                  : TextButton.icon(
+                      onPressed: memories.isEmpty ? null : () => enterSelect(),
+                      icon: const Icon(Icons.checklist_rounded, size: 18),
+                      label: const Text('Select'),
+                    ),
+            )
+          else
+            ScreenHeader(
+              title: 'Memories',
+              description:
+                  'Your conversations, distilled into clear memories and actionable highlights.',
+              trailing: selecting
+                  ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+                  : TextButton.icon(
+                      onPressed: memories.isEmpty ? null : () => enterSelect(),
+                      icon: const Icon(Icons.checklist_rounded, size: 18),
+                      label: const Text('Select'),
+                    ),
+            ),
           if (controller.dailySummaries.isNotEmpty) ...<Widget>[
             DailySummaryCard(summary: controller.dailySummaries.first),
             const SizedBox(height: 16),
@@ -365,16 +396,20 @@ class _MemoriesScreenState extends State<MemoriesScreen>
             onChanged: (value) => setState(() => _query = value),
           ),
           const SizedBox(height: 14),
-          MemoriesTabBar(
-            tab: _tab,
-            momentsCount: controller.memories.where((m) => !m.archived).length,
-            highlightsCount: controller.miniMemories.length,
-            onChanged: (tab) => setState(() {
-              _tab = tab;
-              exitSelect();
-            }),
-          ),
-          const SizedBox(height: 14),
+          if (!widget.embedded) ...<Widget>[
+            MemoriesTabBar(
+              tab: _tab,
+              momentsCount: controller.memories
+                  .where((m) => !m.archived)
+                  .length,
+              highlightsCount: controller.miniMemories.length,
+              onChanged: (tab) => setState(() {
+                _ownTab = tab;
+                exitSelect();
+              }),
+            ),
+            const SizedBox(height: 14),
+          ],
           if (_tab == MemoriesTab.moments) ...<Widget>[
             FilterRow(
               filter: _filter,
@@ -400,7 +435,7 @@ class _MemoriesScreenState extends State<MemoriesScreen>
               const SizedBox(height: 14),
             ],
             if (memories.isEmpty)
-              GlassSurface(
+              AppPanel(
                 child: EmptyState(
                   icon: Icons.auto_awesome_outlined,
                   title: _query.isNotEmpty || _filter != MemoryFilter.all
@@ -434,7 +469,7 @@ class _MemoriesScreenState extends State<MemoriesScreen>
             ),
             const SizedBox(height: 12),
             if (minis.isEmpty)
-              const GlassSurface(
+              const AppPanel(
                 child: EmptyState(
                   icon: Icons.timeline_outlined,
                   title: 'No action items yet',
