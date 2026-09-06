@@ -1,3 +1,4 @@
+require 'fileutils'
 platform :osx, '13.0'
 
 # CocoaPods analytics sends network stats synchronously affecting Flutter builds.
@@ -25,6 +26,59 @@ end
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
 
 flutter_macos_podfile_setup
+
+# Publishing to pub.dev does not preserve symlinks, so a vendored macOS
+# framework arrives flattened: the binary, Headers and Info.plist sit at the top
+# level and Versions/A is left empty. Xcode 26 rejects that layout outright --
+# "contains Info.plist, expected Versions/Current/Resources/Info.plist since the
+# platform does not use shallow bundles" -- while older Xcode accepted it, which
+# is why CI has been building what this machine cannot.
+#
+# Restore the versioned layout the framework was published with. The repair is
+# idempotent and matches only that signature, so a correctly shipped framework
+# is left untouched.
+def repair_flattened_framework(framework)
+  name = File.basename(framework, '.framework')
+  binary = File.join(framework, name)
+  versions_a = File.join(framework, 'Versions', 'A')
+  return unless File.file?(binary) && !File.symlink?(binary)
+  return unless Dir.exist?(versions_a) && (Dir.entries(versions_a) - %w[. ..]).empty?
+
+  resources = File.join(versions_a, 'Resources')
+  FileUtils.mkdir_p(resources)
+  FileUtils.mv(binary, File.join(versions_a, name))
+  %w[Headers Modules].each do |directory|
+    source = File.join(framework, directory)
+    FileUtils.mv(source, File.join(versions_a, directory)) if Dir.exist?(source)
+  end
+  info = File.join(framework, 'Info.plist')
+  FileUtils.mv(info, File.join(resources, 'Info.plist')) if File.file?(info)
+
+  Dir.chdir(framework) do
+    File.symlink('A', File.join('Versions', 'Current')) unless File.symlink?(File.join('Versions', 'Current'))
+    { name => name, 'Headers' => 'Headers', 'Modules' => 'Modules', 'Resources' => 'Resources' }.each do |link, target|
+      next if File.symlink?(link)
+      next unless File.exist?(File.join('Versions', 'Current', target))
+      File.symlink(File.join('Versions', 'Current', target), link)
+    end
+  end
+  Pod::UI.puts "[neorecall] repaired framework layout: #{framework}"
+end
+
+pre_install do |installer|
+  installer.pod_targets.each do |pod_target|
+    pod_target.file_accessors.each do |accessor|
+      accessor.vendored_frameworks.each do |framework|
+        path = framework.to_s
+        if path.end_with?('.xcframework')
+          Dir.glob(File.join(path, '*', '*.framework')).each { |inner| repair_flattened_framework(inner) }
+        elsif path.end_with?('.framework')
+          repair_flattened_framework(path)
+        end
+      end
+    end
+  end
+end
 
 target 'Runner' do
   use_frameworks!
