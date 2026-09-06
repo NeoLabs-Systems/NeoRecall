@@ -33,8 +33,13 @@ test.after(() => {
   fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true });
 });
 
+// One clock reading for the whole suite. Reading it per call made a pair of
+// offsets 50 seconds apart come out 50001 ms whenever the millisecond ticked
+// between the two calls, which failed a release at random.
+const SUITE_NOW = Date.now();
+
 function iso(offsetMs) {
-  return new Date(Date.now() + offsetMs).toISOString();
+  return new Date(SUITE_NOW + offsetMs).toISOString();
 }
 
 /// A user with one still-running recording, ready for segments to be appended.
