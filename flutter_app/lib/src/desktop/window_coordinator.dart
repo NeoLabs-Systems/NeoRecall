@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// Owns native desktop window presentation so app lifecycle code only decides
@@ -14,11 +16,70 @@ class DesktopWindowCoordinator {
   static const Size librarySize = Size(1180, 780);
   static const Size libraryMinimumSize = Size(760, 560);
 
-  static const WindowOptions initialOptions = WindowOptions(
-    size: librarySize,
-    minimumSize: libraryMinimumSize,
-    center: true,
-    title: 'NeoRecall',
+  /// Kept clear of the menu bar and dock, so a window sized to the work area
+  /// still reads as a window rather than filling the screen edge to edge.
+  static const double screenMargin = 48;
+
+  static const Color _darkChrome = Color(0xFF151514);
+  static const Color _lightChrome = Color(0xFFF8F7F2);
+
+  /// The library window as it should open on this machine.
+  ///
+  /// The size used to be a fixed 1180x780. On any display whose work area is
+  /// shorter than that -- a laptop at a scaled resolution, an external screen
+  /// with a large dock -- the frame ran past the bottom of the screen and the
+  /// native window background showed through the part Flutter had not laid
+  /// out, as black bands along the edges.
+  Future<WindowOptions> initialWindowOptions() async {
+    final size = await fitToScreen(librarySize);
+    return WindowOptions(
+      size: size,
+      minimumSize: _withinBounds(libraryMinimumSize, size),
+      center: true,
+      title: 'NeoRecall',
+      // Painted before the first frame arrives, so a resize never exposes an
+      // unpainted black rectangle.
+      backgroundColor:
+          PlatformDispatcher.instance.platformBrightness == Brightness.dark
+          ? _darkChrome
+          : _lightChrome,
+    );
+  }
+
+  /// [desired], shrunk to what the display it opens on can actually show.
+  @visibleForTesting
+  Future<Size> fitToScreen(Size desired) async {
+    try {
+      final display = await screenRetriever.getPrimaryDisplay();
+      final visible = display.visibleSize ?? display.size;
+      return clampToVisible(desired, visible);
+    } on Object {
+      // No display to ask (headless, or a platform without the plugin): the
+      // requested size is still the best guess available.
+      return desired;
+    }
+  }
+
+  @visibleForTesting
+  static Size clampToVisible(Size desired, Size visible) {
+    // A display smaller than the margin is not a real display; never return a
+    // size at or below zero for one.
+    final width = math.max(
+      floatingSize.width,
+      math.min(desired.width, visible.width - screenMargin),
+    );
+    final height = math.max(
+      floatingSize.height,
+      math.min(desired.height, visible.height - screenMargin),
+    );
+    return Size(width, height);
+  }
+
+  /// A minimum larger than the window itself would force the frame back off
+  /// the screen, so it follows the fitted size down.
+  static Size _withinBounds(Size minimum, Size bounds) => Size(
+    math.min(minimum.width, bounds.width),
+    math.min(minimum.height, bounds.height),
   );
 
   Future<void> showFloating({bool activate = true}) async {
@@ -60,13 +121,12 @@ class DesktopWindowCoordinator {
     }
     await windowManager.setSkipTaskbar(false);
     await windowManager.setResizable(true);
-    await windowManager.setMinimumSize(libraryMinimumSize);
+    final size = await fitToScreen(librarySize);
+    await windowManager.setMinimumSize(_withinBounds(libraryMinimumSize, size));
     await windowManager.setBackgroundColor(
-      brightness == Brightness.dark
-          ? const Color(0xFF151514)
-          : const Color(0xFFF8F7F2),
+      brightness == Brightness.dark ? _darkChrome : _lightChrome,
     );
-    await windowManager.setSize(librarySize, animate: true);
+    await windowManager.setSize(size, animate: true);
     await windowManager.center(animate: true);
     await _show();
   }

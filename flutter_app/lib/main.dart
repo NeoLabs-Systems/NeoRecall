@@ -24,7 +24,7 @@ Future<void> main() async {
           defaultTargetPlatform == TargetPlatform.windows)) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
-      DesktopWindowCoordinator.initialOptions,
+      await const DesktopWindowCoordinator().initialWindowOptions(),
       () async {
         await windowManager.show();
         await windowManager.focus();

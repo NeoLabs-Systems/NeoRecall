@@ -62,6 +62,18 @@ class LocalBackendInstaller {
         retryable: false,
       );
     }
+    if (_isSandboxed) {
+      throw const LocalBackendInstallerException(
+        'SETUP_APP_SANDBOX',
+        'This build of NeoRecall runs in the macOS App Sandbox, which cannot '
+            'install a server: it redirects the home directory into the app '
+            'container and blocks git, npm, and the background service.',
+        retryable: false,
+        remedy: 'Install from a terminal instead:\n'
+            'bash <(curl -fsSL https://raw.githubusercontent.com/'
+            'NeoLabs-Systems/NeoRecall/main/install.sh)',
+      );
+    }
     _cancelled = false;
     final directory = Directory(
       (installDirectory?.trim().isNotEmpty ?? false)
@@ -604,8 +616,9 @@ class LocalBackendInstaller {
       Platform.isWindows ? 'where' : 'which',
       <String>[command],
     );
-    final direct = _firstExistingPath(lookup);
-    if (direct != null) return direct;
+    for (final path in _existingPaths(lookup)) {
+      if (await _runs(path)) return path;
+    }
 
     if (!Platform.isWindows) {
       // Apps launched from Finder or a .desktop entry inherit a minimal PATH,
@@ -615,24 +628,40 @@ class LocalBackendInstaller {
         '-lc',
         'command -v $command',
       ]);
-      final shellPath = _firstExistingPath(viaShell);
-      if (shellPath != null) return shellPath;
+      for (final path in _existingPaths(viaShell)) {
+        if (await _runs(path)) return path;
+      }
     }
 
     for (final candidate in _candidatePaths(command)) {
-      if (File(candidate).existsSync()) return candidate;
+      if (File(candidate).existsSync() && await _runs(candidate)) {
+        return candidate;
+      }
     }
     return null;
   }
 
-  String? _firstExistingPath(ProcessResult? result) {
-    if (result == null || result.exitCode != 0) return null;
-    for (final line in const LineSplitter().convert('${result.stdout}')) {
-      final path = line.trim();
-      if (path.isNotEmpty && File(path).existsSync()) return path;
-    }
-    return null;
+  /// Whether the file at this path is the working tool and not a stand-in for
+  /// one. `/usr/bin/git` exists on every Mac but is an Xcode shim: without the
+  /// command line tools installed it only prints an error, and treating it as
+  /// Git would fail the install halfway through instead of up front.
+  Future<bool> _runs(String path) async {
+    final probe = await _runQuiet(path, <String>['--version']);
+    return probe != null && probe.exitCode == 0;
   }
+
+  List<String> _existingPaths(ProcessResult? result) {
+    if (result == null || result.exitCode != 0) return const <String>[];
+    return <String>[
+      for (final line in const LineSplitter().convert('${result.stdout}'))
+        if (line.trim().isNotEmpty && File(line.trim()).existsSync()) line.trim(),
+    ];
+  }
+
+  /// The sandbox sets this for every process it contains.
+  bool get _isSandboxed =>
+      Platform.isMacOS &&
+      (Platform.environment['APP_SANDBOX_CONTAINER_ID']?.isNotEmpty ?? false);
 
   List<String> _candidatePaths(String command) {
     final home = _homeDirectory();
