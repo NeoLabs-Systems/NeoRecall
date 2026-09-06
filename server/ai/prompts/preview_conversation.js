@@ -21,7 +21,7 @@ The transcript is a prefix: recording continues and later speech may change what
 
 const CONTINUATION_INSTRUCTIONS = `You maintain the description of a conversation that is still being recorded. Return one JSON object matching the supplied contract.
 You are given the description written earlier and only the speech recorded since. Produce the description of the conversation as a whole: carry forward everything from the earlier summary that still holds, and fold in what the new speech adds or corrects. Never describe only the new part, never refer to an earlier summary or to earlier updates, and never state that the transcript is partial or continuing.
-Revise the title when the new speech shows the conversation is really about something else; otherwise keep it stable so it does not change under the reader on every update.`;
+Revise the title when the new speech or user-supplied context shows the conversation is really about something else; otherwise keep it stable so it does not change under the reader on every update.`;
 
 const SHARED_INSTRUCTIONS = `titleEn, summaryEn and topics MUST be English even when the transcript is German or another language. Preserve proper names accurately.
 The title is a concise specific name for this conversation, the kind a person would use to find it again.

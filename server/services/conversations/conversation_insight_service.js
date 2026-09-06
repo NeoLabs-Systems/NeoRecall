@@ -71,15 +71,29 @@ function previewOwns(conversation) {
 // The interval is measured from the last *attempt*, not the last success.
 // Measuring successes would leave a conversation whose previews keep failing
 // permanently due, and the scheduler would spend a request a minute on it.
-function previewDue(conversation, characters, limits, now = Date.now()) {
+function previewDue(conversation, characters, limits, now = Date.now(), options = {}) {
   if (conversation.insight_state === FINAL) return false;
   // A short recording never reaches a model at all, however dense its speech.
   if (material.durationMs(conversation) < limits.minimumAudioMs) return false;
   if (characters < limits.minimumCharacters) return false;
+  const contextRefresh = Boolean(options.contextRefresh);
   const attemptedAt = conversation.insight_attempted_at || conversation.insight_updated_at;
-  if (attemptedAt && now - Date.parse(attemptedAt) < limits.minimumIntervalMs) return false;
+  // A note or analyzed file is new evidence, not more speech. Waiting out the
+  // speech interval would leave the live title ignoring what the user just added.
+  if (!contextRefresh && attemptedAt && now - Date.parse(attemptedAt) < limits.minimumIntervalMs) return false;
   if (conversation.insight_state !== PROVISIONAL) return true;
+  if (contextRefresh) return true;
   return characters - conversation.insight_characters >= limits.refreshCharacters;
+}
+
+function hasContextSince(userId, conversation, since, database = getDatabase()) {
+  const sessionId = conversation.session_id || conversation.sessionId;
+  if (!sessionId || !since) return false;
+  return Boolean(database.prepare(`SELECT 1 FROM recording_context_items
+    WHERE user_id=? AND session_id=?
+      AND analysis_state IN ('ready','skipped','failed')
+      AND COALESCE(updated_at, created_at) > ?
+    LIMIT 1`).get(userId, sessionId, since));
 }
 
 function due(userId, database = getDatabase()) {
@@ -89,7 +103,14 @@ function due(userId, database = getDatabase()) {
   return material.listByState(userId, PREVIEWABLE_STATES, database, { includeQuarantined: true })
     .filter(previewOwns)
     .map((conversation) => ({ conversation, characters: material.transcriptCharacters(userId, conversation.id, database) }))
-    .filter(({ conversation, characters }) => previewDue(conversation, characters, limits, now))
+    .filter(({ conversation, characters }) => previewDue(conversation, characters, limits, now, {
+      contextRefresh: hasContextSince(
+        userId,
+        conversation,
+        conversation.insight_updated_at || conversation.insight_attempted_at,
+        database,
+      ),
+    }))
     .filter(({ conversation }) => material.isComplete(userId, conversation.id, database));
 }
 
@@ -98,19 +119,37 @@ function due(userId, database = getDatabase()) {
 // Enqueueing is idempotent per conversation: the job table rejects a second
 // active job for the same resource, so a scheduler tick during a running
 // preview adds nothing.
+function enqueuePreview(userId, conversationId, database = getDatabase()) {
+  return jobs.enqueue({
+    userId,
+    resourceType: 'conversation',
+    resourceId: conversationId,
+    type: 'preview_conversation',
+    priority: 40,
+  }, database);
+}
+
 function request(userId, database = getDatabase()) {
   const queued = [];
   for (const { conversation } of due(userId, database)) {
-    jobs.enqueue({
-      userId,
-      resourceType: 'conversation',
-      resourceId: conversation.id,
-      type: 'preview_conversation',
-      priority: 40,
-    }, database);
+    enqueuePreview(userId, conversation.id, database);
     queued.push(conversation.id);
   }
   return { queued };
+}
+
+// A live note, highlight or analyzed file belongs to the session, not to a
+// memory yet. Queue a preview for every open (or quarantined) conversation on
+// that session so the title and summary can fold the new evidence in.
+function enqueueForSession(userId, sessionId, database = getDatabase()) {
+  if (!sessionId) return [];
+  const queued = [];
+  for (const conversation of material.listForSession(userId, sessionId, database)) {
+    if (!previewOwns(conversation) || conversation.insight_state === FINAL) continue;
+    enqueuePreview(userId, conversation.id, database);
+    queued.push(conversation.id);
+  }
+  return queued;
 }
 
 // Keeps the leading segments that fit in one request.
@@ -224,25 +263,41 @@ async function execute(userId, conversationId) {
   if (!conversation || !previewOwns(conversation)) return { skipped: 'not_previewable' };
   // Re-checked here because the queue is not the authority: the conversation may
   // have been previewed, split or extended since the job was created.
-  if (!previewDue(conversation, material.transcriptCharacters(userId, conversationId, database), limits)) return { skipped: 'not_due' };
+  const contextRefresh = hasContextSince(
+    userId,
+    conversation,
+    conversation.insight_updated_at || conversation.insight_attempted_at,
+    database,
+  );
+  if (!previewDue(conversation, material.transcriptCharacters(userId, conversationId, database), limits, Date.now(), {
+    contextRefresh,
+  })) return { skipped: 'not_due' };
   if (!material.isComplete(userId, conversationId, database)) return { skipped: 'incomplete' };
   const input = previewInput(userId, conversation, limits, database);
   const coveredThrough = input.conversation.segments.at(-1)?.ended_at || conversation.ended_at;
+  const attemptedAt = conversation.insight_attempted_at || conversation.insight_updated_at;
   markAttempted(userId, conversationId, database);
   const response = await ai.previewConversation(userId, {
     conversation: input.conversation,
     previousInsight: input.previousInsight,
     timezone: settings.get(userId).timezone,
   });
+  const persisted = persist(userId, conversationId, response.value, {
+    characters: input.characters, coveredThrough, aiRequestId: response.requestId,
+  }, database);
+  // A note saved while this request was in flight is newer than the attempt
+  // stamp and would otherwise wait for more speech.
+  if (hasContextSince(userId, conversation, attemptedAt, database)) {
+    enqueuePreview(userId, conversationId, database);
+  }
   return {
     conversationId,
     rolling: Boolean(input.previousInsight),
-    ...persist(userId, conversationId, response.value, {
-      characters: input.characters, coveredThrough, aiRequestId: response.requestId,
-    }, database),
+    ...persisted,
   };
 }
 
 module.exports = {
-  due, request, execute, persist, thresholds, previewDue, previewOwns, previewInput, PROVISIONAL, FINAL,
+  due, request, execute, persist, thresholds, previewDue, previewOwns, previewInput,
+  enqueueForSession, hasContextSince, PROVISIONAL, FINAL,
 };

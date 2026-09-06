@@ -26,6 +26,16 @@ test('a conversation is previewed once it carries enough transcript to describe'
   assert.equal(previewDue(conversation(), 800, limits, now), true);
 });
 
+test('a note after a preview refreshes the insight without waiting for more speech', () => {
+  const previewed = conversation({
+    insight_state: PROVISIONAL,
+    insight_characters: 5_000,
+    insight_updated_at: '2026-08-01T11:57:00.000Z',
+  });
+  assert.equal(previewDue(previewed, 5_100, limits, now), false);
+  assert.equal(previewDue(previewed, 5_100, limits, now, { contextRefresh: true }), true);
+});
+
 test('a previewed conversation is only re-previewed after enough new speech and enough time', () => {
   const previewed = conversation({
     insight_state: PROVISIONAL,

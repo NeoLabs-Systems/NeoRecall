@@ -131,3 +131,34 @@ test('uploaded originals expire retroactively without removing extracted context
   assert.equal(retained.extracted_text, 'Launch: September 8');
   assert.equal(retained.analysis_text, 'The roadmap states a September 8 launch.');
 });
+
+test('a live note queues a conversation preview so the title can use it', async () => {
+  const { registered, auth, sessionId, sourceId } = await accountWithRecording();
+  const db = getDatabase();
+  const userId = registered.body.user.id;
+  const chunkId = crypto.randomUUID();
+  const conversationId = crypto.randomUUID();
+  db.prepare(`INSERT INTO audio_chunks
+    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
+    VALUES (?,?,?,?,0,?,?,1,'wav','pcm_s16le','mono','2026-08-26T08:00:00.000Z',0,10000,'transcribed')`)
+    .run(chunkId, userId, sessionId, sourceId, chunkId, crypto.randomBytes(32).toString('hex'));
+  db.prepare(`INSERT INTO conversations
+    (id,user_id,started_at,ended_at,state,boundary_method,boundary_version,insight_state,title_en,summary_en)
+    VALUES (?,?,?,?, 'open','test','1','provisional','Standup','What we talked about')`)
+    .run(conversationId, userId, '2026-08-26T08:00:00.000Z', '2026-08-26T08:10:00.000Z');
+  db.prepare(`INSERT INTO transcript_segments
+    (public_id,user_id,chunk_id,conversation_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text,language)
+    VALUES (?,?,?,?,'combined','2026-08-26T08:00:00.000Z','2026-08-26T08:00:30.000Z',0,30000,'hello','en')`)
+    .run(crypto.randomUUID(), userId, chunkId, conversationId);
+
+  await request(app).put(`/api/v1/ingest/sessions/${sessionId}/context/${crypto.randomUUID()}`).set(auth)
+    .field('kind', 'note')
+    .field('capturedOffsetMs', '4000')
+    .field('noteText', 'This is the Q3 planning call with Marta.')
+    .expect(201);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) count FROM jobs WHERE type='preview_conversation' AND resource_id=?").get(conversationId).count,
+    1,
+  );
+});

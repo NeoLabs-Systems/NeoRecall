@@ -352,9 +352,9 @@ void main() {
     await connector.dispose();
   });
 
-  test('Memoket battery prefers the standard 180F characteristic', () async {
+  test('Memoket vendor battery is not replaced by a 100% standard reading', () async {
     final transport = _FakeWearableTransport();
-    transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[64];
+    transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[100];
     final connector = MemoketConnector(
       device: _device(WearableDeviceType.memoket),
       transport: transport,
@@ -362,14 +362,28 @@ void main() {
     _bindMemoketReplies(transport);
 
     await connector.connect();
-    expect(await connector.readBatteryLevel(), 64);
-    expect(
-      transport.writes.any(
-        (write) =>
-            write.value.toString() == MemoketProtocol.batteryQuery.toString(),
-      ),
-      isFalse,
+    expect(await connector.readBatteryLevel(), 78);
+    transport.emit(
+      WearableDeviceUuids.batteryService,
+      WearableDeviceUuids.batteryLevel,
+      <int>[100],
     );
+    await Future<void>.delayed(Duration.zero);
+    expect(await connector.readBatteryLevel(), 78);
+    await connector.dispose();
+  });
+
+  test('Memoket falls back to the standard battery when the vendor query is silent', () async {
+    final transport = _FakeWearableTransport();
+    transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[64];
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport, silentBattery: true);
+
+    await connector.connect();
+    expect(await connector.readBatteryLevel(), 64);
     await connector.dispose();
   });
 
@@ -1182,6 +1196,7 @@ void _bindMemoketReplies(
   _FakeWearableTransport transport, {
   List<int>? fileChunk,
   bool repeatListEntry = false,
+  bool silentBattery = false,
 }) {
   const filename = '20260905_222817_2.opus';
   const liveName = '20260905_222343_2.opus';
@@ -1199,7 +1214,9 @@ void _bindMemoketReplies(
       case MemoketProtocol.opPing:
         ctrl(<int>[MemoketProtocol.opPing, 0x00]);
       case MemoketProtocol.opBattery:
-        ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        if (!silentBattery) {
+          ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        }
       case MemoketProtocol.opFirmware:
         ctrl(<int>[MemoketProtocol.opFirmware, ...ascii.encode('01.42.01.10')]);
       case MemoketProtocol.opTimeQuery:

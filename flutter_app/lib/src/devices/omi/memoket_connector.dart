@@ -148,20 +148,20 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
 
   @override
   Future<int> readBatteryLevel() async {
-    // The vendor `e1` fallback writes the same characteristic as record
-    // start/stop. Doing that while live has stopped the Gem mid-take.
+    // The vendor `e1` write shares the control characteristic with start/stop.
+    // Doing that while live has stopped the Gem mid-take.
     if (recording || _deviceLive) return _lastBattery;
-    final standard = await _readStandardBattery();
-    if (standard != null) {
-      _publishBattery(standard);
-      return standard.percent;
-    }
     final reply = await _command(
       MemoketProtocol.batteryQuery,
       MemoketProtocol.opBattery,
     );
     final parsed = reply == null ? null : MemoketProtocol.parseBattery(reply);
-    if (parsed != null) _publishBattery(parsed);
+    if (parsed != null) {
+      _publishBattery(parsed);
+      return parsed.percent;
+    }
+    final standard = await _readStandardBattery();
+    if (standard != null) _publishStandardBattery(standard);
     return _lastBattery;
   }
 
@@ -179,8 +179,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
           WearableDeviceUuids.batteryService,
           WearableDeviceUuids.batteryLevel,
         )).listen((value) {
-          if (value.isEmpty) return;
-          _publishBattery(MemoketBattery(percent: value.first));
+          if (value.isEmpty || value.first > 100) return;
+          _publishStandardBattery(MemoketBattery(percent: value.first));
         }),
       );
       _batterySubscribed = true;
@@ -216,6 +216,13 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   void _publishBattery(MemoketBattery battery) {
     _lastBattery = battery.percent;
     if (!batteryLevels.isClosed) batteryLevels.add(battery.percent);
+  }
+
+  /// 180F on this firmware reports 100 as a placeholder. A real vendor reading
+  /// (or a still-unknown gauge the UI is already showing) must not be replaced.
+  void _publishStandardBattery(MemoketBattery battery) {
+    if (battery.percent == 100 && _lastBattery != 100) return;
+    _publishBattery(battery);
   }
 
   @override

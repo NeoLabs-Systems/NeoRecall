@@ -10,6 +10,7 @@ const { HttpError } = require('../../middleware/error_handler');
 const settings = require('../settings/settings_service');
 const jobs = require('../jobs/job_service');
 const analyzer = require('./context_analyzer');
+const conversationInsights = require('../conversations/conversation_insight_service');
 
 function memoryRow(userId, publicId) {
   const row = getDatabase().prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?').get(publicId, userId);
@@ -180,6 +181,7 @@ function create(userId, target, id, input, file) {
     if (memory) db.prepare('INSERT OR IGNORE INTO memory_context_sources (memory_id,context_item_id) VALUES (?,?)').run(memory.id, id);
     if (file) jobs.enqueue({ userId, resourceType: 'recording_context', resourceId: id, type: 'analyze_context', priority: 50 }, db);
     else if (memory) jobs.enqueue({ userId, resourceType: 'memory', resourceId: String(memory.id), type: 'rewrite_memory_context', priority: 60 }, db);
+    if (session && !file) conversationInsights.enqueueForSession(userId, session.id, db);
     return present({ ...owned(userId, id), memory_public_id: memory?.public_id || null, used_by_ai: 0 });
   } catch (error) {
     if (storedPath && fs.existsSync(storedPath)) fs.unlinkSync(storedPath);
@@ -196,6 +198,7 @@ function update(userId, id, input, target = null) {
   const db = getDatabase();
   db.prepare(`UPDATE recording_context_items SET note_text=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(text, id);
   enqueueAffectedMemoryRewrites(row, db);
+  if (row.session_id) conversationInsights.enqueueForSession(userId, row.session_id, db);
   return present({ ...owned(userId, id), memory_public_id: null, used_by_ai: 0 });
 }
 

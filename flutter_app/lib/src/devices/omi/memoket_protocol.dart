@@ -37,8 +37,8 @@ class MemoketProtocol {
 
   /// Phone → Gem on the control write characteristic. Reply is
   /// `e1 <percent> <status>` (`e14e02` = 78%, status 0x02 charging/full).
-  /// The Gem also exposes standard Battery (180F / 2A19); prefer that read
-  /// when the characteristic is present — it does not need a control write.
+  /// The Gem also exposes standard Battery (180F / 2A19), but that
+  /// characteristic is a stub that reports 100. The vendor reply is the gauge.
   static final Uint8List batteryQuery = Uint8List.fromList(const <int>[
     opBattery,
   ]);

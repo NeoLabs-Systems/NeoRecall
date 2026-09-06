@@ -30,6 +30,13 @@ function findInState(userId, conversationId, states, database = getDatabase(), {
     ${quarantineClause(includeQuarantined)}`).get(conversationId, userId, ...states) || null;
 }
 
+function listForSession(userId, sessionId, database = getDatabase()) {
+  if (!sessionId) return [];
+  return database.prepare(`SELECT c.*, ${SESSION_ID_SELECT} session_id
+    FROM conversations c WHERE c.user_id=? AND (${SESSION_ID_SELECT})=?
+    ORDER BY c.started_at`).all(userId, sessionId);
+}
+
 // Transcript size without loading the transcript.
 //
 // Preview eligibility is re-evaluated for every open conversation on every
@@ -106,6 +113,6 @@ function material(userId, conversation, database = getDatabase()) {
 }
 
 module.exports = {
-  listByState, findInState, isComplete, segmentsOf, segmentsAfter, characterCount, durationMs,
+  listByState, findInState, listForSession, isComplete, segmentsOf, segmentsAfter, characterCount, durationMs,
   transcriptCharacters, material,
 };
