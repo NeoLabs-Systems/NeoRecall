@@ -275,7 +275,9 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     );
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // Opaque, for the same reason the local-setup screen is: a transparent
+      // scaffold shows the native window's own background.
+      backgroundColor: palette.bgPrimary,
       resizeToAvoidBottomInset: true,
       body: AppBackdrop(
         child: SafeArea(

@@ -99,16 +99,27 @@ class DesktopWindowCoordinator {
     await windowManager.setSkipTaskbar(true);
     await windowManager.setHasShadow(true);
     await windowManager.setBackgroundColor(Colors.transparent);
-    await windowManager.setSize(floatingSize, animate: true);
+    await windowManager.setSize(floatingSize);
     await _alignFloating();
     await _show(activate: activate);
   }
 
   Future<void> showConsentSurface() async {
     await windowManager.setMinimumSize(consentSize);
-    await windowManager.setSize(consentSize, animate: true);
+    await windowManager.setSize(consentSize);
     await _alignFloating();
   }
+
+  /// Paints the native window behind whatever Flutter draws.
+  ///
+  /// Floating mode makes the window transparent for its rounded pill, and a
+  /// transparent window shows black wherever Flutter has not painted. Every
+  /// other surface -- sign-in, local setup, the library -- restores a solid
+  /// chrome colour so a resize or a short layout can never expose one.
+  Future<void> applyChromeBackground(Brightness brightness) =>
+      windowManager.setBackgroundColor(
+        brightness == Brightness.dark ? _darkChrome : _lightChrome,
+      );
 
   Future<void> showLibrary(Brightness brightness) async {
     await windowManager.setTitleBarStyle(
@@ -123,11 +134,9 @@ class DesktopWindowCoordinator {
     await windowManager.setResizable(true);
     final size = await fitToScreen(librarySize);
     await windowManager.setMinimumSize(_withinBounds(libraryMinimumSize, size));
-    await windowManager.setBackgroundColor(
-      brightness == Brightness.dark ? _darkChrome : _lightChrome,
-    );
-    await windowManager.setSize(size, animate: true);
-    await windowManager.center(animate: true);
+    await applyChromeBackground(brightness);
+    await windowManager.setSize(size);
+    await windowManager.center();
     await _show();
   }
 
@@ -141,11 +150,8 @@ class DesktopWindowCoordinator {
   }
 
   Future<void> _alignFloating() async {
-    await windowManager.setAlignment(Alignment.bottomRight, animate: true);
+    await windowManager.setAlignment(Alignment.bottomRight);
     final position = await windowManager.getPosition();
-    await windowManager.setPosition(
-      position - floatingScreenInset,
-      animate: true,
-    );
+    await windowManager.setPosition(position - floatingScreenInset);
   }
 }

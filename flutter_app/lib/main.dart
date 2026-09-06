@@ -117,6 +117,10 @@ class _NeoRecallAppState extends State<NeoRecallApp>
         await _meetingDetector?.dispose();
         _meetingDetector = null;
         await _openLibrary(selectNotes: false);
+      } else if (_desktop) {
+        // Sign-in and local setup are ordinary windows: make sure nothing left
+        // the native window transparent from an earlier floating session.
+        await _applyChromeBackground();
       }
       return;
     }
@@ -238,6 +242,16 @@ class _NeoRecallAppState extends State<NeoRecallApp>
 
   @override
   void onTrayIconMouseDown() => _showWindow();
+
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    if (_desktop && !_floatingMode) unawaited(_applyChromeBackground());
+  }
+
+  Future<void> _applyChromeBackground() => _window.applyChromeBackground(
+    WidgetsBinding.instance.platformDispatcher.platformBrightness,
+  );
 
   @override
   Widget build(BuildContext context) => MaterialApp(

@@ -177,7 +177,9 @@ class _LocalInstallViewState extends State<LocalInstallView> {
     final palette = neoRecallPaletteOf(context);
     final compact = MediaQuery.sizeOf(context).width < 760;
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // Opaque: a transparent scaffold leaves whatever the native window paints
+      // showing through, which on macOS is black.
+      backgroundColor: palette.bgPrimary,
       resizeToAvoidBottomInset: true,
       body: AppBackdrop(
         child: SafeArea(
