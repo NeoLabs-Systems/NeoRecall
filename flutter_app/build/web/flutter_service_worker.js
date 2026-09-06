@@ -3,11 +3,11 @@ const MANIFEST = 'flutter-app-manifest';
 const TEMP = 'flutter-temp-cache';
 const CACHE_NAME = 'flutter-app-cache';
 
-const RESOURCES = {"flutter_bootstrap.js": "ac9b8020fc1961d5d2eb4b6ccd3beb43",
+const RESOURCES = {"flutter_bootstrap.js": "cb37b10615bca94487371b505b58102a",
 "version.json": "62655dfb4a248b2ebcf166379e81de6f",
 "index.html": "156a7d18acb76944026798e277f97eb7",
 "/": "156a7d18acb76944026798e277f97eb7",
-"main.dart.js": "bd487f6cfc892c287f716fa56ffc01ca",
+"main.dart.js": "c3c8dfc5ded7018778915ebd95ed8067",
 "flutter.js": "888483df48293866f9f41d3d9274a779",
 "audio_capture_worklet.js": "28b0b2bb49fd0b26a73bbc5d3c9f67c0",
 "favicon.png": "45cf5836637cce0d49dfe7a41cdc62e1",
@@ -32,7 +32,7 @@ const RESOURCES = {"flutter_bootstrap.js": "ac9b8020fc1961d5d2eb4b6ccd3beb43",
 "assets/packages/record_web/assets/js/record.worklet.js": "6d247986689d283b7e45ccdf7214c2ff",
 "assets/shaders/ink_sparkle.frag": "ecc85a2e95f5e9f53123dcaf8cb9b6ce",
 "assets/AssetManifest.bin": "32e26e192eceb7ec2ef0c99b6237da67",
-"assets/fonts/MaterialIcons-Regular.otf": "340bfdea94b30e888ebaf04482e654c5",
+"assets/fonts/MaterialIcons-Regular.otf": "e676b0adb2ed905f3ec1c39a1dcc7c74",
 "assets/assets/branding/tray_idle.png": "d2159090f213d00ff557598fee0abb31",
 "assets/assets/branding/tray_recording.ico": "f9be7aea758d55934f6feff8d7fb3495",
 "assets/assets/branding/logo.png": "74870c4520be07c3fbe8f3fe1ff16ba3",

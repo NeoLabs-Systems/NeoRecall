@@ -53,6 +53,12 @@ class SettingsNavigation extends StatelessWidget {
       description: 'Sessions and access',
     ),
     _SettingsNavigationItem(
+      section: SettingsSection.services,
+      icon: Icons.cloud_outlined,
+      label: 'Services',
+      description: 'Transcription and memory writing',
+    ),
+    _SettingsNavigationItem(
       section: SettingsSection.integrations,
       icon: Icons.hub_outlined,
       label: 'Integrations',
@@ -93,7 +99,7 @@ class SettingsNavigation extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: palette.border),
       ),
-      // The rail scrolls on its own: seven areas with descriptions are taller
+      // The rail scrolls on its own: eight areas with descriptions are taller
       // than a short desktop window, and a nav that overflows is a nav with an
       // unreachable last entry.
       child: SingleChildScrollView(

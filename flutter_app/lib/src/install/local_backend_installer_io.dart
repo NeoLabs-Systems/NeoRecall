@@ -186,6 +186,19 @@ class LocalBackendInstaller {
         failureMessage: 'Could not store the ${channel.cliName} release channel.',
       );
 
+      // Created before the service starts so the server reads it at boot; this
+      // is what lets the app configure providers without the admin dashboard.
+      final adminApiKey = await _ensureAdminApiKey(node, directory.path);
+      _emit(
+        LocalBackendInstallStage.install,
+        adminApiKey == null ? 'warning' : 'progress',
+        adminApiKey == null
+            ? 'The administrator key could not be created; provider setup will '
+                  'have to happen in the admin dashboard.'
+            : 'Administrator key ready',
+        progress: 0.66,
+      );
+
       _emit(
         LocalBackendInstallStage.install,
         'started',
@@ -234,6 +247,7 @@ class LocalBackendInstaller {
         sourceDirectory: directory.path,
         channel: channel,
         serverVersion: version,
+        adminApiKey: adminApiKey,
         cliLinked: cliLinked,
       );
     } on LocalBackendInstallerException catch (error) {
@@ -257,6 +271,37 @@ class LocalBackendInstaller {
         errorCode: wrapped.code,
       );
       throw wrapped;
+    }
+  }
+
+  /// Asks the CLI for the administrator API key, which it creates on first use.
+  /// Deliberately not streamed into the event log: the key is a secret and the
+  /// log is shown on screen.
+  Future<String?> _ensureAdminApiKey(String node, String sourceDirectory) async {
+    try {
+      final result = await Process.run(
+        node,
+        <String>[
+          '$sourceDirectory${Platform.pathSeparator}bin'
+              '${Platform.pathSeparator}neorecall.js',
+          'admin-key',
+          '--json',
+        ],
+        workingDirectory: sourceDirectory,
+        environment: _childEnvironment(),
+      );
+      if (result.exitCode != 0) return null;
+      for (final line in const LineSplitter().convert('${result.stdout}')) {
+        if (!line.trim().startsWith('{')) continue;
+        final decoded = jsonDecode(line.trim());
+        if (decoded is Map && decoded['adminApiKey'] is String) {
+          final key = (decoded['adminApiKey'] as String).trim();
+          if (key.isNotEmpty) return key;
+        }
+      }
+      return null;
+    } on Object {
+      return null;
     }
   }
 
@@ -483,17 +528,36 @@ class LocalBackendInstaller {
   }
 
   int _configuredPort() {
-    final home = _homeDirectory();
-    if (home.isEmpty) return _defaultPort;
     final envFile = File(
-      '$home${Platform.pathSeparator}.neorecall${Platform.pathSeparator}.env',
+      '${_runtimeHome()}${Platform.pathSeparator}.env',
     );
+    final fromEnvironment = int.tryParse(
+      Platform.environment['NEORECALL_PORT']?.trim() ?? '',
+    );
+    if (fromEnvironment != null) return fromEnvironment;
     if (!envFile.existsSync()) return _defaultPort;
     for (final line in envFile.readAsLinesSync()) {
-      final match = RegExp(r'^\s*PORT\s*=\s*"?(\d{2,5})"?\s*$').firstMatch(line);
+      final match = RegExp(
+        r'^\s*NEORECALL_PORT\s*=\s*"?(\d{2,5})"?\s*$',
+      ).firstMatch(line);
       if (match != null) return int.parse(match.group(1)!);
     }
     return _defaultPort;
+  }
+
+  /// Where the server keeps its runtime data, mirroring the CLI's own
+  /// `NEORECALL_HOME` override.
+  String _runtimeHome() {
+    final configured = Platform.environment['NEORECALL_HOME']?.trim() ?? '';
+    if (configured.isNotEmpty) {
+      return configured.startsWith('~')
+          ? '${_homeDirectory()}${configured.substring(1)}'
+          : configured;
+    }
+    final home = _homeDirectory();
+    return home.isEmpty
+        ? '.neorecall'
+        : '$home${Platform.pathSeparator}.neorecall';
   }
 
   String _homeDirectory() {

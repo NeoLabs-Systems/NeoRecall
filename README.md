@@ -43,12 +43,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/ma
 ```
 
 Open `http://localhost:4500` once `neorecall status` reports a
-running service.
+running service. The macOS and Windows apps can do all of this without a
+terminal: **Set up NeoRecall on this computer** installs the server, then asks
+for the transcription and language-model services and tests both.
 
 ## ✨ What makes it different
 
 - **Audio stays under your control.** Clients retain every chunk until the server proves its transcript is durable and its temporary audio copy is gone.
-- **Inference stays replaceable.** NeoRecall bundles no speech-recognition or language model. Use a hosted provider or a compatible service you deploy elsewhere; provider and model choices are configurable in `.env` and the admin dashboard.
+- **Inference stays replaceable.** NeoRecall bundles no speech-recognition or language model. Use a hosted provider or a compatible service you deploy elsewhere; provider and model choices are configurable in the desktop app, `.env`, and the admin dashboard.
 - **Voices are recognized on your machine.** A transcription service returns words, never who said them, so NeoRecall detects speech and tells speakers apart itself — 31 MB of models, not gigabytes. Silence is never sent anywhere, and the same voice is still recognized weeks later.
 - **Long recordings remain bounded.** Memories are written as soon as a conversation ends, and a transcript longer than the configured external model context is read in windows and folded back into one memory.
 - **Built for recorders that never stop.** Audio uploads, transcription, and conversation detection all run during capture, a conversation that is still recording gets a provisional title and summary you can read before it ends, and one real-world occasion still becomes exactly one memory.

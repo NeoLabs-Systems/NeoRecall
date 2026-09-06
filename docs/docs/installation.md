@@ -41,12 +41,30 @@ network.
 
 ## Install from the desktop app
 
-The macOS and Windows apps can perform the same install without a terminal.
+The macOS and Windows apps can perform the whole setup without a terminal.
 On the server screen, choose **Set up NeoRecall on this computer**: the app
 checks for Git, Node.js, and npm, clones the selected channel, installs
 dependencies, links the CLI, starts the service, and connects to it — showing
 each step as it runs. If a prerequisite is missing, the app names it and links to
 the download instead of failing silently.
+
+It then asks for the two services NeoRecall does not run itself: the
+transcription service and the language model that writes memories. Pick a
+provider, paste a key, let the app list the available models, and press **Save
+and test** — the test transcribes a bundled sample recording and asks the model
+for a one-word answer, reporting each leg separately. These settings are stored
+encrypted in the database and can be changed later under **Settings → Services**.
+
+That step works because the install creates an administrator API key in
+`~/.neorecall/.env` and keeps it in the app's secure storage. To read or create
+that key yourself:
+
+```bash
+neorecall admin-key
+```
+
+Servers this app did not install have no stored key; configure their providers
+from the admin dashboard at `/admin` instead.
 
 ## Manual checkout
 

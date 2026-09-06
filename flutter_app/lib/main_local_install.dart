@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_provider_setup.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
+import 'src/install/admin_key_store.dart';
+import 'src/install/admin_provider_client.dart';
 import 'src/install/local_backend_installer.dart';
 
-enum _LocalInstallPhase { choose, installing, done, failed }
+enum _LocalInstallPhase { choose, installing, providers, done, failed }
 
 /// Installs a NeoRecall server on this computer without a terminal, then points
 /// the app at it. Mirrors what `install.sh` does on the command line.
@@ -41,6 +44,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   String? _errorRemedy;
   bool _showDetails = false;
   bool _connecting = false;
+  AdminProviderClient? _adminClient;
 
   @override
   void initState() {
@@ -53,7 +57,17 @@ class _LocalInstallViewState extends State<LocalInstallView> {
       if (!mounted) return;
       setState(() {
         _current = event;
-        _events.add(event);
+        // Download progress arrives once per percent and would otherwise bury
+        // the log; each file keeps one line that counts up.
+        final previous = _events.isEmpty ? null : _events.last;
+        final subject = _progressSubject(event.message);
+        if (previous != null &&
+            subject != null &&
+            _progressSubject(previous.message) == subject) {
+          _events[_events.length - 1] = event;
+        } else {
+          _events.add(event);
+        }
       });
     });
     unawaited(_refreshRequirements());
@@ -63,8 +77,15 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   void dispose() {
     _subscription?.cancel();
     _installer.dispose();
+    _adminClient?.dispose();
     _directory.dispose();
     super.dispose();
+  }
+
+  /// The file a `name: 12.3%` progress line is about, or null for other lines.
+  static String? _progressSubject(String message) {
+    final match = RegExp(r'^(.+): \d+(\.\d+)?%$').firstMatch(message.trim());
+    return match?.group(1);
   }
 
   Future<void> _refreshRequirements() async {
@@ -86,10 +107,25 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         channel: _channel,
         installDirectory: _directory.text,
       );
+      final adminApiKey = result.adminApiKey;
+      if (adminApiKey != null) {
+        await const AdminKeyStore().save(result.backendUrl, adminApiKey);
+      }
       if (!mounted) return;
       setState(() {
         _result = result;
-        _phase = _LocalInstallPhase.done;
+        _adminClient?.dispose();
+        _adminClient = adminApiKey == null
+            ? null
+            : AdminProviderClient(
+                backendUrl: result.backendUrl,
+                apiKey: adminApiKey,
+              );
+        // Without the administrator key there is nothing this screen can
+        // configure, so it goes straight to the finish step.
+        _phase = adminApiKey == null
+            ? _LocalInstallPhase.done
+            : _LocalInstallPhase.providers;
       });
     } on LocalBackendInstallerException catch (error) {
       if (!mounted) return;
@@ -184,6 +220,8 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         return _buildChoose(palette);
       case _LocalInstallPhase.installing:
         return _buildInstalling(palette);
+      case _LocalInstallPhase.providers:
+        return _buildProviders(palette);
       case _LocalInstallPhase.done:
         return _buildDone(palette);
       case _LocalInstallPhase.failed:
@@ -356,6 +394,44 @@ class _LocalInstallViewState extends State<LocalInstallView> {
     );
   }
 
+  Widget _buildProviders(NeoRecallPalette palette) {
+    final result = _result;
+    final client = _adminClient;
+    if (client == null) return _buildDone(palette);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(Icons.check_circle_outline, color: palette.success),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'NeoRecall is running'
+                '${result == null ? '' : ' at ${result.backendUrl}'}. One step '
+                'left: choose the services that transcribe your recordings and '
+                'write your memories.',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        ProviderSetupPanel(
+          client: client,
+          finishLabel: 'Create your account',
+          onFinished: _connecting ? null : _connect,
+          showSkip: true,
+          onSkip: () => setState(() => _phase = _LocalInstallPhase.done),
+        ),
+        if (widget.controller.error != null) ...<Widget>[
+          const SizedBox(height: 12),
+          InlineMessage(message: widget.controller.error!, error: true),
+        ],
+      ],
+    );
+  }
+
   Widget _buildDone(NeoRecallPalette palette) {
     final result = _result;
     return Column(
@@ -394,6 +470,14 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         if (widget.controller.error != null) ...<Widget>[
           const SizedBox(height: 12),
           InlineMessage(message: widget.controller.error!, error: true),
+        ],
+        if (_adminClient != null) ...<Widget>[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => setState(() => _phase = _LocalInstallPhase.providers),
+            icon: const Icon(Icons.tune_rounded),
+            label: const Text('Choose transcription and memory services'),
+          ),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
 import 'main_devices.dart';
+import 'main_provider_setup.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/settings/integrations_section.dart';
 import 'src/settings/security_section.dart';
 import 'src/settings/settings_navigation.dart';
+import 'src/install/admin_key_store.dart';
+import 'src/install/admin_provider_client.dart';
 
 enum SettingsSection {
   general,
@@ -16,6 +19,7 @@ enum SettingsSection {
   memory,
   speakers,
   devices,
+  services,
   integrations,
 }
 
@@ -40,6 +44,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late SettingsSection selectedSection = widget.initialSection;
   bool _savingUploadPolicy = false;
   int _loadedContextRetentionDays = 7;
+  AdminProviderClient? _adminClient;
 
   List<String> get _customVocabularyTerms {
     final unique = <String, String>{};
@@ -98,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     timezone.dispose();
     customVocabulary.dispose();
+    _adminClient?.dispose();
     super.dispose();
   }
 
@@ -204,6 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       settings == null ||
                       _customVocabularyError != null ||
                       selectedSection == SettingsSection.devices ||
+                      selectedSection == SettingsSection.services ||
                       selectedSection == SettingsSection.integrations
                   ? null
                   : save,
@@ -262,6 +269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _content() {
     if (settings == null &&
         selectedSection != SettingsSection.devices &&
+        selectedSection != SettingsSection.services &&
         selectedSection != SettingsSection.integrations) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -274,6 +282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSection.memory => _memorySettings(),
       SettingsSection.speakers => _speakerSettings(),
       SettingsSection.devices => _devicesSettings(),
+      SettingsSection.services => _servicesSettings(),
       SettingsSection.integrations => IntegrationsSection(
         controller: widget.controller,
       ),
@@ -326,6 +335,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// One settings pane. Sections are spaced by this list rather than by each
   /// section remembering to add a gap after itself — four cards that each
   /// forgot were what made the recording pane read as one long slab.
+  /// One client per server and key: rebuilds must not leak a new HTTP client on
+  /// every frame.
+  AdminProviderClient _adminClientFor(String key) {
+    final existing = _adminClient;
+    if (existing != null &&
+        existing.apiKey == key &&
+        existing.backendUrl ==
+            widget.controller.backendUrl.replaceFirst(RegExp(r'/$'), '')) {
+      return existing;
+    }
+    existing?.dispose();
+    final client = AdminProviderClient(
+      backendUrl: widget.controller.backendUrl,
+      apiKey: key,
+    );
+    _adminClient = client;
+    return client;
+  }
+
+  /// Transcription and memory-writing services, configured through the admin
+  /// API with the key stored when this app installed the server. Servers this
+  /// app did not install have no stored key, and say so rather than showing an
+  /// empty form.
+  Widget _servicesSettings() {
+    final palette = neoRecallPaletteOf(context);
+    return _sectionList(<Widget>[
+      FutureBuilder<String?>(
+        future: const AdminKeyStore().read(widget.controller.backendUrl),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final key = snapshot.data;
+          if (key == null) {
+            return InlineMessage(
+              message:
+                  'These services are set on the server itself. This app has no '
+                  'administrator key for ${widget.controller.backendUrl}, so ask '
+                  'whoever runs that server to configure transcription and '
+                  'memory writing there.',
+              icon: Icons.info_outline,
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Services',
+                style: TextStyle(
+                  color: palette.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              ProviderSetupPanel(client: _adminClientFor(key)),
+            ],
+          );
+        },
+      ),
+    ]);
+  }
+
   Widget _sectionList(List<Widget> children) {
     final blocks = <Widget>[..._statusMessages(), ...children];
     return ListView.separated(
