@@ -22,6 +22,7 @@ import 'src/devices/device_session_controller.dart';
 import 'src/devices/device_storage_sync_scheduler.dart';
 import 'src/devices/plaud/plaud_session.dart';
 import 'src/devices/omi/offline_sync.dart';
+import 'src/models/ask.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
@@ -615,9 +616,10 @@ class NeoRecallController extends ChangeNotifier
   String processingSummary = '';
   int audioStillOnDevice = 0;
   List<Map<String, dynamic>> dailySummaries = <Map<String, dynamic>>[];
-  List<Map<String, dynamic>> searchResults = <Map<String, dynamic>>[];
-  String? askAnswer;
-  List<Map<String, dynamic>> askCitations = <Map<String, dynamic>>[];
+  /// The Ask conversation, oldest first. One entry per question asked in this
+  /// session; the trailing one is still being answered while [askBusy] is true.
+  List<AskTurn> askTurns = <AskTurn>[];
+  bool askBusy = false;
   @override
   int pendingAudioBytes = 0;
   // Recording sessions containing a chunk parked after repeated server-side
@@ -1529,9 +1531,8 @@ class NeoRecallController extends ChangeNotifier
     miniMemories = <MiniMemory>[];
     speakers = <RecallSpeaker>[];
     dailySummaries = <Map<String, dynamic>>[];
-    searchResults = <Map<String, dynamic>>[];
-    askAnswer = null;
-    askCitations = <Map<String, dynamic>>[];
+    askTurns = <AskTurn>[];
+    askBusy = false;
     notifyListeners();
     await refreshAll();
     return null;
@@ -3249,6 +3250,21 @@ class NeoRecallController extends ChangeNotifier
   Future<void> showOlderMoments() =>
       _switchMomentPage(momentPage + 1, _momentNextCursor);
 
+  /// Returns the timeline to its newest page.
+  ///
+  /// Called whenever the moments list is opened. Someone who left the list
+  /// three pages into last week and comes back to it is looking for what has
+  /// happened since, not for the page they stopped reading on — and a list
+  /// that silently opens in the middle of the history reads as a list that
+  /// has lost today's recordings.
+  Future<void> showNewestMoments() async {
+    if (momentPage == 0 || isPagingMoments) return;
+    _momentPageCursors
+      ..clear()
+      ..add(null);
+    await _switchMomentPage(0, null);
+  }
+
   /// Moves one page back towards today.
   Future<void> showNewerMoments() => _switchMomentPage(
     momentPage - 1,
@@ -3353,41 +3369,62 @@ class NeoRecallController extends ChangeNotifier
     return 'This moment could not be written up again just now.';
   }
 
-  Future<void> search(String query) async {
-    if (query.trim().isEmpty) {
-      searchResults = <Map<String, dynamic>>[];
+  /// Asks one question and appends the exchange to [askTurns].
+  ///
+  /// The turn is added before the request goes out, so the question the user
+  /// typed is on screen while the answer is being written — and a failure lands
+  /// on that turn rather than replacing the conversation with an error banner.
+  Future<void> ask(String question) async {
+    final trimmed = question.trim();
+    if (trimmed.isEmpty || askBusy) return;
+    final turn = AskTurn(question: trimmed);
+    askTurns = <AskTurn>[...askTurns, turn];
+    askBusy = true;
+    notifyListeners();
+    try {
+      final payload =
+          await api.request(
+                'POST',
+                '/api/v1/search/ask',
+                body: <String, dynamic>{'question': trimmed},
+              )
+              as Map;
+      turn.answer = payload['answer'] as String?;
+      turn.sources = (payload['citations'] as List? ?? <dynamic>[])
+          .cast<Map>()
+          .map((Map citation) => AskSource.fromJson(Map<String, dynamic>.from(citation)))
+          .toList();
+      final retrieval = payload['retrieval'];
+      if (retrieval is Map) {
+        turn.considered = (retrieval['considered'] as num?)?.toInt() ?? turn.sources.length;
+        turn.weakCount = (retrieval['weakCount'] as num?)?.toInt() ?? 0;
+      }
+    } catch (exception) {
+      turn.error = _describeAskFailure(exception);
+    } finally {
+      askBusy = false;
       notifyListeners();
-      return;
     }
-    final payload =
-        await api.request(
-              'GET',
-              '/api/v1/search?q=${Uri.encodeQueryComponent(query)}',
-            )
-            as Map;
-    searchResults = (payload['results'] as List)
-        .cast<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList();
-    askAnswer = null;
-    askCitations = <Map<String, dynamic>>[];
+  }
+
+  /// Starts a fresh conversation. Nothing is kept between app runs, so this is
+  /// the whole of forgetting.
+  void clearAsk() {
+    if (askTurns.isEmpty) return;
+    askTurns = <AskTurn>[];
+    askBusy = false;
     notifyListeners();
   }
 
-  Future<void> ask(String question) async {
-    final payload =
-        await api.request(
-              'POST',
-              '/api/v1/search/ask',
-              body: <String, dynamic>{'question': question},
-            )
-            as Map;
-    askAnswer = payload['answer'] as String;
-    askCitations = (payload['citations'] as List)
-        .cast<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList();
-    notifyListeners();
+  String _describeAskFailure(Object exception) {
+    final detail = exception.toString();
+    if (detail.contains('ASK_RATE_LIMITED') || detail.contains('ASK_BURST_LIMITED')) {
+      return 'You have asked a lot in a short time. Try again in a few minutes.';
+    }
+    if (detail.contains('AI_NOT_CONFIGURED')) {
+      return 'No answering model is configured yet, so this question cannot be answered.';
+    }
+    return 'That question could not be answered just now.';
   }
 
   Future<void> importAudio(

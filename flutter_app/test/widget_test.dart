@@ -315,7 +315,7 @@ void main() {
     controller.selectLibraryTab(LibraryTab.speakers);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('Search'));
+    await tester.tap(find.text('Ask'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(controller.page, RecallPage.search);
@@ -353,7 +353,7 @@ void main() {
 
     // Four groups, not six flat entries. Capture is open because Record is the
     // page on screen; the rest stay collapsed until asked for.
-    for (final label in <String>['Capture', 'Library', 'Search', 'Settings']) {
+    for (final label in <String>['Capture', 'Library', 'Ask', 'Settings']) {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('Record'), findsOneWidget);

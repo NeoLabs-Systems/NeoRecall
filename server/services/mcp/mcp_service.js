@@ -26,9 +26,9 @@ const TOOLS = Object.freeze([
         kinds: { type: 'array', items: { type: 'string' } },
       },
     },
-    run: (userId, args) => search.search(userId, String(args.query || '').trim(), {
+    run: async (userId, args) => (await search.search(userId, String(args.query || '').trim(), {
       limit: args.limit, kinds: Array.isArray(args.kinds) ? args.kinds.map(String) : [],
-    }),
+    })).results,
   },
   {
     name: 'list_memories',

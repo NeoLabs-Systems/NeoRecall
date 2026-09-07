@@ -33,4 +33,12 @@ function localDateTimeToUtc(localDateTime, timezone) {
   throw new Error(`Local date-time ${localDateTime} does not resolve uniquely in ${timezone}.`);
 }
 
-module.exports = { nowIso, addMilliseconds, clamp, isIanaTimezone, localDateTimeToUtc };
+// The wall clock a user is reading, as the same offset-free string every prompt
+// and every plan uses.
+function localDateTimeNow(timezone, instantMs = Date.now()) {
+  if (!isIanaTimezone(timezone)) throw new Error(`Invalid IANA timezone: ${timezone}.`);
+  const parts = localDateTimeParts(instantMs, timezone);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+module.exports = { nowIso, addMilliseconds, clamp, isIanaTimezone, localDateTimeToUtc, localDateTimeNow };

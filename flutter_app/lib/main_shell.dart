@@ -4,7 +4,7 @@ import 'main_controller.dart';
 import 'main_library.dart';
 import 'main_navigation.dart';
 import 'main_record.dart';
-import 'main_search.dart';
+import 'main_ask.dart';
 import 'main_settings.dart';
 import 'main_shared.dart';
 import 'main_sources.dart';
@@ -56,7 +56,7 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
   Widget _screen() => switch (controller.page) {
     RecallPage.record => RecordScreen(controller: controller),
     RecallPage.library => LibraryScreen(controller: controller),
-    RecallPage.search => SearchScreen(controller: controller),
+    RecallPage.search => AskScreen(controller: controller),
     RecallPage.sources => SourcesScreen(controller: controller),
     RecallPage.devices => SettingsScreen(
       controller: controller,

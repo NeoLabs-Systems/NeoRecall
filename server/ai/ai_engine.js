@@ -4,6 +4,7 @@ const { provider } = require('./provider_registry');
 const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps } = require('./schemas/consolidation_schema');
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
 const { answerSchema } = require('./schemas/answer_schema');
+const { queryPlanSchema, queryPlanJsonSchema } = require('./schemas/query_plan_schema');
 const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
 const { memoryDedupeSchema, memoryDedupeJsonSchema } = require('./schemas/memory_dedupe_schema');
 const { dailySummarySchema, dailySummaryJsonSchema } = require('./schemas/daily_summary_schema');
@@ -11,6 +12,7 @@ const { prepareConsolidationRequest, restoreReferenceIds, carryOverFor } = requi
 const { conversationPreviewMessages } = require('./prompts/preview_conversation');
 const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
+const { planQueryMessages } = require('./prompts/plan_query');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
 const { dedupeMemoryMessages } = require('./prompts/dedupe_memories');
 const contextAnalysis = require('./prompts/analyze_context');
@@ -274,7 +276,32 @@ function contextWithinBudget(context, budgetCharacters) {
   return kept;
 }
 
-async function answer(userId, question, context, beforeAttempt) {
+// Reads a question as a retrieval instruction: what to look for, and over which
+// stretch of the user's life.
+//
+// Shares the 'ask' purpose because it is the first half of one Ask, and it is
+// small — a question in, a plan out — so it costs a fraction of the answer that
+// follows it.
+async function planQuery(userId, { question, nowLocal, timezone }) {
+  const config = getConfig();
+  return withRetries(async () => {
+    const response = await provider().chatJSON({
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      messages: planQueryMessages({ question, nowLocal, timezone }),
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_query_plan', strict: true, schema: queryPlanJsonSchema } },
+    });
+    const parsed = queryPlanSchema.safeParse(response.value);
+    if (!parsed.success) {
+      markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+      throw Object.assign(new Error('Query plan did not match the required schema.'), {
+        code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
+      });
+    }
+    return { value: parsed.data, requestId: response.requestId };
+  });
+}
+
+async function answer(userId, question, context, beforeAttempt, frame = {}) {
   const config = getConfig();
   // The question and the instructions ride along with the evidence, so they come
   // out of the same budget before it is spent.
@@ -283,7 +310,7 @@ async function answer(userId, question, context, beforeAttempt) {
   return withRetries(async () => {
     if (beforeAttempt) beforeAttempt();
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: answerMessages(question, bounded),
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: answerMessages(question, bounded, frame),
     });
     const parsed = answerSchema.safeParse(response.value);
     if (!parsed.success) {
@@ -433,7 +460,7 @@ async function judgeDuplicateMemories(userId, left, right, evidence) {
 }
 
 module.exports = {
-  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, rewriteMergedMemory,
+  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, planQuery, rewriteMergedMemory,
   judgeDuplicateMemories,
   writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };

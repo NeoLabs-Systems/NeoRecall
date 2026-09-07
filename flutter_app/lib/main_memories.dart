@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'main_processing_status.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/memories/memory_cards.dart';
@@ -387,6 +388,10 @@ class _MemoriesScreenState extends State<MemoriesScreen>
                       label: const Text('Select'),
                     ),
             ),
+          ProcessingActivityBanner(
+            status: controller.processingStatus,
+            isRecording: controller.isRecording,
+          ),
           if (controller.dailySummaries.isNotEmpty) ...<Widget>[
             DailySummaryCard(summary: controller.dailySummaries.first),
             const SizedBox(height: 16),

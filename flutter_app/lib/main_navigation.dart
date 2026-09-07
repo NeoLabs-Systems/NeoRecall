@@ -103,8 +103,8 @@ const NeoRecallDestination speakersDestination = NeoRecallDestination(
 
 const NeoRecallDestination searchDestination = NeoRecallDestination(
   page: RecallPage.search,
-  icon: Icons.search_rounded,
-  label: 'Search',
+  icon: Icons.auto_awesome_rounded,
+  label: 'Ask',
 );
 
 const NeoRecallDestination settingsDestination = NeoRecallDestination(
@@ -136,7 +136,7 @@ const List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
         ],
       ),
       NeoRecallNavigationGroup(
-        label: 'Search',
+        label: 'Ask',
         icon: Icons.search_rounded,
         destinations: <NeoRecallDestination>[searchDestination],
       ),
@@ -178,7 +178,7 @@ String neoRecallPageTitle(NeoRecallController controller) =>
     switch (controller.page) {
       RecallPage.record => 'Record',
       RecallPage.library => 'Library',
-      RecallPage.search => 'Search',
+      RecallPage.search => 'Ask',
       RecallPage.sources => 'Sources',
       RecallPage.devices || RecallPage.settings => 'Settings',
     };

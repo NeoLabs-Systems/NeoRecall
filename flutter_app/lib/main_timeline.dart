@@ -33,6 +33,19 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   NeoRecallController get controller => widget.controller;
 
+  @override
+  void initState() {
+    super.initState();
+    // The page a reader paged back to belongs to the visit they paged in.
+    // Opening the list again should show the newest moments, not the middle
+    // of last week. Deferred past this frame because it refetches and
+    // notifies, which cannot happen while the page is still being built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      controller.showNewestMoments();
+    });
+  }
+
   Future<bool> _confirmDelete(int count) async {
     if (count < 1) return false;
     final confirm = await showDialog<bool>(
@@ -197,6 +210,10 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
             const SizedBox(height: 18),
           ],
+          ProcessingActivityBanner(
+            status: controller.processingStatus,
+            isRecording: controller.isRecording,
+          ),
           ProcessingStatusCard(
             issues: controller.processingIssues,
             audioStillOnDevice: controller.audioStillOnDevice,
@@ -474,298 +491,337 @@ class _TimelineEntry extends StatelessWidget {
                 ? null
                 : Border(bottom: BorderSide(color: palette.border)),
           ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (!compact)
-                  SizedBox(
-                    width: 78,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: <Widget>[
-                          Text(
-                            timeLabel,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _durationLabel(),
-                            style: TextStyle(
-                              color: palette.textMuted,
-                              fontSize: 10.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                SizedBox(
-                  width: 28,
-                  child: Stack(
-                    alignment: Alignment.topCenter,
-                    children: <Widget>[
-                      Positioned(
-                        top: 0,
-                        bottom: 0,
-                        child: Container(width: 1, color: palette.borderLight),
-                      ),
-                      Positioned(
-                        top: 18,
-                        child: Container(
-                          width: 9,
-                          height: 9,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: palette.accent,
-                            border: Border.all(color: palette.bgCard, width: 2),
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: palette.accent.withValues(alpha: 0.28),
-                                blurRadius: 8,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(compact ? 8 : 6, 13, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
+          // The rail is drawn behind the row rather than as a stretched
+          // column of it. An IntrinsicHeight here used to fix this tile's
+          // height to what its children measure, while the transcript's
+          // AnimatedSize was still animating to that height — so every
+          // collapse overflowed the row for the length of the animation.
+          child: Stack(
+            children: <Widget>[
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: compact ? 0 : 78,
+                width: 28,
+                child: _MomentRail(palette: palette),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (!compact)
+                    SizedBox(
+                      width: 78,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: <Widget>[
-                            if (selecting) ...<Widget>[
-                              Icon(
-                                selected
-                                    ? Icons.check_circle_rounded
-                                    : Icons.circle_outlined,
-                                color: selected
-                                    ? palette.accent
-                                    : palette.textMuted,
-                                size: 22,
-                              ),
-                              const SizedBox(width: 10),
-                            ],
-                            Expanded(
-                              child: Text(
-                                moment.isPending
-                                    ? 'Just recorded'
-                                    : generatedTitle?.isNotEmpty == true
-                                    ? generatedTitle!
-                                    : 'Conversation',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                            Text(
+                              timeLabel,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            if (!selecting && !compact)
-                              for (final widget in _titleMeta(
-                                palette: palette,
-                                provisional: provisional,
-                                compact: false,
-                                timeLabel: timeLabel,
-                                endLabel: endLabel,
-                              )) ...<Widget>[const SizedBox(width: 6), widget],
+                            const SizedBox(height: 3),
+                            Text(
+                              _durationLabel(),
+                              style: TextStyle(
+                                color: palette.textMuted,
+                                fontSize: 10.5,
+                              ),
+                            ),
                           ],
                         ),
-                        if (!selecting && compact) ...<Widget>[
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: _titleMeta(
-                              palette: palette,
-                              provisional: provisional,
-                              compact: true,
-                              timeLabel: timeLabel,
-                              endLabel: endLabel,
-                            ),
-                          ),
-                        ],
-                        if (generatedSummary?.isNotEmpty == true) ...<Widget>[
-                          const SizedBox(height: 6),
-                          Text(
-                            generatedSummary!,
-                            maxLines: expanded ? null : 2,
-                            overflow: expanded
-                                ? TextOverflow.visible
-                                : TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: palette.textSecondary,
-                              height: 1.38,
-                              fontSize: 12.5,
-                            ),
-                          ),
-                        ],
-                        if (topics.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 7),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 5,
-                            children: topics
-                                .map(
-                                  (topic) => _TopicChip(
-                                    label: topic,
-                                    palette: palette,
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ],
-                        if (speakers.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 7),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 5,
-                            children: speakers
-                                .take(4)
-                                .map(
-                                  (speaker) => _SpeakerChip(
-                                    label: speaker,
-                                    palette: palette,
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ],
-                        const SizedBox(height: 9),
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          alignment: Alignment.topCenter,
-                          child: Column(
+                      ),
+                    ),
+                  const SizedBox(width: 28),
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(compact ? 8 : 6, 13, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
                             children: <Widget>[
-                              for (
-                                var index = 0;
-                                index < visible.length;
-                                index++
-                              ) ...<Widget>[
-                                _TranscriptLine(segment: visible[index]),
-                                if (index < visible.length - 1)
-                                  const SizedBox(height: 7),
+                              if (selecting) ...<Widget>[
+                                Icon(
+                                  selected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.circle_outlined,
+                                  color: selected
+                                      ? palette.accent
+                                      : palette.textMuted,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 10),
                               ],
-                            ],
-                          ),
-                        ),
-                        if (expanded && loadingSegments) ...<Widget>[
-                          const SizedBox(height: 10),
-                          Row(
-                            children: <Widget>[
-                              const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Loading the rest of this moment',
-                                style: TextStyle(
-                                  color: palette.textMuted,
-                                  fontSize: 11.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (expanded &&
-                            !loadingSegments &&
-                            segments.length < moment.segmentCount) ...<Widget>[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
-                            style: TextStyle(
-                              color: palette.textMuted,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                        ],
-                        if (hidden > 0 || expanded) ...<Widget>[
-                          const SizedBox(height: 5),
-                          Row(
-                            children: <Widget>[
-                              TextButton.icon(
-                                onPressed: selecting ? null : onToggle,
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
+                              Expanded(
+                                child: Text(
+                                  moment.isPending
+                                      ? 'Just recorded'
+                                      : generatedTitle?.isNotEmpty == true
+                                      ? generatedTitle!
+                                      : 'Conversation',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                                icon: Icon(
-                                  expanded
-                                      ? Icons.expand_less_rounded
-                                      : Icons.expand_more_rounded,
-                                  size: 17,
-                                ),
-                                label: Text(
-                                  expanded
-                                      ? 'Show less'
-                                      : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
-                                ),
                               ),
-                              const Spacer(),
-                              // Offered only once a moment is open: it acts on what
-                              // the reader is looking at, and it is not something to
-                              // trip over while scanning the day.
-                              if (expanded && onReprocess != null && !selecting)
-                                TextButton.icon(
-                                  onPressed: busy ? null : onReprocess,
-                                  style: TextButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
+                              if (!selecting && !compact)
+                                for (final widget in _titleMeta(
+                                  palette: palette,
+                                  provisional: provisional,
+                                  compact: false,
+                                  timeLabel: timeLabel,
+                                  endLabel: endLabel,
+                                )) ...<Widget>[
+                                  const SizedBox(width: 6),
+                                  widget,
+                                ],
+                            ],
+                          ),
+                          if (!selecting && compact) ...<Widget>[
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: _titleMeta(
+                                palette: palette,
+                                provisional: provisional,
+                                compact: true,
+                                timeLabel: timeLabel,
+                                endLabel: endLabel,
+                              ),
+                            ),
+                          ],
+                          if (generatedSummary?.isNotEmpty == true) ...<Widget>[
+                            const SizedBox(height: 6),
+                            Text(
+                              generatedSummary!,
+                              maxLines: expanded ? null : 2,
+                              overflow: expanded
+                                  ? TextOverflow.visible
+                                  : TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: palette.textSecondary,
+                                height: 1.38,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                          if (topics.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 7),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 5,
+                              children: topics
+                                  .map(
+                                    (topic) => _TopicChip(
+                                      label: topic,
+                                      palette: palette,
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                          if (speakers.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 7),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 5,
+                              children: speakers
+                                  .take(4)
+                                  .map(
+                                    (speaker) => _SpeakerChip(
+                                      label: speaker,
+                                      palette: palette,
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                          const SizedBox(height: 9),
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: Column(
+                              children: <Widget>[
+                                for (
+                                  var index = 0;
+                                  index < visible.length;
+                                  index++
+                                ) ...<Widget>[
+                                  _TranscriptLine(segment: visible[index]),
+                                  if (index < visible.length - 1)
+                                    const SizedBox(height: 7),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (expanded && loadingSegments) ...<Widget>[
+                            const SizedBox(height: 10),
+                            Row(
+                              children: <Widget>[
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Loading the rest of this moment',
+                                  style: TextStyle(
+                                    color: palette.textMuted,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (expanded &&
+                              !loadingSegments &&
+                              segments.length <
+                                  moment.segmentCount) ...<Widget>[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
+                              style: TextStyle(
+                                color: palette.textMuted,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                          if (hidden > 0 || expanded) ...<Widget>[
+                            const SizedBox(height: 5),
+                            // A Wrap rather than a Row with a Spacer: on a
+                            // narrow phone "Show less" and "Write up again"
+                            // together are wider than the moment, and a Row
+                            // answered that by overflowing for as long as the
+                            // moment stayed open.
+                            SizedBox(
+                              width: double.infinity,
+                              child: Wrap(
+                                alignment: WrapAlignment.spaceBetween,
+                                runSpacing: 2,
+                                children: <Widget>[
+                                  TextButton.icon(
+                                    onPressed: selecting ? null : onToggle,
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                      ),
+                                    ),
+                                    icon: Icon(
+                                      expanded
+                                          ? Icons.expand_less_rounded
+                                          : Icons.expand_more_rounded,
+                                      size: 17,
+                                    ),
+                                    label: Text(
+                                      expanded
+                                          ? 'Show less'
+                                          : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
                                     ),
                                   ),
-                                  icon: busy
-                                      ? const SizedBox(
-                                          width: 14,
-                                          height: 14,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.auto_awesome,
-                                          size: 15,
+                                  // Offered only once a moment is open: it acts on what
+                                  // the reader is looking at, and it is not something to
+                                  // trip over while scanning the day.
+                                  if (expanded &&
+                                      onReprocess != null &&
+                                      !selecting)
+                                    TextButton.icon(
+                                      onPressed: busy ? null : onReprocess,
+                                      style: TextButton.styleFrom(
+                                        visualDensity: VisualDensity.compact,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
                                         ),
-                                  label: Text(
-                                    busy
-                                        ? 'Writing up'
-                                        : moment.hasWriteUp
-                                        ? 'Write up again'
-                                        : 'Write up now',
-                                  ),
-                                ),
-                            ],
-                          ),
+                                      ),
+                                      icon: busy
+                                          ? const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.auto_awesome,
+                                              size: 15,
+                                            ),
+                                      label: Text(
+                                        busy
+                                            ? 'Writing up'
+                                            : moment.hasWriteUp
+                                            ? 'Write up again'
+                                            : 'Write up now',
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+/// The vertical thread that runs behind a moment, with the dot that marks
+/// where it starts. Drawn as a background layer so nothing about a tile's
+/// height depends on it — and, more to the point, so the transcript inside a
+/// tile can animate open and shut without the rail fixing the row's height.
+class _MomentRail extends StatelessWidget {
+  const _MomentRail({required this.palette});
+
+  final NeoRecallPalette palette;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    alignment: Alignment.topCenter,
+    children: <Widget>[
+      Positioned(
+        top: 0,
+        bottom: 0,
+        child: Container(width: 1, color: palette.borderLight),
+      ),
+      Positioned(
+        top: 18,
+        child: Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: palette.accent,
+            border: Border.all(color: palette.bgCard, width: 2),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: palette.accent.withValues(alpha: 0.28),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 /// Marks a title and summary that describe a conversation which is still being

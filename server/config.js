@@ -285,6 +285,21 @@ function buildConfig() {
     embeddingDimensions: integer('NEORECALL_EMBEDDING_DIMENSIONS', 384, { min: 1 }),
     requireVector: boolean('NEORECALL_REQUIRE_VECTOR', process.env.NODE_ENV === 'production'),
     rrfK: integer('NEORECALL_RRF_K', 60, { min: 1 }),
+    // A nearest neighbour is not the same thing as a match. The vector index
+    // returns the k closest embeddings whatever their distance, so on a small
+    // archive every query "matches" every document — which is how unrelated
+    // transcript segments ended up ranked as evidence. Embeddings are unit
+    // length, so this floor is plain cosine similarity: below it a neighbour is
+    // dropped before fusion rather than fused with a rank it did not earn.
+    semanticSimilarityFloor: number('NEORECALL_SEMANTIC_SIMILARITY_FLOOR', 0.62, { min: 0, max: 1 }),
+    // How many restatements of one question Ask may retrieve for. A question
+    // and its paraphrase reach different documents; beyond a handful the extra
+    // queries return what the earlier ones already found.
+    askMaxSearchQueries: integer('NEORECALL_ASK_MAX_SEARCH_QUERIES', 3, { min: 1, max: 8 }),
+    // A question about a period ("what did I do today") is answered from the
+    // period, not from whatever happens to resemble the words in it. This caps
+    // how many documents such a question may read out of its time window.
+    askTimeWindowLimit: integer('NEORECALL_ASK_TIME_WINDOW_LIMIT', 40, { min: 1, max: 200 }),
     searchWeights: {
       relevance: relevanceWeight / searchWeightTotal,
       recency: recencyWeight / searchWeightTotal,
