@@ -9,6 +9,7 @@ import 'main_theme.dart';
 import 'src/models/timeline_moment.dart';
 import 'src/sync/pending_audio_preview.dart';
 import 'src/widgets/local_audio_transport.dart';
+import 'l10n/gen/app_l10n.dart';
 
 Future<void> showMomentAudioSheet(
   BuildContext context,
@@ -284,7 +285,7 @@ class _MomentAudioSheetState extends State<_MomentAudioSheet> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Close',
+                  tooltip: AppL10n.of(context).actionClose,
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded),
                 ),
@@ -314,7 +315,7 @@ class _MomentAudioSheetState extends State<_MomentAudioSheet> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Recording is active. Use headphones to avoid recording the playback again.',
+                        AppL10n.of(context).audioHeadphonesWarning,
                         style: TextStyle(
                           color: palette.textSecondary,
                           fontSize: 11.5,

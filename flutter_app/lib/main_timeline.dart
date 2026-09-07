@@ -9,6 +9,7 @@ import 'main_theme.dart';
 import 'src/models/timeline_moment.dart';
 import 'src/models/transcript.dart';
 import 'src/widgets/selection_mixin.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({
@@ -51,22 +52,20 @@ class _TimelineScreenState extends State<TimelineScreen>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          count == 1 ? 'Delete this moment?' : 'Delete $count moments?',
-        ),
+        title: Text(AppL10n.of(context).momentsDeleteTitle(count)),
         content: Text(
           count == 1
-              ? 'This will permanently delete this conversation and its transcript. A memory that came only from this conversation will be removed too.'
-              : 'This will permanently delete these conversations and their transcripts. Memories that came only from them will be removed too.',
+              ? AppL10n.of(context).momentsDeleteBodyOne
+              : AppL10n.of(context).momentsDeleteBodyMany,
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(context).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(AppL10n.of(context).actionDelete),
           ),
         ],
       ),
@@ -78,11 +77,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     final ids = selectedIds;
     if (!await _confirmDelete(ids.length)) return;
     if (!mounted) return;
+    final strings = AppL10n.of(context);
     await runBulkAction(
       controller.bulkDeleteMoments,
-      success: (deleted) =>
-          'Deleted ${deleted.length} moment${deleted.length == 1 ? '' : 's'}',
-      failure: (error) => 'Could not delete moments: $error',
+      success: (deleted) => strings.momentsDeleted(deleted.length),
+      failure: (error) => strings.momentsDeleteFailed(error.toString()),
     );
   }
 
@@ -93,13 +92,17 @@ class _TimelineScreenState extends State<TimelineScreen>
       await controller.deleteMoment(id);
       if (!mounted) return;
       if (isSelected(id)) toggleSelect(id);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted 1 moment')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).momentsDeleted(1))),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete moments: $error')),
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).momentsDeleteFailed(error.toString()),
+          ),
+        ),
       );
     }
   }
@@ -107,11 +110,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Select and Done — kept in one place so the standalone header and
   /// Library's row cannot diverge.
   Widget _actions() => selecting
-      ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+      ? TextButton(
+          onPressed: exitSelect,
+          child: Text(AppL10n.of(context).actionDone),
+        )
       : TextButton.icon(
           onPressed: controller.moments.isEmpty ? null : () => enterSelect(),
           icon: const Icon(Icons.checklist_rounded, size: 18),
-          label: const Text('Select'),
+          label: Text(AppL10n.of(context).actionSelect),
         );
 
   Widget _headerTrailing(List<TimelineMoment> moments) {
@@ -203,9 +209,8 @@ class _TimelineScreenState extends State<TimelineScreen>
             Align(alignment: Alignment.centerRight, child: _actions())
           else ...<Widget>[
             ScreenHeader(
-              title: 'Moments',
-              description:
-                  'A compact stream of conversations. Expand only the ones you want to read in full.',
+              title: AppL10n.of(context).navMoments,
+              description: AppL10n.of(context).momentsDescription,
               trailing: _headerTrailing(moments),
             ),
             const SizedBox(height: 18),
@@ -238,11 +243,11 @@ class _TimelineScreenState extends State<TimelineScreen>
               child: EmptyState(
                 icon: Icons.view_timeline_outlined,
                 title: controller.processingIssues.isEmpty
-                    ? 'No transcript yet'
-                    : 'Nothing to show yet',
+                    ? AppL10n.of(context).momentsEmptyNoTranscript
+                    : AppL10n.of(context).momentsEmptyNothing,
                 message: controller.processingIssues.isEmpty
-                    ? 'Start a recording or import audio. Persisted segments will appear here.'
-                    : 'Your recordings are safe. They will appear here once the above is sorted out.',
+                    ? AppL10n.of(context).momentsEmptyNoTranscriptMessage
+                    : AppL10n.of(context).momentsEmptyNothingMessage,
               ),
             )
           else
@@ -344,13 +349,13 @@ class _DayHeader extends StatelessWidget {
           Expanded(
             child: Text(
               today
-                  ? 'Today'
+                  ? AppL10n.of(context).momentsToday
                   : MaterialLocalizations.of(context).formatFullDate(day),
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ),
           Text(
-            '$groupCount ${groupCount == 1 ? 'moment' : 'moments'}',
+            AppL10n.of(context).momentsGroupCount(groupCount),
             style: TextStyle(color: palette.textMuted, fontSize: 11.5),
           ),
         ],
@@ -394,13 +399,13 @@ class _TimelineEntry extends StatelessWidget {
 
   /// Where this moment stands, in the reader's terms. Null when it simply
   /// stands finished and there is nothing to say.
-  String? _statusLabel() {
-    if (moment.isPending) return 'Being sorted';
-    if (moment.isSetAside) return 'Waiting on a summary';
+  String? _statusLabel(AppL10n l10n) {
+    if (moment.isPending) return l10n.momentsStatusPending;
+    if (moment.isSetAside) return l10n.momentsStatusSetAside;
     // Waiting for the model is one state, whether this is the first write-up
     // or a repeat: nothing on the record distinguishes them, so the label does
     // not claim to.
-    if (moment.awaitsWriteUp) return 'Summary on the way';
+    if (moment.awaitsWriteUp) return l10n.momentsStatusAwaitsWriteUp;
     return null;
   }
 
@@ -419,15 +424,16 @@ class _TimelineEntry extends StatelessWidget {
     required bool compact,
     required String timeLabel,
     required String endLabel,
+    required AppL10n l10n,
   }) {
-    final status = _statusLabel();
+    final status = _statusLabel(l10n);
     return <Widget>[
       if (provisional) _LiveInsightBadge(palette: palette),
       if (!provisional && status != null)
         _MomentStatus(label: status, palette: palette),
       if (hasAudio && onPlay != null)
         IconButton(
-          tooltip: 'Listen',
+          tooltip: l10n.momentsListen,
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -454,7 +460,10 @@ class _TimelineEntry extends StatelessWidget {
     // is opened.
     final segments = loadedSegments ?? moment.segments;
     final speakers = segments
-        .map((segment) => segment.speaker ?? 'Unassigned')
+        .map(
+          (segment) =>
+              segment.speaker ?? AppL10n.of(context).momentsUnassignedSpeaker,
+        )
         .toSet()
         .toList();
     final visible = expanded ? segments : segments.take(2).toList();
@@ -559,10 +568,10 @@ class _TimelineEntry extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   moment.isPending
-                                      ? 'Just recorded'
+                                      ? AppL10n.of(context).momentsJustRecorded
                                       : generatedTitle?.isNotEmpty == true
                                       ? generatedTitle!
-                                      : 'Conversation',
+                                      : AppL10n.of(context).momentsConversation,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -573,6 +582,7 @@ class _TimelineEntry extends StatelessWidget {
                               ),
                               if (!selecting && !compact)
                                 for (final widget in _titleMeta(
+                                  l10n: AppL10n.of(context),
                                   palette: palette,
                                   provisional: provisional,
                                   compact: false,
@@ -591,6 +601,7 @@ class _TimelineEntry extends StatelessWidget {
                               runSpacing: 4,
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: _titleMeta(
+                                l10n: AppL10n.of(context),
                                 palette: palette,
                                 provisional: provisional,
                                 compact: true,
@@ -677,7 +688,7 @@ class _TimelineEntry extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'Loading the rest of this moment',
+                                  AppL10n.of(context).momentsLoadingRest,
                                   style: TextStyle(
                                     color: palette.textMuted,
                                     fontSize: 11.5,
@@ -692,7 +703,10 @@ class _TimelineEntry extends StatelessWidget {
                                   moment.segmentCount) ...<Widget>[
                             const SizedBox(height: 8),
                             Text(
-                              'Showing the first ${segments.length} of ${moment.segmentCount} lines.',
+                              AppL10n.of(context).momentsShowingFirstLines(
+                                segments.length,
+                                moment.segmentCount,
+                              ),
                               style: TextStyle(
                                 color: palette.textMuted,
                                 fontSize: 11.5,
@@ -728,8 +742,10 @@ class _TimelineEntry extends StatelessWidget {
                                     ),
                                     label: Text(
                                       expanded
-                                          ? 'Show less'
-                                          : '$hidden more ${hidden == 1 ? 'line' : 'lines'}',
+                                          ? AppL10n.of(context).momentsShowLess
+                                          : AppL10n.of(
+                                              context,
+                                            ).momentsMoreLines(hidden),
                                     ),
                                   ),
                                   // Offered only once a moment is open: it acts on what
@@ -760,10 +776,16 @@ class _TimelineEntry extends StatelessWidget {
                                             ),
                                       label: Text(
                                         busy
-                                            ? 'Writing up'
+                                            ? AppL10n.of(
+                                                context,
+                                              ).momentsWritingUp
                                             : moment.hasWriteUp
-                                            ? 'Write up again'
-                                            : 'Write up now',
+                                            ? AppL10n.of(
+                                                context,
+                                              ).momentsWriteUpAgain
+                                            : AppL10n.of(
+                                                context,
+                                              ).momentsWriteUpNow,
                                       ),
                                     ),
                                 ],
@@ -852,7 +874,7 @@ class _LiveInsightBadge extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          'Recording',
+          AppL10n.of(context).momentsRecordingBadge,
           style: TextStyle(
             color: palette.accent,
             fontSize: 9.5,
@@ -922,7 +944,8 @@ class _TranscriptLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    final speaker = segment.speaker ?? 'Unassigned';
+    final speaker =
+        segment.speaker ?? AppL10n.of(context).momentsUnassignedSpeaker;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -984,7 +1007,7 @@ class _TimelinePager extends StatelessWidget {
                 ? null
                 : controller.showNewerMoments,
             icon: const Icon(Icons.chevron_left),
-            label: const Text('Newer'),
+            label: Text(AppL10n.of(context).momentsNewer),
           ),
           if (busy)
             const SizedBox(
@@ -994,7 +1017,7 @@ class _TimelinePager extends StatelessWidget {
             )
           else
             Text(
-              'Page ${controller.momentPage + 1}',
+              AppL10n.of(context).momentsPage(controller.momentPage + 1),
               style: Theme.of(context).textTheme.labelLarge,
             ),
           TextButton.icon(
@@ -1002,7 +1025,7 @@ class _TimelinePager extends StatelessWidget {
                 ? null
                 : controller.showOlderMoments,
             icon: const Icon(Icons.chevron_right),
-            label: const Text('Older'),
+            label: Text(AppL10n.of(context).momentsOlder),
             iconAlignment: IconAlignment.end,
           ),
         ],
@@ -1077,7 +1100,9 @@ class _MomentSelectionBar extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: Text(
-              count == 0 ? 'Select moments' : '$count selected',
+              count == 0
+                  ? AppL10n.of(context).momentsSelectPrompt
+                  : AppL10n.of(context).momentsSelectedCount(count),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1089,13 +1114,13 @@ class _MomentSelectionBar extends StatelessWidget {
           ),
           _MomentSelectionAction(
             tooltip: onSelectAll == null
-                ? 'All moments selected'
-                : 'Select all moments',
+                ? AppL10n.of(context).momentsAllSelected
+                : AppL10n.of(context).momentsSelectAll,
             icon: Icons.select_all_rounded,
             onPressed: onSelectAll,
           ),
           _MomentSelectionAction(
-            tooltip: 'Delete',
+            tooltip: AppL10n.of(context).actionDelete,
             icon: Icons.delete_outline_rounded,
             danger: true,
             onPressed: enabled ? onDelete : null,

@@ -23,6 +23,7 @@ import 'src/devices/appliance/ui/appliance_setup_flow.dart';
 import 'src/sync/processing_status.dart';
 import 'src/models/recording_context.dart';
 import 'src/models/timeline_moment.dart';
+import 'l10n/gen/app_l10n.dart';
 
 bool shouldRequestSystemAudio({
   required bool selected,
@@ -151,18 +152,16 @@ class _RecordScreenState extends State<RecordScreen> {
               borderRadius: BorderRadius.circular(AppRadius.panel),
               side: BorderSide(color: palette.borderLight),
             ),
-            title: const Text('Recording consent and visible use'),
-            content: const Text(
-              'NeoRecall records privately spoken words. Record only when everyone has been informed and you are legally permitted to do so. Recording always remains visibly indicated; NeoRecall has no covert mode.',
-            ),
+            title: Text(AppL10n.of(context).recordConsentTitle),
+            content: Text(AppL10n.of(context).recordConsentBody),
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
+                child: Text(AppL10n.of(context).actionCancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('I understand'),
+                child: Text(AppL10n.of(context).recordConsentAccept),
               ),
             ],
           ),
@@ -224,7 +223,7 @@ class _RecordScreenState extends State<RecordScreen> {
         SnackBar(
           content: Text(
             appliance.message.isEmpty
-                ? 'The device did not answer.'
+                ? AppL10n.of(context).recordDeviceNoAnswer
                 : appliance.message,
           ),
         ),
@@ -372,20 +371,17 @@ class _RecordScreenState extends State<RecordScreen> {
           widget.controller.preferredDeviceIsOfflineFirst &&
           !widget.controller.preferredDeviceStreamsLive);
 
-  String? get _stageFootnote {
+  String? _stageFootnote(AppL10n l10n) {
     if (!_showRecordButton) {
-      return 'This device records by itself — there is no live capture. '
-          'Use “Sync device recordings” to pull and transcribe them.';
+      return l10n.recordFootnoteOfflineDevice;
     }
     if (bluetoothPreferred &&
         widget.controller.preferredDeviceIsOfflineFirst &&
         widget.controller.preferredDeviceStreamsLive) {
-      return 'Start from the app or the device. Either side can stop. '
-          'Recordings made while you were away still sync from the device.';
+      return l10n.recordFootnoteEitherSide;
     }
     if (_isDesktop) {
-      return 'System audio uses the OS screen-recording permission and captures '
-          'audio only, not video frames.';
+      return l10n.recordFootnoteSystemAudio;
     }
     return null;
   }
@@ -408,9 +404,8 @@ class _RecordScreenState extends State<RecordScreen> {
           if (controller.error != null)
             InlineMessage(message: controller.error!, error: true),
           if (!controller.online)
-            const InlineMessage(
-              message:
-                  'You are offline. Capture continues locally and queued audio uploads automatically when the connection returns.',
+            InlineMessage(
+              message: AppL10n.of(context).recordOffline,
               icon: Icons.cloud_off_rounded,
             ),
         ];
@@ -443,8 +438,8 @@ class _RecordScreenState extends State<RecordScreen> {
               ? _deskStartedAt(controller)
               : controller.recordingStartedAt,
           showRecordButton: _showRecordButton,
-          sourceLabel: _sourceLabel,
-          footnote: _stageFootnote,
+          sourceLabel: _sourceLabel(AppL10n.of(context)),
+          footnote: _stageFootnote(AppL10n.of(context)),
           onToggle: _toggle,
           deskChosen: deskChosen,
           onOpenDevice: _openDeviceSheet,
@@ -561,18 +556,22 @@ class _RecordScreenState extends State<RecordScreen> {
   );
 
   /// What the caption under the record button names as the source.
-  String get _sourceLabel {
+  String _sourceLabel(AppL10n l10n) {
     final controller = widget.controller;
     switch (_source) {
       case CaptureSource.wearable:
-        return controller.preferredDeviceLabel ?? 'Wearable';
+        return controller.preferredDeviceLabel ?? l10n.recordSourceWearable;
       case CaptureSource.desk:
         final desk = _selectedDesk;
-        return desk == null ? 'NeoRecall Desk' : applianceName(desk);
+        return desk == null ? l10n.recordSourceDesk : applianceName(desk);
       case CaptureSource.phone:
-        if (_isMobile) return 'Phone microphone';
-        if (microphone && systemAudio) return 'Microphone and device audio';
-        return systemAudio ? 'Device audio' : 'Microphone';
+        if (_isMobile) return l10n.recordSourcePhoneMicrophone;
+        if (microphone && systemAudio) {
+          return l10n.recordSourceMicrophoneAndDevice;
+        }
+        return systemAudio
+            ? l10n.recordSourceDeviceAudio
+            : l10n.recordSourceMicrophone;
     }
   }
 }
@@ -598,25 +597,24 @@ class _RecordingNoteDialogState extends State<_RecordingNoteDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add a note'),
+      title: Text(AppL10n.of(context).recordNoteTitle),
       content: TextField(
         controller: _input,
         autofocus: true,
         minLines: 3,
         maxLines: 8,
-        decoration: const InputDecoration(
-          hintText:
-              'Names, context, decisions, or anything the transcript may miss…',
+        decoration: InputDecoration(
+          hintText: AppL10n.of(context).recordNoteHint,
         ),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(AppL10n.of(context).actionCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, _input.text),
-          child: const Text('Save note'),
+          child: Text(AppL10n.of(context).recordNoteSave),
         ),
       ],
     );
@@ -724,25 +722,45 @@ class _IdleWorkspace extends StatelessWidget {
   final Future<void> Function() onUploadWithMobileData;
   final VoidCallback onReview;
 
-  static const List<String> _months = <String>[
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-  ];
-  static const List<String> _weekdays = <String>[
-    'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY',
-    'FRIDAY', 'SATURDAY', 'SUNDAY',
-  ];
+  // Spelled out rather than taken from `intl`: the eyebrow wants short,
+  // upper-case forms that a locale's own abbreviations do not reliably give,
+  // and the catalogue keeps them reviewable alongside the rest of the copy.
+  static String _monthShort(AppL10n l10n, int month) => <String>[
+    l10n.monthShort1,
+    l10n.monthShort2,
+    l10n.monthShort3,
+    l10n.monthShort4,
+    l10n.monthShort5,
+    l10n.monthShort6,
+    l10n.monthShort7,
+    l10n.monthShort8,
+    l10n.monthShort9,
+    l10n.monthShort10,
+    l10n.monthShort11,
+    l10n.monthShort12,
+  ][month - 1];
+
+  static String _weekdayLong(AppL10n l10n, int weekday) => <String>[
+    l10n.weekdayLong1,
+    l10n.weekdayLong2,
+    l10n.weekdayLong3,
+    l10n.weekdayLong4,
+    l10n.weekdayLong5,
+    l10n.weekdayLong6,
+    l10n.weekdayLong7,
+  ][weekday - 1];
 
   /// A greeting keyed to the clock, not to a name we may not have.
-  static String greetingFor(DateTime now) {
-    if (now.hour < 5) return 'Still up';
-    if (now.hour < 12) return 'Good morning';
-    if (now.hour < 18) return 'Good afternoon';
-    return 'Good evening';
+  static String greetingFor(DateTime now, AppL10n l10n) {
+    if (now.hour < 5) return l10n.recordGreetingStillUp;
+    if (now.hour < 12) return l10n.recordGreetingMorning;
+    if (now.hour < 18) return l10n.recordGreetingAfternoon;
+    return l10n.recordGreetingEvening;
   }
 
-  static String dateLineFor(DateTime now) =>
-      '${_weekdays[now.weekday - 1]} · ${now.day} ${_months[now.month - 1]}';
+  static String dateLineFor(DateTime now, AppL10n l10n) =>
+      '${_weekdayLong(l10n, now.weekday)} · ${now.day} '
+      '${_monthShort(l10n, now.month)}';
 
   /// Today's moments, newest first. The Record page shows a handful; the rest
   /// of the history is Library's job.
@@ -764,10 +782,10 @@ class _IdleWorkspace extends StatelessWidget {
     return '$hour:$minute';
   }
 
-  static String _durationLabel(TimelineMoment moment) {
+  static String _durationLabel(TimelineMoment moment, AppL10n l10n) {
     final span = moment.endedAt.difference(moment.startedAt);
-    if (span.inMinutes < 1) return 'under a minute';
-    if (span.inMinutes < 60) return '${span.inMinutes} min';
+    if (span.inMinutes < 1) return l10n.recordDurationUnderMinute;
+    if (span.inMinutes < 60) return l10n.recordDurationMinutes(span.inMinutes);
     final hours = span.inHours;
     final minutes = span.inMinutes.remainder(60);
     return minutes == 0 ? '${hours}h' : '${hours}h ${minutes}m';
@@ -776,6 +794,7 @@ class _IdleWorkspace extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final now = DateTime.now();
     final moments = _today();
     final visible = moments.take(4).toList();
@@ -797,12 +816,12 @@ class _IdleWorkspace extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Text(
-                          dateLineFor(now),
+                          dateLineFor(now, strings),
                           style: sectionEyebrowStyle(palette),
                         ),
                         const SizedBox(height: 7),
                         Text(
-                          greetingFor(now),
+                          greetingFor(now, strings),
                           style: heroTitleStyle(palette, size: 22),
                         ),
                       ],
@@ -832,10 +851,14 @@ class _IdleWorkspace extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Text(
-                      recording ? 'LIVE' : 'STANDBY',
+                      recording
+                          ? AppL10n.of(context).recordStateLive
+                          : AppL10n.of(context).recordStateStandby,
                       style: sectionEyebrowStyle(palette).copyWith(
                         letterSpacing: 2.2,
-                        color: recording ? palette.secondary : palette.textMuted,
+                        color: recording
+                            ? palette.secondary
+                            : palette.textMuted,
                       ),
                     ),
                     const SizedBox(height: AppSpacing.lg + 2),
@@ -850,10 +873,12 @@ class _IdleWorkspace extends StatelessWidget {
                     const SizedBox(height: AppSpacing.lg - 2),
                     Text(
                       showRecordButton
-                          ? (recording ? 'Recording' : 'Ready to record')
+                          ? (recording
+                                ? AppL10n.of(context).recordStateRecording
+                                : AppL10n.of(context).recordStateReady)
                           // The device's own name is the sync card's line to
                           // say; repeating it here printed it twice.
-                          : 'Recordings sync from the device',
+                          : AppL10n.of(context).recordStateDeviceSync,
                       style: TextStyle(
                         color: palette.textPrimary,
                         fontSize: 15,
@@ -922,22 +947,18 @@ class _IdleWorkspace extends StatelessWidget {
               ),
               SizedBox(height: compact ? 40 : 48),
               SectionLabel(
-                label: 'Today',
+                label: strings.recordTodayLabel,
                 emphasized: true,
                 trailing: moments.isEmpty
                     ? null
-                    : '${moments.length} '
-                          '${moments.length == 1 ? 'moment' : 'moments'}',
+                    : strings.recordMomentCount(moments.length),
               ),
               if (visible.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Text(
-                    'Nothing recorded yet today.',
-                    style: TextStyle(
-                      color: palette.textMuted,
-                      fontSize: 12.5,
-                    ),
+                    strings.recordNothingToday,
+                    style: TextStyle(color: palette.textMuted, fontSize: 12.5),
                   ),
                 )
               else
@@ -952,14 +973,12 @@ class _IdleWorkspace extends StatelessWidget {
                         style: monoMetricStyle(palette),
                       ),
                     ),
-                    title:
-                        visible[index].titleEn?.trim().isNotEmpty == true
+                    title: visible[index].titleEn?.trim().isNotEmpty == true
                         ? visible[index].titleEn!
-                        : 'Untitled moment',
+                        : strings.recordUntitledMoment,
                     subtitle:
-                        '${_durationLabel(visible[index])} · '
-                        '${visible[index].segmentCount} '
-                        '${visible[index].segmentCount == 1 ? 'segment' : 'segments'}',
+                        '${_durationLabel(visible[index], strings)} · '
+                        '${strings.recordSegmentCount(visible[index].segmentCount)}',
                     trailing: const RowChevron(),
                     onTap: onOpenLibrary,
                   ),
@@ -969,7 +988,7 @@ class _IdleWorkspace extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: TextButton(
                     onPressed: onOpenLibrary,
-                    child: const Text('All moments →'),
+                    child: Text(strings.recordAllMoments),
                   ),
                 ),
               ],
@@ -1016,8 +1035,7 @@ class _ActiveRecordingWorkspace extends StatelessWidget {
       onRetry: controller.retryFailedUploads,
       onUploadWithMobileData: controller.uploadQueuedAudioOnMobileDataOnce,
       onReview: () => showPendingAudioReviewSheet(context, controller),
-      footnote:
-          'Add context as it happens. Every item is stored locally before it is synchronized.',
+      footnote: AppL10n.of(context).recordContextFootnote,
     );
     final contextPanel = _RecordingContextPanel(
       items: controller.activeRecordingContext,
@@ -1039,10 +1057,9 @@ class _ActiveRecordingWorkspace extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const ScreenHeader(
-                title: 'Recording in progress',
-                description:
-                    'Mark important moments and add notes, images, or documents without leaving the recording.',
+              ScreenHeader(
+                title: AppL10n.of(context).recordInProgressTitle,
+                description: AppL10n.of(context).recordInProgressDescription,
               ),
               for (final alert in alerts) ...<Widget>[
                 alert,
@@ -1108,7 +1125,7 @@ class _RecordingContextPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Text(
-            'Recording context',
+            AppL10n.of(context).recordContextTitle,
             style: TextStyle(
               color: palette.textPrimary,
               fontSize: 18,
@@ -1117,7 +1134,7 @@ class _RecordingContextPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'These sources help NeoRecall understand what matters and improve the final memory.',
+            AppL10n.of(context).recordContextDescription,
             style: TextStyle(color: palette.textMuted, height: 1.4),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -1128,25 +1145,25 @@ class _RecordingContextPanel extends StatelessWidget {
               action(
                 'recording-context-highlight',
                 Icons.flag_outlined,
-                'Highlight',
+                AppL10n.of(context).recordContextHighlight,
                 onHighlight,
               ),
               action(
                 'recording-context-note',
                 Icons.edit_note_rounded,
-                'Note',
+                AppL10n.of(context).recordContextNote,
                 onNote,
               ),
               action(
                 'recording-context-photo',
                 Icons.add_a_photo_outlined,
-                'Photo',
+                AppL10n.of(context).recordContextPhoto,
                 onPhoto,
               ),
               action(
                 'recording-context-file',
                 Icons.attach_file_rounded,
-                'File',
+                AppL10n.of(context).recordContextFile,
                 onFile,
               ),
             ],
@@ -1160,7 +1177,7 @@ class _RecordingContextPanel extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'No context added yet.',
+                AppL10n.of(context).recordContextEmpty,
                 textAlign: TextAlign.center,
                 style: TextStyle(color: palette.textMuted),
               ),
@@ -1191,7 +1208,7 @@ class _RecordingContextPanel extends StatelessWidget {
                         child: Text(
                           item.noteText ??
                               item.originalName ??
-                              'Highlighted moment',
+                              AppL10n.of(context).recordHighlightedMoment,
                           style: TextStyle(color: palette.textPrimary),
                         ),
                       ),
@@ -1349,12 +1366,16 @@ class _CaptureStageState extends State<_CaptureStage>
           const SizedBox(height: AppSpacing.lg - 4),
           CaptureStatusPill(
             tint: tint,
-            label: recording ? 'LIVE' : 'STANDBY',
+            label: recording
+                ? AppL10n.of(context).recordStateLive
+                : AppL10n.of(context).recordStateStandby,
             pulse: recording ? _pulse : null,
           ),
           const SizedBox(height: AppSpacing.sm + 2),
           Text(
-            recording ? 'Recording is visible and active' : 'Ready to record',
+            recording
+                ? AppL10n.of(context).recordVisibleAndActive
+                : AppL10n.of(context).recordStateReady,
             textAlign: TextAlign.center,
             style: heroTitleStyle(palette, size: 19),
           ),

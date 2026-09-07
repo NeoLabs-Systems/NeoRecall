@@ -17,7 +17,9 @@ class WearableIngestedFiles {
   static Future<void> hydrate(String deviceId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      ids(deviceId).addAll(prefs.getStringList(_key(deviceId)) ?? const <String>[]);
+      ids(
+        deviceId,
+      ).addAll(prefs.getStringList(_key(deviceId)) ?? const <String>[]);
     } catch (_) {
       // Tests and a missing plugin still keep the in-memory set for this process.
     }

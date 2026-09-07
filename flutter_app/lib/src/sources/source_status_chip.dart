@@ -1,22 +1,33 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/gen/app_l10n.dart';
+
 class SourceStatusChip extends StatelessWidget {
   const SourceStatusChip({super.key, required this.label, required this.color});
 
   final String label;
   final Color color;
 
-  factory SourceStatusChip.connected() =>
-      SourceStatusChip(label: 'Connected', color: Colors.green.shade600);
+  // The label is resolved by the caller rather than stored: these factories are
+  // the only place the four status words appear, and they need the translations
+  // the caller's context carries.
+  factory SourceStatusChip.connected(AppL10n l10n) => SourceStatusChip(
+    label: l10n.sourceStatusConnected,
+    color: Colors.green.shade600,
+  );
 
-  factory SourceStatusChip.error() =>
-      const SourceStatusChip(label: 'Error', color: Colors.red);
+  factory SourceStatusChip.error(AppL10n l10n) =>
+      SourceStatusChip(label: l10n.sourceStatusError, color: Colors.red);
 
-  factory SourceStatusChip.unavailable() =>
-      SourceStatusChip(label: 'Not configured', color: Colors.grey.shade600);
+  factory SourceStatusChip.unavailable(AppL10n l10n) => SourceStatusChip(
+    label: l10n.sourceStatusNotConfigured,
+    color: Colors.grey.shade600,
+  );
 
-  factory SourceStatusChip.disabled() =>
-      SourceStatusChip(label: 'Paused', color: Colors.orange.shade700);
+  factory SourceStatusChip.disabled(AppL10n l10n) => SourceStatusChip(
+    label: l10n.sourceStatusPaused,
+    color: Colors.orange.shade700,
+  );
 
   @override
   Widget build(BuildContext context) {

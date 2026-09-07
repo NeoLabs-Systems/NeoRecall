@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../main_spacing.dart';
 import '../../main_theme.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Play, skip, and scrub for a local recording — the same chrome on Moments
 /// and on the queued-audio review sheet.
@@ -85,7 +86,7 @@ class LocalAudioTransport extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             IconButton(
-              tooltip: 'Back 10 seconds',
+              tooltip: AppL10n.of(context).audioBack10,
               onPressed: loading ? null : onSkipBack,
               icon: const Icon(Icons.replay_10_rounded),
             ),
@@ -94,7 +95,9 @@ class LocalAudioTransport extends StatelessWidget {
               width: 56,
               height: 56,
               child: IconButton.filled(
-                tooltip: playing ? 'Pause' : 'Play',
+                tooltip: playing
+                    ? AppL10n.of(context).actionPause
+                    : AppL10n.of(context).actionPlay,
                 onPressed: loading ? null : onPlayPause,
                 icon: loading
                     ? const SizedBox(
@@ -115,7 +118,7 @@ class LocalAudioTransport extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
             IconButton(
-              tooltip: 'Forward 10 seconds',
+              tooltip: AppL10n.of(context).audioForward10,
               onPressed: loading ? null : onSkipForward,
               icon: const Icon(Icons.forward_10_rounded),
             ),

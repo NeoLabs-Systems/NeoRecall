@@ -38,10 +38,11 @@ class WatchDigestPublisher {
         dueToday: snapshot.today.dueToday,
         overdue: snapshot.today.overdue,
       ),
-      dayInReview: _clip(snapshot.dayInReview, WatchDigest.maxSummaryCharacters),
-      moment: moment == null
-          ? null
-          : _moment(moment, fullTranscript),
+      dayInReview: _clip(
+        snapshot.dayInReview,
+        WatchDigest.maxSummaryCharacters,
+      ),
+      moment: moment == null ? null : _moment(moment, fullTranscript),
       memories: snapshot.memories
           .take(WatchDigest.maxMemories)
           .map(
@@ -82,7 +83,8 @@ class WatchDigestPublisher {
     // The timeline carries a preview of each conversation; a moment the reader
     // has already opened on the phone has the whole thing loaded. Prefer
     // whichever is longer, then keep only the end of it.
-    final available = (fullTranscript != null &&
+    final available =
+        (fullTranscript != null &&
             fullTranscript.length > moment.segments.length)
         ? fullTranscript
         : moment.segments;

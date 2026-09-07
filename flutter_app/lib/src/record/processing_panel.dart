@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../main_spacing.dart';
 import '../../main_theme.dart';
 import '../sync/processing_status.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class ProcessingStatusPanel extends StatefulWidget {
   const ProcessingStatusPanel({
@@ -29,29 +30,33 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
   bool _retrying = false;
   bool _uploadingWithMobileData = false;
 
-  String _eta(Duration duration) {
-    if (duration.inSeconds < 45) return 'under a minute';
+  String _eta(Duration duration, AppL10n l10n) {
+    if (duration.inSeconds < 45) return l10n.processingEtaUnderMinute;
     if (duration.inMinutes < 60) {
-      return 'about ${(duration.inSeconds / 60).ceil()} min';
+      return l10n.processingEtaMinutes((duration.inSeconds / 60).ceil());
     }
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
-    return minutes < 10 ? 'about $hours hr' : 'about $hours hr $minutes min';
+    return minutes < 10
+        ? l10n.processingEtaHours(hours)
+        : l10n.processingEtaHoursMinutes(hours, minutes);
   }
 
-  String _headline(ProcessingStatusSnapshot status) {
+  String _headline(ProcessingStatusSnapshot status, AppL10n l10n) {
     if (status.hasIssues &&
         status.activeStage == ProcessingPipelineStage.phoneQueue) {
-      return 'Processing needs attention';
+      return l10n.processingNeedsAttention;
     }
     return switch (status.activeStage) {
-      ProcessingPipelineStage.watchTransfer => 'Downloading from device',
-      ProcessingPipelineStage.phoneQueue => 'Queued securely on this device',
-      ProcessingPipelineStage.upload => 'Uploading to server',
-      ProcessingPipelineStage.serverQueue => 'Waiting in transcription queue',
-      ProcessingPipelineStage.transcription => 'Transcribing on server',
-      ProcessingPipelineStage.finalizing => 'Finalizing secure receipts',
-      ProcessingPipelineStage.complete => 'Everything is processed',
+      ProcessingPipelineStage.watchTransfer =>
+        l10n.processingStageWatchTransfer,
+      ProcessingPipelineStage.phoneQueue => l10n.processingStagePhoneQueue,
+      ProcessingPipelineStage.upload => l10n.processingStageUpload,
+      ProcessingPipelineStage.serverQueue => l10n.processingStageServerQueue,
+      ProcessingPipelineStage.transcription =>
+        l10n.processingStageTranscription,
+      ProcessingPipelineStage.finalizing => l10n.processingStageFinalizing,
+      ProcessingPipelineStage.complete => l10n.processingStageComplete,
     };
   }
 
@@ -68,19 +73,24 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
     };
   }
 
-  List<_ProcessingStepData> _steps(ProcessingStatusSnapshot status) {
+  List<_ProcessingStepData> _steps(
+    ProcessingStatusSnapshot status,
+    AppL10n l10n,
+  ) {
     final watchDetail = status.watchPendingSeconds > 0
-        ? '${_shortDuration(Duration(seconds: status.watchPendingSeconds))} of audio waiting'
+        ? l10n.processingWatchAudioWaiting(
+            _shortDuration(Duration(seconds: status.watchPendingSeconds)),
+          )
         : status.watchTransferActive
-        ? 'Receiving encrypted audio'
+        ? l10n.processingWatchReceiving
         : status.watchPending > 0
-        ? '${status.watchPending} item${status.watchPending == 1 ? '' : 's'} waiting'
-        : 'No device backlog';
+        ? l10n.processingWatchItemsWaiting(status.watchPending)
+        : l10n.processingWatchNoBacklog;
     final serverTotal = status.serverQueued + status.transcribing;
     return <_ProcessingStepData>[
       _ProcessingStepData(
         icon: Icons.bluetooth_audio_rounded,
-        title: 'Device transfer',
+        title: l10n.processingStepDeviceTransfer,
         detail: watchDetail,
         count: status.watchPending,
         active: status.watchTransferActive || status.watchPending > 0,
@@ -88,41 +98,44 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
       ),
       _ProcessingStepData(
         icon: Icons.phone_android_rounded,
-        title: 'Stored on phone',
+        title: l10n.processingStepStoredOnPhone,
         detail: status.phoneQueued == 0
-            ? 'No recordings waiting locally'
-            : '${status.phoneQueued} ready for upload',
+            ? l10n.processingNoLocalQueue
+            : l10n.processingReadyForUpload(status.phoneQueued),
         count: status.phoneQueued,
         active: status.phoneQueued > 0,
       ),
       _ProcessingStepData(
         icon: Icons.cloud_upload_rounded,
-        title: 'Server upload',
+        title: l10n.processingStepServerUpload,
         detail: status.uploading == 0
-            ? 'No upload currently in flight'
-            : '${status.uploading} uploading now',
+            ? l10n.processingNoUploadInFlight
+            : l10n.processingUploadingNow(status.uploading),
         count: status.uploading,
         active: status.uploading > 0,
       ),
       _ProcessingStepData(
         icon: Icons.graphic_eq_rounded,
-        title: 'Server transcription',
+        title: l10n.processingStepServerTranscription,
         detail: status.transcribing > 0
-            ? '${status.transcribing} transcribing · ${status.serverQueued} queued'
+            ? l10n.processingTranscribingQueued(
+                status.transcribing,
+                status.serverQueued,
+              )
             : serverTotal > 0
-            ? '$serverTotal waiting for a worker'
-            : 'Server queue is clear',
+            ? l10n.processingWaitingForWorker(serverTotal)
+            : l10n.processingServerQueueClear,
         count: serverTotal,
         active: serverTotal > 0,
       ),
       _ProcessingStepData(
         icon: Icons.verified_user_outlined,
-        title: 'Safe completion',
+        title: l10n.processingStepSafeCompletion,
         detail: status.complete
-            ? 'Transcript persisted; audio released'
+            ? l10n.processingTranscriptPersisted
             : status.finalizing > 0
-            ? '${status.finalizing} verifying persistence and deletion'
-            : 'Waiting for earlier stages',
+            ? l10n.processingVerifying(status.finalizing)
+            : l10n.processingWaitingEarlierStages,
         count: status.finalizing,
         active: status.finalizing > 0,
         complete: status.complete,
@@ -171,6 +184,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final status = widget.status;
     final color = status.hasIssues
         ? palette.warning
@@ -179,20 +193,26 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
         : palette.accent;
     final facts = <String>[
       if (status.totalPending + status.watchPending > 0)
-        '${status.totalPending + status.watchPending} pending',
+        strings.processingPendingCount(
+          status.totalPending + status.watchPending,
+        ),
       if (status.totalAudioDuration > Duration.zero)
         _audioDuration(status.totalAudioDuration),
       if (status.pendingBytes > 0)
-        '${(status.pendingBytes / 1048576).toStringAsFixed(1)} MB protected',
-      if (status.eta != null) 'ETA ${_eta(status.eta!)}',
-      if (status.eta == null && status.etaCalibrating) 'ETA calibrating',
+        strings.processingMbProtected(
+          (status.pendingBytes / 1048576).toStringAsFixed(1),
+        ),
+      if (status.eta != null)
+        strings.processingEtaPrefix(_eta(status.eta!, strings)),
+      if (status.eta == null && status.etaCalibrating)
+        strings.processingEtaCalibrating,
     ];
-    final steps = _steps(status);
+    final steps = _steps(status, strings);
 
     return Semantics(
       button: true,
       expanded: _expanded,
-      label: '${_headline(status)}. ${facts.join(', ')}',
+      label: '${_headline(status, strings)}. ${facts.join(', ')}',
       child: Container(
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.075),
@@ -225,7 +245,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                _headline(status),
+                                _headline(status, strings),
                                 style: TextStyle(
                                   color: palette.textPrimary,
                                   fontSize: 13.5,
@@ -305,7 +325,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.network_cell_rounded, size: 18),
-                    label: const Text('Upload once with mobile data'),
+                    label: Text(strings.processingUploadOnMobileData),
                   ),
                 ),
               ),
@@ -331,7 +351,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
                           key: const ValueKey<String>('pending-audio-review'),
                           onPressed: widget.onReview,
                           icon: const Icon(Icons.headphones_rounded, size: 18),
-                          label: const Text('Review queued audio'),
+                          label: Text(strings.processingReviewQueued),
                         ),
                       ),
                     ],
@@ -378,7 +398,7 @@ class _ProcessingStatusPanelState extends State<ProcessingStatusPanel> {
                                     ),
                                   )
                                 : const Icon(Icons.refresh_rounded, size: 17),
-                            label: const Text('Retry failed'),
+                            label: Text(strings.processingRetryFailed),
                           ),
                         ),
                     ],

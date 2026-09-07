@@ -11,6 +11,8 @@ import 'models/chunk.dart';
 import 'sync/upload_compression.dart';
 import 'models/recording.dart';
 import 'models/recording_context.dart';
+import '../l10n/gen/app_l10n.dart';
+import 'l10n/app_language.dart';
 
 class ApiException implements Exception {
   const ApiException(this.status, this.code, this.message, [this.details]);
@@ -27,17 +29,17 @@ class ApiException implements Exception {
 /// Dart reports a lapsed deadline as "Future not completed", which is true of
 /// the code and meaningless to the person waiting. Every screen shows what the
 /// client throws, so the translation belongs here rather than in each caller.
-ApiException _requestTimedOut() => const ApiException(
-  0,
-  'REQUEST_TIMEOUT',
-  'The server did not respond in time. Check that it is running and reachable, then try again.',
-);
+ApiException _requestTimedOut() =>
+    ApiException(0, 'REQUEST_TIMEOUT', _strings().apiRequestTimeout);
 
-ApiException _serverUnreachable() => const ApiException(
-  0,
-  'SERVER_UNREACHABLE',
-  'NeoRecall could not connect to the server. Check that it is online and that this device can reach it.',
-);
+ApiException _serverUnreachable() =>
+    ApiException(0, 'SERVER_UNREACHABLE', _strings().apiServerUnreachable);
+
+/// The translations for the language the app is currently in.
+///
+/// The client has no BuildContext and is constructed long before the first
+/// frame, so it reads the shared language the controller keeps current.
+AppL10n _strings() => appStrings;
 
 class NeoRecallApiClient {
   NeoRecallApiClient({
@@ -239,7 +241,7 @@ class NeoRecallApiClient {
           throw ApiException(
             response.statusCode,
             'INVALID_SERVER_RESPONSE',
-            'The server returned a response NeoRecall could not read (HTTP ${response.statusCode}).',
+            _strings().apiInvalidResponse(response.statusCode),
           );
         }
       }
@@ -248,8 +250,8 @@ class NeoRecallApiClient {
       final errorValue = payload is Map ? payload['error'] : null;
       final error = errorValue is Map ? errorValue : null;
       final fallback = response.statusCode >= 500
-          ? 'The NeoRecall server is unavailable (HTTP ${response.statusCode}). Try again shortly or check the server.'
-          : 'The NeoRecall server rejected the request (HTTP ${response.statusCode}).';
+          ? _strings().apiServerUnavailable(response.statusCode)
+          : _strings().apiRequestRejected(response.statusCode);
       throw ApiException(
         response.statusCode,
         error?['code'] as String? ?? 'HTTP_ERROR',
@@ -312,10 +314,10 @@ class NeoRecallApiClient {
           'errorType': error.runtimeType.toString(),
         },
       );
-      throw const ApiException(
+      throw ApiException(
         0,
         'UPLOAD_CONNECTION_INTERRUPTED',
-        'The connection was interrupted while uploading. It will retry automatically.',
+        _strings().apiUploadInterrupted,
       );
     }
     try {
@@ -383,10 +385,10 @@ class NeoRecallApiClient {
       return Map<String, dynamic>.from(_decode(response) as Map);
     } catch (error) {
       if (error is ApiException) rethrow;
-      throw const ApiException(
+      throw ApiException(
         0,
         'CONTEXT_UPLOAD_INTERRUPTED',
-        'The context upload was interrupted. It remains stored locally and will retry.',
+        _strings().apiContextUploadInterrupted,
       );
     }
   }
@@ -621,10 +623,10 @@ class NeoRecallApiClient {
           await _client.send(partRequest).timeout(uploadTimeout),
         ).timeout(uploadTimeout);
       } on TimeoutException {
-        throw const ApiException(
+        throw ApiException(
           0,
           'UPLOAD_CONNECTION_INTERRUPTED',
-          'The connection was interrupted while uploading. Try the import again.',
+          _strings().apiImportInterrupted,
         );
       }
       _decode(partResponse);

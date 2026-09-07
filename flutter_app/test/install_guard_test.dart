@@ -37,45 +37,56 @@ Directory _repository({required bool dirty, required bool published}) {
 }
 
 void main() {
-  test('an install refuses a checkout with uncommitted changes', () async {
-    final repository = _repository(dirty: true, published: true);
-    addTearDown(() => repository.deleteSync(recursive: true));
-    final installer = LocalBackendInstaller();
-    addTearDown(installer.dispose);
+  test(
+    'an install refuses a checkout with uncommitted changes',
+    () async {
+      final repository = _repository(dirty: true, published: true);
+      addTearDown(() => repository.deleteSync(recursive: true));
+      final installer = LocalBackendInstaller();
+      addTearDown(installer.dispose);
 
-    await expectLater(
-      installer.install(
-        channel: LocalBackendChannel.stable,
-        installDirectory: repository.path,
-      ),
-      throwsA(
-        isA<LocalBackendInstallerException>()
-            .having((e) => e.code, 'code', 'SETUP_CHECKOUT_DIRTY')
-            .having((e) => e.retryable, 'retryable', isFalse),
-      ),
-    );
-    // The work is still there: the guard runs before anything destructive.
-    expect(
-      File('${repository.path}/README.md').readAsStringSync(),
-      'local work in progress\n',
-    );
-  }, timeout: const Timeout(Duration(minutes: 2)));
+      await expectLater(
+        installer.install(
+          channel: LocalBackendChannel.stable,
+          installDirectory: repository.path,
+        ),
+        throwsA(
+          isA<LocalBackendInstallerException>()
+              .having((e) => e.code, 'code', 'SETUP_CHECKOUT_DIRTY')
+              .having((e) => e.retryable, 'retryable', isFalse),
+        ),
+      );
+      // The work is still there: the guard runs before anything destructive.
+      expect(
+        File('${repository.path}/README.md').readAsStringSync(),
+        'local work in progress\n',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
-  test('an install refuses a checkout holding unpushed commits', () async {
-    final repository = _repository(dirty: false, published: false);
-    addTearDown(() => repository.deleteSync(recursive: true));
-    final installer = LocalBackendInstaller();
-    addTearDown(installer.dispose);
+  test(
+    'an install refuses a checkout holding unpushed commits',
+    () async {
+      final repository = _repository(dirty: false, published: false);
+      addTearDown(() => repository.deleteSync(recursive: true));
+      final installer = LocalBackendInstaller();
+      addTearDown(installer.dispose);
 
-    await expectLater(
-      installer.install(
-        channel: LocalBackendChannel.stable,
-        installDirectory: repository.path,
-      ),
-      throwsA(
-        isA<LocalBackendInstallerException>()
-            .having((e) => e.code, 'code', 'SETUP_CHECKOUT_UNPUSHED'),
-      ),
-    );
-  }, timeout: const Timeout(Duration(minutes: 2)));
+      await expectLater(
+        installer.install(
+          channel: LocalBackendChannel.stable,
+          installDirectory: repository.path,
+        ),
+        throwsA(
+          isA<LocalBackendInstallerException>().having(
+            (e) => e.code,
+            'code',
+            'SETUP_CHECKOUT_UNPUSHED',
+          ),
+        ),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }

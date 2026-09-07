@@ -61,3 +61,45 @@ test('only user-confirmed speaker names are merged into transcription vocabulary
   assert.deepEqual(exposed.automaticSpeakerVocabulary, ['Grace Hopper']);
   assert.equal(exposed.vocabularyCorrectionEnabled, true);
 });
+
+test('custom instructions round-trip and are bounded by the configured length', async () => {
+  const registered = await request(app).post('/api/v1/auth/register').send({ username: 'settings-instructions', password: 'a long and unique password' }).expect(201);
+  const auth = { Authorization: `Bearer ${registered.body.session.token}` };
+  const initial = await request(app).get('/api/v1/settings').set(auth).expect(200);
+  assert.equal(initial.body.settings.instructionsGlobal, '');
+  assert.equal(initial.body.settings.instructionsAsk, '');
+  const maximum = initial.body.settings.customInstructionsMaxCharacters;
+  assert.ok(maximum > 0);
+
+  const saved = await request(app).put('/api/v1/settings').set(auth).send({
+    instructionsGlobal: '  Schreibe auf Deutsch.  ',
+    instructionsMemories: 'Namen immer ausschreiben.',
+    instructionsSummaries: 'Höchstens fünf Zeilen.',
+    instructionsAsk: 'Antworte knapp.',
+  }).expect(200);
+  assert.equal(saved.body.settings.instructionsGlobal, 'Schreibe auf Deutsch.');
+  assert.equal(saved.body.settings.instructionsAsk, 'Antworte knapp.');
+
+  const reread = await request(app).get('/api/v1/settings').set(auth).expect(200);
+  assert.equal(reread.body.settings.instructionsMemories, 'Namen immer ausschreiben.');
+
+  // Emoji and other astral characters count once, not twice.
+  const rejected = await request(app).put('/api/v1/settings').set(auth)
+    .send({ instructionsAsk: '🧠'.repeat(maximum + 1) }).expect(400);
+  assert.equal(rejected.body.error.code, 'CUSTOM_INSTRUCTIONS_TOO_LONG');
+  const cleared = await request(app).put('/api/v1/settings').set(auth).send({ instructionsAsk: '' }).expect(200);
+  assert.equal(cleared.body.settings.instructionsAsk, '');
+});
+
+test('the output language is unset by default, accepts a supported code, and rejects an unsupported one', async () => {
+  const registered = await request(app).post('/api/v1/auth/register').send({ username: 'language-user', password: 'a long and unique password' }).expect(201);
+  const auth = { Authorization: `Bearer ${registered.body.session.token}` };
+  const initial = await request(app).get('/api/v1/settings').set(auth).expect(200);
+  assert.equal(initial.body.settings.language, null);
+  assert.deepEqual(initial.body.settings.availableLanguages, ['en', 'de']);
+  const german = await request(app).put('/api/v1/settings').set(auth).send({ language: 'de' }).expect(200);
+  assert.equal(german.body.settings.language, 'de');
+  const persisted = await request(app).get('/api/v1/settings').set(auth).expect(200);
+  assert.equal(persisted.body.settings.language, 'de');
+  await request(app).put('/api/v1/settings').set(auth).send({ language: 'fr' }).expect(400);
+});

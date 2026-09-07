@@ -4,6 +4,7 @@ import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/sync/processing_status.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Tells the user what is happening to recordings that have not turned into
 /// anything they can see yet.
@@ -52,7 +53,9 @@ class ProcessingStatusCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  blocked ? 'Something needs attention' : 'Still working on it',
+                  blocked
+                      ? AppL10n.of(context).processingSomethingNeedsAttention
+                      : AppL10n.of(context).processingStillWorking,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: tint,
                     fontWeight: FontWeight.w700,
@@ -65,9 +68,7 @@ class ProcessingStatusCard extends StatelessWidget {
               // Said before any explanation, because it is the question actually
               // being asked: is my recording gone?
               Text(
-                audioStillOnDevice == 1
-                    ? 'Your device is still holding 1 recording, so nothing has been lost.'
-                    : 'Your device is still holding $audioStillOnDevice recordings, so nothing has been lost.',
+                AppL10n.of(context).processingDeviceHolding(audioStillOnDevice),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -121,31 +122,27 @@ class ProcessingActivityBanner extends StatelessWidget {
   final ProcessingStatusSnapshot status;
   final bool isRecording;
 
-  static String _eta(Duration duration) {
-    if (duration.inSeconds < 45) return 'under a minute left';
+  static String _eta(Duration duration, AppL10n l10n) {
+    if (duration.inSeconds < 45) return l10n.processingUnderMinuteLeft;
     if (duration.inMinutes < 60) {
-      return 'about ${(duration.inSeconds / 60).ceil()} min left';
+      return l10n.processingEtaMinutesLeft((duration.inSeconds / 60).ceil());
     }
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     return minutes < 10
-        ? 'about $hours hr left'
-        : 'about $hours hr $minutes min left';
+        ? l10n.processingEtaHoursLeft(hours)
+        : l10n.processingEtaHoursMinutesLeft(hours, minutes);
   }
 
-  String? _label() {
+  String? _label(AppL10n l10n) {
     if (isRecording) return null;
     switch (status.activeStage) {
       case ProcessingPipelineStage.watchTransfer:
-        return 'Getting audio from your device';
+        return l10n.processingGettingAudio;
       case ProcessingPipelineStage.upload:
-        return status.uploading == 1
-            ? 'Uploading a recording'
-            : 'Uploading ${status.uploading} recordings';
+        return l10n.processingUploadingCount(status.uploading);
       case ProcessingPipelineStage.transcription:
-        return status.transcribing == 1
-            ? 'Transcribing a recording'
-            : 'Transcribing ${status.transcribing} recordings';
+        return l10n.processingTranscribingCount(status.transcribing);
       case ProcessingPipelineStage.phoneQueue:
       case ProcessingPipelineStage.serverQueue:
       case ProcessingPipelineStage.finalizing:
@@ -156,7 +153,8 @@ class ProcessingActivityBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _label();
+    final strings = AppL10n.of(context);
+    final label = _label(strings);
     if (label == null) return const SizedBox.shrink();
     final palette = neoRecallPaletteOf(context);
     final eta = status.eta;
@@ -193,7 +191,7 @@ class ProcessingActivityBanner extends StatelessWidget {
             if (eta != null && eta > Duration.zero) ...<Widget>[
               const SizedBox(width: 10),
               Text(
-                _eta(eta),
+                _eta(eta, strings),
                 style: TextStyle(color: palette.textMuted, fontSize: 11.5),
               ),
             ],

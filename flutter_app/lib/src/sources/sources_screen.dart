@@ -7,6 +7,7 @@ import '../../main_theme.dart';
 import 'discord_setup_dialog.dart';
 import 'platform_copy.dart';
 import 'source_platform_card.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class SourcesScreen extends StatefulWidget {
   const SourcesScreen({super.key, required this.controller});
@@ -58,9 +59,13 @@ class _SourcesScreenState extends State<SourcesScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to load sources: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).sourcesLoadFailed(error.toString()),
+          ),
+        ),
+      );
     }
   }
 
@@ -97,13 +102,16 @@ class _SourcesScreenState extends State<SourcesScreen>
       await _load(silent: true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppL10n.of(context).sourcesUpdateFailed(error.toString()),
+            ),
+          ),
+        );
       }
     }
   }
-
 
   Future<void> _deleteSource(Map<String, dynamic> source) async {
     final palette = neoRecallPaletteOf(context);
@@ -111,22 +119,28 @@ class _SourcesScreenState extends State<SourcesScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: palette.bgCard,
-        title: Text('Disconnect', style: TextStyle(color: palette.textPrimary)),
+        title: Text(
+          AppL10n.of(ctx).sourcesDisconnect,
+          style: TextStyle(color: palette.textPrimary),
+        ),
         content: Text(
-          'Stop this source? Existing transcripts stay in NeoRecall.',
+          AppL10n.of(ctx).sourcesDisconnectBody,
           style: TextStyle(color: palette.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: Text(
-              'Cancel',
+              AppL10n.of(ctx).actionCancel,
               style: TextStyle(color: palette.textSecondary),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Disconnect', style: TextStyle(color: palette.danger)),
+            child: Text(
+              AppL10n.of(ctx).sourcesDisconnect,
+              style: TextStyle(color: palette.danger),
+            ),
           ),
         ],
       ),
@@ -140,9 +154,13 @@ class _SourcesScreenState extends State<SourcesScreen>
       await _load(silent: true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to disconnect: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppL10n.of(context).sourcesDisconnectFailed(error.toString()),
+            ),
+          ),
+        );
       }
     }
   }
@@ -191,25 +209,21 @@ class _SourcesScreenState extends State<SourcesScreen>
         padding: EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 40),
         children: <Widget>[
           ScreenHeader(
-            title: 'Sources',
-            description:
-                'Services that can feed NeoRecall audio. Wearables and a '
-                'NeoRecall Desk are set up from Record.',
+            title: AppL10n.of(context).navSources,
+            description: AppL10n.of(context).sourcesDescription,
             trailing: IconButton(
-              tooltip: 'Refresh',
+              tooltip: AppL10n.of(context).actionRefresh,
               onPressed: () => _load(),
               icon: const Icon(Icons.refresh_rounded, size: 20),
             ),
           ),
-          const SectionLabel(label: 'Live capture'),
+          SectionLabel(label: AppL10n.of(context).sourcesLiveCapture),
           const SizedBox(height: 6),
           if (live.isEmpty)
-            const EmptyState(
+            EmptyState(
               icon: Icons.hub_outlined,
-              title: 'Nothing to connect yet',
-              message:
-                  'Live sources appear here as they become available for your '
-                  'account.',
+              title: AppL10n.of(context).sourcesEmptyTitle,
+              message: AppL10n.of(context).sourcesEmptyMessage,
             )
           else
             for (final card in live)

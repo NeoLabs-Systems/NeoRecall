@@ -14,7 +14,8 @@ class FakeGattTransport implements GattTransport {
       StreamController<GattPeripheral>.broadcast();
   final Map<String, StreamController<Uint8List>> _notifications =
       <String, StreamController<Uint8List>>{};
-  final StreamController<bool> _connections = StreamController<bool>.broadcast();
+  final StreamController<bool> _connections =
+      StreamController<bool>.broadcast();
 
   final List<Uint8List> commandWrites = <Uint8List>[];
 
@@ -29,8 +30,8 @@ class FakeGattTransport implements GattTransport {
   Object? writeFailure;
   bool scanning = false;
 
-  StreamController<Uint8List> _channel(String uuid) =>
-      _notifications.putIfAbsent(uuid, () => StreamController<Uint8List>.broadcast());
+  StreamController<Uint8List> _channel(String uuid) => _notifications
+      .putIfAbsent(uuid, () => StreamController<Uint8List>.broadcast());
 
   void advertise(GattPeripheral peripheral) => _discoveries.add(peripheral);
 
@@ -67,7 +68,10 @@ class FakeGattTransport implements GattTransport {
   Future<void> requestAccess() async {}
 
   @override
-  Future<void> startScan(GattScanSpec spec, {Duration timeout = const Duration(seconds: 12)}) async {
+  Future<void> startScan(
+    GattScanSpec spec, {
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     scanning = true;
   }
 
@@ -80,7 +84,11 @@ class FakeGattTransport implements GattTransport {
   bool? lastAutoReconnect;
 
   @override
-  Future<void> connect(String deviceId, {bool autoReconnect = true, Duration timeout = const Duration(seconds: 30)}) async {
+  Future<void> connect(
+    String deviceId, {
+    bool autoReconnect = true,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     lastAutoReconnect = autoReconnect;
     final Object? failure = connectError;
     if (failure != null) throw failure;
@@ -88,7 +96,8 @@ class FakeGattTransport implements GattTransport {
   }
 
   @override
-  Future<int?> requestMtu(String deviceId, int expectedMtu) async => expectedMtu;
+  Future<int?> requestMtu(String deviceId, int expectedMtu) async =>
+      expectedMtu;
 
   @override
   Future<void> pair(String deviceId) async {
@@ -101,19 +110,30 @@ class FakeGattTransport implements GattTransport {
   }
 
   @override
-  Future<List<String>> discoverServices(String deviceId) async =>
-      <String>[ApplianceProtocol.serviceUuid];
+  Future<List<String>> discoverServices(String deviceId) async => <String>[
+    ApplianceProtocol.serviceUuid,
+  ];
 
   @override
-  Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(String deviceId) async =>
-      const <GattDiscoveredCharacteristic>[];
+  Future<List<GattDiscoveredCharacteristic>> discoverCharacteristics(
+    String deviceId,
+  ) async => const <GattDiscoveredCharacteristic>[];
 
   @override
-  Future<Uint8List> read(String deviceId, String serviceUuid, String characteristicUuid) async =>
-      statusOnRead;
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async => statusOnRead;
 
   @override
-  Future<void> write(String deviceId, String serviceUuid, String characteristicUuid, Uint8List value, {bool withoutResponse = false}) async {
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) async {
     final failure = writeFailure;
     if (failure != null) throw failure;
     if (characteristicUuid == ApplianceProtocol.commandUuid) {
@@ -131,11 +151,18 @@ class FakeGattTransport implements GattTransport {
   }
 
   @override
-  Future<Stream<Uint8List>> subscribe(String deviceId, String serviceUuid, String characteristicUuid) async =>
-      _channel(characteristicUuid).stream;
+  Future<Stream<Uint8List>> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async => _channel(characteristicUuid).stream;
 
   @override
-  Future<void> unsubscribe(String deviceId, String serviceUuid, String characteristicUuid) async {}
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {}
 
   @override
   Future<void> dispose() async {

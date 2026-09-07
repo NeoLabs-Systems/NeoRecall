@@ -22,7 +22,9 @@ void main() {
     expect(info.writeSeq, 350);
     expect(info.droppedPackets, 0);
 
-    final done = RingProtocol.parseDoneNotification(hex('0400000000000000015e'));
+    final done = RingProtocol.parseDoneNotification(
+      hex('0400000000000000015e'),
+    );
     expect(done!.nextSeq, 350);
 
     final begin = RingProtocol.parseReadBeginNotification(

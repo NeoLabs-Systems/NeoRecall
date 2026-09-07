@@ -129,30 +129,30 @@ class ApplianceSheetScaffold extends StatelessWidget {
     final Widget? action = trailing?.call();
     return Row(
       children: <Widget>[
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              title,
-              style: TextStyle(
-                color: palette.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (line != null) ...<Widget>[
-              const SizedBox(height: 2),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
               Text(
-                line,
-                style: TextStyle(color: palette.textMuted, fontSize: 13),
+                title,
+                style: TextStyle(
+                  color: palette.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+              if (line != null) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  line,
+                  style: TextStyle(color: palette.textMuted, fontSize: 13),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-      ?action,
-    ],
+        ?action,
+      ],
     );
   }
 }

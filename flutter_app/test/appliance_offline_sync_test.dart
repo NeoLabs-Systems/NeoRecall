@@ -87,24 +87,25 @@ void main() {
     };
   }
 
-  test('a stranded recording travels to the phone and is acknowledged', () async {
-    final Uint8List wav = wavOf(4000);
-    serveChunk('chunk-aaaa-1111', wav);
+  test(
+    'a stranded recording travels to the phone and is acknowledged',
+    () async {
+      final Uint8List wav = wavOf(4000);
+      serveChunk('chunk-aaaa-1111', wav);
 
-    final List<WearableRecording> received = <WearableRecording>[];
-    final int emitted = await sync.drainStoredAudio((recording) async {
-      received.add(recording);
-    });
+      final List<WearableRecording> received = <WearableRecording>[];
+      final int emitted = await sync.drainStoredAudio((recording) async {
+        received.add(recording);
+      });
 
-    expect(emitted, 1);
-    expect(received.single.bytes, wav);
-    expect(received.single.contentType, 'audio/wav');
-    expect(received.single.id, 'desk-chunk-aaaa-1111');
-    final Map<String, Object?> ack = rig
-        .commandsNamed('drain_ack')
-        .single;
-    expect(ack['sh'], sha256.convert(wav).toString());
-  });
+      expect(emitted, 1);
+      expect(received.single.bytes, wav);
+      expect(received.single.contentType, 'audio/wav');
+      expect(received.single.id, 'desk-chunk-aaaa-1111');
+      final Map<String, Object?> ack = rig.commandsNamed('drain_ack').single;
+      expect(ack['sh'], sha256.convert(wav).toString());
+    },
+  );
 
   test('a lost page is resumed, not restarted', () async {
     final Uint8List wav = wavOf(2500);

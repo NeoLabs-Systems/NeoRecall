@@ -18,6 +18,7 @@ import 'package:neorecall/src/models/memory.dart';
 import 'package:neorecall/src/models/speaker.dart';
 import 'package:neorecall/src/models/timeline_moment.dart';
 import 'package:neorecall/src/models/transcript.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   test('web system-audio selection reaches the browser capture request', () {
@@ -46,6 +47,8 @@ void main() {
   testWidgets('NeoRecall theme builds MaterialApp shell', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         darkTheme: buildNeoRecallTheme(Brightness.dark),
         home: const Scaffold(body: Text('NeoRecall')),
@@ -59,6 +62,8 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: RecordScreen(controller: controller)),
       ),
@@ -89,6 +94,8 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: Scaffold(body: RecordScreen(controller: controller)),
           ),
@@ -131,6 +138,8 @@ void main() {
         controller.page = page;
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: NeoRecallShell(controller: controller),
           ),
@@ -171,6 +180,8 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: Scaffold(body: MemoriesScreen(controller: controller)),
           ),
@@ -217,6 +228,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: SpeakersScreen(controller: controller)),
       ),
@@ -242,6 +255,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: AnimatedBuilder(
           animation: controller,
@@ -263,6 +278,10 @@ void main() {
     expect(find.text('Settings areas'), findsOneWidget);
     expect(find.text('Account devices'), findsOneWidget);
 
+    // The rail scrolls: with ten areas it is taller than a short desktop
+    // window, so the entry has to be brought into view before it can be tapped.
+    await tester.ensureVisible(find.text('Account devices'));
+    await tester.pump();
     await tester.tap(find.text('Account devices'));
     await tester.pump();
     expect(find.text('No devices yet'), findsOneWidget);
@@ -284,6 +303,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: AnimatedBuilder(
           animation: controller,
@@ -346,6 +367,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallShell(controller: controller),
       ),
@@ -427,6 +450,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: TimelineScreen(controller: controller),
       ),
@@ -484,6 +509,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: TimelineScreen(controller: controller)),
       ),
@@ -521,6 +548,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: TimelineScreen(controller: controller)),
       ),
@@ -544,6 +573,8 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),
@@ -576,6 +607,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),
@@ -599,6 +632,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:neorecall/main_provider_setup.dart';
 import 'package:neorecall/src/install/admin_provider_client.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 Map<String, dynamic> _settings({
   String transcriptionProvider = 'openai-compatible',
@@ -115,6 +116,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         home: Scaffold(
           body: SingleChildScrollView(
             child: ProviderSetupPanel(client: client),
@@ -150,8 +153,14 @@ void main() {
     expect(requests.containsKey('test'), isTrue);
 
     expect(find.textContaining('Saved.'), findsOneWidget);
-    expect(find.textContaining('Transcription: heard the sample'), findsOneWidget);
-    expect(find.textContaining('Memory writing: the model refused'), findsOneWidget);
+    expect(
+      find.textContaining('Transcription: heard the sample'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Memory writing: the model refused'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a missing base URL is refused before anything is sent', (
@@ -189,6 +198,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         home: Scaffold(
           body: SingleChildScrollView(
             child: ProviderSetupPanel(client: client),
@@ -203,9 +214,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(writes, 0);
-    expect(
-      find.textContaining('needs a base URL'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('needs a base URL'), findsOneWidget);
   });
 }

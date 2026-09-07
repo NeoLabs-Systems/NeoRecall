@@ -10,6 +10,7 @@ import '../appliance_controller.dart';
 import '../appliance_link.dart';
 import '../appliance_protocol.dart';
 import 'appliance_sheet.dart';
+import '../../../../l10n/gen/app_l10n.dart';
 
 typedef ApplianceDevice = Map<String, dynamic>;
 
@@ -139,7 +140,11 @@ class _ApplianceDeviceTileState extends State<ApplianceDeviceTile>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      applianceSummary(widget.device, widget.controller),
+                      applianceSummary(
+                        widget.device,
+                        widget.controller,
+                        AppL10n.of(context),
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -157,7 +162,7 @@ class _ApplianceDeviceTileState extends State<ApplianceDeviceTile>
               ),
               const SizedBox(width: AppSpacing.sm),
               Text(
-                'Open',
+                AppL10n.of(context).applianceOpen,
                 style: TextStyle(
                   color: palette.accentHover,
                   fontSize: 12,
@@ -244,31 +249,32 @@ bool applianceIsReachable(
 String applianceSummary(
   ApplianceDevice device,
   ApplianceController controller,
+  AppL10n l10n,
 ) {
   final status = applianceLiveStatus(device, controller);
-  if (status != null) return status.summary;
+  if (status != null) return status.summary(l10n);
 
   final startedAt = device['active_session_started_at'];
   if (startedAt is String) {
     final started = DateTime.tryParse(startedAt);
     if (started != null) {
       final elapsed = DateTime.now().toUtc().difference(started.toUtc());
-      if (!elapsed.isNegative) return 'Recording · ${formatElapsed(elapsed)}';
+      if (!elapsed.isNegative) {
+        return l10n.applianceRecordingElapsed(formatElapsed(elapsed));
+      }
     }
-    return 'Recording';
+    return l10n.applianceRecording;
   }
 
   final heartbeat = device['last_heartbeat_at'];
-  if (heartbeat is! String) return 'Not seen yet';
+  if (heartbeat is! String) return l10n.applianceNotSeenYet;
   final seen = DateTime.tryParse(heartbeat);
-  if (seen == null) return 'Not seen yet';
+  if (seen == null) return l10n.applianceNotSeenYet;
   final ago = DateTime.now().toUtc().difference(seen.toUtc());
-  if (ago.inMinutes < 10) return 'Ready';
-  if (ago.inHours < 1) return 'Last seen ${ago.inMinutes} minutes ago';
-  if (ago.inDays < 1) {
-    return 'Last seen ${ago.inHours} ${ago.inHours == 1 ? "hour" : "hours"} ago';
-  }
-  return 'Last seen ${ago.inDays} ${ago.inDays == 1 ? "day" : "days"} ago';
+  if (ago.inMinutes < 10) return l10n.applianceReady;
+  if (ago.inHours < 1) return l10n.applianceLastSeenMinutes(ago.inMinutes);
+  if (ago.inDays < 1) return l10n.applianceLastSeenHours(ago.inHours);
+  return l10n.applianceLastSeenDays(ago.inDays);
 }
 
 Future<void> openApplianceDevice(

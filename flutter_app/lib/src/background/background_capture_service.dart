@@ -10,6 +10,7 @@ import 'background_live_status.dart';
 import '../watch/paired_watch.dart';
 import '../watch/watch_digest.dart';
 import 'home_widget_snapshot.dart';
+import '../l10n/app_language.dart';
 
 export 'background_hold.dart';
 export 'background_live_status.dart';
@@ -75,7 +76,10 @@ abstract class BackgroundCaptureService {
   /// hours: the watch renders the last digest it was given and never asks for
   /// another. Sending an unchanged digest is a no-op unless [force] is set,
   /// which is what a watch that has just been installed needs.
-  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {}
+  Future<void> publishWatchDigest(
+    WatchDigest digest, {
+    bool force = false,
+  }) async {}
 
   /// The Wear OS devices paired with this phone, and whether NeoRecall is on
   /// them. Empty on every platform that has no companion watch API at all.
@@ -220,7 +224,10 @@ class PlatformManagedBackgroundCaptureService
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
 
   @override
-  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {}
+  Future<void> publishWatchDigest(
+    WatchDigest digest, {
+    bool force = false,
+  }) async {}
 
   @override
   Future<List<PairedWatch>> pairedWatches() async => const <PairedWatch>[];
@@ -435,7 +442,10 @@ class AndroidBackgroundCaptureService
   }
 
   @override
-  Future<void> publishWatchDigest(WatchDigest digest, {bool force = false}) async {
+  Future<void> publishWatchDigest(
+    WatchDigest digest, {
+    bool force = false,
+  }) async {
     final payload = digest.encode();
     if (!force && payload == _watchPayload) return;
     _watchPayload = payload;
@@ -549,7 +559,7 @@ class AndroidBackgroundCaptureService
       _reportMicrophoneAvailability();
       return true;
     } catch (error) {
-      _message('Background runtime could not start: $error');
+      _message(appStrings.backgroundRuntimeFailed('$error'));
       return false;
     }
   }
@@ -562,7 +572,7 @@ class AndroidBackgroundCaptureService
     try {
       await _channel.invokeMethod<void>('updateLiveStatus', status.toMap());
     } catch (error) {
-      _message('Background status could not be updated: $error');
+      _message(appStrings.backgroundStatusFailed('$error'));
     }
   }
 
@@ -663,7 +673,7 @@ class AndroidBackgroundCaptureService
     } catch (error) {
       // Includes MissingPluginException on a host without the native side.
       _state = const BackgroundRuntimeState();
-      _message('Android background host is temporarily unavailable: $error');
+      _message(appStrings.backgroundHostUnavailable('$error'));
     }
   }
 

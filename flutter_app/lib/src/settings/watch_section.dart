@@ -8,6 +8,7 @@ import '../../main_shared.dart';
 import '../../main_theme.dart';
 import '../watch/paired_watch.dart';
 import 'settings_section_list.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Pairing, installing and feeding a Wear OS watch.
 ///
@@ -71,13 +72,14 @@ class _WatchSectionState extends State<WatchSection> {
     if (!mounted) return;
     setState(() {
       _sending = false;
-      _notice = 'Today was sent to the watch.';
+      _notice = AppL10n.of(context).watchDigestSent;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final watches = _watches;
     final installed = watches?.where((watch) => watch.installed).toList();
     return SettingsSectionList(
@@ -94,13 +96,13 @@ class _WatchSectionState extends State<WatchSection> {
               : IconButton(
                   onPressed: _refresh,
                   icon: const Icon(Icons.refresh, size: 18),
-                  tooltip: 'Check again',
+                  tooltip: strings.watchCheckAgain,
                 ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Record from your wrist',
+                strings.watchTitle,
                 style: TextStyle(
                   color: palette.textPrimary,
                   fontSize: 17,
@@ -109,16 +111,13 @@ class _WatchSectionState extends State<WatchSection> {
               ),
               const SizedBox(height: 6),
               Text(
-                'The watch records on its own and holds every clip until this '
-                'phone confirms it was transcribed and the server copy deleted. '
-                'Today’s transcript, memories and commitments are sent back to '
-                'the watch so they can be read without the phone.',
+                strings.watchDescription,
                 style: TextStyle(color: palette.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 18),
               if (watches == null)
                 Text(
-                  'Looking for paired watches…',
+                  strings.watchLooking,
                   style: TextStyle(color: palette.textMuted, fontSize: 12.5),
                 )
               else if (watches.isEmpty)
@@ -134,7 +133,11 @@ class _WatchSectionState extends State<WatchSection> {
                     FilledButton.icon(
                       onPressed: _sending ? null : _sendDigest,
                       icon: const Icon(Icons.watch_outlined, size: 18),
-                      label: Text(_sending ? 'Sending…' : 'Send today now'),
+                      label: Text(
+                        _sending
+                            ? strings.watchSending
+                            : strings.watchSendToday,
+                      ),
                     ),
                     if (_notice != null) ...<Widget>[
                       const SizedBox(width: 12),
@@ -173,13 +176,13 @@ class _WatchRow extends StatelessWidget {
     final String status;
     if (!watch.installed) {
       tint = palette.warning;
-      status = 'NeoRecall not installed';
+      status = AppL10n.of(context).watchNotInstalled;
     } else if (!watch.nearby) {
       tint = palette.textMuted;
-      status = 'Installed · out of range';
+      status = AppL10n.of(context).watchOutOfRange;
     } else {
       tint = palette.success;
-      status = 'Installed · connected';
+      status = AppL10n.of(context).watchConnected;
     }
     return HairlineRow(
       title: watch.name,
@@ -188,7 +191,9 @@ class _WatchRow extends StatelessWidget {
       trailing: TintedSurface(
         tint: tint,
         child: Text(
-          watch.installed ? 'READY' : 'SET UP',
+          watch.installed
+              ? AppL10n.of(context).watchReady
+              : AppL10n.of(context).watchSetUp,
           style: TextStyle(
             color: tint,
             fontSize: 10.5,
@@ -208,8 +213,7 @@ class _NoWatchNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-    'No paired watch found. Pair the watch with this phone in the Wear OS app '
-    'first — NeoRecall can only see watches Android has already paired.',
+    AppL10n.of(context).watchNonePaired,
     style: TextStyle(color: palette.textMuted, fontSize: 12.5, height: 1.45),
   );
 }
@@ -228,65 +232,52 @@ class _InstallGuide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     return SectionCard(
-      eyebrow: 'Installing on the watch',
+      eyebrow: strings.watchInstallEyebrow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            'NeoRecall for Wear OS ships as its own APK, signed with the same '
-            'key as this app, and is sideloaded once. It is not on the Play '
-            'Store, so the watch needs developer options turned on for the '
-            'install and nothing after that.',
+            strings.watchInstallIntro,
             style: TextStyle(color: palette.textSecondary, height: 1.45),
           ),
           const SizedBox(height: 18),
-          const _Step(
+          _Step(
             number: 1,
-            title: 'Download the watch APK',
-            detail:
-                'Take NeoRecall-WearOS-<version>.apk from the latest release, '
-                'onto a computer that is on the same network as the watch.',
+            title: strings.watchStep1Title,
+            detail: strings.watchStep1Detail,
           ),
-          _CopyLine(label: 'Releases', value: releasesUrl),
+          _CopyLine(label: strings.watchReleasesLabel, value: releasesUrl),
           const SizedBox(height: 14),
-          const _Step(
+          _Step(
             number: 2,
-            title: 'Turn on wireless debugging on the watch',
-            detail:
-                'Settings → System → About → tap Build number seven times, '
-                'then Settings → Developer options → ADB debugging and '
-                'Wireless debugging. The watch shows its IP address there.',
+            title: strings.watchStep2Title,
+            detail: strings.watchStep2Detail,
           ),
           const SizedBox(height: 14),
-          const _Step(
+          _Step(
             number: 3,
-            title: 'Install it over Wi-Fi',
-            detail:
-                'From the computer holding the APK, with the watch IP from the '
-                'previous step:',
+            title: strings.watchStep3Title,
+            detail: strings.watchStep3Detail,
           ),
-          const _CopyLine(
-            label: 'Connect',
+          _CopyLine(
+            label: strings.watchConnectLabel,
             value: 'adb connect WATCH_IP:5555',
           ),
-          const _CopyLine(
-            label: 'Install',
+          _CopyLine(
+            label: strings.watchInstallLabel,
             value: 'adb -s WATCH_IP:5555 install -r NeoRecall-WearOS.apk',
           ),
           const SizedBox(height: 14),
-          const _Step(
+          _Step(
             number: 4,
-            title: 'Open it once on the watch',
-            detail:
-                'Allow the microphone, and this page turns to Installed. Add '
-                'the NeoRecall tiles by long-pressing the watch face, and the '
-                'complications from the watch face editor.',
+            title: strings.watchStep4Title,
+            detail: strings.watchStep4Detail,
           ),
           const SizedBox(height: 16),
           Text(
-            'Developer options can be turned back off afterwards — the app '
-            'stays installed and keeps working.',
+            strings.watchInstallFootnote,
             style: TextStyle(
               color: palette.textMuted,
               fontSize: 12,
@@ -400,7 +391,7 @@ class _CopyLine extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Copy $label',
+            tooltip: AppL10n.of(context).watchCopyLabel(label),
             icon: const Icon(Icons.copy_all_outlined, size: 16),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: value));

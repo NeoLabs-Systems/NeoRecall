@@ -9,6 +9,7 @@ import 'src/memories/memory_filters.dart';
 import 'src/memories/memory_detail_sheets.dart';
 import 'src/models/memory.dart';
 import 'src/widgets/selection_mixin.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class MemoriesScreen extends StatefulWidget {
   const MemoriesScreen({
@@ -189,18 +190,21 @@ class _MemoriesScreenState extends State<MemoriesScreen>
     return items;
   }
 
-  Future<void> _bulk(String action) => runBulkAction(
-    (ids) => controller.bulkMemories(ids, action),
-    success: (ids) => switch (action) {
-      'delete' => 'Deleted ${ids.length} memories',
-      'pin' => 'Pinned ${ids.length} memories',
-      'unpin' => 'Unpinned ${ids.length} memories',
-      'archive' => 'Archived ${ids.length} memories',
-      'unarchive' => 'Restored ${ids.length} memories',
-      _ => 'Updated ${ids.length} memories',
-    },
-    failure: (error) => 'Could not update memories: $error',
-  );
+  Future<void> _bulk(String action) {
+    final strings = AppL10n.of(context);
+    return runBulkAction(
+      (ids) => controller.bulkMemories(ids, action),
+      success: (ids) => switch (action) {
+        'delete' => strings.memoriesBulkDeleted(ids.length),
+        'pin' => strings.memoriesBulkPinned(ids.length),
+        'unpin' => strings.memoriesBulkUnpinned(ids.length),
+        'archive' => strings.memoriesBulkArchived(ids.length),
+        'unarchive' => strings.memoriesBulkRestored(ids.length),
+        _ => strings.memoriesBulkUpdated(ids.length),
+      },
+      failure: (error) => strings.memoriesBulkFailed(error.toString()),
+    );
+  }
 
   Future<void> _renameSelected() async {
     if (selectedCount != 1) return;
@@ -221,9 +225,13 @@ class _MemoriesScreenState extends State<MemoriesScreen>
       exitSelect();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Could not rename: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).memoriesRenameFailed(error.toString()),
+          ),
+        ),
+      );
     }
   }
 
@@ -236,19 +244,19 @@ class _MemoriesScreenState extends State<MemoriesScreen>
         final palette = neoRecallPaletteOf(dialogContext);
         return AlertDialog(
           backgroundColor: palette.bgCard,
-          title: const Text('Merge memories?'),
+          title: Text(AppL10n.of(dialogContext).memoriesMergeTitle),
           content: Text(
-            'Combine ${ids.length} memories into one. Highlights and conversation evidence stay; a new title and description are written for the combined moment.',
+            AppL10n.of(dialogContext).memoriesMergeBody(ids.length),
             style: TextStyle(color: palette.textSecondary, height: 1.45),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
+              child: Text(AppL10n.of(dialogContext).actionCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Merge'),
+              child: Text(AppL10n.of(dialogContext).memoriesMergeConfirm),
             ),
           ],
         );
@@ -270,15 +278,19 @@ class _MemoriesScreenState extends State<MemoriesScreen>
         SnackBar(
           content: Text(
             rewriteQueued
-                ? 'Memories merged. The description will update shortly.'
-                : 'Memories merged.',
+                ? AppL10n.of(context).memoriesMergedQueued
+                : AppL10n.of(context).memoriesMerged,
           ),
         ),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not merge memories: $error')),
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).memoriesMergeFailed(error.toString()),
+          ),
+        ),
       );
     }
   }
@@ -291,25 +303,25 @@ class _MemoriesScreenState extends State<MemoriesScreen>
         final palette = neoRecallPaletteOf(context);
         return AlertDialog(
           backgroundColor: palette.bgCard,
-          title: const Text('Rename memory'),
+          title: Text(AppL10n.of(context).memoriesRenameDialogTitle),
           content: TextField(
             controller: field,
             autofocus: true,
             maxLength: 160,
-            decoration: const InputDecoration(
-              labelText: 'Title',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: AppL10n.of(context).memoriesTitleLabel,
+              border: const OutlineInputBorder(),
             ),
             onSubmitted: (value) => Navigator.of(context).pop(value),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text(AppL10n.of(context).actionCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(field.text),
-              child: const Text('Save'),
+              child: Text(AppL10n.of(context).actionSave),
             ),
           ],
         );
@@ -356,6 +368,7 @@ class _MemoriesScreenState extends State<MemoriesScreen>
     final openTasks = controller.miniMemories
         .where((m) => m.isActionable && m.isOpen)
         .length;
+    final strings = AppL10n.of(context);
 
     return RefreshIndicator(
       onRefresh: controller.refreshAll,
@@ -368,24 +381,29 @@ class _MemoriesScreenState extends State<MemoriesScreen>
             Align(
               alignment: Alignment.centerRight,
               child: selecting
-                  ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+                  ? TextButton(
+                      onPressed: exitSelect,
+                      child: Text(strings.actionDone),
+                    )
                   : TextButton.icon(
                       onPressed: memories.isEmpty ? null : () => enterSelect(),
                       icon: const Icon(Icons.checklist_rounded, size: 18),
-                      label: const Text('Select'),
+                      label: Text(strings.actionSelect),
                     ),
             )
           else
             ScreenHeader(
-              title: 'Memories',
-              description:
-                  'Your conversations, distilled into clear memories and actionable highlights.',
+              title: strings.navMemories,
+              description: strings.memoriesDescription,
               trailing: selecting
-                  ? TextButton(onPressed: exitSelect, child: const Text('Done'))
+                  ? TextButton(
+                      onPressed: exitSelect,
+                      child: Text(strings.actionDone),
+                    )
                   : TextButton.icon(
                       onPressed: memories.isEmpty ? null : () => enterSelect(),
                       icon: const Icon(Icons.checklist_rounded, size: 18),
-                      label: const Text('Select'),
+                      label: Text(strings.actionSelect),
                     ),
             ),
           ProcessingActivityBanner(
@@ -434,8 +452,8 @@ class _MemoriesScreenState extends State<MemoriesScreen>
                 onRename: selectedCount == 1 ? _renameSelected : null,
                 onMerge: selectedCount >= 2 ? _mergeSelected : null,
                 archiveLabel: _filter == MemoryFilter.archived
-                    ? 'Restore'
-                    : 'Archive',
+                    ? strings.memoriesRestore
+                    : strings.memoriesArchive,
               ),
               const SizedBox(height: 14),
             ],
@@ -444,11 +462,11 @@ class _MemoriesScreenState extends State<MemoriesScreen>
                 child: EmptyState(
                   icon: Icons.auto_awesome_outlined,
                   title: _query.isNotEmpty || _filter != MemoryFilter.all
-                      ? 'No matching memories'
-                      : 'Nothing here yet',
+                      ? strings.memoriesEmptyFilteredTitle
+                      : strings.memoriesEmptyTitle,
                   message: _query.isNotEmpty || _filter != MemoryFilter.all
-                      ? 'Try another filter or clear the search.'
-                      : 'Keep recording. When a conversation ends, NeoRecall quietly turns it into a memory.',
+                      ? strings.memoriesEmptyFilteredMessage
+                      : strings.memoriesEmptyMessage,
                 ),
               )
             else
@@ -474,12 +492,11 @@ class _MemoriesScreenState extends State<MemoriesScreen>
             ),
             const SizedBox(height: 12),
             if (minis.isEmpty)
-              const AppPanel(
+              AppPanel(
                 child: EmptyState(
                   icon: Icons.timeline_outlined,
-                  title: 'No action items yet',
-                  message:
-                      'Concrete assignments and commitments will appear here when a conversation creates them.',
+                  title: strings.memoriesNoActionItemsTitle,
+                  message: strings.memoriesNoActionItemsMessage,
                 ),
               )
             else

@@ -5,6 +5,7 @@ import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
 import 'settings_section_list.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// MCP URL and authorized OAuth clients (NeoAgent and remote MCP).
 class IntegrationsSection extends StatefulWidget {
@@ -31,12 +32,12 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
       controller: ctrl,
       children: <Widget>[
         SectionCard(
-          eyebrow: 'MCP',
+          eyebrow: AppL10n.of(context).integrationsMcpEyebrow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Connect Claude, ChatGPT, or Cursor',
+                AppL10n.of(context).integrationsMcpTitle,
                 style: TextStyle(
                   color: palette.textPrimary,
                   fontSize: 17,
@@ -45,9 +46,7 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Paste this MCP URL into Claude, ChatGPT (MCP), or Cursor. '
-                'The client opens NeoRecall for sign-in and the same read-only consent as NeoAgent. '
-                'Ask, ingest, and memory edits stay inside NeoRecall.',
+                AppL10n.of(context).integrationsMcpDescription,
                 style: TextStyle(color: palette.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 16),
@@ -68,17 +67,19 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
                   );
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('MCP URL copied')),
+                    SnackBar(
+                      content: Text(AppL10n.of(context).integrationsMcpCopied),
+                    ),
                   );
                 },
                 icon: const Icon(Icons.copy_outlined, size: 18),
-                label: const Text('Copy MCP URL'),
+                label: Text(AppL10n.of(context).integrationsMcpCopy),
               ),
             ],
           ),
         ),
         SectionCard(
-          eyebrow: 'CONNECTED APPS',
+          eyebrow: AppL10n.of(context).integrationsConnectedEyebrow,
           child: _connectedApps(palette, ctrl),
         ),
       ],
@@ -91,13 +92,17 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
     }
     if (ctrl.integrations.isEmpty) {
       return Text(
-        'No apps are connected yet. After you authorize NeoAgent or an MCP client, it appears here so you can revoke it.',
+        AppL10n.of(context).integrationsNoneConnected,
         style: TextStyle(color: palette.textSecondary, height: 1.45),
       );
     }
     return Column(
       children: <Widget>[
-        for (var index = 0; index < ctrl.integrations.length; index++) ...<Widget>[
+        for (
+          var index = 0;
+          index < ctrl.integrations.length;
+          index++
+        ) ...<Widget>[
           if (index > 0) const SizedBox(height: 12),
           _integrationRow(palette, ctrl, ctrl.integrations[index]),
         ],
@@ -110,8 +115,12 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
     NeoRecallController ctrl,
     Map<String, dynamic> item,
   ) {
-    final name = item['name'] as String? ?? 'Connected app';
-    final kind = _kindLabel(item['description'] as String?);
+    final name =
+        item['name'] as String? ?? AppL10n.of(context).integrationsConnectedApp;
+    final kind = _kindLabel(
+      AppL10n.of(context),
+      item['description'] as String?,
+    );
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -136,38 +145,39 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
         ),
         TextButton(
           onPressed: () => _confirmRevoke(ctrl, item),
-          child: const Text('Revoke'),
+          child: Text(AppL10n.of(context).integrationsRevoke),
         ),
       ],
     );
   }
 
-  String _kindLabel(String? description) {
-    if (description == 'companion:neoagent') return 'NeoAgent';
-    if (description == 'mcp:dcr') return 'MCP client';
-    return 'OAuth client';
+  String _kindLabel(AppL10n l10n, String? description) {
+    if (description == 'companion:neoagent') {
+      return l10n.integrationsClientNeoAgent;
+    }
+    if (description == 'mcp:dcr') return l10n.integrationsClientMcp;
+    return l10n.integrationsClientOAuth;
   }
 
   Future<void> _confirmRevoke(
     NeoRecallController ctrl,
     Map<String, dynamic> item,
   ) async {
-    final name = item['name'] as String? ?? 'this app';
+    final name =
+        item['name'] as String? ?? AppL10n.of(context).integrationsThisApp;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Revoke access?'),
-        content: Text(
-          '$name will lose read-only access to this account until you connect it again.',
-        ),
+        title: Text(AppL10n.of(context).integrationsRevokeTitle),
+        content: Text(AppL10n.of(context).integrationsRevokeBody(name)),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(context).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Revoke'),
+            child: Text(AppL10n.of(context).integrationsRevoke),
           ),
         ],
       ),

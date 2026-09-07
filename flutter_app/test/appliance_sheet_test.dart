@@ -9,16 +9,22 @@ import 'package:neorecall/src/record/capture_orb.dart';
 import 'package:neorecall/src/record/record_controls.dart';
 
 import 'support/appliance_test_support.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 /// The device page has to answer one question before any other: is this thing
 /// recording right now? These tests hold it to that.
 void main() {
   Widget wrap(Widget child) => MaterialApp(
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     theme: buildNeoRecallTheme(Brightness.dark),
     home: Scaffold(body: child),
   );
 
-  Future<ApplianceRig> open(WidgetTester tester, Map<String, Object?> status) async {
+  Future<ApplianceRig> open(
+    WidgetTester tester,
+    Map<String, Object?> status,
+  ) async {
     final rig = ApplianceRig();
     addTearDown(rig.controller.dispose);
     rig.transport.statusOnRead = cborEncodeStatus(status);
@@ -47,7 +53,10 @@ void main() {
   testWidgets('a recording device says so, and for how long', (tester) async {
     await open(
       tester,
-      applianceStatusPayload(const <String, Object?>{'st': 'recording', 'el': 843000}),
+      applianceStatusPayload(const <String, Object?>{
+        'st': 'recording',
+        'el': 843000,
+      }),
     );
 
     expect(find.text('RECORDING'), findsOneWidget);
@@ -56,7 +65,9 @@ void main() {
     expect(find.byType(RecordButton), findsNothing);
   });
 
-  testWidgets('the current output and microphone are named in plain words', (tester) async {
+  testWidgets('the current output and microphone are named in plain words', (
+    tester,
+  ) async {
     await open(
       tester,
       applianceStatusPayload(const <String, Object?>{
@@ -75,7 +86,9 @@ void main() {
     expect(find.text('Headset'), findsOneWidget);
   });
 
-  testWidgets('with no headphones the speaker is the only choice offered', (tester) async {
+  testWidgets('with no headphones the speaker is the only choice offered', (
+    tester,
+  ) async {
     await open(tester, applianceStatusPayload());
 
     expect(find.text('Its own microphones'), findsOneWidget);
@@ -96,15 +109,21 @@ void main() {
       find.byType(SegmentedButton<ApplianceOutput>),
     );
     final headphones = segmented.segments.firstWhere(
-      (ButtonSegment<ApplianceOutput> s) => s.value == ApplianceOutput.headphones,
+      (ButtonSegment<ApplianceOutput> s) =>
+          s.value == ApplianceOutput.headphones,
     );
     expect(headphones.enabled, isFalse);
   });
 
-  testWidgets('out of range, the device page still says what it last knew', (tester) async {
+  testWidgets('out of range, the device page still says what it last knew', (
+    tester,
+  ) async {
     final rig = await open(
       tester,
-      applianceStatusPayload(const <String, Object?>{'st': 'recording', 'el': 60000}),
+      applianceStatusPayload(const <String, Object?>{
+        'st': 'recording',
+        'el': 60000,
+      }),
     );
 
     rig.transport.dropConnection();
@@ -126,7 +145,9 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('an error from the appliance is shown as a sentence', (tester) async {
+  testWidgets('an error from the appliance is shown as a sentence', (
+    tester,
+  ) async {
     final rig = await open(tester, applianceStatusPayload());
 
     rig.transport.pushStatus(
@@ -139,10 +160,15 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('No network yet — 12 recordings are waiting.'), findsOneWidget);
+    expect(
+      find.text('No network yet — 12 recordings are waiting.'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('a connected headset is listed even when no scan has run', (tester) async {
+  testWidgets('a connected headset is listed even when no scan has run', (
+    tester,
+  ) async {
     await open(
       tester,
       applianceStatusPayload(const <String, Object?>{

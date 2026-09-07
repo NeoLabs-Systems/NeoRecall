@@ -5,6 +5,7 @@ import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/models/ask.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Ask: one conversation with your own recall.
 ///
@@ -93,7 +94,7 @@ class _AskScreenState extends State<AskScreen> {
                   child: TextButton.icon(
                     onPressed: controller.clearAsk,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('New question'),
+                    label: Text(AppL10n.of(context).askNewQuestion),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -102,8 +103,8 @@ class _AskScreenState extends State<AskScreen> {
                 controller: question,
                 busy: controller.askBusy,
                 hint: turns.isEmpty
-                    ? 'Ask anything about your day'
-                    : 'Ask a follow-up',
+                    ? AppL10n.of(context).askHint
+                    : AppL10n.of(context).askFollowUpHint,
                 onSubmit: submit,
                 palette: palette,
               ),
@@ -121,28 +122,27 @@ class _AskIntro extends StatelessWidget {
   final double gutter;
   final void Function(String) onPick;
 
-  static const List<String> _starters = <String>[
-    'What did I do today?',
-    'What did I say I would follow up on this week?',
-    'Who did I talk to yesterday, and about what?',
+  static List<String> _starters(AppL10n l10n) => <String>[
+    l10n.askStarterToday,
+    l10n.askStarterFollowUps,
+    l10n.askStarterYesterday,
   ];
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.mobile;
     return ListView(
       padding: EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 0),
       children: <Widget>[
-        const ScreenHeader(
-          eyebrow: 'Recall',
-          title: 'Ask',
-          description:
-              'Your recall, in your own words. Retrieval and the answer both '
-              'run wherever your NeoRecall server does — no query leaves it.',
+        ScreenHeader(
+          eyebrow: strings.askEyebrow,
+          title: strings.navAsk,
+          description: strings.askDescription,
         ),
-        const SectionLabel(label: 'Start with'),
-        for (final starter in _starters)
+        SectionLabel(label: strings.askStartWith),
+        for (final starter in _starters(strings))
           HairlineRow(
             title: starter,
             leading: Icon(
@@ -259,13 +259,8 @@ class _Answer extends StatelessWidget {
           ),
         ],
         if (turn.sources.isNotEmpty) ...<Widget>[
-          const SizedBox(height: AppSpacing.lg),
-          SectionLabel(label: 'Sources', trailing: '${turn.sources.length}'),
-          for (var index = 0; index < turn.sources.length; index++)
-            _SourceRow(
-              source: turn.sources[index],
-              showDivider: index > 0,
-            ),
+          const SizedBox(height: AppSpacing.md),
+          _SourcesPanel(sources: turn.sources),
         ],
         if (turn.weakCount > 0) ...<Widget>[
           const SizedBox(height: AppSpacing.sm),
@@ -280,8 +275,7 @@ class _Answer extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  '${turn.weakCount} weaker matches were left out — they share '
-                  'words with the question, not meaning.',
+                  AppL10n.of(context).askWeakMatches(turn.weakCount),
                   style: TextStyle(
                     color: palette.textMuted,
                     fontSize: 12,
@@ -292,6 +286,88 @@ class _Answer extends StatelessWidget {
             ],
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// What the answer was written from, folded away until it is asked for.
+///
+/// The answer is the thing the reader wanted; the evidence is what they check
+/// when they doubt it. Open by default, four sources push every following turn
+/// off the screen — so this stays shut, and says how many it is holding.
+class _SourcesPanel extends StatefulWidget {
+  const _SourcesPanel({required this.sources});
+
+  final List<AskSource> sources;
+
+  @override
+  State<_SourcesPanel> createState() => _SourcesPanelState();
+}
+
+class _SourcesPanelState extends State<_SourcesPanel> {
+  bool expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final count = widget.sources.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        InkWell(
+          onTap: () => setState(() => expanded = !expanded),
+          borderRadius: BorderRadius.circular(AppRadius.tag),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              children: <Widget>[
+                Text(
+                  expanded
+                      ? AppL10n.of(context).askSourcesExpanded
+                      : AppL10n.of(context).askSourcesCollapsed,
+                  style: sectionEyebrowStyle(palette),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Container(height: 1, color: palette.border)),
+                const SizedBox(width: 10),
+                Text(
+                  '$count',
+                  style: sectionEyebrowStyle(
+                    palette,
+                  ).copyWith(letterSpacing: 1.3),
+                ),
+                const SizedBox(width: 4),
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    size: 18,
+                    color: palette.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: expanded
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    for (var index = 0; index < count; index++)
+                      _SourceRow(
+                        source: widget.sources[index],
+                        showDivider: index > 0,
+                      ),
+                  ],
+                )
+              : const SizedBox(width: double.infinity),
+        ),
       ],
     );
   }
@@ -324,9 +400,10 @@ class _PeriodLine extends StatelessWidget {
         to.difference(from) == const Duration(days: 1)) {
       return localizations.formatShortDate(from);
     }
+    final strings = AppL10n.of(context);
     if (from != null && to != null) return '${at(from)} – ${at(to)}';
-    if (from != null) return 'from ${at(from)}';
-    return 'until ${at(to!)}';
+    if (from != null) return strings.askPeriodFrom(at(from));
+    return strings.askPeriodUntil(at(to!));
   }
 
   @override
@@ -334,9 +411,9 @@ class _PeriodLine extends StatelessWidget {
     final palette = neoRecallPaletteOf(context);
     return Text(
       <String>[
-        'Read ${_label(context)}',
+        AppL10n.of(context).askPeriodRead(_label(context)),
         ?turn.timezone,
-        if (turn.considered == 0) 'nothing recorded',
+        if (turn.considered == 0) AppL10n.of(context).askNothingRecorded,
       ].join(' · ').toUpperCase(),
       style: sectionEyebrowStyle(palette),
     );
@@ -520,7 +597,7 @@ class _Composer extends StatelessWidget {
                 minimumSize: const Size(44, 44),
               ),
               icon: const Icon(Icons.arrow_upward_rounded, size: 20),
-              tooltip: 'Ask',
+              tooltip: AppL10n.of(context).askSubmitTooltip,
             ),
           ),
         ),
@@ -598,7 +675,7 @@ class _AskThinkingIndicatorState extends State<AskThinkingIndicator>
             ),
             const SizedBox(width: 12),
             _ShimmerLabel(
-              label: 'Searching your recall',
+              label: AppL10n.of(context).askSearching,
               animation: sweep,
               animate: !still,
               palette: palette,
@@ -614,7 +691,9 @@ class _AskThinkingIndicatorState extends State<AskThinkingIndicator>
               painter: _SweepPainter(
                 track: palette.border,
                 color: palette.accent,
-                progress: still ? null : Curves.easeInOut.transform(sweep.value),
+                progress: still
+                    ? null
+                    : Curves.easeInOut.transform(sweep.value),
               ),
               size: Size.infinite,
             ),
@@ -642,9 +721,9 @@ class _ShimmerLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Text(
       label.toUpperCase(),
-      style: sectionEyebrowStyle(palette).copyWith(
-        color: animate ? Colors.white : palette.textMuted,
-      ),
+      style: sectionEyebrowStyle(
+        palette,
+      ).copyWith(color: animate ? Colors.white : palette.textMuted),
     );
     if (!animate) return text;
     return AnimatedBuilder(
@@ -662,7 +741,12 @@ class _ShimmerLabel extends StatelessWidget {
             ],
             stops: const <double>[0.0, 0.5, 1.0],
           ).createShader(
-            Rect.fromLTWH(origin - bounds.width * 0.5, 0, bounds.width, bounds.height),
+            Rect.fromLTWH(
+              origin - bounds.width * 0.5,
+              0,
+              bounds.width,
+              bounds.height,
+            ),
           );
         },
         child: child,

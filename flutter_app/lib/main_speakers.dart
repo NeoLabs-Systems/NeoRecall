@@ -9,6 +9,7 @@ import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/models/speaker.dart';
 import 'src/widgets/selection_mixin.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class SpeakersScreen extends StatefulWidget {
   const SpeakersScreen({
@@ -65,20 +66,22 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Name recurring speaker'),
+        title: Text(AppL10n.of(context).speakersRenameTitle),
         content: TextField(
           controller: field,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Display name'),
+          decoration: InputDecoration(
+            labelText: AppL10n.of(context).speakersDisplayNameLabel,
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(context).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, field.text.trim()),
-            child: const Text('Save'),
+            child: Text(AppL10n.of(context).actionSave),
           ),
         ],
       ),
@@ -95,13 +98,15 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     final sourceId = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Merge another voice into this speaker'),
+        title: Text(AppL10n.of(context).speakersMergeIntoTitle),
         children: speakers
             .where((speaker) => speaker.id != targetId)
             .map(
               (speaker) => SimpleDialogOption(
                 onPressed: () => Navigator.pop(context, speaker.id),
-                child: Text(speaker.name ?? 'Unnamed recurring speaker'),
+                child: Text(
+                  speaker.name ?? AppL10n.of(context).speakersUnnamed,
+                ),
               ),
             )
             .toList(),
@@ -116,29 +121,26 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          'Delete ${ids.length} speaker${ids.length == 1 ? '' : 's'}?',
-        ),
-        content: const Text(
-          'This will permanently delete these speaker profiles. Associated transcript segments will no longer identify them.',
-        ),
+        title: Text(AppL10n.of(context).speakersDeleteManyTitle(ids.length)),
+        content: Text(AppL10n.of(context).speakersDeleteManyBody),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(context).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(AppL10n.of(context).actionDelete),
           ),
         ],
       ),
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
+    final strings = AppL10n.of(context);
     await runBulkAction(
       controller.bulkDeleteSpeakers,
-      success: (deleted) => 'Deleted ${deleted.length} speakers',
-      failure: (error) => 'Could not delete speakers: $error',
+      success: (deleted) => strings.speakersDeleted(deleted.length),
+      failure: (error) => strings.speakersDeleteFailed(error.toString()),
     );
   }
 
@@ -151,12 +153,14 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     final targetId = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Combine into which speaker?'),
+        title: Text(AppL10n.of(context).speakersCombineTargetTitle),
         children: selectedSpeakers
             .map(
               (speaker) => SimpleDialogOption(
                 onPressed: () => Navigator.pop(context, speaker.id),
-                child: Text(speaker.name ?? 'Unnamed recurring speaker'),
+                child: Text(
+                  speaker.name ?? AppL10n.of(context).speakersUnnamed,
+                ),
               ),
             )
             .toList(),
@@ -164,10 +168,11 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     );
     if (targetId == null || !mounted) return;
     final sourceIds = ids.where((id) => id != targetId).toList();
+    final strings = AppL10n.of(context);
     await runBulkAction(
       (_) => controller.mergeSpeakers(targetId, sourceIds),
-      success: (_) => 'Combined ${sourceIds.length + 1} speakers',
-      failure: (error) => 'Could not combine speakers: $error',
+      success: (_) => strings.speakersCombined(sourceIds.length + 1),
+      failure: (error) => strings.speakersCombineFailed(error.toString()),
     );
   }
 
@@ -182,15 +187,19 @@ class _SpeakersScreenState extends State<SpeakersScreen>
         SnackBar(
           content: Text(
             merged == 0
-                ? 'Speaker profiles are already up to date'
-                : 'Merged $merged matching speaker profile${merged == 1 ? '' : 's'}',
+                ? AppL10n.of(context).speakersUpToDate
+                : AppL10n.of(context).speakersMergedCount(merged),
           ),
         ),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not re-evaluate speakers: $error')),
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).speakersReevaluateFailed(error.toString()),
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _reevaluating = false);
@@ -227,9 +236,13 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _playingSpeakerId = null);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Preview failed: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).speakersPreviewFailed(error.toString()),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loadingPreview = false);
     }
@@ -241,7 +254,7 @@ class _SpeakersScreenState extends State<SpeakersScreen>
     mainAxisSize: MainAxisSize.min,
     children: <Widget>[
       Tooltip(
-        message: 'Re-evaluate and merge matching speakers',
+        message: AppL10n.of(context).speakersReevaluateTooltip,
         child: IconButton.filledTonal(
           onPressed: selecting || _reevaluating ? null : _reevaluateSpeakers,
           icon: _reevaluating
@@ -254,12 +267,15 @@ class _SpeakersScreenState extends State<SpeakersScreen>
       ),
       const SizedBox(width: 6),
       if (selecting)
-        TextButton(onPressed: exitSelect, child: const Text('Done'))
+        TextButton(
+          onPressed: exitSelect,
+          child: Text(AppL10n.of(context).actionDone),
+        )
       else
         TextButton.icon(
           onPressed: controller.speakers.isEmpty ? null : () => enterSelect(),
           icon: const Icon(Icons.checklist_rounded, size: 18),
-          label: const Text('Select'),
+          label: Text(AppL10n.of(context).actionSelect),
         ),
     ],
   );
@@ -282,9 +298,8 @@ class _SpeakersScreenState extends State<SpeakersScreen>
             Align(alignment: Alignment.centerRight, child: _actions())
           else
             ScreenHeader(
-              title: 'Speakers',
-              description:
-                  'Recognize a voice with a short clean sample, then name or merge its recurring profile.',
+              title: AppL10n.of(context).navSpeakers,
+              description: AppL10n.of(context).speakersDescription,
               trailing: _actions(),
             ),
           const SizedBox(height: 12),
@@ -301,12 +316,11 @@ class _SpeakersScreenState extends State<SpeakersScreen>
             const SizedBox(height: 14),
           ],
           if (visibleSpeakers.isEmpty)
-            const AppPanel(
+            AppPanel(
               child: EmptyState(
                 icon: Icons.record_voice_over_outlined,
-                title: 'No recurring speakers yet',
-                message:
-                    'A speaker appears after a full 10-second clean voice preview is available.',
+                title: AppL10n.of(context).speakersEmptyTitle,
+                message: AppL10n.of(context).speakersEmptyMessage,
               ),
             )
           else
@@ -359,19 +373,21 @@ class _SpeakersScreenState extends State<SpeakersScreen>
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (context) => AlertDialog(
-                              title: const Text('Delete speaker?'),
-                              content: const Text(
-                                'This will permanently delete this speaker profile. Associated transcript segments will no longer identify this speaker.',
+                              title: Text(
+                                AppL10n.of(context).speakersDeleteOneTitle,
+                              ),
+                              content: Text(
+                                AppL10n.of(context).speakersDeleteOneBody,
                               ),
                               actions: <Widget>[
                                 TextButton(
                                   onPressed: () =>
                                       Navigator.pop(context, false),
-                                  child: const Text('Cancel'),
+                                  child: Text(AppL10n.of(context).actionCancel),
                                 ),
                                 FilledButton(
                                   onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Delete'),
+                                  child: Text(AppL10n.of(context).actionDelete),
                                 ),
                               ],
                             ),
@@ -429,7 +445,7 @@ class _SpeakerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = speaker.name ?? 'Unnamed recurring speaker';
+    final label = speaker.name ?? AppL10n.of(context).speakersUnnamed;
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 680;
@@ -482,8 +498,10 @@ class _SpeakerRow extends StatelessWidget {
             : <Widget>[
                 Tooltip(
                   message: speaker.hasPreview
-                      ? (playing ? 'Pause voice preview' : 'Play voice preview')
-                      : 'A full clean voice preview is needed',
+                      ? (playing
+                            ? AppL10n.of(context).speakersPausePreview
+                            : AppL10n.of(context).speakersPlayPreview)
+                      : AppL10n.of(context).speakersPreviewNeeded,
                   child: IconButton.filledTonal(
                     onPressed: speaker.hasPreview ? onPreview : null,
                     icon: loading
@@ -503,18 +521,18 @@ class _SpeakerRow extends StatelessWidget {
                   onChanged: onMatchingChanged,
                 ),
                 IconButton(
-                  tooltip: 'Name speaker',
+                  tooltip: AppL10n.of(context).speakersNameTooltip,
                   onPressed: onRename,
                   icon: const Icon(Icons.edit_outlined),
                 ),
                 if (onMerge != null)
                   IconButton(
-                    tooltip: 'Merge another voice into this speaker',
+                    tooltip: AppL10n.of(context).speakersMergeIntoTitle,
                     onPressed: onMerge,
                     icon: const Icon(Icons.merge_outlined),
                   ),
                 IconButton(
-                  tooltip: 'Delete speaker',
+                  tooltip: AppL10n.of(context).speakersDeleteTooltip,
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
                 ),
@@ -583,7 +601,9 @@ class _SpeakerSelectionBar extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: Text(
-              count == 0 ? 'Select speakers' : '$count selected',
+              count == 0
+                  ? AppL10n.of(context).speakersSelectPrompt
+                  : AppL10n.of(context).speakersSelectedCount(count),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -595,18 +615,18 @@ class _SpeakerSelectionBar extends StatelessWidget {
           ),
           _SpeakerSelectionAction(
             tooltip: onSelectAll == null
-                ? 'All speakers selected'
-                : 'Select all speakers',
+                ? AppL10n.of(context).speakersAllSelected
+                : AppL10n.of(context).speakersSelectAll,
             icon: Icons.select_all_rounded,
             onPressed: onSelectAll,
           ),
           _SpeakerSelectionAction(
-            tooltip: 'Combine into one speaker',
+            tooltip: AppL10n.of(context).speakersCombineTooltip,
             icon: Icons.merge_type_rounded,
             onPressed: onMerge,
           ),
           _SpeakerSelectionAction(
-            tooltip: 'Delete',
+            tooltip: AppL10n.of(context).actionDelete,
             icon: Icons.delete_outline_rounded,
             danger: true,
             onPressed: enabled ? onDelete : null,

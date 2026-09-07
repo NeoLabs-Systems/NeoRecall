@@ -22,6 +22,11 @@ const { migrate } = require('../../server/db/migrate');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
 const consolidation = require('../../server/services/memories/consolidation_service');
 
+// The evidence turn, found by role. The engine inserts an output-language
+// directive (and any standing owner instructions) between the task's system
+// message and the evidence, so its position is not fixed.
+function userTurn(body) { return body.messages.find((message) => message.role === 'user'); }
+
 migrate();
 let server;
 test.after(() => { server?.close(); closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true }); });
@@ -75,7 +80,7 @@ test('a validation failure keeps its specific reason, not just its code', async 
         res.end(JSON.stringify({ id: 'r-daily', usage: {}, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summaryEn: 'A day.' }) } }] }));
         return;
       }
-      const input = JSON.parse(payload.messages[1].content);
+      const input = JSON.parse(userTurn(payload).content);
       const aliases = input.conversations[0].segments.map((segment) => segment.id);
       res.end(JSON.stringify({ id: 'r1', usage: {}, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
         conversationSections: [{ titleEn: 'Whole', summaryEn: 'Both segments.', memoryWorthy: true, topics: [], sourceSegmentIds: aliases }],

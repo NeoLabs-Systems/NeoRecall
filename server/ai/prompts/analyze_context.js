@@ -1,7 +1,7 @@
 'use strict';
 
 function outputContract() {
-  return { descriptionEn: 'Faithful concise English description of the supplied source.' };
+  return { descriptionEn: 'Faithful concise description of the supplied source, in the output language.' };
 }
 
 function textMessages({ name, content }) {

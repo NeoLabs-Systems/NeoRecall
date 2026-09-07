@@ -71,7 +71,8 @@ class LocalBackendInstaller {
             'install a server: it redirects the home directory into the app '
             'container and blocks git, npm, and the background service.',
         retryable: false,
-        remedy: 'Install from a terminal instead:\n'
+        remedy:
+            'Install from a terminal instead:\n'
             'bash <(curl -fsSL https://raw.githubusercontent.com/'
             'NeoLabs-Systems/NeoRecall/main/install.sh)',
       );
@@ -110,11 +111,7 @@ class LocalBackendInstaller {
         progress: 0.06,
       );
 
-      await _prepareCheckout(
-        git: git,
-        directory: directory,
-        channel: channel,
-      );
+      await _prepareCheckout(git: git, directory: directory, channel: channel);
       _throwIfCancelled();
 
       _emit(
@@ -197,7 +194,8 @@ class LocalBackendInstaller {
         progressFrom: 0.64,
         progressTo: 0.66,
         failureCode: 'SETUP_CHANNEL_FAILED',
-        failureMessage: 'Could not store the ${channel.cliName} release channel.',
+        failureMessage:
+            'Could not store the ${channel.cliName} release channel.',
       );
 
       // Created before the service starts so the server reads it at boot; this
@@ -231,7 +229,8 @@ class LocalBackendInstaller {
         progressFrom: 0.67,
         progressTo: 0.92,
         failureCode: 'SETUP_INSTALL_FAILED',
-        failureMessage: 'NeoRecall could not finish installing on this computer.',
+        failureMessage:
+            'NeoRecall could not finish installing on this computer.',
       );
       _emit(
         LocalBackendInstallStage.install,
@@ -291,7 +290,10 @@ class LocalBackendInstaller {
   /// Asks the CLI for the administrator API key, which it creates on first use.
   /// Deliberately not streamed into the event log: the key is a secret and the
   /// log is shown on screen.
-  Future<String?> _ensureAdminApiKey(String node, String sourceDirectory) async {
+  Future<String?> _ensureAdminApiKey(
+    String node,
+    String sourceDirectory,
+  ) async {
     try {
       final result = await Process.run(
         node,
@@ -343,7 +345,8 @@ class LocalBackendInstaller {
           'SETUP_DIRECTORY_OCCUPIED',
           '${directory.path} is a Git repository, but not a NeoRecall checkout.',
           retryable: false,
-          remedy: 'Choose a different install directory and start the setup '
+          remedy:
+              'Choose a different install directory and start the setup '
               'again.',
         );
       }
@@ -362,7 +365,8 @@ class LocalBackendInstaller {
           'SETUP_CHECKOUT_DIRTY',
           '${directory.path} has uncommitted changes.',
           retryable: false,
-          remedy: 'Installing here would discard them. Commit or stash them '
+          remedy:
+              'Installing here would discard them. Commit or stash them '
               'first, or choose a different install directory.',
         );
       }
@@ -381,7 +385,8 @@ class LocalBackendInstaller {
           'SETUP_CHECKOUT_UNPUSHED',
           '${directory.path} holds commits that are not on any remote branch.',
           retryable: false,
-          remedy: 'Installing here would discard them. Push them first, or '
+          remedy:
+              'Installing here would discard them. Push them first, or '
               'choose a different install directory.',
         );
       }
@@ -416,7 +421,8 @@ class LocalBackendInstaller {
           'SETUP_DIRECTORY_OCCUPIED',
           '${directory.path} already exists and is not a NeoRecall checkout.',
           retryable: false,
-          remedy: 'Choose a different install directory, or move that folder '
+          remedy:
+              'Choose a different install directory, or move that folder '
               'somewhere else and start the setup again.',
         );
       }
@@ -546,8 +552,7 @@ class LocalBackendInstaller {
 
   Future<String> _waitForServer(int port) async {
     final deadline = DateTime.now().add(const Duration(minutes: 3));
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 3);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     try {
       while (DateTime.now().isBefore(deadline)) {
         _throwIfCancelled();
@@ -574,15 +579,14 @@ class LocalBackendInstaller {
     throw LocalBackendInstallerException(
       'SETUP_SERVER_UNREACHABLE',
       'NeoRecall was installed, but the service did not answer on port $port.',
-      remedy: 'Open a terminal and run "neorecall status" and "neorecall logs" '
+      remedy:
+          'Open a terminal and run "neorecall status" and "neorecall logs" '
           'to see what the service reported.',
     );
   }
 
   int _configuredPort() {
-    final envFile = File(
-      '${_runtimeHome()}${Platform.pathSeparator}.env',
-    );
+    final envFile = File('${_runtimeHome()}${Platform.pathSeparator}.env');
     final fromEnvironment = int.tryParse(
       Platform.environment['NEORECALL_PORT']?.trim() ?? '',
     );
@@ -722,7 +726,8 @@ class LocalBackendInstaller {
     if (result == null || result.exitCode != 0) return const <String>[];
     return <String>[
       for (final line in const LineSplitter().convert('${result.stdout}'))
-        if (line.trim().isNotEmpty && File(line.trim()).existsSync()) line.trim(),
+        if (line.trim().isNotEmpty && File(line.trim()).existsSync())
+          line.trim(),
     ];
   }
 
@@ -788,9 +793,9 @@ class LocalBackendInstaller {
         paths.add('${root.path}/$command');
         continue;
       }
-      final versions =
-          root.listSync().whereType<Directory>().toList(growable: false)
-            ..sort((a, b) => b.path.compareTo(a.path));
+      final versions = root.listSync().whereType<Directory>().toList(
+        growable: false,
+      )..sort((a, b) => b.path.compareTo(a.path));
       for (final version in versions) {
         paths.add('${version.path}/${entry.value}/$command');
       }

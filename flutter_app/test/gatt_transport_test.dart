@@ -194,9 +194,7 @@ void main() {
     sessions.activeAdapter = adapter;
     final banners = <String>[];
     final bannerSub = sessions.messages.listen(banners.add);
-    final connected = await sessions.connectPreferred(
-      scheduleReconnect: false,
-    );
+    final connected = await sessions.connectPreferred(scheduleReconnect: false);
     await bannerSub.cancel();
     expect(
       connected,

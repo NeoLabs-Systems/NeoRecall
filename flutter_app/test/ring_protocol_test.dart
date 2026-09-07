@@ -38,16 +38,22 @@ void main() {
 
   test('parseInfoNotification rejects wrong opcode or short payload', () {
     expect(RingProtocol.parseInfoNotification(<int>[0x03, 1, 2]), isNull);
-    expect(RingProtocol.parseInfoNotification(<int>[RingProtocol.notifyInfo]), isNull);
+    expect(
+      RingProtocol.parseInfoNotification(<int>[RingProtocol.notifyInfo]),
+      isNull,
+    );
   });
 
-  test('parseAudioPayload extracts [size][frame] opus frames and skips padding', () {
-    final payload = <int>[0, 3, 0xb8, 0x11, 0x22, 2, 0x78, 0x33, 0, 0];
-    final frames = RingProtocol.parseAudioPayload(payload);
-    expect(frames.length, 2);
-    expect(frames[0], <int>[0xb8, 0x11, 0x22]);
-    expect(frames[1], <int>[0x78, 0x33]);
-  });
+  test(
+    'parseAudioPayload extracts [size][frame] opus frames and skips padding',
+    () {
+      final payload = <int>[0, 3, 0xb8, 0x11, 0x22, 2, 0x78, 0x33, 0, 0];
+      final frames = RingProtocol.parseAudioPayload(payload);
+      expect(frames.length, 2);
+      expect(frames[0], <int>[0xb8, 0x11, 0x22]);
+      expect(frames[1], <int>[0x78, 0x33]);
+    },
+  );
 
   test('RingRecordReassembler yields whole 444-byte records only', () {
     final reassembler = RingRecordReassembler();

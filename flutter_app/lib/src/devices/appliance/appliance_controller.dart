@@ -55,6 +55,7 @@ class ApplianceController extends ChangeNotifier {
         status.pendingRecordings > 0 &&
         !status.networkOnline;
   }
+
   final ApiKeyMinter _mintApiKey;
   final String Function() _backendUrl;
   final String Function() _timezone;

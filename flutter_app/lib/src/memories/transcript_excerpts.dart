@@ -64,7 +64,8 @@ List<_Passage> _passages(List<Map<String, dynamic>> sources) {
     final text = (source['text'] as String? ?? '').trim();
     if (text.isEmpty) continue;
     final started = DateTime.tryParse(source['started_at'] as String? ?? '');
-    final ended = DateTime.tryParse(source['ended_at'] as String? ?? '') ?? started;
+    final ended =
+        DateTime.tryParse(source['ended_at'] as String? ?? '') ?? started;
     final previous = previousEnd;
     final breaks =
         previous == null ||
@@ -129,7 +130,9 @@ class _TranscriptExcerptsState extends State<TranscriptExcerpts> {
                 for (var index = 0; index < visible.length; index += 1)
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.xs,
+                    ),
                     decoration: index == 0
                         ? null
                         : BoxDecoration(

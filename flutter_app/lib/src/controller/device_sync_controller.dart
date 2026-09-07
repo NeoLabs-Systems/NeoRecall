@@ -7,6 +7,8 @@ part of '../../main_controller.dart';
 /// stand down when live capture claims the device, and reports its own progress
 /// and failures.
 mixin DeviceSyncController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   NeoRecallApiClient get api;
   ChunkStore get store;
   RetainedAudioStore get retainedAudio;
@@ -206,7 +208,7 @@ mixin DeviceSyncController on ChangeNotifier {
         if (userInitiated) {
           // Only tell the user "nothing to sync" when they asked; the automatic
           // sweep stays quiet on an empty device.
-          notice = 'No new recordings on $deviceName to sync.';
+          notice = strings.controllerNoNewRecordings(deviceName);
         }
       }
       if (succeeded) deviceStorageSyncError = null;
@@ -222,7 +224,10 @@ mixin DeviceSyncController on ChangeNotifier {
       // A single transient miss (device busy, a momentary link drop) between
       // unattended sweeps is not worth alarming anyone; a repeat is.
       if (userInitiated || _deviceSyncFailureIsPersistent) {
-        deviceStorageSyncError = 'Sync of $deviceName failed: $message';
+        deviceStorageSyncError = strings.controllerSyncFailed(
+          deviceName,
+          message,
+        );
       }
     } finally {
       // Unattended polling must not flood the diagnostic ring: record a sweep

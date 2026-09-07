@@ -96,9 +96,7 @@ class WatchDigest {
       );
     }
     if (memories.length > 2) {
-      return _copyWith(
-        memories: memories.sublist(0, memories.length - 1),
-      );
+      return _copyWith(memories: memories.sublist(0, memories.length - 1));
     }
     if (highlights.length > 2) {
       return _copyWith(

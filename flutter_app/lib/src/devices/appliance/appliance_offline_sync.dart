@@ -155,8 +155,7 @@ class ApplianceOfflineSync with WearableOfflineSync {
             if (!entry.id.startsWith(page.chunkPrefix)) return;
             pages ??= List<Uint8List?>.filled(page.pages, null);
             if (page.page < pages!.length) pages![page.page] = page.data;
-            if (_firstGap(pages!) == pages!.length &&
-                !complete.isCompleted) {
+            if (_firstGap(pages!) == pages!.length && !complete.isCompleted) {
               complete.complete();
             } else {
               arm();

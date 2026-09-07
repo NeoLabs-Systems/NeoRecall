@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../main_controller.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class DiscordSetupDialog extends StatefulWidget {
   const DiscordSetupDialog({super.key, required this.controller});
@@ -12,10 +13,23 @@ class DiscordSetupDialog extends StatefulWidget {
 }
 
 class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
-  final _nameController = TextEditingController(text: 'My Discord Bot');
+  final _nameController = TextEditingController();
   final _usersController = TextEditingController();
   final _tokenController = TextEditingController();
   bool _saving = false;
+  bool _prefilled = false;
+
+  // The suggested name is a translated string, so it cannot be a field
+  // initializer; it is filled in once, the first time translations are in
+  // reach, and never again — overwriting what somebody typed would be worse
+  // than showing no suggestion at all.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_prefilled) return;
+    _prefilled = true;
+    _nameController.text = AppL10n.of(context).discordDefaultName;
+  }
 
   @override
   void dispose() {
@@ -50,7 +64,7 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $error'),
+            content: Text(AppL10n.of(context).discordError(error.toString())),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -61,28 +75,30 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Connect Discord'),
+      title: Text(AppL10n.of(context).discordTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'NeoRecall joins voice channels as a bot and records the people you list. Create a bot in the Discord Developer Portal, invite it to your server, then paste its token here.',
-              style: TextStyle(fontSize: 14),
+            Text(
+              AppL10n.of(context).discordDescription,
+              style: const TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Display name'),
+              decoration: InputDecoration(
+                labelText: AppL10n.of(context).speakersDisplayNameLabel,
+              ),
               enabled: !_saving,
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _usersController,
-              decoration: const InputDecoration(
-                labelText: 'Users to record',
-                helperText: 'Comma-separated Discord usernames',
+              decoration: InputDecoration(
+                labelText: AppL10n.of(context).discordUsersLabel,
+                helperText: AppL10n.of(context).discordUsersHelper,
               ),
               enabled: !_saving,
             ),
@@ -90,29 +106,23 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
             TextField(
               controller: _tokenController,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Bot token',
-                helperText: 'Stored only on your NeoRecall server',
+              decoration: InputDecoration(
+                labelText: AppL10n.of(context).discordTokenLabel,
+                helperText: AppL10n.of(context).discordTokenHelper,
               ),
               enabled: !_saving,
             ),
             const SizedBox(height: 16),
-            const ExpansionTile(
+            ExpansionTile(
               tilePadding: EdgeInsets.zero,
               title: Text(
-                'How to create the bot',
-                style: TextStyle(fontSize: 13),
+                AppL10n.of(context).discordHowTo,
+                style: const TextStyle(fontSize: 13),
               ),
               children: [
                 Text(
-                  '1. Open the Discord Developer Portal and create an application.\n'
-                  '2. Open the "Bot" tab, then "Reset Token" and copy the token into the field above.\n'
-                  '3. In "OAuth2 → URL Generator", tick the "bot" scope and the '
-                  '"View Channels", "Connect", and "Speak" permissions.\n'
-                  '4. Open the generated URL and invite the bot to your server.\n'
-                  '\n'
-                  'No privileged intents are required. The bot only listens — it never speaks.',
-                  style: TextStyle(fontSize: 13, height: 1.5),
+                  AppL10n.of(context).discordSteps,
+                  style: const TextStyle(fontSize: 13, height: 1.5),
                 ),
               ],
             ),
@@ -122,7 +132,7 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppL10n.of(context).actionCancel),
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
@@ -132,7 +142,7 @@ class _DiscordSetupDialogState extends State<DiscordSetupDialog> {
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Connect Account'),
+              : Text(AppL10n.of(context).discordConnect),
         ),
       ],
     );

@@ -3,6 +3,8 @@ part of '../../main_controller.dart';
 /// One durable context workflow shared by the live recorder and memory detail.
 /// Widgets only choose content; persistence, retries and API translation live here.
 mixin ContextController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   NeoRecallApiClient get api;
   ChunkStore get store;
   Uuid get _uuid;
@@ -65,10 +67,10 @@ mixin ContextController on ChangeNotifier {
 
   Future<void> addRecordingNote(String sessionId, String text) {
     final note = text.trim();
-    if (note.isEmpty) throw StateError('Write a note before saving it.');
+    if (note.isEmpty) throw StateError(strings.controllerNoteEmpty);
     final maximum = api.maxContextNoteCharacters;
     if (maximum != null && note.length > maximum) {
-      throw StateError('Notes may contain at most $maximum characters.');
+      throw StateError(strings.controllerNoteTooLong(maximum));
     }
     return _addRecordingContext(
       RecordingContextItem(
@@ -92,7 +94,7 @@ mixin ContextController on ChangeNotifier {
   }) {
     final maximum = api.maxContextFileBytes;
     if (maximum != null && bytes.length > maximum) {
-      throw StateError('This file is larger than the server limit.');
+      throw StateError(strings.controllerFileTooLarge);
     }
     final normalized = contentType.toLowerCase();
     final extension = name.toLowerCase().split('.').last;
@@ -132,11 +134,11 @@ mixin ContextController on ChangeNotifier {
     Uint8List? bytes,
   ]) async {
     if (!isRecording) {
-      throw StateError('Context can only be added while recording is active.');
+      throw StateError(strings.controllerContextWhileRecording);
     }
     final contextStore = _contextStore;
     if (contextStore == null) {
-      throw StateError('Recording context storage is unavailable.');
+      throw StateError(strings.controllerContextStorageUnavailable);
     }
     await contextStore.putContext(item, bytes);
     _activeRecordingContext.add(item);
@@ -189,9 +191,7 @@ mixin ContextController on ChangeNotifier {
           if (item.sha256 != null &&
               (bytes == null ||
                   sha256.convert(bytes).toString() != item.sha256)) {
-            throw StateError(
-              'The locally stored context file failed its integrity check.',
-            );
+            throw StateError(strings.controllerContextIntegrity);
           }
           await api.uploadRecordingContext(item, bytes);
           await contextStore.releaseContextBytes(item.id);

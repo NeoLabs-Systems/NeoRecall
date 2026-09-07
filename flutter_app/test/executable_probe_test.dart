@@ -26,10 +26,7 @@ void main() {
     // npm is exactly this shape: `#!/usr/bin/env node`, installed next to the
     // node it needs, with neither on the PATH a window-server launch provides.
     write('probe-runtime', '#!/bin/sh\necho v1.2.3\n');
-    final script = write(
-      'probe-tool',
-      '#!/usr/bin/env probe-runtime\n',
-    );
+    final script = write('probe-tool', '#!/usr/bin/env probe-runtime\n');
 
     final installer = LocalBackendInstaller();
     addTearDown(installer.dispose);
@@ -39,7 +36,10 @@ void main() {
   test('a stand-in that cannot run is rejected', () async {
     // /usr/bin/git on a Mac without command line tools behaves this way: the
     // file is there and only prints an error when run.
-    final shim = write('probe-shim', '#!/bin/sh\necho "not a developer tool" >&2\nexit 1\n');
+    final shim = write(
+      'probe-shim',
+      '#!/bin/sh\necho "not a developer tool" >&2\nexit 1\n',
+    );
 
     final installer = LocalBackendInstaller();
     addTearDown(installer.dispose);
@@ -47,7 +47,10 @@ void main() {
   });
 
   test('a missing interpreter is rejected', () async {
-    final orphan = write('probe-orphan', '#!/usr/bin/env definitely-not-installed\n');
+    final orphan = write(
+      'probe-orphan',
+      '#!/usr/bin/env definitely-not-installed\n',
+    );
 
     final installer = LocalBackendInstaller();
     addTearDown(installer.dispose);

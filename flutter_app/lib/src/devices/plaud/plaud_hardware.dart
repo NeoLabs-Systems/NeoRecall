@@ -37,10 +37,7 @@ class PlaudConnectUpdate {
 }
 
 class PlaudExportUpdate {
-  const PlaudExportUpdate({
-    required this.sessionId,
-    required this.progress,
-  });
+  const PlaudExportUpdate({required this.sessionId, required this.progress});
 
   final int sessionId;
   final int progress;
@@ -65,7 +62,11 @@ abstract class PlaudHardware {
   });
   Future<void> startScan();
   Future<void> stopScan();
-  Future<void> connect({String? uuid, String? serialNumber, String? deviceToken});
+  Future<void> connect({
+    String? uuid,
+    String? serialNumber,
+    String? deviceToken,
+  });
   Future<void> disconnect();
   Future<void> getFileList({int startSessionId = 0});
   Future<Uint8List> exportAudio(int sessionId);

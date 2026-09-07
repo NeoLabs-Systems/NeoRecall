@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/install/admin_provider_client.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Configures the transcription and language-model services a NeoRecall server
 /// uses, without the admin web dashboard. Used both at the end of a local
@@ -12,7 +13,7 @@ class ProviderSetupPanel extends StatefulWidget {
     super.key,
     required this.client,
     this.onFinished,
-    this.finishLabel = 'Continue',
+    this.finishLabel,
     this.showSkip = false,
     this.onSkip,
   });
@@ -22,7 +23,7 @@ class ProviderSetupPanel extends StatefulWidget {
   /// Called once both services are saved (and, when the person asked for it,
   /// tested).
   final VoidCallback? onFinished;
-  final String finishLabel;
+  final String? finishLabel;
   final bool showSkip;
   final VoidCallback? onSkip;
 
@@ -66,7 +67,10 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
-        _transcription.adopt(snapshot.transcription, snapshot.transcriptionCatalog);
+        _transcription.adopt(
+          snapshot.transcription,
+          snapshot.transcriptionCatalog,
+        );
         _llm.adopt(snapshot.llm, snapshot.llmCatalog);
         _loading = false;
       });
@@ -109,10 +113,13 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   }
 
   String? _validate(_WorkloadFormState form) {
+    final strings = AppL10n.of(context);
     final entry = form.selectedEntry;
-    if (entry == null) return 'Choose a ${form.title.toLowerCase()} provider.';
+    if (entry == null) {
+      return strings.providerChoose(form.title(strings).toLowerCase());
+    }
     if (entry.baseUrlRequired && form.baseUrl.text.trim().isEmpty) {
-      return '${entry.label} needs a base URL.';
+      return strings.providerNeedsBaseUrl(entry.label);
     }
     if (entry.apiKeyRequired &&
         form.apiKey.text.trim().isEmpty &&
@@ -155,7 +162,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _transcription.adoptSaved(snapshot.transcription);
         _llm.adoptSaved(snapshot.llm);
         _saving = false;
-        _saved = 'Saved. The server uses these services from now on.';
+        _saved = AppL10n.of(context).providerSaved;
       });
       return true;
     } on AdminProviderException catch (error) {
@@ -190,6 +197,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 32),
@@ -203,14 +211,14 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           InlineMessage(
-            message: _error ?? 'The provider settings could not be loaded.',
+            message: _error ?? strings.providerLoadFailed,
             error: true,
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
+            label: Text(strings.providerTryAgain),
           ),
         ],
       );
@@ -221,8 +229,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          'NeoRecall does the speech detection and speaker matching itself, but '
-          'the words and the written memories come from services you choose.',
+          strings.providerIntro,
           style: TextStyle(color: palette.textSecondary, height: 1.5),
         ),
         const SizedBox(height: 18),
@@ -258,10 +265,10 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
                     : const Icon(Icons.play_circle_outline),
                 label: Text(
                   _testing
-                      ? 'Testing…'
+                      ? strings.providerTesting
                       : _saving
-                      ? 'Saving…'
-                      : 'Save and test',
+                      ? strings.providerSaving
+                      : strings.providerSaveAndTest,
                 ),
               ),
             ),
@@ -269,10 +276,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
             OutlinedButton(
               onPressed: busy ? null : _save,
               // A height-only minimum would ask for infinite width inside a Row.
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(120, 52),
-              ),
-              child: const Text('Save only'),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(120, 52)),
+              child: Text(strings.providerSaveOnly),
             ),
           ],
         ),
@@ -284,14 +289,14 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               minimumSize: const Size.fromHeight(52),
             ),
             icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(widget.finishLabel),
+            label: Text(widget.finishLabel ?? strings.providerContinue),
           ),
         ],
         if (widget.showSkip) ...<Widget>[
           const SizedBox(height: 4),
           TextButton(
             onPressed: busy ? null : widget.onSkip,
-            child: const Text('Set these up later'),
+            child: Text(strings.providerSetUpLater),
           ),
         ],
       ],
@@ -299,6 +304,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   }
 
   Widget _workloadCard(NeoRecallPalette palette, _WorkloadFormState form) {
+    final strings = AppL10n.of(context);
     final entry = form.selectedEntry;
     return Container(
       padding: const EdgeInsets.all(16),
@@ -317,20 +323,20 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  form.title,
+                  form.title(strings),
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
               if (form.apiKeyAlreadyStored)
                 Text(
-                  'key stored',
+                  strings.providerKeyStored,
                   style: TextStyle(color: palette.textMuted, fontSize: 11),
                 ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
-            form.subtitle,
+            form.subtitle(strings),
             style: TextStyle(
               color: palette.textSecondary,
               fontSize: 12,
@@ -341,7 +347,9 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
           DropdownButtonFormField<String>(
             initialValue: form.provider,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Service'),
+            decoration: InputDecoration(
+              labelText: strings.providerServiceLabel,
+            ),
             items: <DropdownMenuItem<String>>[
               for (final item in form.catalog)
                 DropdownMenuItem<String>(
@@ -359,8 +367,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
             TextField(
               controller: form.baseUrl,
               autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
+              decoration: InputDecoration(
+                labelText: strings.providerBaseUrlLabel,
                 hintText: 'https://example.com/v1',
               ),
             ),
@@ -373,8 +381,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
             enableSuggestions: false,
             decoration: InputDecoration(
               labelText: form.apiKeyAlreadyStored
-                  ? 'API key (leave empty to keep the stored one)'
-                  : 'API key',
+                  ? strings.providerApiKeyStoredLabel
+                  : strings.providerApiKeyLabel,
             ),
           ),
           const SizedBox(height: 12),
@@ -388,8 +396,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
                         autocorrect: false,
                         decoration: InputDecoration(
                           labelText: entry?.modelOptional == true
-                              ? 'Model (optional)'
-                              : 'Model',
+                              ? strings.providerModelOptionalLabel
+                              : strings.providerModelLabel,
                         ),
                       )
                     : DropdownButtonFormField<String>(
@@ -397,7 +405,9 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
                             ? form.model.text
                             : null,
                         isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Model'),
+                        decoration: InputDecoration(
+                          labelText: strings.providerModelLabel,
+                        ),
                         items: <DropdownMenuItem<String>>[
                           for (final id in form.models)
                             DropdownMenuItem<String>(
@@ -418,7 +428,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
                         dimension: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Find models'),
+                    : Text(strings.providerFindModels),
               ),
             ],
           ),
@@ -435,6 +445,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   }
 
   Widget _testReport(NeoRecallPalette palette, ProviderTestReport report) {
+    final strings = AppL10n.of(context);
     Widget leg(String label, ProviderTestLeg value) => Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -466,9 +477,9 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          leg('Transcription', report.transcription),
-          leg('Speaker identity', report.speakerIdentity),
-          leg('Memory writing', report.llm),
+          leg(strings.providerLegTranscription, report.transcription),
+          leg(strings.providerLegSpeakerIdentity, report.speakerIdentity),
+          leg(strings.providerLegMemoryWriting, report.llm),
         ],
       ),
     );
@@ -491,11 +502,13 @@ class _WorkloadFormState {
 
   bool get isTranscription => workload == 'transcription';
 
-  String get title => isTranscription ? 'Transcription' : 'Memory writing';
+  String title(AppL10n l10n) => isTranscription
+      ? l10n.providerLegTranscription
+      : l10n.providerLegMemoryWriting;
 
-  String get subtitle => isTranscription
-      ? 'Turns recorded speech into words. Speaker identity stays on this machine.'
-      : 'Writes titles, summaries, and memories from the transcript.';
+  String subtitle(AppL10n l10n) => isTranscription
+      ? l10n.providerTranscriptionSubtitle
+      : l10n.providerMemorySubtitle;
 
   IconData get icon =>
       isTranscription ? Icons.graphic_eq_rounded : Icons.auto_stories_rounded;

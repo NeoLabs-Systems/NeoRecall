@@ -5,8 +5,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// Keeps the administrator API key of each NeoRecall server this app installed,
 /// so provider settings stay reachable from the app after the first run.
 class AdminKeyStore {
-  const AdminKeyStore({FlutterSecureStorage storage = const FlutterSecureStorage()})
-    : _storage = storage;
+  const AdminKeyStore({
+    FlutterSecureStorage storage = const FlutterSecureStorage(),
+  }) : _storage = storage;
 
   final FlutterSecureStorage _storage;
 
@@ -24,5 +25,6 @@ class AdminKeyStore {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  Future<void> clear(String backendUrl) => _storage.delete(key: _key(backendUrl));
+  Future<void> clear(String backendUrl) =>
+      _storage.delete(key: _key(backendUrl));
 }

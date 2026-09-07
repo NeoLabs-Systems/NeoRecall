@@ -19,6 +19,11 @@ process.env.NEORECALL_MIN_MEMORY_EVIDENCE_CHARS = '0';
 const { createApp } = require('../../server/app');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
 const service = require('../../server/services/memories/consolidation_service');
+
+// The evidence turn, found by role. The engine inserts an output-language
+// directive (and any standing owner instructions) between the task's system
+// message and the evidence, so its position is not fixed.
+function userTurn(body) { return body.messages.find((message) => message.role === 'user'); }
 const app = createApp();
 let server;
 test.after(() => { server?.close(); closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true }); });
@@ -86,8 +91,8 @@ test('one consolidation pass creates English memories and a durable interval gat
   // The completion budget is always sent; its size is configuration, not contract.
   assert.equal(outboundBody.max_tokens, require('../../server/config').getConfig().aiConsolidationMaxOutputTokens);
   assert.equal(outboundBody.temperature, require('../../server/config').getConfig().llmTemperature);
-  assert.equal(outboundBody.messages[1].content.includes(conversationId), false);
-  assert.equal(outboundBody.messages[1].content.includes(segmentPublicId), false);
+  assert.equal(userTurn(outboundBody).content.includes(conversationId), false);
+  assert.equal(userTurn(outboundBody).content.includes(segmentPublicId), false);
   const storedMemory = db.prepare('SELECT title_en,started_at,ended_at FROM memories WHERE user_id=?').get(userId);
   assert.deepEqual(storedMemory, { title_en: 'Project planning', started_at: '2026-07-13T10:00:00.000Z', ended_at: '2026-07-13T10:02:00.000Z' });
   assert.equal(db.prepare('SELECT text_en FROM mini_memories WHERE user_id=?').get(userId).text_en, 'Alex promised to prepare the release plan.');

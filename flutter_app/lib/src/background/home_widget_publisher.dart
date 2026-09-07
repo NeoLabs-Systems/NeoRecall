@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../models/memory.dart';
 import 'background_live_status.dart';
 import 'home_widget_snapshot.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Turns app state into the snapshot the Android home-screen widgets render.
 ///
@@ -29,8 +30,9 @@ class HomeWidgetPublisher {
     int? deviceBatteryPercent,
     int devicePendingSeconds = 0,
     String? dayInReview,
+    required AppL10n strings,
   }) {
-    if (!signedIn) return HomeWidgetSnapshot.signedOut;
+    if (!signedIn) return HomeWidgetSnapshot.signedOut(strings);
     final visible = memories.where((memory) => !memory.archived).toList()
       ..sort((left, right) => right.startedAt.compareTo(left.startedAt));
     final open = _openCommitments(miniMemories, now);

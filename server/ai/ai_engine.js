@@ -17,9 +17,30 @@ const { mergeMemoryMessages } = require('./prompts/merge_memories');
 const { dedupeMemoryMessages } = require('./prompts/dedupe_memories');
 const contextAnalysis = require('./prompts/analyze_context');
 const memoryContextRewrite = require('./prompts/rewrite_memory_context');
+const { withInstructions } = require('./prompts/custom_instructions');
+const { withOutputLanguage } = require('./prompts/output_language');
 const { inputBudgetCharacters } = require('./context_budget');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
+const settingsService = require('../services/settings/settings_service');
+
+// The account owner's standing instructions for one area of the product, read
+// per request so a change takes effect on the next one rather than on restart.
+//
+// The output language rides along because it is the same kind of thing — a
+// preference the owner set that every request has to carry — and because both
+// come from the one settings read. Language goes in first so that a standing
+// instruction saying something more specific about language is read last.
+function ownerInstructions(userId, area, messages) {
+  const settings = settingsService.get(userId);
+  return withInstructions(withOutputLanguage(messages, settings.language), settings, area);
+}
+
+// The language alone, for work that writes prose the user reads but has no area
+// of its own for standing instructions.
+function inOwnerLanguage(userId, messages) {
+  return withOutputLanguage(messages, settingsService.outputLanguage(userId));
+}
 
 function markValidationFailed(requestId, code) {
   getDatabase().prepare("UPDATE ai_requests SET state='failed',error_code=? WHERE id=?").run(code, requestId);
@@ -57,7 +78,7 @@ async function withRetries(work) {
 async function consolidateWindowOnce(userId, window, carryOver) {
   const config = getConfig();
   const response = await provider().chatJSON({
-    userId, purpose: 'consolidation', messages: window.messages(carryOver),
+    userId, purpose: 'consolidation', messages: ownerInstructions(userId, 'memories', window.messages(carryOver)),
     maxTokens: config.aiConsolidationMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
       schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
@@ -176,11 +197,11 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
       userId, purpose: 'consolidation',
       // A long recording is read in many windows and yields many sections, so
       // this grows with the day rather than staying the size of one request.
-      messages: dailySummaryMessages({
+      messages: ownerInstructions(userId, 'summaries', dailySummaryMessages({
         sections: contextWithinBudget(sections, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000),
         previousDailySummary,
         timezone,
-      }),
+      })),
       maxTokens: config.aiPreviewMaxOutputTokens,
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
@@ -242,7 +263,7 @@ async function previewConversation(userId, { conversation, previousInsight = nul
   const config = getConfig();
   const response = await provider().chatJSON({
     userId, purpose: 'conversation_preview',
-    messages: conversationPreviewMessages({ conversation, previousInsight, timezone }),
+    messages: ownerInstructions(userId, 'summaries', conversationPreviewMessages({ conversation, previousInsight, timezone })),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_conversation_preview', strict: true,
       schema: conversationPreviewJsonSchema } },
@@ -310,7 +331,7 @@ async function answer(userId, question, context, beforeAttempt, frame = {}) {
   return withRetries(async () => {
     if (beforeAttempt) beforeAttempt();
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: answerMessages(question, bounded, frame),
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: ownerInstructions(userId, 'ask', answerMessages(question, bounded, frame)),
     });
     const parsed = answerSchema.safeParse(response.value);
     if (!parsed.success) {
@@ -327,7 +348,7 @@ async function analyzeContextText(userId, { name, content }) {
   const response = await provider().chatJSON({
     userId,
     purpose: 'context_analysis',
-    messages: contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    messages: inOwnerLanguage(userId, contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) })),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: contextAnalysis.responseFormat,
   });
@@ -341,7 +362,7 @@ async function analyzeContextImage(userId, { name, mediaType, data }) {
   const response = await provider().chatJSON({
     userId,
     purpose: 'context_analysis',
-    messages: contextAnalysis.imageMessages({ name, mediaType, data }),
+    messages: inOwnerLanguage(userId, contextAnalysis.imageMessages({ name, mediaType, data })),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: contextAnalysis.responseFormat,
   });
@@ -360,7 +381,7 @@ async function rewriteMemoryWithContext(userId, { memory, segments, contextItems
   const boundedSegments = contextWithinBudget(segments, Math.max(1_000, budget - contextCharacters));
   const response = await provider().chatJSON({
     userId, purpose: 'memory_context_rewrite',
-    messages: memoryContextRewrite.messages(memory, boundedSegments, boundedContext),
+    messages: ownerInstructions(userId, 'memories', memoryContextRewrite.messages(memory, boundedSegments, boundedContext)),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: {
       name: 'neorecall_memory_context_rewrite', strict: true, schema: memoryContextRewrite.jsonSchema,
@@ -399,7 +420,7 @@ async function rewriteMergedMemory(userId, memories) {
     const response = await provider().chatJSON({
       userId,
       purpose: 'memory_merge',
-      messages: mergeMemoryMessages(memories),
+      messages: ownerInstructions(userId, 'memories', mergeMemoryMessages(memories)),
       maxTokens: config.aiPreviewMaxOutputTokens,
       responseFormat: {
         type: 'json_schema',

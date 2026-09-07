@@ -9,6 +9,7 @@ import 'package:neorecall/src/devices/audio_device_adapter.dart';
 import 'package:neorecall/src/recording/audio_frame.dart';
 import 'package:neorecall/src/recording/recorder.dart';
 import 'package:neorecall/src/sync/processing_status.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 /// Opening and closing a transcript animates the moment's height. The rail that
 /// runs down the side of a moment used to be a stretched column of the same
@@ -45,6 +46,8 @@ void main() {
   // The app rebuilds the screen from one listener at its root; the test
   // stands in for that so a change to the controller reaches the page.
   Widget wrap(NeoRecallController controller) => MaterialApp(
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     theme: buildNeoRecallTheme(Brightness.dark),
     home: Scaffold(
       body: ListenableBuilder(

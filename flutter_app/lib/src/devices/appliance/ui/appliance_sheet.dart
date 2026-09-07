@@ -9,6 +9,7 @@ import '../appliance_controller.dart';
 import '../appliance_protocol.dart';
 import 'appliance_settings_sheet.dart';
 import 'appliance_sheet_scaffold.dart';
+import '../../../../l10n/gen/app_l10n.dart';
 
 /// The appliance's page: one screen that answers "is it recording?" before
 /// anything else, and hides everything that is not a decision the user makes.
@@ -80,14 +81,14 @@ class _ApplianceSheetState extends State<ApplianceSheet>
       // headset, "Sending 3 recordings".
       subtitle: () {
         final ApplianceStatus? status = controller.status;
-        if (status == null) return 'Connecting…';
-        final String summary = status.summary;
-        if (summary == 'Ready') return null;
-        if (summary.startsWith('Recording ·')) return null;
-        return summary;
+        if (status == null) return AppL10n.of(context).applianceConnecting;
+        // The pill above already says both of these, so the line would only
+        // repeat it.
+        if (status.isPlainlyReady || status.isRecording) return null;
+        return status.summary(AppL10n.of(context));
       },
       trailing: () => IconButton(
-        tooltip: 'Device settings',
+        tooltip: AppL10n.of(context).applianceSettingsTooltip,
         icon: const Icon(Icons.tune_rounded),
         onPressed: controller.status == null
             ? null
@@ -134,13 +135,18 @@ class _ApplianceSheetState extends State<ApplianceSheet>
       children: <Widget>[
         CaptureStatusPill(
           tint: recording ? palette.secondary : palette.accent,
-          label: recording ? 'RECORDING' : 'READY',
+          label: recording
+              ? AppL10n.of(context).applianceRecordingBadge
+              : AppL10n.of(context).applianceReadyBadge,
           // The pulse is a claim about *now*. Out of range there is no now,
           // only the last thing the device said, so it stops.
           pulse: recording && controller.isConnected ? _pulse : null,
         ),
         if (!controller.isConnected)
-          CaptureStatusPill(tint: palette.textMuted, label: 'OUT OF RANGE'),
+          CaptureStatusPill(
+            tint: palette.textMuted,
+            label: AppL10n.of(context).applianceOutOfRangeBadge,
+          ),
         if (recording)
           Padding(
             padding: const EdgeInsets.only(top: 3),
@@ -158,14 +164,11 @@ class _ApplianceSheetState extends State<ApplianceSheet>
     );
   }
 
-  Widget get _outOfRange => const InlineMessage(
-      icon: Icons.bluetooth_disabled_rounded,
-      // Deliberately reassuring and true: the appliance keeps recording and
-      // uploading with the phone nowhere near it.
-      message:
-          'Out of range. This page shows what the device last reported. '
-          'A recording already running is not affected — the device keeps '
-          'recording and sending on its own.',
+  Widget get _outOfRange => InlineMessage(
+    icon: Icons.bluetooth_disabled_rounded,
+    // Deliberately reassuring and true: the appliance keeps recording and
+    // uploading with the phone nowhere near it.
+    message: AppL10n.of(context).applianceOutOfRangeBody,
   );
 
   /// Where the sound goes, and where it comes from — as two labelled choices.
@@ -179,25 +182,25 @@ class _ApplianceSheetState extends State<ApplianceSheet>
     final bool headphonesAvailable = status?.headsetConnected ?? false;
     final bool live = status != null && controller.isConnected;
     return SectionCard(
-      eyebrow: 'SOUND',
+      eyebrow: AppL10n.of(context).applianceSoundEyebrow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _choiceLabel(palette, 'Plays out of'),
+          _choiceLabel(palette, AppL10n.of(context).appliancePlaysOutOf),
           const SizedBox(height: 8),
           SegmentedButton<ApplianceOutput>(
             segments: <ButtonSegment<ApplianceOutput>>[
-              const ButtonSegment<ApplianceOutput>(
+              ButtonSegment<ApplianceOutput>(
                 value: ApplianceOutput.speaker,
-                label: Text('Speaker'),
-                icon: Icon(Icons.speaker_rounded, size: 18),
+                label: Text(AppL10n.of(context).applianceSpeaker),
+                icon: const Icon(Icons.speaker_rounded, size: 18),
               ),
               ButtonSegment<ApplianceOutput>(
                 value: ApplianceOutput.headphones,
                 label: Text(
                   headphonesAvailable && (status?.headsetName ?? '').isNotEmpty
                       ? status!.headsetName
-                      : 'Headphones',
+                      : AppL10n.of(context).applianceHeadphones,
                 ),
                 icon: const Icon(Icons.headphones_rounded, size: 18),
                 enabled: headphonesAvailable,
@@ -213,18 +216,18 @@ class _ApplianceSheetState extends State<ApplianceSheet>
                 : null,
           ),
           const SizedBox(height: AppSpacing.md),
-          _choiceLabel(palette, 'Records with'),
+          _choiceLabel(palette, AppL10n.of(context).applianceRecordsWith),
           const SizedBox(height: 8),
           SegmentedButton<ApplianceMicSource>(
             segments: <ButtonSegment<ApplianceMicSource>>[
-              const ButtonSegment<ApplianceMicSource>(
+              ButtonSegment<ApplianceMicSource>(
                 value: ApplianceMicSource.builtIn,
-                label: Text('Its own microphones'),
-                icon: Icon(Icons.mic_rounded, size: 18),
+                label: Text(AppL10n.of(context).applianceOwnMicrophones),
+                icon: const Icon(Icons.mic_rounded, size: 18),
               ),
               ButtonSegment<ApplianceMicSource>(
                 value: ApplianceMicSource.headset,
-                label: const Text('Headset'),
+                label: Text(AppL10n.of(context).applianceHeadset),
                 icon: const Icon(Icons.headset_mic_rounded, size: 18),
                 enabled: headphonesAvailable,
               ),
@@ -245,10 +248,7 @@ class _ApplianceSheetState extends State<ApplianceSheet>
             // The honest version. This is a property of Bluetooth itself, not
             // something a future release will fix, and the owner is about to
             // hear the difference.
-            const Footnote(
-              'While recording, what you hear drops in quality — that is how '
-              'Bluetooth headsets work.',
-            ),
+            Footnote(AppL10n.of(context).applianceHeadsetQualityNote),
           ],
         ],
       ),
@@ -284,7 +284,7 @@ class _ApplianceSheetState extends State<ApplianceSheet>
         ),
     ];
     return SectionCard(
-      eyebrow: 'HEADPHONES',
+      eyebrow: AppL10n.of(context).applianceHeadphonesEyebrow,
       trailing: TextButton.icon(
         onPressed: !controller.isConnected || controller.isLookingForHeadphones
             ? null
@@ -292,13 +292,17 @@ class _ApplianceSheetState extends State<ApplianceSheet>
         icon: controller.isLookingForHeadphones
             ? const ButtonSpinner()
             : const Icon(Icons.search_rounded, size: 18),
-        label: Text(controller.isLookingForHeadphones ? 'Looking…' : 'Find'),
+        label: Text(
+          controller.isLookingForHeadphones
+              ? AppL10n.of(context).applianceLooking
+              : AppL10n.of(context).applianceFind,
+        ),
       ),
       child: found.isEmpty
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
-                'No headphones yet. Put yours in pairing mode and tap Find.',
+                AppL10n.of(context).applianceNoHeadphones,
                 style: TextStyle(color: palette.textMuted, fontSize: 13),
               ),
             )
@@ -310,14 +314,20 @@ class _ApplianceSheetState extends State<ApplianceSheet>
                     child: DeviceRow(
                       name: headphone.name,
                       detail: headphone.connected
-                          ? 'Connected'
-                          : (headphone.paired ? 'Paired' : 'In range'),
+                          ? AppL10n.of(context).deviceConnected
+                          : (headphone.paired
+                                ? AppL10n.of(context).applianceHeadphonePaired
+                                : AppL10n.of(
+                                    context,
+                                  ).applianceHeadphoneInRange),
                       connected: headphone.connected,
                       batteryLevel: headphone.battery,
                       actionLabel: headphone.connected
-                          ? 'Disconnect'
-                          : 'Connect',
-                      connectedActionLabel: 'Disconnect',
+                          ? AppL10n.of(context).applianceDisconnect
+                          : AppL10n.of(context).applianceConnect,
+                      connectedActionLabel: AppL10n.of(
+                        context,
+                      ).applianceDisconnect,
                       onAction: headphone.address.isEmpty
                           ? null
                           : () => headphone.connected

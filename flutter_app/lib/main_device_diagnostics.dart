@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'main_controller.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Device & sync diagnostics, shown as a modal sheet from the Bluetooth setup
 /// area rather than as a settings page.
@@ -42,12 +43,13 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
   Future<void> _copyReport() async {
     setState(() => exporting = true);
     final messenger = ScaffoldMessenger.of(context);
+    // Read alongside the messenger, before the await: both are resolved from a
+    // context that may be gone by the time the export finishes.
+    final copied = AppL10n.of(context).diagnosticsCopied;
     try {
       final report = await widget.controller.buildDiagnosticExport();
       await Clipboard.setData(ClipboardData(text: report));
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Diagnostic report copied.')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(copied)));
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text('$error')));
     } finally {
@@ -58,11 +60,10 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
   Future<void> _clear() async {
     setState(() => clearing = true);
     final messenger = ScaffoldMessenger.of(context);
+    final cleared = AppL10n.of(context).diagnosticsCleared;
     try {
       await widget.controller.clearDiagnostics();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Diagnostic log cleared.')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(cleared)));
     } finally {
       if (mounted) setState(() => clearing = false);
     }
@@ -92,7 +93,7 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Device & sync diagnostics',
+                      AppL10n.of(context).diagnosticsTitle,
                       style: TextStyle(
                         color: palette.textPrimary,
                         fontSize: 17,
@@ -101,7 +102,7 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Refresh',
+                    tooltip: AppL10n.of(context).actionRefresh,
                     onPressed: () => setState(() {}),
                     icon: const Icon(Icons.refresh_rounded),
                   ),
@@ -109,9 +110,7 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
               ),
               const SizedBox(height: 2),
               Text(
-                'Bluetooth scan/connect, device sync, and import events for this '
-                'account. Passwords, tokens, audio, transcripts, and other '
-                'accounts are never included.',
+                AppL10n.of(context).diagnosticsDescription,
                 style: TextStyle(
                   color: palette.textSecondary,
                   height: 1.45,
@@ -136,7 +135,11 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.content_copy_outlined),
-                    label: Text(exporting ? 'Preparing…' : 'Copy full report'),
+                    label: Text(
+                      exporting
+                          ? AppL10n.of(context).diagnosticsPreparing
+                          : AppL10n.of(context).diagnosticsCopyReport,
+                    ),
                   ),
                   OutlinedButton.icon(
                     onPressed: clearing ? null : _clear,
@@ -147,7 +150,7 @@ class _DeviceDiagnosticsSheetState extends State<_DeviceDiagnosticsSheet> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.delete_outline_rounded),
-                    label: const Text('Clear log'),
+                    label: Text(AppL10n.of(context).diagnosticsClearLog),
                   ),
                 ],
               ),
@@ -182,8 +185,7 @@ class DeviceDiagnosticsLogView extends StatelessWidget {
       ),
       child: events.isEmpty
           ? Text(
-              'No diagnostic events yet. Connect a device and sync to populate '
-              'this log, then refresh.',
+              AppL10n.of(context).diagnosticsEmpty,
               style: TextStyle(color: palette.textMuted, fontSize: 12.5),
             )
           : SingleChildScrollView(

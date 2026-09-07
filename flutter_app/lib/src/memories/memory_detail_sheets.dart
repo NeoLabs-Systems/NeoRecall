@@ -8,6 +8,7 @@ import '../widgets/detail_sheet_mixin.dart';
 import 'memory_cards.dart';
 import 'memory_formatting.dart';
 import 'transcript_excerpts.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class MemoryDetailSheet extends StatefulWidget {
   const MemoryDetailSheet({
@@ -38,24 +39,24 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
     final text = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add memory context'),
+        title: Text(AppL10n.of(dialogContext).memoryContextDialogTitle),
         content: TextField(
           controller: input,
           autofocus: true,
           minLines: 3,
           maxLines: 8,
-          decoration: const InputDecoration(
-            hintText: 'Add details that should improve this memory…',
+          decoration: InputDecoration(
+            hintText: AppL10n.of(dialogContext).memoryContextDialogHint,
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(dialogContext).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, input.text),
-            child: const Text('Add and update'),
+            child: Text(AppL10n.of(dialogContext).memoryContextDialogConfirm),
           ),
         ],
       ),
@@ -197,20 +198,26 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                         final ok = await showDialog<bool>(
                           context: context,
                           builder: (dialogContext) => AlertDialog(
-                            title: const Text('Delete memory?'),
-                            content: const Text(
-                              'This removes the memory and its highlights. Transcripts stay available on the timeline.',
+                            title: Text(
+                              AppL10n.of(dialogContext).memoryDeleteTitle,
+                            ),
+                            content: Text(
+                              AppL10n.of(dialogContext).memoryDeleteBody,
                             ),
                             actions: <Widget>[
                               TextButton(
                                 onPressed: () =>
                                     Navigator.of(dialogContext).pop(false),
-                                child: const Text('Cancel'),
+                                child: Text(
+                                  AppL10n.of(dialogContext).actionCancel,
+                                ),
                               ),
                               FilledButton(
                                 onPressed: () =>
                                     Navigator.of(dialogContext).pop(true),
-                                child: const Text('Delete'),
+                                child: Text(
+                                  AppL10n.of(dialogContext).actionDelete,
+                                ),
                               ),
                             ],
                           ),
@@ -222,16 +229,30 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                     }
                   },
                   itemBuilder: (context) => <PopupMenuEntry<String>>[
-                    const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                    PopupMenuItem(
+                      value: 'rename',
+                      child: Text(AppL10n.of(context).actionRename),
+                    ),
                     PopupMenuItem(
                       value: 'pin',
-                      child: Text(memory.pinned ? 'Unpin' : 'Pin'),
+                      child: Text(
+                        memory.pinned
+                            ? AppL10n.of(context).memoriesUnpin
+                            : AppL10n.of(context).memoriesPin,
+                      ),
                     ),
                     PopupMenuItem(
                       value: 'archive',
-                      child: Text(memory.archived ? 'Restore' : 'Archive'),
+                      child: Text(
+                        memory.archived
+                            ? AppL10n.of(context).memoriesRestore
+                            : AppL10n.of(context).memoriesArchive,
+                      ),
                     ),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text(AppL10n.of(context).actionDelete),
+                    ),
                   ],
                 ),
               ],
@@ -245,7 +266,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: Text(
-                        'Could not load details.\n$loadError',
+                        AppL10n.of(context).memoryLoadFailed('$loadError'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: palette.textMuted),
                       ),
@@ -274,7 +295,10 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                       ],
                       if (entities.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 22),
-                        Text('People & things', style: _sectionStyle(palette)),
+                        Text(
+                          AppL10n.of(context).memoryPeopleAndThings,
+                          style: _sectionStyle(palette),
+                        ),
                         const SizedBox(height: 10),
                         Wrap(
                           spacing: 8,
@@ -283,7 +307,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                             final name =
                                 entity['display_name'] as String? ??
                                 entity['canonical_name_en'] as String? ??
-                                'Unknown';
+                                AppL10n.of(context).memoryEntityUnknown;
                             final kind = entity['kind'] as String? ?? '';
                             final emoji = switch (kind) {
                               'person' => '👤',
@@ -298,7 +322,10 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                       ],
                       if (miniMemories.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 22),
-                        Text('Highlights', style: _sectionStyle(palette)),
+                        Text(
+                          AppL10n.of(context).navHighlights,
+                          style: _sectionStyle(palette),
+                        ),
                         const SizedBox(height: 10),
                         for (final mini in miniMemories)
                           Padding(
@@ -328,7 +355,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                         children: <Widget>[
                           Expanded(
                             child: Text(
-                              'Context',
+                              AppL10n.of(context).memoryContextHeading,
                               style: _sectionStyle(palette),
                             ),
                           ),
@@ -336,7 +363,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                             key: const ValueKey<String>('memory-context-note'),
                             onPressed: _addNote,
                             icon: const Icon(Icons.edit_note_rounded, size: 18),
-                            label: const Text('Note'),
+                            label: Text(AppL10n.of(context).recordContextNote),
                           ),
                           TextButton.icon(
                             key: const ValueKey<String>('memory-context-file'),
@@ -345,14 +372,14 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                               Icons.attach_file_rounded,
                               size: 18,
                             ),
-                            label: const Text('File'),
+                            label: Text(AppL10n.of(context).recordContextFile),
                           ),
                         ],
                       ),
                       const SizedBox(height: 10),
                       if (contextItems.isEmpty)
                         Text(
-                          'No notes or files are attached to this memory.',
+                          AppL10n.of(context).memoryNoContext,
                           style: TextStyle(color: palette.textMuted),
                         )
                       else
@@ -391,7 +418,9 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                         Text(
                                           (item['noteText'] ??
                                                   item['originalName'] ??
-                                                  'Highlighted moment')
+                                                  AppL10n.of(
+                                                    context,
+                                                  ).recordHighlightedMoment)
                                               .toString(),
                                           style: TextStyle(
                                             color: palette.textPrimary,
@@ -404,7 +433,8 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                             true) ...<Widget>[
                                           const SizedBox(height: 5),
                                           _ExpandableText(
-                                            text: item['analysisText'] as String,
+                                            text:
+                                                item['analysisText'] as String,
                                             style: TextStyle(
                                               color: palette.textSoft,
                                               height: 1.4,
@@ -415,8 +445,12 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                         Text(
                                           item['analysisState'] == 'ready'
                                               ? (item['usedByAi'] == true
-                                                    ? 'Used by AI'
-                                                    : 'Ready for AI')
+                                                    ? AppL10n.of(
+                                                        context,
+                                                      ).memoryContextUsedByAi
+                                                    : AppL10n.of(
+                                                        context,
+                                                      ).memoryContextReadyForAi)
                                               : (item['analysisErrorMessage'] ??
                                                         item['analysisState'])
                                                     .toString(),
@@ -432,7 +466,9 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                       (item['analysisState'] == 'failed' ||
                                           item['analysisState'] == 'skipped'))
                                     IconButton(
-                                      tooltip: 'Retry analysis',
+                                      tooltip: AppL10n.of(
+                                        context,
+                                      ).memoryContextRetry,
                                       onPressed: () =>
                                           _retryContext(item['id'] as String),
                                       icon: const Icon(
@@ -441,7 +477,9 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                       ),
                                     ),
                                   IconButton(
-                                    tooltip: 'Remove context',
+                                    tooltip: AppL10n.of(
+                                      context,
+                                    ).memoryContextRemove,
                                     onPressed: () =>
                                         _removeContext(item['id'] as String),
                                     icon: const Icon(
@@ -455,7 +493,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                           ),
                       const SizedBox(height: 22),
                       Text(
-                        'From the conversation',
+                        AppL10n.of(context).memoryFromConversation,
                         style: _sectionStyle(palette),
                       ),
                       const SizedBox(height: 10),
@@ -591,7 +629,9 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                 ),
                 if (mini.isActionable)
                   IconButton(
-                    tooltip: mini.isCompleted ? 'Reopen' : 'Mark done',
+                    tooltip: mini.isCompleted
+                        ? AppL10n.of(context).memoriesReopen
+                        : AppL10n.of(context).memoriesMarkDone,
                     onPressed: () async {
                       final navigator = Navigator.of(context);
                       final next = mini.isCompleted ? 'open' : 'completed';
@@ -608,7 +648,7 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                     ),
                   ),
                 IconButton(
-                  tooltip: 'Delete',
+                  tooltip: AppL10n.of(context).actionDelete,
                   onPressed: () async {
                     final navigator = Navigator.of(context);
                     await widget.controller.deleteMiniMemory(mini.id);
@@ -625,7 +665,7 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                 : loadError != null
                 ? Center(
                     child: Text(
-                      'Could not load highlight.\n$loadError',
+                      AppL10n.of(context).miniLoadFailed('$loadError'),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: palette.textMuted),
                     ),
@@ -635,7 +675,10 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                     children: <Widget>[
                       if (mini.memoryTitle != null) ...<Widget>[
                         Text(
-                          'From ${mini.memoryEmoji ?? '💭'} ${mini.memoryTitle}',
+                          AppL10n.of(context).miniFromMemory(
+                            mini.memoryEmoji ?? '💭',
+                            mini.memoryTitle!,
+                          ),
                           style: TextStyle(
                             color: palette.textSecondary,
                             fontWeight: FontWeight.w600,
@@ -645,7 +688,9 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                       ],
                       if (mini.dueAt != null) ...<Widget>[
                         Text(
-                          'Due ${formatFullDateTime(mini.dueAt!)}',
+                          AppL10n.of(
+                            context,
+                          ).memoriesDue(formatFullDateTime(mini.dueAt!)),
                           style: TextStyle(
                             color: palette.warning,
                             fontWeight: FontWeight.w700,
@@ -654,7 +699,7 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                         const SizedBox(height: 16),
                       ],
                       Text(
-                        'Evidence',
+                        AppL10n.of(context).miniEvidence,
                         style: TextStyle(
                           color: palette.textPrimary,
                           fontWeight: FontWeight.w800,
@@ -664,7 +709,7 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                       const SizedBox(height: 10),
                       TranscriptExcerpts(
                         sources: sources,
-                        emptyLabel: 'No transcript excerpts linked.',
+                        emptyLabel: AppL10n.of(context).miniNoExcerpts,
                         // A highlight cites one moment, so a clock down the
                         // side would repeat what its own timestamp says.
                         showTimes: false,

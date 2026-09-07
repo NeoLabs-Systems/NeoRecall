@@ -8,6 +8,8 @@ part of '../../main_controller.dart';
 /// `_webAuthn`) and its published state. Splitting the file is what was needed;
 /// splitting the privacy boundary was not.
 mixin AuthController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   // Provided by NeoRecallController.
   NeoRecallApiClient get api;
   WebAuthnClient get _webAuthn;
@@ -159,7 +161,7 @@ mixin AuthController on ChangeNotifier {
               )
               as Map;
       securityKeys = _securityKeyList(response);
-      notice = 'Security key added.';
+      notice = strings.controllerSecurityKeyAdded;
     });
     if (!registered && _securityKeyDismissed) {
       _securityKeyDismissed = false;
@@ -222,15 +224,15 @@ mixin AuthController on ChangeNotifier {
   String _readableError(Object error) {
     final text = error.toString();
     if (text.contains('INVALID_PASSWORD')) {
-      return 'That password is not correct.';
+      return strings.controllerWrongPassword;
     }
     if (text.contains('INVALID_TWO_FACTOR')) {
-      return 'That authentication code is not valid. Codes expire quickly — try the current one.';
+      return strings.controllerInvalidTwoFactor;
     }
     if (text.contains('TWO_FACTOR_REQUIRED')) {
-      return 'This account needs an authenticator code to confirm.';
+      return strings.controllerTwoFactorRequired;
     }
-    return 'The account could not be deleted: $text';
+    return strings.controllerDeleteFailed(text);
   }
 
   Future<void> fetchTwoFactorStatus() async {

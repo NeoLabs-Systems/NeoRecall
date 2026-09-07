@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../l10n/gen/app_l10n.dart';
 
 /// Ask for a Wi-Fi password.
 ///
@@ -43,9 +44,11 @@ class _WifiPasswordPromptState extends State<_WifiPasswordPrompt> {
       autofocus: true,
       obscureText: _obscured,
       decoration: InputDecoration(
-        labelText: 'Network password',
+        labelText: AppL10n.of(context).wifiPasswordLabel,
         suffixIcon: IconButton(
-          tooltip: _obscured ? 'Show password' : 'Hide password',
+          tooltip: _obscured
+              ? AppL10n.of(context).wifiShowPassword
+              : AppL10n.of(context).wifiHidePassword,
           icon: Icon(
             _obscured ? Icons.visibility_rounded : Icons.visibility_off_rounded,
           ),
@@ -57,11 +60,11 @@ class _WifiPasswordPromptState extends State<_WifiPasswordPrompt> {
     actions: <Widget>[
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
+        child: Text(AppL10n.of(context).actionCancel),
       ),
       TextButton(
         onPressed: () => Navigator.of(context).pop(_password.text),
-        child: const Text('Join'),
+        child: Text(AppL10n.of(context).wifiJoin),
       ),
     ],
   );

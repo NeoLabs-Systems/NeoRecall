@@ -304,6 +304,10 @@ function buildConfig() {
     // summaries are what consolidation already sorted, dated and titled;
     // transcript segments are the raw speech behind them, worth a few slots for
     // exact wording but not worth crowding out the layer written from them.
+    // Standing instructions an account owner may give the model, per area. Long
+    // enough for a paragraph of preferences on each; short enough that four of
+    // them plus the global one cannot crowd the evidence out of a request.
+    customInstructionsMaxCharacters: integer('NEORECALL_CUSTOM_INSTRUCTIONS_MAX_CHARACTERS', 2_000, { min: 0, max: 20_000 }),
     askMemoryContextLimit: integer('NEORECALL_ASK_MEMORY_CONTEXT_LIMIT', 12, { min: 1, max: 100 }),
     askTranscriptContextLimit: integer('NEORECALL_ASK_TRANSCRIPT_CONTEXT_LIMIT', 4, { min: 0, max: 100 }),
     searchWeights: {

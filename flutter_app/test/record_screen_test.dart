@@ -11,6 +11,7 @@ import 'package:neorecall/src/recording/recorder.dart';
 import 'package:neorecall/src/sync/processing_status.dart';
 import 'package:neorecall/src/sync/pending_audio_preview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 /// The record screen animates and samples audio levels only while recording, so
 /// the live state needs its own coverage: the idle screen must settle, the live
@@ -18,6 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// callbacks), and leaving the screen must stop the ticker.
 void main() {
   Widget wrap(Widget child) => MaterialApp(
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     theme: buildNeoRecallTheme(Brightness.dark),
     home: Scaffold(body: child),
   );
@@ -493,8 +496,8 @@ void main() {
         reason: 'the live record screen overflowed at ${size.width}px',
       );
 
-    await tester.pumpWidget(wrap(const SizedBox.shrink()));
-    await tester.pump();
+      await tester.pumpWidget(wrap(const SizedBox.shrink()));
+      await tester.pump();
     });
   }
 

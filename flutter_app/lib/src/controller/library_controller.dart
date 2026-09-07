@@ -7,6 +7,8 @@ part of '../../main_controller.dart';
 /// from capture. Grouping it here is what makes that shape visible, and makes
 /// the controller's remaining bulk actually about recording.
 mixin LibraryController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   NeoRecallApiClient get api;
   List<RecallMemory> get memories;
   set memories(List<RecallMemory> value);
@@ -131,7 +133,7 @@ mixin LibraryController on ChangeNotifier {
     await _refreshPending();
     sync.pump.pump();
     _applyRecordingSchedule();
-    notice = 'Settings saved.';
+    notice = strings.settingsSaved;
     notifyListeners();
   }
 
@@ -213,11 +215,11 @@ mixin LibraryController on ChangeNotifier {
   /// refresh picks them up.
   Future<Map<String, dynamic>> mergeMemories(List<String> ids) async {
     if (ids.length < 2) {
-      throw StateError('Select at least two memories to merge.');
+      throw StateError(strings.controllerMergeTooFew);
     }
     final mergeMax = api.maxMemoryMergeItems;
     if (mergeMax != null && ids.length > mergeMax) {
-      throw StateError('Select at most $mergeMax memories to merge.');
+      throw StateError(strings.controllerMergeTooMany(mergeMax));
     }
     final payload =
         await api.request(

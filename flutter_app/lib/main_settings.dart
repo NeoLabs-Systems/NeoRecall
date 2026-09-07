@@ -6,6 +6,8 @@ import 'main_provider_setup.dart';
 import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'l10n/gen/app_l10n.dart';
+import 'src/l10n/app_language.dart';
 import 'src/settings/integrations_section.dart';
 import 'src/settings/security_section.dart';
 import 'src/settings/watch_section.dart';
@@ -18,6 +20,7 @@ enum SettingsSection {
   security,
   recording,
   memory,
+  instructions,
   speakers,
   watch,
   devices,
@@ -43,8 +46,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? settings;
   final timezone = TextEditingController();
   final customVocabulary = TextEditingController();
+  // One field per area the model writes for, plus one that applies to all of
+  // them. Kept as controllers rather than in `settings` so a half-typed
+  // instruction survives switching areas and back.
+  final instructionsGlobal = TextEditingController();
+  final instructionsMemories = TextEditingController();
+  final instructionsSummaries = TextEditingController();
+  final instructionsAsk = TextEditingController();
   late SettingsSection selectedSection = widget.initialSection;
   bool _savingUploadPolicy = false;
+  bool _changingLanguage = false;
   bool _savingKeepRawAudio = false;
   int _loadedContextRetentionDays = 7;
   AdminProviderClient? _adminClient;
@@ -68,12 +79,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final maximumLength =
         current['customVocabularyMaxTermLength'] as int? ?? 120;
     if (_customVocabularyTerms.length > maximumTerms) {
-      return 'Remove ${_customVocabularyTerms.length - maximumTerms} terms to save.';
+      return AppL10n.of(
+        context,
+      ).settingsVocabularyTooMany(_customVocabularyTerms.length - maximumTerms);
     }
     if (_customVocabularyTerms.any(
       (term) => term.runes.length > maximumLength,
     )) {
-      return 'Each term must be $maximumLength characters or fewer.';
+      return AppL10n.of(context).settingsVocabularyTermTooLong(maximumLength);
     }
     return null;
   }
@@ -90,6 +103,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               .join('\n');
       _loadedContextRetentionDays =
           value['contextOriginalRetentionDays'] as int? ?? 7;
+      instructionsGlobal.text = value['instructionsGlobal'] as String? ?? '';
+      instructionsMemories.text =
+          value['instructionsMemories'] as String? ?? '';
+      instructionsSummaries.text =
+          value['instructionsSummaries'] as String? ?? '';
+      instructionsAsk.text = value['instructionsAsk'] as String? ?? '';
       setState(() => settings = value);
     });
     // fetchTwoFactorStatus flips a flag and notifies synchronously; deferring to
@@ -106,30 +125,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     timezone.dispose();
     customVocabulary.dispose();
+    instructionsGlobal.dispose();
+    instructionsMemories.dispose();
+    instructionsSummaries.dispose();
+    instructionsAsk.dispose();
     _adminClient?.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
     final current = settings;
-    if (current == null || _customVocabularyError != null) return;
+    if (current == null ||
+        _customVocabularyError != null ||
+        _instructionsError != null) {
+      return;
+    }
+    final strings = AppL10n.of(context);
     final retention = current['contextOriginalRetentionDays'] as int? ?? 7;
     if (retention < _loadedContextRetentionDays) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Shorten original-file retention?'),
-          content: Text(
-            'Original photos, documents, and raw audio older than $retention days will be permanently deleted during the next cleanup. Transcripts and AI descriptions remain.',
-          ),
+          title: Text(strings.settingsShortenRetentionTitle),
+          content: Text(strings.settingsShortenRetentionBody(retention)),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
+              child: Text(strings.actionCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Shorten retention'),
+              child: Text(strings.settingsShortenRetentionConfirm),
             ),
           ],
         ),
@@ -149,6 +175,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'recordingStartMinute': current['recordingStartMinute'],
       'recordingEndMinute': current['recordingEndMinute'],
       'customVocabulary': _customVocabularyTerms,
+      'instructionsGlobal': instructionsGlobal.text.trim(),
+      'instructionsMemories': instructionsMemories.text.trim(),
+      'instructionsSummaries': instructionsSummaries.text.trim(),
+      'instructionsAsk': instructionsAsk.text.trim(),
       'vocabularyCorrectionEnabled':
           current['vocabularyCorrectionEnabled'] as bool? ?? true,
       'contextOriginalRetentionDays': retention,
@@ -158,7 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
+    ).showSnackBar(SnackBar(content: Text(strings.settingsSaved)));
   }
 
   Future<void> _setUploadOnlyOnUnmetered(bool value) async {
@@ -179,7 +209,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => current['uploadOnlyOnUnmetered'] = previous);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update upload policy: $error')),
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).settingsUploadPolicyFailed(error.toString()),
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _savingUploadPolicy = false);
@@ -193,19 +227,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Stop keeping raw audio?'),
-          content: const Text(
-            'Recordings already on this device will be deleted now. '
-            'Transcripts, titles, and memories stay.',
-          ),
+          title: Text(AppL10n.of(context).settingsStopRawAudioTitle),
+          content: Text(AppL10n.of(context).settingsStopRawAudioBody),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
+              child: Text(AppL10n.of(context).actionCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Delete raw audio'),
+              child: Text(AppL10n.of(context).settingsStopRawAudioConfirm),
             ),
           ],
         ),
@@ -225,7 +256,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => current['keepRawAudio'] = previous);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update raw audio storage: $error')),
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).settingsRawAudioFailed(error.toString()),
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _savingKeepRawAudio = false);
@@ -234,6 +269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppL10n.of(context);
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < AppBreakpoints.rail;
     // The same gutter every other page uses. Settings had its own 28, which is
@@ -246,15 +282,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         children: <Widget>[
           ScreenHeader(
-            title: 'Settings',
-            description:
-                'Capture behaviour, memory, and account security in one place.',
+            title: strings.settingsTitle,
+            description: strings.settingsDescription,
             trailing: FilledButton.icon(
               onPressed:
                   widget.controller.loading ||
                       _savingUploadPolicy ||
                       settings == null ||
                       _customVocabularyError != null ||
+                      _instructionsError != null ||
                       selectedSection == SettingsSection.watch ||
                       selectedSection == SettingsSection.devices ||
                       selectedSection == SettingsSection.services ||
@@ -262,7 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? null
                   : save,
               icon: const Icon(Icons.save_outlined, size: 18),
-              label: const Text('Save'),
+              label: Text(strings.actionSave),
             ),
           ),
           Expanded(
@@ -273,7 +309,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         selected: selectedSection,
                         compact: true,
                         onSelected: _select,
-                        watchSupported: widget.controller.isMobileCapturePlatform,
+                        watchSupported:
+                            widget.controller.isMobileCapturePlatform,
                       ),
                       const SizedBox(height: AppSpacing.md + 2),
                       Expanded(child: _content()),
@@ -331,6 +368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
+      SettingsSection.instructions => _instructionSettings(),
       SettingsSection.speakers => _speakerSettings(),
       SettingsSection.watch => WatchSection(controller: widget.controller),
       SettingsSection.devices => _devicesSettings(),
@@ -343,6 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _devicesSettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     return _sectionList(<Widget>[
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,7 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Signed-in devices',
+                  strings.settingsDevicesTitle,
                   style: TextStyle(
                     color: palette.textPrimary,
                     fontSize: 17,
@@ -361,7 +400,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  'Review access or revoke an old client. Set up, connect, and control capture hardware from Record.',
+                  strings.settingsDevicesDescription,
                   style: TextStyle(
                     color: palette.textMuted,
                     fontSize: 12.5,
@@ -375,7 +414,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton.icon(
             onPressed: () => widget.controller.selectPage(RecallPage.record),
             icon: const Icon(Icons.mic_none_rounded, size: 18),
-            label: const Text('Open Record'),
+            label: Text(strings.settingsOpenRecord),
           ),
         ],
       ),
@@ -412,6 +451,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// empty form.
   Widget _servicesSettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     return _sectionList(<Widget>[
       FutureBuilder<String?>(
         future: const AdminKeyStore().read(widget.controller.backendUrl),
@@ -425,11 +465,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           final key = snapshot.data;
           if (key == null) {
             return InlineMessage(
-              message:
-                  'These services are set on the server itself. This app has no '
-                  'administrator key for ${widget.controller.backendUrl}, so ask '
-                  'whoever runs that server to configure transcription and '
-                  'memory writing there.',
+              message: strings.settingsServicesNoAdminKey(
+                widget.controller.backendUrl,
+              ),
               icon: Icons.info_outline,
             );
           }
@@ -437,7 +475,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'Services',
+                strings.settingsServicesTitle,
                 style: TextStyle(
                   color: palette.textPrimary,
                   fontSize: 16,
@@ -472,14 +510,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _generalSettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     return _sectionList(<Widget>[
       SectionCard(
-        eyebrow: 'GENERAL',
+        eyebrow: strings.settingsSectionGeneral,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Time and locale',
+              strings.settingsTimeLocaleTitle,
               style: TextStyle(
                 color: palette.textPrimary,
                 fontSize: 17,
@@ -488,17 +527,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Used to place recordings and generated memories on your local timeline.',
+              strings.settingsTimeLocaleDescription,
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
             const SizedBox(height: 18),
             TextField(
               controller: timezone,
-              decoration: const InputDecoration(
-                labelText: 'IANA timezone',
-                prefixIcon: Icon(Icons.public_outlined),
+              decoration: InputDecoration(
+                labelText: strings.settingsTimezoneLabel,
+                prefixIcon: const Icon(Icons.public_outlined),
               ),
               onChanged: (value) => settings!['timezone'] = value,
+            ),
+            const Divider(height: 32),
+            Text(
+              strings.settingsLanguageTitle,
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              strings.settingsLanguageDescription,
+              style: TextStyle(color: palette.textSecondary, height: 1.45),
+            ),
+            const SizedBox(height: 18),
+            DropdownButtonFormField<AppLanguage>(
+              initialValue: widget.controller.language,
+              decoration: InputDecoration(
+                labelText: strings.settingsLanguageLabel,
+                prefixIcon: const Icon(Icons.translate_outlined),
+              ),
+              items: <DropdownMenuItem<AppLanguage>>[
+                for (final language in AppLanguage.values)
+                  DropdownMenuItem<AppLanguage>(
+                    value: language,
+                    child: Text(language.label),
+                  ),
+              ],
+              onChanged: _changingLanguage ? null : _setLanguage,
             ),
           ],
         ),
@@ -506,26 +575,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
   }
 
+  /// Applied immediately rather than on Save.
+  ///
+  /// The whole interface redraws in the new language the moment it is picked,
+  /// so leaving the choice pending behind a Save button would show a German
+  /// list under an English heading until the button was pressed.
+  Future<void> _setLanguage(AppLanguage? value) async {
+    if (value == null || value == widget.controller.language) return;
+    setState(() => _changingLanguage = true);
+    try {
+      await widget.controller.setLanguage(value);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).settingsLanguageFailed(error.toString()),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _changingLanguage = false);
+    }
+  }
+
   Widget _recordingSettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final current = settings!;
     final minimum = (current['chunkMinMs'] as int) / 1000;
     final maximum = (current['chunkMaxMs'] as int) / 1000;
     return _sectionList(<Widget>[
       SectionCard(
-        eyebrow: 'ALWAYS-ON CAPTURE',
+        eyebrow: strings.settingsSectionAlwaysOn,
         child: Column(
           children: <Widget>[
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: current['uploadOnlyOnUnmetered'] as bool? ?? true,
               onChanged: _savingUploadPolicy ? null : _setUploadOnlyOnUnmetered,
-              title: const Text('Upload only on Wi-Fi / unmetered networks'),
-              subtitle: const Text(
-                'On by default. Recording continues to private app storage '
-                'while offline or on mobile data, then uploads when an '
-                'unmetered connection is available.',
-              ),
+              title: Text(strings.settingsUnmeteredTitle),
+              subtitle: Text(strings.settingsUnmeteredDescription),
             ),
             const Divider(),
             SwitchListTile(
@@ -533,11 +623,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: current['recordingScheduleEnabled'] as bool? ?? false,
               onChanged: (value) =>
                   setState(() => current['recordingScheduleEnabled'] = value),
-              title: const Text('Daily recording window'),
-              subtitle: const Text(
-                'Uses this device’s local time. Off means 24/7; overnight '
-                'windows such as 22:00–06:00 are supported.',
-              ),
+              title: Text(strings.settingsScheduleTitle),
+              subtitle: Text(strings.settingsScheduleDescription),
             ),
             if (current['recordingScheduleEnabled'] == true) ...<Widget>[
               const SizedBox(height: 8),
@@ -551,7 +638,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: Text(
-                        'Start ${_formatMinute(current['recordingStartMinute'] as int? ?? 0)}',
+                        strings.settingsScheduleStart(
+                          _formatMinute(
+                            current['recordingStartMinute'] as int? ?? 0,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -564,7 +655,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       icon: const Icon(Icons.stop_rounded),
                       label: Text(
-                        'Stop ${_formatMinute(current['recordingEndMinute'] as int? ?? 0)}',
+                        strings.settingsScheduleStop(
+                          _formatMinute(
+                            current['recordingEndMinute'] as int? ?? 0,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -572,9 +667,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'At the end time, the current chunk is finalized to on-device '
-                'storage. Android may require opening NeoRecall before the '
-                'phone microphone can restart at the next start time.',
+                strings.settingsScheduleFootnote,
                 style: TextStyle(color: palette.textSecondary, height: 1.4),
               ),
             ],
@@ -582,23 +675,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.multitrack_audio_outlined),
-              title: const Text('Silence handling'),
-              subtitle: const Text(
-                'Server-side voice activity detection marks silent chunks. '
-                'The phone keeps its copy until a terminal receipt proves '
-                'processing completed and server audio was deleted.',
-              ),
+              title: Text(strings.settingsSilenceTitle),
+              subtitle: Text(strings.settingsSilenceDescription),
             ),
           ],
         ),
       ),
       SectionCard(
-        eyebrow: 'RECORDING',
+        eyebrow: strings.settingsSectionRecording,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Chunk duration: ${((current['chunkTargetMs'] as int) / 1000).round()} seconds',
+              strings.settingsChunkDuration(
+                ((current['chunkTargetMs'] as int) / 1000).round(),
+              ),
               style: TextStyle(
                 color: palette.textSecondary,
                 fontWeight: FontWeight.w600,
@@ -616,7 +707,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Boundary overlap: ${((current['chunkOverlapMs'] as int) / 1000).toStringAsFixed(1)} seconds',
+              strings.settingsChunkOverlap(
+                ((current['chunkOverlapMs'] as int) / 1000).toStringAsFixed(1),
+              ),
               style: TextStyle(
                 color: palette.textSecondary,
                 fontWeight: FontWeight.w600,
@@ -637,7 +730,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       SectionCard(
-        eyebrow: 'TRANSCRIPTION',
+        eyebrow: strings.settingsSectionTranscription,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -647,9 +740,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               minLines: 4,
               maxLines: 10,
               decoration: InputDecoration(
-                labelText: 'Words and phrases to recognize',
-                hintText: 'NeoRecall\nProduct or company name\nTechnical term',
-                helperText: 'One entry per line. Duplicates are ignored.',
+                labelText: strings.settingsVocabularyLabel,
+                hintText: strings.settingsVocabularyHint,
+                helperText: strings.settingsVocabularyHelper,
                 errorText: _customVocabularyError,
                 counterText:
                     '${_customVocabularyTerms.length}/${current['customVocabularyMaxTerms'] ?? 100} terms',
@@ -663,10 +756,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(
                 () => current['vocabularyCorrectionEnabled'] = value,
               ),
-              title: const Text('Correct close transcription misspellings'),
+              title: Text(strings.settingsVocabularyCorrectionTitle),
               subtitle: Text(
-                'For providers without native vocabulary matching, only unambiguous single words of '
-                '${current['vocabularyCorrectionMinimumLength'] ?? 8}+ characters are corrected.',
+                strings.settingsVocabularyCorrectionDescription(
+                  current['vocabularyCorrectionMinimumLength'] ?? 8,
+                ),
               ),
             ),
             if ((current['automaticSpeakerVocabulary'] as List<dynamic>? ??
@@ -674,7 +768,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 .isNotEmpty) ...<Widget>[
               const Divider(height: 28),
               Text(
-                'Added automatically from named speakers',
+                strings.settingsSpeakerVocabularyTitle,
                 style: TextStyle(
                   color: palette.textSecondary,
                   fontWeight: FontWeight.w600,
@@ -699,7 +793,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       SectionCard(
-        eyebrow: 'RECORDING CONTEXT',
+        eyebrow: strings.settingsSectionRecordingContext,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -708,16 +802,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               contentPadding: EdgeInsets.zero,
               value: current['keepRawAudio'] as bool? ?? true,
               onChanged: _savingKeepRawAudio ? null : _setKeepRawAudio,
-              title: const Text('Keep raw audio on this device'),
-              subtitle: const Text(
-                'On by default. Listen from Moments. The server still deletes '
-                'its copy after transcription; only this phone keeps the file, '
-                'and only until the retention period below.',
-              ),
+              title: Text(strings.settingsKeepRawAudioTitle),
+              subtitle: Text(strings.settingsKeepRawAudioDescription),
             ),
             const Divider(),
             Text(
-              'Keep original photos, documents, and raw audio for ${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              strings.settingsRetentionTitle(
+                current['contextOriginalRetentionDays'] as int? ?? 7,
+              ),
               style: TextStyle(
                 color: palette.textPrimary,
                 fontSize: 16,
@@ -726,7 +818,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'After this period NeoRecall deletes the original bytes but keeps transcripts, extracted text, image descriptions, and source links.',
+              strings.settingsRetentionDescription,
               style: TextStyle(color: palette.textSecondary, height: 1.45),
             ),
             const SizedBox(height: 14),
@@ -735,8 +827,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               min: 1,
               max: 365,
               divisions: 364,
-              label:
-                  '${current['contextOriginalRetentionDays'] as int? ?? 7} days',
+              label: strings.settingsRetentionDays(
+                current['contextOriginalRetentionDays'] as int? ?? 7,
+              ),
               value: (current['contextOriginalRetentionDays'] as int? ?? 7)
                   .toDouble(),
               onChanged: (value) => setState(
@@ -749,7 +842,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: <int>[1, 3, 7, 14, 30, 90, 365]
                   .map(
                     (days) => ChoiceChip(
-                      label: Text(days == 365 ? '1 year' : '$days days'),
+                      label: Text(
+                        days == 365
+                            ? strings.settingsRetentionOneYear
+                            : strings.settingsRetentionDays(days),
+                      ),
                       selected:
                           (current['contextOriginalRetentionDays'] as int? ??
                               7) ==
@@ -764,9 +861,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if ((current['contextOriginalRetentionDays'] as int? ?? 7) <
                 _loadedContextRetentionDays) ...<Widget>[
               const SizedBox(height: 12),
-              const InlineMessage(
-                message:
-                    'Shortening retention can permanently delete existing originals on the next server cleanup.',
+              InlineMessage(
+                message: strings.settingsRetentionWarning,
                 icon: Icons.warning_amber_rounded,
               ),
             ],
@@ -803,6 +899,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// interval could only ever be increased.
   Widget _memorySettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final current = settings!;
     const hour = 3600000;
     const maximum = 24 * hour;
@@ -822,12 +919,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return _sectionList(<Widget>[
       SectionCard(
-        eyebrow: 'MEMORY',
+        eyebrow: strings.settingsSectionMemory,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Consolidation interval',
+              strings.settingsConsolidationTitle,
               style: TextStyle(
                 color: palette.textPrimary,
                 fontSize: 14,
@@ -837,9 +934,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             Text(
               chosenHours == 0
-                  ? 'As soon as there is enough material'
-                  : 'Wait at least $chosenHours '
-                        '${chosenHours == 1 ? 'hour' : 'hours'} between write-ups',
+                  ? strings.settingsConsolidationImmediate
+                  : strings.settingsConsolidationWait(chosenHours),
               style: TextStyle(
                 color: palette.textMuted,
                 fontSize: 12.5,
@@ -851,7 +947,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               min: floorHours.toDouble(),
               max: 24,
               divisions: 24 - floorHours,
-              label: chosenHours == 0 ? 'Immediate' : '${chosenHours}h',
+              label: chosenHours == 0
+                  ? strings.settingsConsolidationSliderImmediate
+                  : strings.settingsConsolidationSliderHours(chosenHours),
               value: chosenHours.toDouble(),
               onChanged: (value) => setState(
                 () => current['consolidationIntervalMs'] = value.round() * hour,
@@ -859,10 +957,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             Text(
               floorHours == 0
-                  ? 'Memories are written when enough has been said, without '
-                        'waiting for a conversation to end.'
-                  : 'This server will not write up more often than every '
-                        '$floorHours ${floorHours == 1 ? 'hour' : 'hours'}.',
+                  ? strings.settingsConsolidationFloorNone
+                  : strings.settingsConsolidationFloor(floorHours),
               style: TextStyle(
                 color: palette.textMuted,
                 fontSize: 11.5,
@@ -875,25 +971,122 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
   }
 
+  /// How long an instruction may be, and how much of it has been written.
+  int get _instructionsLimit =>
+      settings?['customInstructionsMaxCharacters'] as int? ?? 2000;
+
+  String? get _instructionsError {
+    final over = <TextEditingController>[
+      instructionsGlobal,
+      instructionsMemories,
+      instructionsSummaries,
+      instructionsAsk,
+    ].where((field) => field.text.runes.length > _instructionsLimit).length;
+    if (over == 0) return null;
+    return AppL10n.of(
+      context,
+    ).settingsInstructionsTooLong(over, _instructionsLimit);
+  }
+
+  Widget _instructionField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required String helper,
+  }) {
+    final tooLong = controller.text.runes.length > _instructionsLimit;
+    return TextField(
+      controller: controller,
+      onChanged: (_) => setState(() {}),
+      minLines: 3,
+      maxLines: 8,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        helperText: helper,
+        helperMaxLines: 3,
+        errorText: tooLong
+            ? AppL10n.of(context).settingsInstructionsLimit(_instructionsLimit)
+            : null,
+        counterText: '${controller.text.runes.length}/$_instructionsLimit',
+        alignLabelWithHint: true,
+      ),
+    );
+  }
+
+  /// Standing instructions for the language model, per area.
+  ///
+  /// Everything the model writes is a judgement call the product otherwise
+  /// makes on the user's behalf — how long a summary runs, whose names get
+  /// written out, which language an answer comes back in. This is where the
+  /// account owner takes those calls back.
+  Widget _instructionSettings() {
+    final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
+    return _sectionList(<Widget>[
+      InlineMessage(
+        icon: Icons.auto_awesome_outlined,
+        message: strings.settingsInstructionsIntro,
+      ),
+      SectionCard(
+        eyebrow: strings.settingsSectionEverywhere,
+        child: _instructionField(
+          controller: instructionsGlobal,
+          label: strings.settingsInstructionsGlobalLabel,
+          hint: strings.settingsInstructionsGlobalHint,
+          helper: strings.settingsInstructionsGlobalHelper,
+        ),
+      ),
+      SectionCard(
+        eyebrow: strings.settingsSectionMemories,
+        child: _instructionField(
+          controller: instructionsMemories,
+          label: strings.settingsInstructionsMemoriesLabel,
+          hint: strings.settingsInstructionsMemoriesHint,
+          helper: strings.settingsInstructionsMemoriesHelper,
+        ),
+      ),
+      SectionCard(
+        eyebrow: strings.settingsSectionSummaries,
+        child: _instructionField(
+          controller: instructionsSummaries,
+          label: strings.settingsInstructionsSummariesLabel,
+          hint: strings.settingsInstructionsSummariesHint,
+          helper: strings.settingsInstructionsSummariesHelper,
+        ),
+      ),
+      SectionCard(
+        eyebrow: strings.settingsSectionAsk,
+        child: _instructionField(
+          controller: instructionsAsk,
+          label: strings.settingsInstructionsAskLabel,
+          hint: strings.settingsInstructionsAskHint,
+          helper: strings.settingsInstructionsAskHelper,
+        ),
+      ),
+      if (_instructionsError != null)
+        Text(
+          _instructionsError!,
+          style: TextStyle(color: palette.danger, fontSize: 12.5, height: 1.4),
+        ),
+    ]);
+  }
+
   Widget _speakerSettings() {
+    final strings = AppL10n.of(context);
     final current = settings!;
     // The server reports whether local speaker identity models are installed;
     // when unavailable these switches are shown off instead of left to flip.
     final available = current['speakerIdentityAvailable'] as bool? ?? true;
     return _sectionList(<Widget>[
       SectionCard(
-        eyebrow: 'SPEAKERS',
+        eyebrow: strings.settingsSectionSpeakers,
         child: Column(
           children: <Widget>[
             if (!available)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'Your server cannot tell voices apart right now, so new '
-                  'recordings will not be split by speaker. Running setup on '
-                  'the server installs what it needs. Names you have already '
-                  'given a speaker are kept.',
-                ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(strings.settingsSpeakerIdentityUnavailable),
               ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -903,10 +1096,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? (value) =>
                         setState(() => current['diarizationEnabled'] = value)
                   : null,
-              title: const Text('Speaker diarization'),
-              subtitle: const Text(
-                'Separate overlapping speakers during transcription.',
-              ),
+              title: Text(strings.settingsDiarizationTitle),
+              subtitle: Text(strings.settingsDiarizationDescription),
             ),
             const Divider(),
             SwitchListTile(
@@ -919,10 +1110,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       () => current['recurringSpeakerMatching'] = value,
                     )
                   : null,
-              title: const Text('Recurring speaker matching'),
-              subtitle: const Text(
-                'Match known voiceprints across recordings.',
-              ),
+              title: Text(strings.settingsRecurringSpeakerTitle),
+              subtitle: Text(strings.settingsRecurringSpeakerDescription),
             ),
             const Divider(),
             SwitchListTile(
@@ -935,12 +1124,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       () => current['deferredSpeakerResolution'] = value,
                     )
                   : null,
-              title: const Text('Review speakers when a conversation ends'),
-              subtitle: const Text(
-                'Look again at who spoke once the whole conversation can be heard, '
-                'so one person is not listed several times. Speaker labels may '
-                'change shortly after a recording finishes.',
-              ),
+              title: Text(strings.settingsDeferredSpeakerTitle),
+              subtitle: Text(strings.settingsDeferredSpeakerDescription),
             ),
           ],
         ),

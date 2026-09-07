@@ -155,7 +155,9 @@ class ProviderTestReport {
           Map<String, dynamic>.from(json['transcription'] as Map? ?? const {}),
         ),
         speakerIdentity: ProviderTestLeg.fromJson(
-          Map<String, dynamic>.from(json['speakerIdentity'] as Map? ?? const {}),
+          Map<String, dynamic>.from(
+            json['speakerIdentity'] as Map? ?? const {},
+          ),
         ),
         llm: ProviderTestLeg.fromJson(
           Map<String, dynamic>.from(json['llm'] as Map? ?? const {}),
@@ -220,8 +222,9 @@ class AdminProviderClient {
   };
 
   Future<ProviderSettingsSnapshot> load() async {
-    final body = await _send(() => _client.get(_uri('/provider-settings'),
-        headers: _headers));
+    final body = await _send(
+      () => _client.get(_uri('/provider-settings'), headers: _headers),
+    );
     return ProviderSettingsSnapshot.fromJson(
       Map<String, dynamic>.from(body['settings'] as Map? ?? const {}),
     );
@@ -310,7 +313,8 @@ class AdminProviderClient {
           ? (error['message']?.toString() ?? error['code']?.toString())
           : body['message']?.toString();
       throw AdminProviderException(
-        message ?? 'The server rejected the request (HTTP ${response.statusCode}).',
+        message ??
+            'The server rejected the request (HTTP ${response.statusCode}).',
         code: error is Map ? error['code']?.toString() : null,
       );
     }

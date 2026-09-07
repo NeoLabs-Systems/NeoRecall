@@ -9,6 +9,7 @@ import '../../../record/record_controls.dart';
 import '../appliance_controller.dart';
 import '../appliance_protocol.dart';
 import 'appliance_sheet_scaffold.dart';
+import '../../../../l10n/gen/app_l10n.dart';
 
 /// The second level: things that are set once and then forgotten.
 ///
@@ -58,7 +59,7 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
   Widget build(BuildContext context) {
     return ApplianceSheetScaffold(
       controller: widget.controller,
-      title: 'Device settings',
+      title: AppL10n.of(context).applianceSettingsTitle,
       initialSize: 0.7,
       minSize: 0.4,
       maxSize: 0.92,
@@ -73,14 +74,14 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
   }
 
   Widget _nameSection(NeoRecallPalette palette) => SectionCard(
-    eyebrow: 'NAME',
+    eyebrow: AppL10n.of(context).applianceNameEyebrow,
     child: Row(
       children: <Widget>[
         Expanded(
           child: TextField(
             controller: _name,
-            decoration: const InputDecoration(
-              hintText: 'Desk in the study',
+            decoration: InputDecoration(
+              hintText: AppL10n.of(context).applianceNameHint,
               isDense: true,
             ),
           ),
@@ -90,7 +91,7 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
           onPressed: widget.controller.isConnected
               ? () => widget.controller.rename(_name.text.trim())
               : null,
-          child: const Text('Save'),
+          child: Text(AppL10n.of(context).actionSave),
         ),
       ],
     ),
@@ -100,7 +101,7 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
     final controller = widget.controller;
     final status = controller.status;
     return SectionCard(
-      eyebrow: 'NETWORK',
+      eyebrow: AppL10n.of(context).applianceNetworkEyebrow,
       trailing: TextButton.icon(
         onPressed: !controller.isConnected || controller.isLookingForNetworks
             ? null
@@ -108,15 +109,19 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
         icon: controller.isLookingForNetworks
             ? const ButtonSpinner()
             : const Icon(Icons.refresh_rounded, size: 18),
-        label: Text(controller.isLookingForNetworks ? 'Looking…' : 'Change'),
+        label: Text(
+          controller.isLookingForNetworks
+              ? AppL10n.of(context).applianceLooking
+              : AppL10n.of(context).applianceChange,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             status?.networkOnline ?? false
-                ? 'Connected. Recordings are sent when you stop recording.'
-                : 'Not connected. Recordings are kept on the device until it is.',
+                ? AppL10n.of(context).applianceNetworkOnline
+                : AppL10n.of(context).applianceNetworkOffline,
             style: TextStyle(color: palette.textMuted, fontSize: 13),
           ),
           if (controller.networks.isNotEmpty) ...<Widget>[
@@ -184,7 +189,7 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
     final controller = widget.controller;
     final checks = controller.checks;
     return SectionCard(
-      eyebrow: 'SOUND CHECK',
+      eyebrow: AppL10n.of(context).applianceSoundCheckEyebrow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -192,10 +197,10 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
             // The device answers this itself: it plays a tone and listens for
             // it, so nobody has to be in the room to say what they heard.
             label: Text(
-              'Have the device play a tone and listen for it.',
+              AppL10n.of(context).applianceSoundCheckLabel,
               style: TextStyle(color: palette.textMuted, fontSize: 12.5),
             ),
-            action: 'Check',
+            action: AppL10n.of(context).applianceCheck,
             busy: controller.isChecking,
             onPressed: controller.isConnected && !controller.isBusy
                 ? controller.runSelfTest
@@ -211,56 +216,61 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
     );
   }
 
-  Widget _checkVerdict(NeoRecallPalette palette, ApplianceCheck check) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Icon(
-          check.ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-          size: 18,
-          color: check.ok ? palette.success : palette.danger,
-        ),
-        const SizedBox(width: AppSpacing.xs),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                check.name,
-                style: TextStyle(color: palette.textPrimary, fontSize: 14),
-              ),
-              if (check.detail.isNotEmpty)
-                Text(
-                  check.detail,
-                  style: TextStyle(
-                    color: palette.textMuted,
-                    fontSize: 12.5,
-                    height: 1.35,
+  Widget _checkVerdict(NeoRecallPalette palette, ApplianceCheck check) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              check.ok
+                  ? Icons.check_circle_rounded
+                  : Icons.error_outline_rounded,
+              size: 18,
+              color: check.ok ? palette.success : palette.danger,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    check.name,
+                    style: TextStyle(color: palette.textPrimary, fontSize: 14),
                   ),
-                ),
-            ],
-          ),
+                  if (check.detail.isNotEmpty)
+                    Text(
+                      check.detail,
+                      style: TextStyle(
+                        color: palette.textMuted,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Widget _softwareSection(NeoRecallPalette palette) {
     final controller = widget.controller;
     final status = controller.status;
     final version = status?.firmware ?? '';
     return SectionCard(
-      eyebrow: 'SOFTWARE',
+      eyebrow: AppL10n.of(context).applianceSoftwareEyebrow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           _actionRow(
             label: Text(
-              version.isEmpty ? 'Version unknown' : 'Version $version',
+              version.isEmpty
+                  ? AppL10n.of(context).applianceVersionUnknown
+                  : AppL10n.of(context).applianceVersion(version),
               style: TextStyle(color: palette.textPrimary, fontSize: 15),
             ),
-            action: 'Check now',
+            action: AppL10n.of(context).applianceCheckNow,
             busy: status?.isUpdating ?? false,
             onPressed: controller.isConnected && !controller.isBusy
                 ? controller.checkForUpdate
@@ -273,14 +283,13 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
                 ? (bool value) => controller.useAutomaticUpdates(value)
                 : null,
             title: Text(
-              'Keep this device up to date',
+              AppL10n.of(context).applianceAutoUpdateTitle,
               style: TextStyle(color: palette.textPrimary, fontSize: 15),
             ),
             subtitle: Text(
               // Say what it will and will not do. "Updates automatically" on a
               // recorder invites the obvious worry, and the answer is good.
-              'Checks once a day and installs new versions by itself. It never '
-              'interrupts a recording — an update waits until you have stopped.',
+              AppL10n.of(context).applianceAutoUpdateDescription,
               style: TextStyle(
                 color: palette.textMuted,
                 fontSize: 12.5,
@@ -294,13 +303,12 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
   }
 
   Widget _removeSection(NeoRecallPalette palette) => SectionCard(
-    eyebrow: 'REMOVE',
+    eyebrow: AppL10n.of(context).applianceRemoveEyebrow,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Takes this device off your account. Recordings already sent stay in '
-          'NeoRecall; anything still waiting on the device is lost.',
+          AppL10n.of(context).applianceRemoveDescription,
           style: TextStyle(color: palette.textMuted, fontSize: 13),
         ),
         const SizedBox(height: 10),
@@ -308,7 +316,7 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
           onPressed: widget.controller.isConnected ? _confirmRemoval : null,
           icon: Icon(Icons.link_off_rounded, color: palette.danger, size: 18),
           label: Text(
-            'Remove this device',
+            AppL10n.of(context).applianceRemoveAction,
             style: TextStyle(color: palette.danger),
           ),
         ),
@@ -322,23 +330,21 @@ class _ApplianceSettingsSheetState extends State<ApplianceSettingsSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Remove this device?'),
+        title: Text(AppL10n.of(context).applianceRemoveTitle),
         content: Text(
           pending > 0
               // Naming the real cost rather than a generic warning.
-              ? 'It still has $pending recording${pending == 1 ? '' : 's'} that '
-                    'have not been sent. Removing it now loses them.'
-              : 'You can set it up again at any time by holding its button for '
-                    'five seconds.',
+              ? AppL10n.of(context).applianceRemovePending(pending)
+              : AppL10n.of(context).applianceRemoveBody,
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep it'),
+            child: Text(AppL10n.of(context).applianceKeepIt),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
+            child: Text(AppL10n.of(context).actionRemove),
           ),
         ],
       ),

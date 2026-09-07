@@ -8,6 +8,7 @@ import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/sync/pending_audio_preview.dart';
 import 'src/widgets/local_audio_transport.dart';
+import 'l10n/gen/app_l10n.dart';
 
 Future<void> showPendingAudioReviewSheet(
   BuildContext context,
@@ -247,7 +248,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Review queued audio',
+                          AppL10n.of(context).pendingAudioTitle,
                           style: TextStyle(
                             color: palette.textPrimary,
                             fontSize: 18,
@@ -255,7 +256,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                           ),
                         ),
                         Text(
-                          'Local playback only · upload continues normally',
+                          AppL10n.of(context).pendingAudioSubtitle,
                           style: TextStyle(
                             color: palette.textMuted,
                             fontSize: 11.5,
@@ -265,7 +266,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Close',
+                    tooltip: AppL10n.of(context).actionClose,
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close_rounded),
                   ),
@@ -296,7 +297,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Recording is active. Use headphones to avoid recording the playback again.',
+                        AppL10n.of(context).audioHeadphonesWarning,
                         style: TextStyle(
                           color: palette.textSecondary,
                           fontSize: 11.5,
@@ -326,7 +327,10 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                         ),
                       ),
                     ),
-                    TextButton(onPressed: _load, child: const Text('Refresh')),
+                    TextButton(
+                      onPressed: _load,
+                      child: Text(AppL10n.of(context).actionRefresh),
+                    ),
                   ],
                 ),
               ),
@@ -356,7 +360,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
             Icon(Icons.audio_file_outlined, size: 34, color: palette.textMuted),
             const SizedBox(height: 10),
             Text(
-              'No retained audio is currently available to review.',
+              AppL10n.of(context).pendingAudioEmpty,
               textAlign: TextAlign.center,
               style: TextStyle(color: palette.textSecondary),
             ),
@@ -403,7 +407,9 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                 width: 42,
                 height: 42,
                 child: IconButton.filledTonal(
-                  tooltip: playing ? 'Pause' : 'Play',
+                  tooltip: playing
+                      ? AppL10n.of(context).actionPause
+                      : AppL10n.of(context).actionPlay,
                   onPressed: _loadingPart ? null : () => _toggle(recording),
                   icon: _loadingPart && selected
                       ? const SizedBox(

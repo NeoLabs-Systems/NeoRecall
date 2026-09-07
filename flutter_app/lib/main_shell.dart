@@ -11,6 +11,7 @@ import 'main_sources.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/record/sync_cards.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class NeoRecallShell extends StatefulWidget {
   const NeoRecallShell({super.key, required this.controller});
@@ -159,7 +160,7 @@ class _TabBar extends StatelessWidget {
           for (final destination in neoRecallTabDestinations)
             NavigationDestination(
               icon: Icon(destination.icon),
-              label: destination.label,
+              label: destination.label(AppL10n.of(context)),
             ),
         ],
       ),
@@ -184,7 +185,7 @@ class _Sidebar extends StatelessWidget {
     final accountLabel = controller.username?.trim();
     final safeLabel = accountLabel?.isNotEmpty == true
         ? accountLabel!
-        : 'Account';
+        : AppL10n.of(context).shellAccountFallback;
     final initial = safeLabel.characters.first.toUpperCase();
 
     return Container(
@@ -224,7 +225,7 @@ class _Sidebar extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'CONTROL SURFACE',
+                          AppL10n.of(context).shellControlSurface,
                           style: sectionEyebrowStyle(
                             palette,
                           ).copyWith(fontSize: 9.5, letterSpacing: 1.8),
@@ -244,7 +245,7 @@ class _Sidebar extends StatelessWidget {
                   _SidebarButton(
                     selected: group.isCurrent(controller),
                     icon: group.icon,
-                    label: group.label,
+                    label: group.label(AppL10n.of(context)),
                     trailing: group.hasChildren
                         ? Icon(
                             openGroup == group
@@ -272,7 +273,7 @@ class _Sidebar extends StatelessWidget {
                               _SidebarButton(
                                 selected: destination.isCurrent(controller),
                                 icon: destination.icon,
-                                label: destination.label,
+                                label: destination.label(AppL10n.of(context)),
                                 compact: true,
                                 onTap: () => destination.select(controller),
                               ),
@@ -326,13 +327,13 @@ class _Sidebar extends StatelessWidget {
                   ),
                 ),
                 _SidebarIconButton(
-                  tooltip: 'Settings',
+                  tooltip: AppL10n.of(context).navSettings,
                   icon: Icons.settings_outlined,
                   onTap: () => controller.selectPage(RecallPage.settings),
                 ),
                 const SizedBox(width: 4),
                 _SidebarIconButton(
-                  tooltip: 'Sign out',
+                  tooltip: AppL10n.of(context).shellSignOut,
                   icon: Icons.logout,
                   onTap: () async => controller.logout(),
                 ),
@@ -487,9 +488,8 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.battery_alert_rounded,
           color: palette.danger,
-          message:
-              'Battery optimization may suspend always-on capture on this device.',
-          actionLabel: 'Fix',
+          message: AppL10n.of(context).shellBatteryWarning,
+          actionLabel: AppL10n.of(context).shellBatteryFix,
           onAction: () => controller.openBatterySettings(),
         ),
       );
@@ -499,8 +499,7 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.cloud_off_rounded,
           color: palette.textMuted,
-          message:
-              'Offline — capture continues; uploads resume when reconnected.',
+          message: AppL10n.of(context).shellOffline,
         ),
       );
     }
@@ -521,8 +520,8 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.fiber_manual_record_rounded,
           color: palette.secondary,
-          message: 'Recording is active.',
-          actionLabel: 'Open',
+          message: AppL10n.of(context).shellRecordingActive,
+          actionLabel: AppL10n.of(context).shellRecordingOpen,
           onAction: () => controller.selectPage(RecallPage.record),
         ),
       );
@@ -605,7 +604,7 @@ class _SyncStatusPillState extends State<_SyncStatusPill>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Syncing $label',
+                  AppL10n.of(context).shellSyncing(label),
                   style: TextStyle(
                     color: palette.textSecondary,
                     fontSize: 12.5,

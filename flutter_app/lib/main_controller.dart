@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show Locale, PlatformDispatcher;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import 'l10n/gen/app_l10n.dart';
 import 'src/api_client.dart';
 import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
@@ -32,6 +34,7 @@ import 'src/models/timeline_moment.dart';
 import 'src/devices/appliance/appliance_controller.dart';
 import 'src/devices/appliance/appliance_link.dart';
 import 'src/devices/ble/gatt_transport.dart';
+import 'src/l10n/app_language.dart';
 import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
@@ -243,6 +246,13 @@ class NeoRecallController extends ChangeNotifier
   );
   bool cachedData = false;
   bool autostartEnabled = false;
+
+  /// The language the interface is drawn in and the server writes memories in.
+  ///
+  /// Held here rather than read from settings at the point of use because it is
+  /// needed before there is an account to read settings for: the sign-in screen
+  /// and the server-setup screen are both drawn in it.
+  AppLanguage language = AppLanguage.fallback;
   bool preferBluetoothCapture = true;
   String? preferredDeviceLabel;
   // Latest battery percentage reported by the connected wearable, if any.
@@ -335,9 +345,7 @@ class NeoRecallController extends ChangeNotifier
       snapshot: snapshot ?? buildHomeWidgetSnapshot(),
       now: DateTime.now(),
       moment: moment,
-      fullTranscript: moment?.id == null
-          ? null
-          : momentTranscripts[moment!.id],
+      fullTranscript: moment?.id == null ? null : momentTranscripts[moment!.id],
     );
   }
 
@@ -405,9 +413,10 @@ class NeoRecallController extends ChangeNotifier
         (recorder is MobileRecallRecorder
             ? _buildLiveStatus(recorder as MobileRecallRecorder)
             : null);
-    if (live == null) return HomeWidgetSnapshot.signedOut;
+    if (live == null) return HomeWidgetSnapshot.signedOut(strings);
     final device = audioDeviceSessions.preferredDevice;
     return const HomeWidgetPublisher().build(
+      strings: strings,
       signedIn: authenticated,
       status: live,
       recording: isRecording,
@@ -434,7 +443,7 @@ class NeoRecallController extends ChangeNotifier
       if (processing.totalAudioDuration > Duration.zero)
         _compactDuration(processing.totalAudioDuration),
       if (etaSeconds != null && etaSeconds > 0)
-        'about ${_compactDuration(processing.eta!)} left',
+        strings.liveEtaLeft(_compactDuration(processing.eta!)),
     ];
     String detail(String fallback) =>
         facts.isEmpty ? fallback : '$fallback · ${facts.join(' · ')}';
@@ -442,24 +451,24 @@ class NeoRecallController extends ChangeNotifier
     if (_storageExhausted) {
       return BackgroundLiveStatus(
         phase: BackgroundLivePhase.storageFull,
-        title: 'Storage full — recording stopped',
-        detail: 'Free device storage, then reopen NeoRecall to resume safely.',
+        title: strings.controllerStorageFull,
+        detail: strings.liveStorageFullDetail,
         pendingBytes: processing.pendingBytes,
         pendingAudioSeconds: processing.totalAudioDuration.inSeconds,
-        issue: 'No local space remains for another durable audio block.',
+        issue: strings.liveStorageFullIssue,
       );
     }
     if (isRecording) {
       final source = capability?.sourceKind == 'wearable'
-          ? preferredDeviceLabel ?? 'Bluetooth device'
-          : 'Phone microphone';
+          ? preferredDeviceLabel ?? strings.liveSourceBluetooth
+          : strings.recordSourcePhoneMicrophone;
       return BackgroundLiveStatus(
         phase: BackgroundLivePhase.recording,
-        title: 'Recording from $source',
+        title: strings.liveRecordingFrom(source),
         detail: detail(
           processing.uploading > 0
-              ? 'Recording safely · uploading in background'
-              : 'Recording safely to this device',
+              ? strings.liveRecordingUploading
+              : strings.liveRecordingSafely,
         ),
         recordingStartedAt: recordingStartedAt,
         pendingBytes: processing.pendingBytes,
@@ -472,29 +481,29 @@ class NeoRecallController extends ChangeNotifier
     final (phase, title, fallback) = switch (processing.activeStage) {
       ProcessingPipelineStage.watchTransfer => (
         BackgroundLivePhase.watchTransfer,
-        'Downloading from device',
-        'Audio is moving into protected phone storage',
+        strings.processingStageWatchTransfer,
+        strings.liveWatchTransferDetail,
       ),
       ProcessingPipelineStage.upload => (
         BackgroundLivePhase.uploading,
-        'Uploading recordings',
-        'Local originals stay protected until processing is verified',
+        strings.liveUploadingTitle,
+        strings.liveUploadingDetail,
       ),
       ProcessingPipelineStage.transcription => (
         BackgroundLivePhase.transcribing,
-        'Transcribing on server',
-        'Audio is safely stored while the transcript is created',
+        strings.processingStageTranscription,
+        strings.liveTranscribingDetail,
       ),
       ProcessingPipelineStage.finalizing => (
         BackgroundLivePhase.finalizing,
-        'Finalizing transcript',
-        'Waiting for verified persistence and server audio deletion',
+        strings.liveFinalizingTitle,
+        strings.liveFinalizingDetail,
       ),
       ProcessingPipelineStage.phoneQueue ||
       ProcessingPipelineStage.serverQueue => (
         BackgroundLivePhase.queued,
-        'Recordings safely queued',
-        issue ?? 'Waiting for the next processing step',
+        strings.liveQueuedTitle,
+        issue ?? strings.liveQueuedDetail,
       ),
       ProcessingPipelineStage.complete =>
         mobile.background.active.isNotEmpty
@@ -505,8 +514,8 @@ class NeoRecallController extends ChangeNotifier
               )
             : (
                 BackgroundLivePhase.idle,
-                'NeoRecall is ready',
-                'No recording or processing is active',
+                strings.liveIdleTitle,
+                strings.liveIdleDetail,
               ),
     };
     return BackgroundLiveStatus(
@@ -616,6 +625,7 @@ class NeoRecallController extends ChangeNotifier
   String processingSummary = '';
   int audioStillOnDevice = 0;
   List<Map<String, dynamic>> dailySummaries = <Map<String, dynamic>>[];
+
   /// The Ask conversation, oldest first. One entry per question asked in this
   /// session; the trailing one is still being answered while [askBusy] is true.
   List<AskTurn> askTurns = <AskTurn>[];
@@ -744,6 +754,7 @@ class NeoRecallController extends ChangeNotifier
   @override
   Future<void> _cacheSettings(Map<String, dynamic> value) async {
     _cachedSettings = <String, dynamic>{..._fallbackSettings, ...value};
+    await _reconcileLanguage(value);
     final ownerAccountId = accountId;
     if (ownerAccountId != null && _preferences != null) {
       await _preferences!.setString(
@@ -924,6 +935,91 @@ class NeoRecallController extends ChangeNotifier
       allowsBackendUrlConfiguration && api.baseUrl.trim().isEmpty;
   bool get initializing => _initializing;
 
+  /// The translated strings for the current language.
+  ///
+  /// Widgets should prefer `AppL10n.of(context)`; this exists for the text the
+  /// controller itself produces — errors and notices that reach the user
+  /// through fields on this object, with no BuildContext anywhere in reach.
+  @override
+  AppL10n get strings => lookupAppL10n(language.locale);
+
+  /// Reads the stored language, or picks one from the device on first launch.
+  ///
+  /// Detection happens exactly once and is then written down, so that a person
+  /// who chose English on a German phone still gets English after an update
+  /// changes what the platform reports.
+  Future<void> _loadLanguage() async {
+    _preferences ??= await SharedPreferences.getInstance();
+    final stored = AppLanguage.fromCode(_preferences!.getString(_languageKey));
+    if (stored != null) {
+      language = stored;
+      currentAppLanguage = stored;
+      return;
+    }
+    language = AppLanguage.detect(
+      PlatformDispatcher.instance.locales.isEmpty
+          ? <Locale>[PlatformDispatcher.instance.locale]
+          : PlatformDispatcher.instance.locales,
+    );
+    currentAppLanguage = language;
+    await _preferences!.setString(_languageKey, language.code);
+  }
+
+  static const String _languageKey = 'appLanguage';
+
+  /// Switches the interface and, when signed in, the language the server writes
+  /// memories, summaries and answers in.
+  ///
+  /// The local write happens first and unconditionally: the interface must
+  /// change even when the server is unreachable, and the next successful
+  /// settings read will carry the choice up.
+  Future<void> setLanguage(AppLanguage value) async {
+    if (language == value) return;
+    language = value;
+    currentAppLanguage = value;
+    _preferences ??= await SharedPreferences.getInstance();
+    await _preferences!.setString(_languageKey, value.code);
+    notifyListeners();
+    if (!authenticated || !online) return;
+    try {
+      await updateSettings(<String, dynamic>{'language': value.code});
+    } catch (_) {
+      // The interface is already in the new language and the choice is stored.
+      // A server that could not be told will be told by the next settings save.
+    }
+  }
+
+  /// Reconciles the account's language with this device's after a settings read.
+  ///
+  /// An account that has chosen is authoritative — that is how the choice
+  /// follows somebody to a second device. An account that has never chosen
+  /// adopts what this device detected, which is what makes a German phone's
+  /// first sign-in produce German memories without anyone visiting settings.
+  Future<void> _reconcileLanguage(Map<String, dynamic> settings) async {
+    if (!settings.containsKey('language')) return;
+    final stored = AppLanguage.fromCode(settings['language'] as String?);
+    if (stored == null) {
+      if (!authenticated || !online) return;
+      unawaited(
+        api
+            .request(
+              'PUT',
+              '/api/v1/settings',
+              body: <String, dynamic>{'language': language.code},
+            )
+            .catchError((Object _) => <String, dynamic>{}),
+      );
+      _cachedSettings['language'] = language.code;
+      return;
+    }
+    if (stored == language) return;
+    language = stored;
+    currentAppLanguage = stored;
+    _preferences ??= await SharedPreferences.getInstance();
+    await _preferences!.setString(_languageKey, stored.code);
+    notifyListeners();
+  }
+
   Future<void> initialize() async {
     if (_initializing) return;
     _initializing = true;
@@ -932,6 +1028,7 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
     try {
       _preferences ??= await SharedPreferences.getInstance();
+      await _loadLanguage();
       final savedBackendUrl =
           _preferences!.getString('backendUrl')?.trim() ?? '';
       if (!allowsBackendUrlConfiguration) {
@@ -1358,7 +1455,7 @@ class NeoRecallController extends ChangeNotifier
     }
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
-      error = 'Enter a complete server URL including http:// or https://.';
+      error = strings.controllerIncompleteUrl;
       notifyListeners();
       return false;
     }
@@ -2134,13 +2231,13 @@ class NeoRecallController extends ChangeNotifier
       case HomeWidgetAction.stopRecording:
         if (!isRecording) return false;
         await stopRecording();
-        notice = 'Recording stopped from the home-screen widget.';
+        notice = strings.controllerWidgetStopped;
         return true;
       case HomeWidgetAction.completeHighlight:
         final id = action.targetId;
         if (id == null || id.isEmpty) return false;
         if (!authenticated) {
-          warning = 'Sign in to complete highlights from the home screen.';
+          warning = strings.controllerWidgetSignIn;
           return true;
         }
         // Answered locally first so the list is right immediately; the refresh
@@ -2253,7 +2350,7 @@ class NeoRecallController extends ChangeNotifier
           bluetooth: false,
         );
       }
-      notice = 'Phone recording started from the home-screen widget.';
+      notice = strings.controllerWidgetStarted;
       ClientDiagnosticLog.instance.record(
         'widget_capture',
         'phone_recording_started',
@@ -2262,7 +2359,7 @@ class NeoRecallController extends ChangeNotifier
       notifyListeners();
       return true;
     } catch (exception) {
-      warning = 'The home-screen widget could not start recording: $exception';
+      warning = strings.controllerWidgetStartFailed('$exception');
       ClientDiagnosticLog.instance.record(
         'widget_capture',
         'phone_recording_failed',
@@ -2357,7 +2454,7 @@ class NeoRecallController extends ChangeNotifier
     );
     if (mode == null) return;
     if (!_recordingSchedule.allows(DateTime.now())) {
-      warning = 'Recording is waiting for the next configured daily window.';
+      warning = strings.controllerScheduleWaiting;
       _armRecordingSchedule();
       notifyListeners();
       return;
@@ -2396,7 +2493,7 @@ class NeoRecallController extends ChangeNotifier
         );
       }
     } catch (exception) {
-      warning = 'Background recording recovery is waiting: $exception';
+      warning = strings.controllerRecoveryWaiting('$exception');
       notifyListeners();
     } finally {
       _resumingMobileCapture = false;
@@ -2554,7 +2651,7 @@ class NeoRecallController extends ChangeNotifier
           : 'Bluetooth disconnected; recording continues with the phone microphone.';
       notifyListeners();
     } catch (exception) {
-      warning = 'Audio source recovery failed: $exception';
+      warning = strings.controllerSourceRecoveryFailed('$exception');
       notifyListeners();
       _scheduleMobileCaptureRecovery(
         useBluetooth: useBluetooth,
@@ -2661,7 +2758,7 @@ class NeoRecallController extends ChangeNotifier
           bluetooth: useBluetooth,
         );
         _switchingMobileSource = false;
-        notice = 'Audio capture recovered after an interruption.';
+        notice = strings.controllerCaptureRecovered;
         notifyListeners();
       } catch (exception) {
         _scheduleMobileCaptureRecovery(
@@ -2755,6 +2852,7 @@ class NeoRecallController extends ChangeNotifier
         // active network: upload policy still performs its own authoritative check.
       }
       processingLedgerStatus = ProcessingStatusSnapshot.fromChunks(
+        strings: strings,
         chunks: chunks,
         pendingBytes: pendingAudioBytes,
         localUploadBytes: localUploadBytes,
@@ -3295,7 +3393,7 @@ class NeoRecallController extends ChangeNotifier
     } catch (exception) {
       // Reaching further back is a convenience; losing what is already on
       // screen to fetch it would be a poor trade.
-      warning = 'That part of the timeline could not be loaded just now.';
+      warning = strings.controllerTimelineLoadFailed;
     } finally {
       isPagingMoments = false;
       notifyListeners();
@@ -3325,7 +3423,7 @@ class NeoRecallController extends ChangeNotifier
           .toList();
     } catch (exception) {
       // The preview stays on screen; only the rest is missing.
-      warning = 'The rest of this moment could not be loaded just now.';
+      warning = strings.controllerMomentLoadFailed;
     } finally {
       loadingMomentTranscripts.remove(id);
       notifyListeners();
@@ -3346,7 +3444,7 @@ class NeoRecallController extends ChangeNotifier
         '/api/v1/conversations/$conversationId/reprocess',
       );
       momentTranscripts.remove(conversationId);
-      notice = 'Writing this moment up again. It will update here when ready.';
+      notice = strings.controllerRewriteQueued;
       await refreshAll(silent: true);
     } catch (exception) {
       warning = _describeReprocessFailure(exception);
@@ -3392,7 +3490,10 @@ class NeoRecallController extends ChangeNotifier
       turn.answer = payload['answer'] as String?;
       turn.sources = (payload['citations'] as List? ?? <dynamic>[])
           .cast<Map>()
-          .map((Map citation) => AskSource.fromJson(Map<String, dynamic>.from(citation)))
+          .map(
+            (Map citation) =>
+                AskSource.fromJson(Map<String, dynamic>.from(citation)),
+          )
           .toList();
       final retrieval = payload['retrieval'];
       if (retrieval is Map) {
@@ -3417,7 +3518,8 @@ class NeoRecallController extends ChangeNotifier
 
   String _describeAskFailure(Object exception) {
     final detail = exception.toString();
-    if (detail.contains('ASK_RATE_LIMITED') || detail.contains('ASK_BURST_LIMITED')) {
+    if (detail.contains('ASK_RATE_LIMITED') ||
+        detail.contains('ASK_BURST_LIMITED')) {
       return 'You have asked a lot in a short time. Try again in a few minutes.';
     }
     if (detail.contains('AI_NOT_CONFIGURED')) {
@@ -3469,7 +3571,7 @@ class NeoRecallController extends ChangeNotifier
         'import_accepted',
         details: <String, Object?>{'importId': importId, 'bytes': bytes.length},
       );
-      notice = 'Import uploaded. Local transcription has been queued.';
+      notice = strings.controllerImportQueued;
     } catch (exception) {
       ClientDiagnosticLog.instance.record(
         'file_import',

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../omi/wearable_capture_time.dart';
 import 'appliance_codec.dart';
+import '../../../l10n/gen/app_l10n.dart';
 
 /// The contract with the NeoRecall Desk appliance.
 ///
@@ -149,22 +150,30 @@ class ApplianceStatus {
   bool get isSyncing =>
       state == ApplianceState.idle && pendingRecordings > 0 && networkOnline;
 
+  /// Nothing to report but that the device is there and idle.
+  ///
+  /// Named rather than derived from the summary text, because a screen that
+  /// hides a redundant line by comparing it to the word "Ready" stops working
+  /// the moment the word is translated.
+  bool get isPlainlyReady =>
+      !needsSetup &&
+      !isRecording &&
+      !isSyncing &&
+      pendingRecordings == 0 &&
+      !headsetConnected;
+
   /// The one line the device list shows, in words rather than fields.
-  String get summary {
-    if (needsSetup) return 'Not set up yet';
-    if (isRecording) return 'Recording · ${formatElapsed(recordingElapsed)}';
-    if (isSyncing) {
-      return pendingRecordings == 1
-          ? 'Sending 1 recording'
-          : 'Sending $pendingRecordings recordings';
+  String summary(AppL10n l10n) {
+    if (needsSetup) return l10n.applianceNotSetUp;
+    if (isRecording) {
+      return l10n.applianceRecordingElapsed(formatElapsed(recordingElapsed));
     }
+    if (isSyncing) return l10n.applianceSending(pendingRecordings);
     if (pendingRecordings > 0) {
-      return pendingRecordings == 1
-          ? '1 recording waiting to be sent'
-          : '$pendingRecordings recordings waiting to be sent';
+      return l10n.applianceWaitingToSend(pendingRecordings);
     }
-    if (headsetConnected) return 'Ready · $headsetName';
-    return 'Ready';
+    if (headsetConnected) return l10n.applianceReadyWithHeadset(headsetName);
+    return l10n.applianceReady;
   }
 
   static ApplianceStatus decode(Uint8List payload) {

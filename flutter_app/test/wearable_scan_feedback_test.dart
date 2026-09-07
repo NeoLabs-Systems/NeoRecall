@@ -25,18 +25,23 @@ void main() {
         audioDeviceRegistry: AudioDeviceAdapterRegistry()..register(adapter),
       );
 
-  test('a scan that finds nothing explains why instead of staying silent', () async {
-    final adapter = _StubAdapter();
-    final controller = controllerWith(adapter);
-    addTearDown(controller.dispose);
+  test(
+    'a scan that finds nothing explains why instead of staying silent',
+    () async {
+      final adapter = _StubAdapter();
+      final controller = controllerWith(adapter);
+      addTearDown(controller.dispose);
 
-    await controller.scanForWearables(timeout: const Duration(milliseconds: 10));
+      await controller.scanForWearables(
+        timeout: const Duration(milliseconds: 10),
+      );
 
-    expect(controller.discoveredWearables, isEmpty);
-    expect(controller.scanningWearables, isFalse);
-    expect(controller.notice, isNotNull);
-    expect(controller.notice, contains('No supported device found'));
-  });
+      expect(controller.discoveredWearables, isEmpty);
+      expect(controller.scanningWearables, isFalse);
+      expect(controller.notice, isNotNull);
+      expect(controller.notice, contains('No supported device found'));
+    },
+  );
 
   test('a scan that finds a device reports no failure notice', () async {
     const found = AudioDeviceDescriptor(
@@ -48,30 +53,43 @@ void main() {
     final controller = controllerWith(_StubAdapter(emit: found));
     addTearDown(controller.dispose);
 
-    await controller.scanForWearables(timeout: const Duration(milliseconds: 30));
+    await controller.scanForWearables(
+      timeout: const Duration(milliseconds: 30),
+    );
 
     expect(controller.discoveredWearables.single.deviceKey, 'dev-1');
     expect(controller.notice, isNull);
   });
 
-  test('a stale notice from a previous empty scan does not survive the next', () async {
-    const found = AudioDeviceDescriptor(
-      adapterId: 'stub',
-      deviceKey: 'dev-1',
-      displayName: 'Omi',
-      transport: 'bluetooth_le',
-    );
-    final adapter = _StubAdapter();
-    final controller = controllerWith(adapter);
-    addTearDown(controller.dispose);
+  test(
+    'a stale notice from a previous empty scan does not survive the next',
+    () async {
+      const found = AudioDeviceDescriptor(
+        adapterId: 'stub',
+        deviceKey: 'dev-1',
+        displayName: 'Omi',
+        transport: 'bluetooth_le',
+      );
+      final adapter = _StubAdapter();
+      final controller = controllerWith(adapter);
+      addTearDown(controller.dispose);
 
-    await controller.scanForWearables(timeout: const Duration(milliseconds: 10));
-    expect(controller.notice, isNotNull);
+      await controller.scanForWearables(
+        timeout: const Duration(milliseconds: 10),
+      );
+      expect(controller.notice, isNotNull);
 
-    adapter.emit = found;
-    await controller.scanForWearables(timeout: const Duration(milliseconds: 30));
-    expect(controller.notice, isNull, reason: 'the successful scan clears the old message');
-  });
+      adapter.emit = found;
+      await controller.scanForWearables(
+        timeout: const Duration(milliseconds: 30),
+      );
+      expect(
+        controller.notice,
+        isNull,
+        reason: 'the successful scan clears the old message',
+      );
+    },
+  );
 }
 
 /// Minimal adapter that optionally announces one device when a scan starts.
@@ -104,7 +122,9 @@ class _StubAdapter implements AudioDeviceAdapter {
   Future<void> initialize() async {}
 
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     final device = emit;
     if (device != null) scheduleMicrotask(() => _discoveries.add(device));
   }

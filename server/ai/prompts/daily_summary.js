@@ -15,7 +15,7 @@
 
 const INSTRUCTIONS = `You maintain a running summary of one day for a personal memory service. Return one JSON object matching the supplied contract.
 You are given the description of the day written so far, if there is one, and the occasions recorded since. Produce the summary of the WHOLE day: carry forward everything the earlier text still says correctly and fold in the new occasions. It replaces the earlier text, so never write it as an addendum, never refer to an update, and never mention that a summary already existed.
-Write English prose, even when the occasions came from German or another transcript. Preserve proper names accurately. A few sentences is right: name what actually happened and what was decided, not how many conversations were recorded. Do not invent anything the supplied occasions do not support, and do not restate a calendar date. Return no prose outside JSON.`;
+Write prose in the output language, even when the occasions came from a transcript in another language. Preserve proper names accurately. A few sentences is right: name what actually happened and what was decided, not how many conversations were recorded. Do not invent anything the supplied occasions do not support, and do not restate a calendar date. Return no prose outside JSON.`;
 
 function dailySummaryMessages({ sections, previousDailySummary, timezone }) {
   return [
@@ -30,7 +30,7 @@ function dailySummaryMessages({ sections, previousDailySummary, timezone }) {
           summaryEn: section.summaryEn,
           topics: section.topics,
         })),
-        outputContract: { summaryEn: 'English summary of the whole day' },
+        outputContract: { summaryEn: 'summary of the whole day, in the output language' },
       }),
     },
   ];

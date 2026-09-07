@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
   audioplayers: 6.7.1
   connectivity_plus: 7.0.0
   crypto: ^3.0.6
@@ -55,6 +58,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Generates AppL10n from lib/l10n/*.arb (see l10n.yaml) on pub get and build.
+  generate: true
   assets:
     - assets/branding/logo.svg
     - assets/branding/logo.png

@@ -9,6 +9,7 @@ import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/capture/capture_defaults.dart';
 import 'src/desktop/meeting_detector.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class FloatingCaptureWindow extends StatefulWidget {
   const FloatingCaptureWindow({
@@ -89,20 +90,16 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
               titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
               contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              title: const Text('Before you record'),
-              content: const Text(
-                'Tell everyone that NeoRecall is recording and make sure you '
-                'are allowed to capture the conversation. Recording is always '
-                'visibly indicated.',
-              ),
+              title: Text(AppL10n.of(context).floatingConsentTitle),
+              content: Text(AppL10n.of(context).floatingConsentBody),
               actions: <Widget>[
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancel'),
+                  child: Text(AppL10n.of(context).actionCancel),
                 ),
                 FilledButton(
                   onPressed: () => Navigator.pop(context, true),
-                  child: const Text('I understand'),
+                  child: Text(AppL10n.of(context).recordConsentAccept),
                 ),
               ],
             ),
@@ -314,12 +311,12 @@ class _FloatingCaptureWindowState extends State<FloatingCaptureWindow> {
                   ),
                   const SizedBox(width: 4),
                   _WindowAction(
-                    tooltip: 'Open library',
+                    tooltip: AppL10n.of(context).floatingOpenLibrary,
                     icon: Icons.open_in_full_rounded,
                     onPressed: widget.onOpenLibrary,
                   ),
                   _WindowAction(
-                    tooltip: 'Hide',
+                    tooltip: AppL10n.of(context).floatingHide,
                     icon: Icons.close_rounded,
                     onPressed: widget.onHide,
                   ),

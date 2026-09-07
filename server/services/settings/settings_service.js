@@ -6,11 +6,16 @@ const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { isIanaTimezone } = require('../../utils/time');
 const localAnalysis = require('../../transcription/local_analysis');
+const { LANGUAGE_CODES, DEFAULT_LANGUAGE } = require('../../ai/prompts/output_language');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('settings');
 
 const schema = z.object({
+  // The language this account reads the product in and has its memories,
+  // summaries and answers written in. One setting for both: a person who reads
+  // the interface in German does not want their day described in English.
+  language: z.enum(LANGUAGE_CODES).optional(),
   consolidationIntervalMs: z.number().int().nonnegative().optional(),
   timezone: z.string().min(1).max(100).optional(),
   recurringSpeakerMatching: z.boolean().optional(),
@@ -26,9 +31,17 @@ const schema = z.object({
   keepRawAudio: z.boolean().optional(),
   vocabularyCorrectionEnabled: z.boolean().optional(),
   deferredSpeakerResolution: z.boolean().optional(),
+  // Standing instructions the account owner gives the language model. Trimmed,
+  // never interpreted here: what they mean is the model's business, and a rule
+  // in this file about what they may say would be a phrase filter.
+  instructionsGlobal: z.string().trim().optional(),
+  instructionsMemories: z.string().trim().optional(),
+  instructionsSummaries: z.string().trim().optional(),
+  instructionsAsk: z.string().trim().optional(),
 });
 
 const keyMap = Object.freeze({
+  language: 'language',
   consolidationIntervalMs: 'consolidation_interval_ms', timezone: 'timezone',
   recurringSpeakerMatching: 'recurring_speaker_matching', diarizationEnabled: 'diarization_enabled',
   chunkTargetMs: 'chunk_target_ms', chunkOverlapMs: 'chunk_overlap_ms',
@@ -40,6 +53,10 @@ const keyMap = Object.freeze({
   keepRawAudio: 'keep_raw_audio',
   vocabularyCorrectionEnabled: 'vocabulary_correction_enabled',
   deferredSpeakerResolution: 'deferred_speaker_resolution',
+  instructionsGlobal: 'instructions_global',
+  instructionsMemories: 'instructions_memories',
+  instructionsSummaries: 'instructions_summaries',
+  instructionsAsk: 'instructions_ask',
 });
 
 // Column name back to API name, so reading a row is a lookup rather than a
@@ -49,6 +66,11 @@ const apiKeyByColumn = new Map(Object.entries(keyMap).map(([apiKey, column]) => 
 function defaults() {
   const config = getConfig();
   return {
+    // Null, not 'en': "this account has never chosen" is a different state from
+    // "this account chose English", and only the first one lets a client adopt
+    // the language it detected from the device on first sign-in without
+    // overwriting a choice the owner made on another device.
+    language: null,
     consolidationIntervalMs: config.minConsolidationIntervalMs,
     timezone: 'UTC',
     recurringSpeakerMatching: true,
@@ -70,8 +92,16 @@ function defaults() {
   // feature: without it a voice too briefly heard in any single chunk never
   // attaches to a person and every cluster keeps its own Speaker N.
   deferredSpeakerResolution: true,
+    instructionsGlobal: '',
+    instructionsMemories: '',
+    instructionsSummaries: '',
+    instructionsAsk: '',
   };
 }
+
+// Every setting that carries free-form instructions, so the length check and
+// the prompt layer agree on the list.
+const INSTRUCTION_KEYS = Object.freeze(['instructionsGlobal', 'instructionsMemories', 'instructionsSummaries', 'instructionsAsk']);
 
 function uniqueTerms(terms) {
   const unique = new Map();
@@ -105,6 +135,10 @@ function get(userId) {
   result.chunkMinMs = config.chunkMinMs;
   result.chunkMaxMs = config.chunkMaxMs;
   result.customVocabularyMaxTerms = config.customVocabularyMaxTerms;
+  // What this build can actually offer, so the client's picker is a view of the
+  // server's list rather than a second copy of it that can drift out of step.
+  result.availableLanguages = LANGUAGE_CODES;
+  result.customInstructionsMaxCharacters = config.customInstructionsMaxCharacters;
   result.customVocabularyMaxTermLength = config.customVocabularyMaxTermLength;
   result.vocabularyCorrectionMinimumLength = config.vocabularyCorrectionMinimumLength;
   result.automaticSpeakerVocabulary = speakerVocabulary(userId);
@@ -125,6 +159,13 @@ function update(userId, input) {
       throw new HttpError(400, 'CUSTOM_VOCABULARY_TERM_TOO_LONG', `Custom vocabulary terms may contain at most ${config.customVocabularyMaxTermLength} characters.`);
     }
     parsed.data.customVocabulary = uniqueTerms(parsed.data.customVocabulary);
+  }
+  for (const key of INSTRUCTION_KEYS) {
+    const value = parsed.data[key];
+    if (value !== undefined && [...value].length > config.customInstructionsMaxCharacters) {
+      throw new HttpError(400, 'CUSTOM_INSTRUCTIONS_TOO_LONG',
+        `Custom instructions may contain at most ${config.customInstructionsMaxCharacters} characters.`);
+    }
   }
   if (parsed.data.timezone !== undefined && !isIanaTimezone(parsed.data.timezone)) {
     throw new HttpError(400, 'INVALID_TIMEZONE', 'Timezone must be a valid IANA timezone identifier.');
@@ -169,4 +210,19 @@ function speakerVocabulary(userId) {
     .map((row) => row.display_name.trim()).filter(Boolean);
 }
 
-module.exports = { get, update, schema, transcriptionVocabulary };
+/**
+ * Just the output language for an account.
+ *
+ * The AI layer needs this on every request and nothing else from the record, so
+ * it reads one row rather than assembling the whole settings object (which also
+ * queries voiceprints and probes the local analysis models).
+ */
+function outputLanguage(userId) {
+  // Unset resolves to the default here rather than in every prompt.
+  const row = getDatabase().prepare('SELECT value_json FROM user_settings WHERE user_id=? AND key=?')
+    .get(userId, keyMap.language);
+  if (!row) return DEFAULT_LANGUAGE;
+  try { return JSON.parse(row.value_json); } catch { return DEFAULT_LANGUAGE; }
+}
+
+module.exports = { get, update, schema, transcriptionVocabulary, outputLanguage, INSTRUCTION_KEYS };

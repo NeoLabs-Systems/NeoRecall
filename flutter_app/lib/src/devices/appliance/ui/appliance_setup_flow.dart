@@ -11,6 +11,7 @@ import '../appliance_controller.dart';
 import '../appliance_link.dart';
 import '../appliance_protocol.dart';
 import 'appliance_sheet_scaffold.dart';
+import '../../../../l10n/gen/app_l10n.dart';
 
 /// Setting the appliance up, with nothing to type that a person should not have
 /// to type.
@@ -78,11 +79,13 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
     final availability = await widget.controller.bluetoothAvailability();
     if (!mounted) return;
     if (availability == GattAvailability.poweredOff) {
-      setState(() => _error = 'Turn Bluetooth on to set up a device.');
+      setState(() => _error = AppL10n.of(context).applianceBluetoothOff);
       return;
     }
     if (availability == GattAvailability.unsupported) {
-      setState(() => _error = 'This device cannot use Bluetooth.');
+      setState(
+        () => _error = AppL10n.of(context).applianceBluetoothUnsupported,
+      );
       return;
     }
     await widget.controller.scanForAppliances();
@@ -99,9 +102,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
     if (!connected) {
       setState(() {
         _step = _Step.looking;
-        _error =
-            'Could not pair. Hold the button on the device for five seconds '
-            'until it beeps three times, then try again.';
+        _error = AppL10n.of(context).appliancePairFailed;
       });
       return;
     }
@@ -162,7 +163,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
     if (!mounted) return;
     setState(() {
       _step = _Step.chooseNetwork;
-      _error = 'The device did not answer. Check the network and try again.';
+      _error = AppL10n.of(context).applianceNoAnswer;
     });
   }
 
@@ -170,7 +171,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
   Widget build(BuildContext context) {
     return ApplianceSheetScaffold(
       controller: widget.controller,
-      title: 'Add a NeoRecall Desk',
+      title: AppL10n.of(context).applianceAddTitle,
       initialSize: 0.75,
       minSize: 0.5,
       maxSize: 0.92,
@@ -199,8 +200,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
     final found = widget.controller.candidates;
     return <Widget>[
       Text(
-        'Plug the device in and wait for its short rising tone. If it has been '
-        'set up before, hold its button for five seconds first.',
+        AppL10n.of(context).applianceLookingIntro,
         style: TextStyle(color: palette.textMuted, fontSize: 14),
       ),
       const SizedBox(height: 18),
@@ -209,11 +209,10 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           child: Padding(padding: EdgeInsets.all(24), child: ButtonSpinner()),
         )
       else if (found.isEmpty)
-        const EmptyState(
+        EmptyState(
           icon: Icons.bluetooth_searching_rounded,
-          title: 'Nothing found yet',
-          message:
-              'Hold the button on the device for five seconds, then look again.',
+          title: AppL10n.of(context).applianceNothingFound,
+          message: AppL10n.of(context).applianceNothingFoundMessage,
         )
       else
         for (final ApplianceCandidate candidate in found)
@@ -236,7 +235,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
                   ),
                   TextButton(
                     onPressed: () => _connect(candidate),
-                    child: const Text('Set up'),
+                    child: Text(AppL10n.of(context).applianceSetUpAction),
                   ),
                 ],
               ),
@@ -247,7 +246,11 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
         child: TextButton.icon(
           onPressed: widget.controller.isScanning ? null : _look,
           icon: const Icon(Icons.refresh_rounded, size: 18),
-          label: Text(widget.controller.isScanning ? 'Looking…' : 'Look again'),
+          label: Text(
+            widget.controller.isScanning
+                ? AppL10n.of(context).applianceLooking
+                : AppL10n.of(context).applianceLookAgain,
+          ),
         ),
       ),
     ];
@@ -260,7 +263,9 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           Icon(Icons.touch_app_rounded, size: 56, color: palette.accent),
           const SizedBox(height: 16),
           Text(
-            'Press the button on ${_chosen?.name ?? 'the device'}',
+            AppL10n.of(context).appliancePressButton(
+              _chosen?.name ?? AppL10n.of(context).applianceTheDevice,
+            ),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: palette.textPrimary,
@@ -270,8 +275,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           ),
           const SizedBox(height: 8),
           Text(
-            'The device has no screen, so pressing its button is how it knows '
-            'the request came from someone standing next to it.',
+            AppL10n.of(context).appliancePressButtonWhy,
             textAlign: TextAlign.center,
             style: TextStyle(color: palette.textMuted, fontSize: 13),
           ),
@@ -286,18 +290,18 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
     final networks = widget.controller.networks;
     return <Widget>[
       SectionCard(
-        eyebrow: 'NAME',
+        eyebrow: AppL10n.of(context).applianceNameEyebrow,
         child: TextField(
           controller: _deviceName,
-          decoration: const InputDecoration(
-            hintText: 'Desk in the study',
+          decoration: InputDecoration(
+            hintText: AppL10n.of(context).applianceNameHint,
             isDense: true,
           ),
         ),
       ),
       const SizedBox(height: 14),
       SectionCard(
-        eyebrow: 'NETWORK',
+        eyebrow: AppL10n.of(context).applianceNetworkEyebrow,
         trailing: TextButton.icon(
           onPressed: widget.controller.isLookingForNetworks
               ? null
@@ -305,15 +309,15 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           icon: widget.controller.isLookingForNetworks
               ? const ButtonSpinner()
               : const Icon(Icons.refresh_rounded, size: 18),
-          label: const Text('Refresh'),
+          label: Text(AppL10n.of(context).actionRefresh),
         ),
         child: networks.isEmpty
             ? Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
                   widget.controller.isLookingForNetworks
-                      ? 'Looking for networks…'
-                      : 'No networks found yet.',
+                      ? AppL10n.of(context).applianceLookingForNetworks
+                      : AppL10n.of(context).applianceNoNetworks,
                   style: TextStyle(color: palette.textMuted, fontSize: 13),
                 ),
               )
@@ -351,12 +355,12 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
         children: <Widget>[
           const Padding(padding: EdgeInsets.all(24), child: ButtonSpinner()),
           Text(
-            'Setting the device up…',
+            AppL10n.of(context).applianceSettingUp,
             style: TextStyle(color: palette.textPrimary, fontSize: 16),
           ),
           const SizedBox(height: 6),
           Text(
-            'It is joining your network and signing in.',
+            AppL10n.of(context).applianceSettingUpDetail,
             style: TextStyle(color: palette.textMuted, fontSize: 13),
           ),
         ],
@@ -371,7 +375,7 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           Icon(Icons.check_circle_rounded, size: 56, color: palette.success),
           const SizedBox(height: 16),
           Text(
-            'Ready',
+            AppL10n.of(context).applianceDoneTitle,
             style: TextStyle(
               color: palette.textPrimary,
               fontSize: 18,
@@ -380,15 +384,14 @@ class _ApplianceSetupFlowState extends State<ApplianceSetupFlow> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Choose "${_deviceName.text.trim()}" as the speaker and microphone '
-            'on your computer, then press its button to record.',
+            AppL10n.of(context).applianceDoneBody(_deviceName.text.trim()),
             textAlign: TextAlign.center,
             style: TextStyle(color: palette.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Done'),
+            child: Text(AppL10n.of(context).actionDone),
           ),
         ],
       ),

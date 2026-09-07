@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../main_settings.dart';
 import '../../main_theme.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class SettingsNavigation extends StatelessWidget {
   const SettingsNavigation({
@@ -22,65 +23,71 @@ class SettingsNavigation extends StatelessWidget {
   final bool watchSupported;
 
   List<_SettingsNavigationItem> get _visibleItems => items
-      .where(
-        (item) => item.section != SettingsSection.watch || watchSupported,
-      )
+      .where((item) => item.section != SettingsSection.watch || watchSupported)
       .toList(growable: false);
 
-  static const items = <_SettingsNavigationItem>[
+  // `final`, not `const`: each label is a function of the active translations,
+  // and a closure over a generated getter is not a constant expression.
+  static final items = <_SettingsNavigationItem>[
     _SettingsNavigationItem(
       section: SettingsSection.general,
       icon: Icons.tune,
-      label: 'General',
-      description: 'Time and locale',
+      label: (l10n) => l10n.settingsNavGeneral,
+      description: (l10n) => l10n.settingsNavGeneralDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.security,
       icon: Icons.security,
-      label: 'Security',
-      description: 'Passwords and 2FA',
+      label: (l10n) => l10n.settingsNavSecurity,
+      description: (l10n) => l10n.settingsNavSecurityDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.recording,
       icon: Icons.graphic_eq_outlined,
-      label: 'Recording',
-      description: 'Schedule, network, chunks',
+      label: (l10n) => l10n.settingsNavRecording,
+      description: (l10n) => l10n.settingsNavRecordingDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.memory,
       icon: Icons.auto_awesome_outlined,
-      label: 'Memory',
-      description: 'Consolidation timing',
+      label: (l10n) => l10n.settingsNavMemory,
+      description: (l10n) => l10n.settingsNavMemoryDescription,
+    ),
+    _SettingsNavigationItem(
+      section: SettingsSection.instructions,
+      icon: Icons.edit_note_outlined,
+      label: (l10n) => l10n.settingsNavInstructions,
+      description: (l10n) => l10n.settingsNavInstructionsDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.speakers,
       icon: Icons.record_voice_over_outlined,
-      label: 'Speakers',
-      description: 'Diarization and matching',
+      label: (l10n) => l10n.settingsNavSpeakers,
+      description: (l10n) => l10n.settingsNavSpeakersDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.watch,
       icon: Icons.watch_outlined,
-      label: 'Watch',
-      description: 'Wear OS setup and digest',
+      label: (l10n) => l10n.settingsNavWatch,
+      description: (l10n) => l10n.settingsNavWatchDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.devices,
       icon: Icons.devices_other_outlined,
-      label: 'Account devices',
-      description: 'Sessions and access',
+      label: (l10n) => l10n.settingsNavDevices,
+      description: (l10n) => l10n.settingsNavDevicesDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.services,
       icon: Icons.cloud_outlined,
-      label: 'Services',
-      description: 'Transcription and memory writing',
+      label: (l10n) => l10n.settingsNavServices,
+      description: (l10n) => l10n.settingsNavServicesDescription,
     ),
     _SettingsNavigationItem(
       section: SettingsSection.integrations,
       icon: Icons.hub_outlined,
-      label: 'Integrations',
-      description: 'NeoAgent and MCP',
+      label: (l10n) => l10n.settingsNavIntegrations,
+      description: (l10n) => l10n.settingsNavIntegrationsDescription,
     ),
   ];
 
@@ -91,15 +98,15 @@ class SettingsNavigation extends StatelessWidget {
         key: ValueKey<SettingsSection>(selected),
         initialValue: selected,
         isExpanded: true,
-        decoration: const InputDecoration(
-          labelText: 'Settings area',
-          prefixIcon: Icon(Icons.settings_outlined),
+        decoration: InputDecoration(
+          labelText: AppL10n.of(context).settingsNavAreaLabel,
+          prefixIcon: const Icon(Icons.settings_outlined),
         ),
         items: _visibleItems
             .map(
               (item) => DropdownMenuItem<SettingsSection>(
                 value: item.section,
-                child: Text(item.label),
+                child: Text(item.label(AppL10n.of(context))),
               ),
             )
             .toList(),
@@ -128,7 +135,7 @@ class SettingsNavigation extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
               child: Text(
-                'Settings areas',
+                AppL10n.of(context).settingsNavAreasHeading,
                 style: TextStyle(
                   color: palette.textSecondary,
                   fontSize: 12,
@@ -189,7 +196,7 @@ class _SettingsNavigationButton extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        item.label,
+                        item.label(AppL10n.of(context)),
                         style: TextStyle(
                           color: selected
                               ? palette.accent
@@ -199,7 +206,7 @@ class _SettingsNavigationButton extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        item.description,
+                        item.description(AppL10n.of(context)),
                         style: TextStyle(
                           color: palette.textSecondary,
                           fontSize: 11,
@@ -228,6 +235,10 @@ class _SettingsNavigationItem {
 
   final SettingsSection section;
   final IconData icon;
-  final String label;
-  final String description;
+
+  /// Resolved against the active translations rather than stored as text: the
+  /// list is const and built once, but the rail is rebuilt in whatever language
+  /// the app is currently in.
+  final String Function(AppL10n) label;
+  final String Function(AppL10n) description;
 }

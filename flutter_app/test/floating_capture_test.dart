@@ -5,6 +5,7 @@ import 'package:neorecall/main_floating.dart';
 import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/src/desktop/meeting_detector.dart';
 import 'package:neorecall/src/desktop/window_coordinator.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   test('native floating geometry stays compact', () {
@@ -30,6 +31,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: FloatingCaptureWindow(
           controller: controller,

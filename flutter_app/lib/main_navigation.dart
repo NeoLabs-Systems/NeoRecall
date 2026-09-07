@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// A destination the shell can move to.
 ///
@@ -17,7 +18,10 @@ class NeoRecallDestination {
 
   final RecallPage page;
   final IconData icon;
-  final String label;
+
+  /// Resolved against the active translations at build time so the same const
+  /// structure renders in whatever language the app is set to.
+  final String Function(AppL10n) label;
   final LibraryTab? libraryTab;
 
   /// True when [controller] is currently showing this destination.
@@ -50,7 +54,9 @@ class NeoRecallNavigationGroup {
     required this.destinations,
   });
 
-  final String label;
+  /// Resolved against the active translations at build time so the same const
+  /// structure renders in whatever language the app is set to.
+  final String Function(AppL10n) label;
   final IconData icon;
   final List<NeoRecallDestination> destinations;
 
@@ -61,64 +67,66 @@ class NeoRecallNavigationGroup {
       destinations.any((destination) => destination.isCurrent(controller));
 }
 
-const NeoRecallDestination recordDestination = NeoRecallDestination(
+final NeoRecallDestination recordDestination = NeoRecallDestination(
   page: RecallPage.record,
   icon: Icons.mic_none_rounded,
-  label: 'Record',
+  label: (l10n) => l10n.navRecord,
 );
 
-const NeoRecallDestination sourcesDestination = NeoRecallDestination(
+final NeoRecallDestination sourcesDestination = NeoRecallDestination(
   page: RecallPage.sources,
   icon: Icons.grid_view_rounded,
-  label: 'Sources',
+  label: (l10n) => l10n.navSources,
 );
 
-const NeoRecallDestination libraryDestination = NeoRecallDestination(
+final NeoRecallDestination libraryDestination = NeoRecallDestination(
   page: RecallPage.library,
   icon: Icons.subject_rounded,
-  label: 'Moments',
+  label: (l10n) => l10n.navMoments,
   libraryTab: LibraryTab.moments,
 );
 
-const NeoRecallDestination memoriesDestination = NeoRecallDestination(
+final NeoRecallDestination memoriesDestination = NeoRecallDestination(
   page: RecallPage.library,
   icon: Icons.auto_awesome_outlined,
-  label: 'Memories',
+  label: (l10n) => l10n.navMemories,
   libraryTab: LibraryTab.memories,
 );
 
-const NeoRecallDestination highlightsDestination = NeoRecallDestination(
+final NeoRecallDestination highlightsDestination = NeoRecallDestination(
   page: RecallPage.library,
   icon: Icons.flag_outlined,
-  label: 'Highlights',
+  label: (l10n) => l10n.navHighlights,
   libraryTab: LibraryTab.highlights,
 );
 
-const NeoRecallDestination speakersDestination = NeoRecallDestination(
+final NeoRecallDestination speakersDestination = NeoRecallDestination(
   page: RecallPage.library,
   icon: Icons.people_outline_rounded,
-  label: 'Speakers',
+  label: (l10n) => l10n.navSpeakers,
   libraryTab: LibraryTab.speakers,
 );
 
-const NeoRecallDestination searchDestination = NeoRecallDestination(
+final NeoRecallDestination searchDestination = NeoRecallDestination(
   page: RecallPage.search,
   icon: Icons.auto_awesome_rounded,
-  label: 'Ask',
+  label: (l10n) => l10n.navAsk,
 );
 
-const NeoRecallDestination settingsDestination = NeoRecallDestination(
+final NeoRecallDestination settingsDestination = NeoRecallDestination(
   page: RecallPage.settings,
   icon: Icons.tune_rounded,
-  label: 'Settings',
+  label: (l10n) => l10n.navSettings,
 );
 
 /// Canonical product structure. The desktop sidebar and the mobile tab bar are
 /// both rendered from this, so the two can never drift apart.
-const List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
+// `final`, not `const`: every label is a function of the active translations,
+// which is not a constant expression.
+final List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
     <NeoRecallNavigationGroup>[
       NeoRecallNavigationGroup(
-        label: 'Capture',
+        label: (l10n) => l10n.navCapture,
         icon: Icons.mic_none_rounded,
         destinations: <NeoRecallDestination>[
           recordDestination,
@@ -126,7 +134,7 @@ const List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
         ],
       ),
       NeoRecallNavigationGroup(
-        label: 'Library',
+        label: (l10n) => l10n.navLibrary,
         icon: Icons.subject_rounded,
         destinations: <NeoRecallDestination>[
           libraryDestination,
@@ -136,12 +144,12 @@ const List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
         ],
       ),
       NeoRecallNavigationGroup(
-        label: 'Ask',
+        label: (l10n) => l10n.navAsk,
         icon: Icons.search_rounded,
         destinations: <NeoRecallDestination>[searchDestination],
       ),
       NeoRecallNavigationGroup(
-        label: 'Settings',
+        label: (l10n) => l10n.navSettings,
         icon: Icons.tune_rounded,
         destinations: <NeoRecallDestination>[settingsDestination],
       ),
@@ -150,7 +158,7 @@ const List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
 /// The four tabs on a phone. Sources is reached from the Record screen's source
 /// sheet rather than the bar: it is somewhere you go to set things up, not one
 /// of the four places you live in.
-const List<NeoRecallDestination> neoRecallTabDestinations =
+final List<NeoRecallDestination> neoRecallTabDestinations =
     <NeoRecallDestination>[
       recordDestination,
       // No libraryTab: the tab bar returns to Library where the reader left it
@@ -158,7 +166,7 @@ const List<NeoRecallDestination> neoRecallTabDestinations =
       NeoRecallDestination(
         page: RecallPage.library,
         icon: Icons.subject_rounded,
-        label: 'Library',
+        label: (l10n) => l10n.navLibrary,
       ),
       searchDestination,
       settingsDestination,
@@ -166,19 +174,19 @@ const List<NeoRecallDestination> neoRecallTabDestinations =
 
 /// Which tab is lit for [page]. Pages that are not tabs of their own belong to
 /// the tab they are reached from, so the bar never goes blank.
-int neoRecallTabIndex(NeoRecallController controller) => switch (controller
-    .page) {
-  RecallPage.record || RecallPage.sources => 0,
-  RecallPage.library => 1,
-  RecallPage.search => 2,
-  RecallPage.settings || RecallPage.devices => 3,
-};
-
-String neoRecallPageTitle(NeoRecallController controller) =>
+int neoRecallTabIndex(NeoRecallController controller) =>
     switch (controller.page) {
-      RecallPage.record => 'Record',
-      RecallPage.library => 'Library',
-      RecallPage.search => 'Ask',
-      RecallPage.sources => 'Sources',
-      RecallPage.devices || RecallPage.settings => 'Settings',
+      RecallPage.record || RecallPage.sources => 0,
+      RecallPage.library => 1,
+      RecallPage.search => 2,
+      RecallPage.settings || RecallPage.devices => 3,
+    };
+
+String neoRecallPageTitle(NeoRecallController controller, AppL10n l10n) =>
+    switch (controller.page) {
+      RecallPage.record => l10n.navRecord,
+      RecallPage.library => l10n.navLibrary,
+      RecallPage.search => l10n.navAsk,
+      RecallPage.sources => l10n.navSources,
+      RecallPage.devices || RecallPage.settings => l10n.navSettings,
     };

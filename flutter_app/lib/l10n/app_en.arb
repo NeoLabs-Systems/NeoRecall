@@ -1,0 +1,1834 @@
+{
+  "@@locale": "en",
+  "appLoading": "Loading NeoRecall",
+  "@appLoading": {
+    "description": "Splash screen line while the app boots."
+  },
+  "settingsLanguageTitle": "Language",
+  "settingsLanguageDescription": "The language NeoRecall uses for the app and for the memories, summaries, and answers it writes. Recordings are still transcribed in whatever language was spoken.",
+  "settingsLanguageLabel": "App and memory language",
+  "settingsLanguageFailed": "Could not change the language: {error}",
+  "@settingsLanguageFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "actionCancel": "Cancel",
+  "actionSave": "Save",
+  "settingsTitle": "Settings",
+  "settingsDescription": "Capture behaviour, memory, and account security in one place.",
+  "settingsSaved": "Settings saved.",
+  "settingsVocabularyTooMany": "{count, plural, =1{Remove 1 term to save.} other{Remove {count} terms to save.}}",
+  "@settingsVocabularyTooMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsVocabularyTermTooLong": "Each term must be {maximum} characters or fewer.",
+  "@settingsVocabularyTermTooLong": {
+    "placeholders": {
+      "maximum": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsShortenRetentionTitle": "Shorten original-file retention?",
+  "settingsShortenRetentionBody": "Original photos, documents, and raw audio older than {days} days will be permanently deleted during the next cleanup. Transcripts and AI descriptions remain.",
+  "@settingsShortenRetentionBody": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsShortenRetentionConfirm": "Shorten retention",
+  "settingsUploadPolicyFailed": "Could not update upload policy: {error}",
+  "@settingsUploadPolicyFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStopRawAudioTitle": "Stop keeping raw audio?",
+  "settingsStopRawAudioBody": "Recordings already on this device will be deleted now. Transcripts, titles, and memories stay.",
+  "settingsStopRawAudioConfirm": "Delete raw audio",
+  "settingsRawAudioFailed": "Could not update raw audio storage: {error}",
+  "@settingsRawAudioFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsDevicesTitle": "Signed-in devices",
+  "settingsDevicesDescription": "Review access or revoke an old client. Set up, connect, and control capture hardware from Record.",
+  "settingsOpenRecord": "Open Record",
+  "settingsServicesNoAdminKey": "These services are set on the server itself. This app has no administrator key for {backendUrl}, so ask whoever runs that server to configure transcription and memory writing there.",
+  "@settingsServicesNoAdminKey": {
+    "placeholders": {
+      "backendUrl": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsServicesTitle": "Services",
+  "settingsSectionGeneral": "GENERAL",
+  "settingsTimeLocaleTitle": "Time and locale",
+  "settingsTimeLocaleDescription": "Used to place recordings and generated memories on your local timeline.",
+  "settingsTimezoneLabel": "IANA timezone",
+  "settingsSectionAlwaysOn": "ALWAYS-ON CAPTURE",
+  "settingsUnmeteredTitle": "Upload only on Wi-Fi / unmetered networks",
+  "settingsUnmeteredDescription": "On by default. Recording continues to private app storage while offline or on mobile data, then uploads when an unmetered connection is available.",
+  "settingsScheduleTitle": "Daily recording window",
+  "settingsScheduleDescription": "Uses this device’s local time. Off means 24/7; overnight windows such as 22:00–06:00 are supported.",
+  "settingsScheduleStart": "Start {time}",
+  "@settingsScheduleStart": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsScheduleStop": "Stop {time}",
+  "@settingsScheduleStop": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsScheduleFootnote": "At the end time, the current chunk is finalized to on-device storage. Android may require opening NeoRecall before the phone microphone can restart at the next start time.",
+  "settingsSilenceTitle": "Silence handling",
+  "settingsSilenceDescription": "Server-side voice activity detection marks silent chunks. The phone keeps its copy until a terminal receipt proves processing completed and server audio was deleted.",
+  "settingsSectionRecording": "RECORDING",
+  "settingsChunkDuration": "Chunk duration: {seconds} seconds",
+  "@settingsChunkDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsChunkOverlap": "Boundary overlap: {seconds} seconds",
+  "@settingsChunkOverlap": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSectionTranscription": "TRANSCRIPTION",
+  "settingsVocabularyLabel": "Words and phrases to recognize",
+  "settingsVocabularyHint": "NeoRecall\nProduct or company name\nTechnical term",
+  "settingsVocabularyHelper": "One entry per line. Duplicates are ignored.",
+  "settingsVocabularyCorrectionTitle": "Correct close transcription misspellings",
+  "settingsVocabularyCorrectionDescription": "For providers without native vocabulary matching, only unambiguous single words of {minimum}+ characters are corrected.",
+  "@settingsVocabularyCorrectionDescription": {
+    "placeholders": {
+      "minimum": {
+        "type": "Object"
+      }
+    }
+  },
+  "settingsSpeakerVocabularyTitle": "Added automatically from named speakers",
+  "settingsSectionRecordingContext": "RECORDING CONTEXT",
+  "settingsKeepRawAudioTitle": "Keep raw audio on this device",
+  "settingsKeepRawAudioDescription": "On by default. Listen from Moments. The server still deletes its copy after transcription; only this phone keeps the file, and only until the retention period below.",
+  "settingsRetentionTitle": "Keep original photos, documents, and raw audio for {days} days",
+  "@settingsRetentionTitle": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsRetentionDescription": "After this period NeoRecall deletes the original bytes but keeps transcripts, extracted text, image descriptions, and source links.",
+  "settingsRetentionDays": "{days, plural, =1{1 day} other{{days} days}}",
+  "@settingsRetentionDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsRetentionOneYear": "1 year",
+  "settingsRetentionWarning": "Shortening retention can permanently delete existing originals on the next server cleanup.",
+  "settingsSectionMemory": "MEMORY",
+  "settingsConsolidationTitle": "Consolidation interval",
+  "settingsConsolidationImmediate": "As soon as there is enough material",
+  "settingsConsolidationWait": "{hours, plural, =1{Wait at least 1 hour between write-ups} other{Wait at least {hours} hours between write-ups}}",
+  "@settingsConsolidationWait": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsConsolidationSliderImmediate": "Immediate",
+  "settingsConsolidationSliderHours": "{hours}h",
+  "@settingsConsolidationSliderHours": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsConsolidationFloorNone": "Memories are written when enough has been said, without waiting for a conversation to end.",
+  "settingsConsolidationFloor": "{hours, plural, =1{This server will not write up more often than every hour.} other{This server will not write up more often than every {hours} hours.}}",
+  "@settingsConsolidationFloor": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsInstructionsTooLong": "{count, plural, =1{Shorten 1 instruction to {limit} characters to save.} other{Shorten {count} instructions to {limit} characters to save.}}",
+  "@settingsInstructionsTooLong": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsInstructionsLimit": "At most {limit} characters.",
+  "@settingsInstructionsLimit": {
+    "placeholders": {
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsInstructionsIntro": "These are sent with every request in their area. They shape tone, length, language, and what matters to you — they cannot change what the model is allowed to read, and evidence still comes only from your own recordings.",
+  "settingsSectionEverywhere": "EVERYWHERE",
+  "settingsInstructionsGlobalLabel": "Global instructions",
+  "settingsInstructionsGlobalHint": "Write in German.\nUse 24-hour times.",
+  "settingsInstructionsGlobalHelper": "Applied to memories, summaries, and answers alike.",
+  "settingsSectionMemories": "MEMORIES",
+  "settingsInstructionsMemoriesLabel": "When writing memories",
+  "settingsSectionSummaries": "SUMMARIES",
+  "settingsInstructionsSummariesLabel": "When writing summaries",
+  "settingsSectionAsk": "ASK",
+  "settingsInstructionsAskLabel": "When answering questions",
+  "settingsSectionSpeakers": "SPEAKERS",
+  "settingsDiarizationTitle": "Speaker diarization",
+  "settingsDiarizationDescription": "Separate overlapping speakers during transcription.",
+  "settingsRecurringSpeakerTitle": "Recurring speaker matching",
+  "settingsRecurringSpeakerDescription": "Match known voiceprints across recordings.",
+  "settingsInstructionsMemoriesHint": "Always name who was there.\nKeep decisions and promises separate from small talk.",
+  "settingsInstructionsMemoriesHelper": "Used while an occasion is written up into a memory card, and when memories are rewritten or merged.",
+  "settingsInstructionsSummariesHint": "Five lines at most.\nLead with what changed.",
+  "settingsInstructionsSummariesHelper": "Used for the daily summary and for the running summary of a conversation while it is still being recorded.",
+  "settingsInstructionsAskHint": "Answer in two sentences, then stop.",
+  "settingsInstructionsAskHelper": "Used for every answer on the Ask tab.",
+  "settingsSpeakerIdentityUnavailable": "Your server cannot tell voices apart right now, so new recordings will not be split by speaker. Running setup on the server installs what it needs. Names you have already given a speaker are kept.",
+  "settingsDeferredSpeakerTitle": "Review speakers when a conversation ends",
+  "settingsDeferredSpeakerDescription": "Look again at who spoke once the whole conversation can be heard, so one person is not listed several times. Speaker labels may change shortly after a recording finishes.",
+  "settingsNavGeneral": "General",
+  "settingsNavGeneralDescription": "Time and locale",
+  "settingsNavSecurity": "Security",
+  "settingsNavSecurityDescription": "Passwords and 2FA",
+  "settingsNavRecording": "Recording",
+  "settingsNavRecordingDescription": "Schedule, network, chunks",
+  "settingsNavMemory": "Memory",
+  "settingsNavMemoryDescription": "Consolidation timing",
+  "settingsNavInstructions": "Instructions",
+  "settingsNavInstructionsDescription": "How the model writes for you",
+  "settingsNavSpeakers": "Speakers",
+  "settingsNavSpeakersDescription": "Diarization and matching",
+  "settingsNavWatch": "Watch",
+  "settingsNavWatchDescription": "Wear OS setup and digest",
+  "settingsNavDevices": "Account devices",
+  "settingsNavDevicesDescription": "Sessions and access",
+  "settingsNavServices": "Services",
+  "settingsNavServicesDescription": "Transcription and memory writing",
+  "settingsNavIntegrations": "Integrations",
+  "settingsNavIntegrationsDescription": "NeoAgent and MCP",
+  "settingsNavAreaLabel": "Settings area",
+  "settingsNavAreasHeading": "Settings areas",
+  "navRecord": "Record",
+  "navSources": "Sources",
+  "navMoments": "Moments",
+  "navMemories": "Memories",
+  "navHighlights": "Highlights",
+  "navSpeakers": "Speakers",
+  "navAsk": "Ask",
+  "navSettings": "Settings",
+  "navCapture": "Capture",
+  "navLibrary": "Library",
+  "shellAccountFallback": "Account",
+  "shellControlSurface": "CONTROL SURFACE",
+  "shellSignOut": "Sign out",
+  "shellBatteryWarning": "Battery optimization may suspend always-on capture on this device.",
+  "shellBatteryFix": "Fix",
+  "shellOffline": "Offline — capture continues; uploads resume when reconnected.",
+  "shellRecordingActive": "Recording is active.",
+  "shellRecordingOpen": "Open",
+  "shellSyncing": "Syncing {label}",
+  "@shellSyncing": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "authPasswordsDoNotMatch": "Passwords do not match.",
+  "authTwoFactorTitle": "Enter 2FA code",
+  "authRegisterTitle": "Create your NeoRecall account",
+  "authSignInTitle": "Sign in",
+  "authTwoFactorSubtitle": "Open your authenticator app and enter the current NeoRecall code.",
+  "authRegisterSubtitle": "Your first account becomes the NeoRecall administrator for this server.",
+  "authSignInSubtitle": "Enter your NeoRecall account details.",
+  "authRetryLocalStartup": "Retry local startup",
+  "authTwoFactorFieldLabel": "2FA or recovery code",
+  "authUsernameLabel": "Username",
+  "authEmailLabel": "Email (optional)",
+  "authPasswordLabel": "Password",
+  "authConfirmPasswordLabel": "Confirm password",
+  "authVerify": "Verify",
+  "authCreateAccount": "Create account",
+  "authSecurityKeySignIn": "Sign in with a security key",
+  "authSwitchToSignIn": "Already have an account? Sign in",
+  "authSwitchToRegister": "Need a new account? Register",
+  "authServerButton": "Server",
+  "authWelcomeEyebrow": "WELCOME TO NEORECALL",
+  "authSetUpOrConnect": "Set up or connect NeoRecall",
+  "authConnect": "Connect NeoRecall",
+  "authSetUpOrConnectBody": "Install NeoRecall on this computer without a terminal, or enter the address of a server that is already running.",
+  "authConnectBody": "Enter the address of the NeoRecall server this device should use.",
+  "authInstallLocally": "Set up NeoRecall on this computer",
+  "authOrConnectRunning": "or connect to a running server",
+  "authServerAddressLabel": "NeoRecall server address",
+  "authConnectToServer": "Connect to this server",
+  "authBackToSignIn": "Back to sign in",
+  "askNewQuestion": "New question",
+  "askHint": "Ask anything about your day",
+  "askFollowUpHint": "Ask a follow-up",
+  "askStarterToday": "What did I do today?",
+  "askStarterFollowUps": "What did I say I would follow up on this week?",
+  "askStarterYesterday": "Who did I talk to yesterday, and about what?",
+  "askEyebrow": "Recall",
+  "askDescription": "Your recall, in your own words. Retrieval and the answer both run wherever your NeoRecall server does — no query leaves it.",
+  "askStartWith": "Start with",
+  "askWeakMatches": "{count, plural, =1{1 weaker match was left out — it shares words with the question, not meaning.} other{{count} weaker matches were left out — they share words with the question, not meaning.}}",
+  "@askWeakMatches": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "askSourcesExpanded": "SOURCES",
+  "askSourcesCollapsed": "SHOW SOURCES",
+  "askPeriodRead": "Read {period}",
+  "@askPeriodRead": {
+    "placeholders": {
+      "period": {
+        "type": "String"
+      }
+    }
+  },
+  "askPeriodFrom": "from {time}",
+  "@askPeriodFrom": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "askPeriodUntil": "until {time}",
+  "@askPeriodUntil": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "askNothingRecorded": "nothing recorded",
+  "askSubmitTooltip": "Ask",
+  "askSearching": "Searching your recall",
+  "memoriesBulkDeleted": "{count, plural, =1{1 memory deleted} other{{count} memories deleted}}",
+  "@memoriesBulkDeleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkPinned": "{count, plural, =1{1 memory pinned} other{{count} memories pinned}}",
+  "@memoriesBulkPinned": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkUnpinned": "{count, plural, =1{1 memory unpinned} other{{count} memories unpinned}}",
+  "@memoriesBulkUnpinned": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkArchived": "{count, plural, =1{1 memory archived} other{{count} memories archived}}",
+  "@memoriesBulkArchived": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkRestored": "{count, plural, =1{1 memory restored} other{{count} memories restored}}",
+  "@memoriesBulkRestored": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkUpdated": "{count, plural, =1{1 memory updated} other{{count} memories updated}}",
+  "@memoriesBulkUpdated": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesBulkFailed": "Could not update memories: {error}",
+  "@memoriesBulkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "memoriesRenameFailed": "Could not rename: {error}",
+  "@memoriesRenameFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "memoriesMergeTitle": "Merge memories?",
+  "memoriesMergeBody": "Combine {count} memories into one. Highlights and conversation evidence stay; a new title and description are written for the combined moment.",
+  "@memoriesMergeBody": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesMergeConfirm": "Merge",
+  "memoriesMergedQueued": "Memories merged. The description will update shortly.",
+  "memoriesMerged": "Memories merged.",
+  "memoriesMergeFailed": "Could not merge memories: {error}",
+  "@memoriesMergeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "memoriesRenameDialogTitle": "Rename memory",
+  "memoriesTitleLabel": "Title",
+  "actionDone": "Done",
+  "actionSelect": "Select",
+  "memoriesDescription": "Your conversations, distilled into clear memories and actionable highlights.",
+  "memoriesRestore": "Restore",
+  "memoriesArchive": "Archive",
+  "memoriesEmptyFilteredTitle": "No matching memories",
+  "memoriesEmptyTitle": "Nothing here yet",
+  "memoriesEmptyFilteredMessage": "Try another filter or clear the search.",
+  "memoriesEmptyMessage": "Keep recording. When a conversation ends, NeoRecall quietly turns it into a memory.",
+  "memoriesNoActionItemsTitle": "No action items yet",
+  "memoriesNoActionItemsMessage": "Concrete assignments and commitments will appear here when a conversation creates them.",
+  "momentsDeleteTitle": "{count, plural, =1{Delete this moment?} other{Delete {count} moments?}}",
+  "@momentsDeleteTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsDeleteBodyOne": "This will permanently delete this conversation and its transcript. A memory that came only from this conversation will be removed too.",
+  "momentsDeleteBodyMany": "This will permanently delete these conversations and their transcripts. Memories that came only from them will be removed too.",
+  "actionDelete": "Delete",
+  "momentsDeleted": "{count, plural, =1{1 moment deleted} other{{count} moments deleted}}",
+  "@momentsDeleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsDeleteFailed": "Could not delete moments: {error}",
+  "@momentsDeleteFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "momentsDescription": "A compact stream of conversations. Expand only the ones you want to read in full.",
+  "momentsEmptyNoTranscript": "No transcript yet",
+  "momentsEmptyNothing": "Nothing to show yet",
+  "momentsEmptyNoTranscriptMessage": "Start a recording or import audio. Persisted segments will appear here.",
+  "momentsEmptyNothingMessage": "Your recordings are safe. They will appear here once the above is sorted out.",
+  "momentsToday": "Today",
+  "momentsGroupCount": "{count, plural, =1{1 moment} other{{count} moments}}",
+  "@momentsGroupCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsStatusPending": "Being sorted",
+  "momentsStatusSetAside": "Waiting on a summary",
+  "momentsStatusAwaitsWriteUp": "Summary on the way",
+  "momentsListen": "Listen",
+  "momentsUnassignedSpeaker": "Unassigned",
+  "momentsJustRecorded": "Just recorded",
+  "momentsConversation": "Conversation",
+  "momentsLoadingRest": "Loading the rest of this moment",
+  "momentsShowingFirstLines": "Showing the first {shown} of {total} lines.",
+  "@momentsShowingFirstLines": {
+    "placeholders": {
+      "shown": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsShowLess": "Show less",
+  "momentsMoreLines": "{count, plural, =1{1 more line} other{{count} more lines}}",
+  "@momentsMoreLines": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsWritingUp": "Writing up",
+  "momentsWriteUpAgain": "Write up again",
+  "momentsWriteUpNow": "Write up now",
+  "momentsRecordingBadge": "Recording",
+  "momentsNewer": "Newer",
+  "momentsOlder": "Older",
+  "momentsPage": "Page {page}",
+  "@momentsPage": {
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsSelectPrompt": "Select moments",
+  "momentsSelectedCount": "{count} selected",
+  "@momentsSelectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "momentsAllSelected": "All moments selected",
+  "momentsSelectAll": "Select all moments",
+  "speakersRenameTitle": "Name recurring speaker",
+  "speakersDisplayNameLabel": "Display name",
+  "speakersMergeIntoTitle": "Merge another voice into this speaker",
+  "speakersUnnamed": "Unnamed recurring speaker",
+  "speakersDeleteManyTitle": "{count, plural, =1{Delete 1 speaker?} other{Delete {count} speakers?}}",
+  "@speakersDeleteManyTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speakersDeleteManyBody": "This will permanently delete these speaker profiles. Associated transcript segments will no longer identify them.",
+  "speakersDeleted": "{count, plural, =1{1 speaker deleted} other{{count} speakers deleted}}",
+  "@speakersDeleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speakersDeleteFailed": "Could not delete speakers: {error}",
+  "@speakersDeleteFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "speakersCombineTargetTitle": "Combine into which speaker?",
+  "speakersCombined": "{count, plural, =1{1 speaker combined} other{{count} speakers combined}}",
+  "@speakersCombined": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speakersCombineFailed": "Could not combine speakers: {error}",
+  "@speakersCombineFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "speakersUpToDate": "Speaker profiles are already up to date",
+  "speakersMergedCount": "{count, plural, =1{1 matching speaker profile merged} other{{count} matching speaker profiles merged}}",
+  "@speakersMergedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speakersReevaluateFailed": "Could not re-evaluate speakers: {error}",
+  "@speakersReevaluateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "speakersPreviewFailed": "Preview failed: {error}",
+  "@speakersPreviewFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "speakersReevaluateTooltip": "Re-evaluate and merge matching speakers",
+  "speakersDescription": "Recognize a voice with a short clean sample, then name or merge its recurring profile.",
+  "speakersEmptyTitle": "No recurring speakers yet",
+  "speakersEmptyMessage": "A speaker appears after a full 10-second clean voice preview is available.",
+  "speakersDeleteOneTitle": "Delete speaker?",
+  "speakersDeleteOneBody": "This will permanently delete this speaker profile. Associated transcript segments will no longer identify this speaker.",
+  "speakersPausePreview": "Pause voice preview",
+  "speakersPlayPreview": "Play voice preview",
+  "speakersPreviewNeeded": "A full clean voice preview is needed",
+  "speakersNameTooltip": "Name speaker",
+  "speakersDeleteTooltip": "Delete speaker",
+  "speakersSelectPrompt": "Select speakers",
+  "speakersSelectedCount": "{count} selected",
+  "@speakersSelectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speakersAllSelected": "All speakers selected",
+  "speakersSelectAll": "Select all speakers",
+  "speakersCombineTooltip": "Combine into one speaker",
+  "monthShort1": "JAN",
+  "monthShort2": "FEB",
+  "monthShort3": "MAR",
+  "monthShort4": "APR",
+  "monthShort5": "MAY",
+  "monthShort6": "JUN",
+  "monthShort7": "JUL",
+  "monthShort8": "AUG",
+  "monthShort9": "SEP",
+  "monthShort10": "OCT",
+  "monthShort11": "NOV",
+  "monthShort12": "DEC",
+  "weekdayLong1": "MONDAY",
+  "weekdayLong2": "TUESDAY",
+  "weekdayLong3": "WEDNESDAY",
+  "weekdayLong4": "THURSDAY",
+  "weekdayLong5": "FRIDAY",
+  "weekdayLong6": "SATURDAY",
+  "weekdayLong7": "SUNDAY",
+  "recordConsentTitle": "Recording consent and visible use",
+  "recordConsentBody": "NeoRecall records privately spoken words. Record only when everyone has been informed and you are legally permitted to do so. Recording always remains visibly indicated; NeoRecall has no covert mode.",
+  "recordConsentAccept": "I understand",
+  "recordDeviceNoAnswer": "The device did not answer.",
+  "recordFootnoteOfflineDevice": "This device records by itself — there is no live capture. Use “Sync device recordings” to pull and transcribe them.",
+  "recordFootnoteEitherSide": "Start from the app or the device. Either side can stop. Recordings made while you were away still sync from the device.",
+  "recordFootnoteSystemAudio": "System audio uses the OS screen-recording permission and captures audio only, not video frames.",
+  "recordOffline": "You are offline. Capture continues locally and queued audio uploads automatically when the connection returns.",
+  "recordSourceWearable": "Wearable",
+  "recordSourceDesk": "NeoRecall Desk",
+  "recordSourcePhoneMicrophone": "Phone microphone",
+  "recordSourceMicrophoneAndDevice": "Microphone and device audio",
+  "recordSourceDeviceAudio": "Device audio",
+  "recordSourceMicrophone": "Microphone",
+  "recordNoteTitle": "Add a note",
+  "recordNoteHint": "Names, context, decisions, or anything the transcript may miss…",
+  "recordNoteSave": "Save note",
+  "recordGreetingStillUp": "Still up",
+  "recordGreetingMorning": "Good morning",
+  "recordGreetingAfternoon": "Good afternoon",
+  "recordGreetingEvening": "Good evening",
+  "recordDurationUnderMinute": "under a minute",
+  "recordDurationMinutes": "{minutes} min",
+  "@recordDurationMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "recordStateLive": "LIVE",
+  "recordStateStandby": "STANDBY",
+  "recordStateRecording": "Recording",
+  "recordStateReady": "Ready to record",
+  "recordStateDeviceSync": "Recordings sync from the device",
+  "recordTodayLabel": "Today",
+  "recordNothingToday": "Nothing recorded yet today.",
+  "recordUntitledMoment": "Untitled moment",
+  "recordSegmentCount": "{count, plural, =1{1 segment} other{{count} segments}}",
+  "@recordSegmentCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recordAllMoments": "All moments →",
+  "recordContextFootnote": "Add context as it happens. Every item is stored locally before it is synchronized.",
+  "recordInProgressTitle": "Recording in progress",
+  "recordInProgressDescription": "Mark important moments and add notes, images, or documents without leaving the recording.",
+  "recordContextTitle": "Recording context",
+  "recordContextDescription": "These sources help NeoRecall understand what matters and improve the final memory.",
+  "recordContextHighlight": "Highlight",
+  "recordContextNote": "Note",
+  "recordContextPhoto": "Photo",
+  "recordContextFile": "File",
+  "recordContextEmpty": "No context added yet.",
+  "recordHighlightedMoment": "Highlighted moment",
+  "recordVisibleAndActive": "Recording is visible and active",
+  "recordMomentCount": "{count, plural, =1{1 moment} other{{count} moments}}",
+  "@recordMomentCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "securitySectionEyebrow": "SECURITY",
+  "securityTwoFactorTitle": "Two-factor authentication",
+  "securityTwoFactorDescription": "Protect your account with an authenticator app.",
+  "securityTwoFactorEnabled": "{count, plural, =1{2FA is enabled (1 recovery code remaining)} other{2FA is enabled ({count} recovery codes remaining)}}",
+  "@securityTwoFactorEnabled": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "securityDisableTwoFactor": "Disable 2FA",
+  "securityRegenerateCodes": "Regenerate codes",
+  "securityTwoFactorDisabled": "2FA is not enabled",
+  "securityEnableTwoFactor": "Enable 2FA",
+  "securityKeysEyebrow": "SECURITY KEYS",
+  "securityKeysTitle": "Security keys",
+  "securityKeysDescription": "Sign in with a hardware key or passkey instead of your password. A key that asks for a PIN or a fingerprint also replaces your two-factor code.",
+  "securityKeysNone": "No security keys registered.",
+  "securityKeysAdd": "Add security key",
+  "securityKeysUnsupported": "This device cannot register security keys. Open NeoRecall in a browser over HTTPS to add one.",
+  "securityKeyFallbackName": "Security key",
+  "securityKeyNeverUsed": "Never used",
+  "securityKeyLastUsed": "Last used {date}",
+  "@securityKeyLastUsed": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "actionRename": "Rename",
+  "actionRemove": "Remove",
+  "securityYourUsername": "your username",
+  "securityEraseTitle": "Erase everything you have recorded",
+  "securityEraseIntro": "This empties your library but keeps your account. There is no undo and no backup you can ask to restore from.",
+  "securityEraseItem1": "Every recording, transcript and conversation",
+  "securityEraseItem2": "All memories, highlights and daily summaries",
+  "securityEraseItem3": "Named speakers and their voice profiles",
+  "securityEraseItem4": "Imported audio and anything still waiting to upload",
+  "securityKeptItem1": "Your account, password and security keys",
+  "securityKeptItem2": "Your settings and paired devices",
+  "securityEraseConfirm": "Erase my data",
+  "securityErasedNotice": "Everything you had recorded was erased.",
+  "securityDeleteAccountTitle": "Delete your account",
+  "securityDeleteAccountIntro": "This removes everything, permanently, and closes the account. There is no undo and no backup you can ask to restore from.",
+  "securityDeleteItem1": "Every transcript, conversation and memory",
+  "securityDeleteItem2": "Recordings still waiting to upload on this device",
+  "securityDeleteItem3": "Connected devices, security keys and sign-in history",
+  "securityDeleteItem4": "The account itself, and your ability to sign in",
+  "securityDeleteConfirm": "Delete permanently",
+  "securityDeletedNotice": "Your account and all its data were deleted.",
+  "securityDangerZone": "DANGER ZONE",
+  "securityEraseCardDescription": "Empties your library — recordings, transcripts, memories, highlights and voice profiles — and keeps your account, settings and paired devices. This cannot be undone.",
+  "securityEraseCardAction": "Erase my data…",
+  "securityDeleteCardDescription": "Removes everything above and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.",
+  "securityDeleteCardAction": "Delete account…",
+  "securityNameKeyTitle": "Name this key",
+  "securityNameKeyMessage": "Give the key a name you will recognise, for example \"YubiKey\".",
+  "securityKeyDefaultName": "Security key {number}",
+  "@securityKeyDefaultName": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "securityRenameKeyTitle": "Rename security key",
+  "securityRenameKeyMessage": "Enter a new name for \"{name}\".",
+  "@securityRenameKeyMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "securityEnterPassword": "Enter password",
+  "securityPasswordForDisable": "Your current password is required to disable 2FA",
+  "securityPasswordRequired": "Your current password is required.",
+  "securityEnterTwoFactorCode": "Enter 2FA code",
+  "securityEnterAuthenticatorCode": "Enter your current authenticator code.",
+  "securityScanQr": "Scan this QR code in your authenticator app.",
+  "securityAuthenticatorCodeLabel": "Authenticator code",
+  "actionVerify": "Verify",
+  "securityRecoveryCodesTitle": "Recovery Codes",
+  "securityRecoveryCodesBody": "Save these codes in a secure place. They are shown only once.",
+  "destructiveYourPassword": "Your password",
+  "destructiveCodeHelper": "A current code, or one of your recovery codes.",
+  "destructiveTypeToConfirm": "Type {username} to confirm",
+  "@destructiveTypeToConfirm": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "integrationsMcpEyebrow": "MCP",
+  "integrationsMcpTitle": "Connect Claude, ChatGPT, or Cursor",
+  "integrationsMcpDescription": "Paste this MCP URL into Claude, ChatGPT (MCP), or Cursor. The client opens NeoRecall for sign-in and the same read-only consent as NeoAgent. Ask, ingest, and memory edits stay inside NeoRecall.",
+  "integrationsMcpCopied": "MCP URL copied",
+  "integrationsMcpCopy": "Copy MCP URL",
+  "integrationsConnectedEyebrow": "CONNECTED APPS",
+  "integrationsNoneConnected": "No apps are connected yet. After you authorize NeoAgent or an MCP client, it appears here so you can revoke it.",
+  "integrationsConnectedApp": "Connected app",
+  "integrationsRevoke": "Revoke",
+  "integrationsClientNeoAgent": "NeoAgent",
+  "integrationsClientMcp": "MCP client",
+  "integrationsClientOAuth": "OAuth client",
+  "integrationsThisApp": "this app",
+  "integrationsRevokeTitle": "Revoke access?",
+  "integrationsRevokeBody": "{name} will lose read-only access to this account until you connect it again.",
+  "@integrationsRevokeBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "memoriesSearchHint": "Search memories…",
+  "memoriesFilterAll": "All",
+  "memoriesFilterPinned": "Pinned",
+  "memoriesFilterThisWeek": "This week",
+  "memoriesFilterMeetings": "Meetings",
+  "memoriesFilterDecisions": "Decisions",
+  "memoriesFilterOpenTasks": "Open tasks",
+  "memoriesFilterOpenTasksCount": "Open tasks ({count})",
+  "@memoriesFilterOpenTasksCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesFilterArchived": "Archived",
+  "memoriesSelectPrompt": "Select memories",
+  "memoriesSelectedCount": "{count} selected",
+  "@memoriesSelectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "memoriesMergeTooltip": "Merge",
+  "memoriesPin": "Pin",
+  "memoriesUnpin": "Unpin",
+  "memoriesTodaysStory": "Today’s story",
+  "memoriesAllHighlights": "All highlights",
+  "memoriesDue": "Due {date}",
+  "@memoriesDue": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "memoriesReopen": "Reopen",
+  "memoriesMarkDone": "Mark done",
+  "memoryContextDialogTitle": "Add memory context",
+  "memoryContextDialogHint": "Add details that should improve this memory…",
+  "memoryContextDialogConfirm": "Add and update",
+  "memoryDeleteTitle": "Delete memory?",
+  "memoryDeleteBody": "This removes the memory and its highlights. Transcripts stay available on the timeline.",
+  "memoryLoadFailed": "Could not load details.\n{error}",
+  "@memoryLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "memoryPeopleAndThings": "People & things",
+  "memoryEntityUnknown": "Unknown",
+  "memoryContextHeading": "Context",
+  "memoryNoContext": "No notes or files are attached to this memory.",
+  "memoryContextUsedByAi": "Used by AI",
+  "memoryContextReadyForAi": "Ready for AI",
+  "memoryContextRetry": "Retry analysis",
+  "memoryContextRemove": "Remove context",
+  "memoryFromConversation": "From the conversation",
+  "miniLoadFailed": "Could not load highlight.\n{error}",
+  "@miniLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "miniFromMemory": "From {emoji} {title}",
+  "@miniFromMemory": {
+    "placeholders": {
+      "emoji": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "miniEvidence": "Evidence",
+  "miniNoExcerpts": "No transcript excerpts linked.",
+  "processingEtaUnderMinute": "under a minute",
+  "processingEtaMinutes": "about {minutes} min",
+  "@processingEtaMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "processingEtaHours": "about {hours} hr",
+  "@processingEtaHours": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "processingEtaHoursMinutes": "about {hours} hr {minutes} min",
+  "@processingEtaHoursMinutes": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "processingNeedsAttention": "Processing needs attention",
+  "processingStageWatchTransfer": "Downloading from device",
+  "processingStagePhoneQueue": "Queued securely on this device",
+  "processingStageUpload": "Uploading to server",
+  "processingStageServerQueue": "Waiting in transcription queue",
+  "processingStageTranscription": "Transcribing on server",
+  "processingStageFinalizing": "Finalizing secure receipts",
+  "processingStageComplete": "Everything is processed",
+  "processingWatchAudioWaiting": "{duration} of audio waiting",
+  "@processingWatchAudioWaiting": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "processingWatchReceiving": "Receiving encrypted audio",
+  "processingWatchItemsWaiting": "{count, plural, =1{1 item waiting} other{{count} items waiting}}",
+  "@processingWatchItemsWaiting": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingWatchNoBacklog": "No device backlog",
+  "processingStepDeviceTransfer": "Device transfer",
+  "processingStepStoredOnPhone": "Stored on phone",
+  "processingNoLocalQueue": "No recordings waiting locally",
+  "processingReadyForUpload": "{count} ready for upload",
+  "@processingReadyForUpload": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingStepServerUpload": "Server upload",
+  "processingNoUploadInFlight": "No upload currently in flight",
+  "processingUploadingNow": "{count} uploading now",
+  "@processingUploadingNow": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingStepServerTranscription": "Server transcription",
+  "processingTranscribingQueued": "{transcribing} transcribing · {queued} queued",
+  "@processingTranscribingQueued": {
+    "placeholders": {
+      "transcribing": {
+        "type": "int"
+      },
+      "queued": {
+        "type": "int"
+      }
+    }
+  },
+  "processingWaitingForWorker": "{count} waiting for a worker",
+  "@processingWaitingForWorker": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingServerQueueClear": "Server queue is clear",
+  "processingStepSafeCompletion": "Safe completion",
+  "processingTranscriptPersisted": "Transcript persisted; audio released",
+  "processingVerifying": "{count} verifying persistence and deletion",
+  "@processingVerifying": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingWaitingEarlierStages": "Waiting for earlier stages",
+  "processingPendingCount": "{count} pending",
+  "@processingPendingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingMbProtected": "{size} MB protected",
+  "@processingMbProtected": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "processingEtaPrefix": "ETA {eta}",
+  "@processingEtaPrefix": {
+    "placeholders": {
+      "eta": {
+        "type": "String"
+      }
+    }
+  },
+  "processingEtaCalibrating": "ETA calibrating",
+  "processingUploadOnMobileData": "Upload once with mobile data",
+  "processingReviewQueued": "Review queued audio",
+  "processingRetryFailed": "Retry failed",
+  "processingSomethingNeedsAttention": "Something needs attention",
+  "processingStillWorking": "Still working on it",
+  "processingDeviceHolding": "{count, plural, =1{Your device is still holding 1 recording, so nothing has been lost.} other{Your device is still holding {count} recordings, so nothing has been lost.}}",
+  "@processingDeviceHolding": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingUnderMinuteLeft": "under a minute left",
+  "processingGettingAudio": "Getting audio from your device",
+  "processingUploadingCount": "{count, plural, =1{Uploading a recording} other{Uploading {count} recordings}}",
+  "@processingUploadingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingTranscribingCount": "{count, plural, =1{Transcribing a recording} other{Transcribing {count} recordings}}",
+  "@processingTranscribingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "processingEtaMinutesLeft": "about {minutes} min left",
+  "@processingEtaMinutesLeft": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "processingEtaHoursLeft": "about {hours} hr left",
+  "@processingEtaHoursLeft": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "processingEtaHoursMinutesLeft": "about {hours} hr {minutes} min left",
+  "@processingEtaHoursMinutesLeft": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "deviceAddDevice": "Add device",
+  "deviceConnected": "Connected",
+  "deviceNotConnected": "Not connected",
+  "deviceAddDeviceSemantics": "Add a device",
+  "deviceManageSemantics": "Manage {label}",
+  "@deviceManageSemantics": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceNoneTitle": "No device yet",
+  "deviceNoneBody": "NeoRecall records with the phone microphone until you connect a wearable or set up a Desk.",
+  "deviceScanning": "Scanning…",
+  "deviceScanForWearables": "Scan for wearables",
+  "deviceSetUpDesk": "Set up a NeoRecall Desk",
+  "deviceRemembered": "Remembered — not connected right now",
+  "deviceStatBattery": "Battery",
+  "deviceStatSynced": "Synced",
+  "deviceStatSyncedUnit": "recordings",
+  "deviceStatLeft": "Left",
+  "deviceStatQueued": "queued",
+  "deviceOfflineFirstStreams": "This device can record on its own as well. Anything it captured while you were away syncs here when it connects, or you can pull it now.",
+  "deviceOfflineFirstOnly": "This device records on its own — press record and stop on the device itself. Recordings sync here when it connects, or you can pull them now.",
+  "deviceStranded": "The device has recordings but no Wi-Fi. They can move to this phone over Bluetooth and upload from here later.",
+  "deviceMovingRecordings": "Moving recordings…",
+  "deviceMoveRecordings": "Move recordings to this phone",
+  "deviceScanAnother": "Scan for another wearable",
+  "deviceDiagnostics": "Device and sync diagnostics",
+  "deviceForget": "Forget this device",
+  "sourceRecordFrom": "Record from",
+  "sourceLockedWhileRecording": "The source is locked while a recording is running.",
+  "sourceOneAtATime": "Only one source records at a time. The choice sticks until you change it.",
+  "sourceThisComputer": "This computer",
+  "sourcePhoneSubtitle": "Always available, nothing to connect",
+  "sourceComputerSubtitle": "Microphone, and system audio if you want it",
+  "sourceDeviceAudioDesktop": "Device audio — everything this machine plays",
+  "sourceTabOrSystemAudio": "Tab or system audio",
+  "sourceNoWearable": "No wearable connected yet",
+  "sourceConnectedWithBattery": "Connected · {battery}%",
+  "@sourceConnectedWithBattery": {
+    "placeholders": {
+      "battery": {
+        "type": "Object"
+      }
+    }
+  },
+  "sourceScan": "Scan",
+  "sourceDeskNotSetUp": "Not set up",
+  "sourceSetUp": "Set up",
+  "sourceDeskSubtitle": "Records the room on its own",
+  "sourceFoundNearby": "Found nearby",
+  "sourceReadyForAudio": "{type} · ready for audio",
+  "@sourceReadyForAudio": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "sourceWearableFallback": "wearable",
+  "sourceReconnect": "Reconnect",
+  "sourceConnect": "Connect",
+  "sourceImportAudio": "Import an audio file",
+  "sourceConsentNote": "Recording privately spoken words may require everyone’s consent. NeoRecall never hides that it is recording.",
+  "sourceWebBluetoothNote": "The browser opens its own Bluetooth chooser, and capture continues only while this tab stays active.",
+  "libraryTitle": "Library",
+  "floatingConsentTitle": "Before you record",
+  "floatingOpenLibrary": "Open library",
+  "floatingHide": "Hide",
+  "devicesEmptyTitle": "No devices yet",
+  "devicesEmptyMessage": "Apps appear here after their first recording. A NeoRecall Desk appears once you set it up.",
+  "devicesAddDesk": "Add a NeoRecall Desk",
+  "devicesRevoked": "REVOKED",
+  "devicesNotRecentlyConnected": "not recently connected",
+  "devicesClockOffset": "Device clock differs by more than two minutes",
+  "devicesRevokeTooltip": "Revoke device",
+  "pendingAudioTitle": "Review queued audio",
+  "pendingAudioSubtitle": "Local playback only · upload continues normally",
+  "actionClose": "Close",
+  "audioHeadphonesWarning": "Recording is active. Use headphones to avoid recording the playback again.",
+  "actionRefresh": "Refresh",
+  "pendingAudioEmpty": "No retained audio is currently available to review.",
+  "actionPause": "Pause",
+  "actionPlay": "Play",
+  "diagnosticsCopied": "Diagnostic report copied.",
+  "diagnosticsCleared": "Diagnostic log cleared.",
+  "diagnosticsTitle": "Device & sync diagnostics",
+  "diagnosticsDescription": "Bluetooth scan/connect, device sync, and import events for this account. Passwords, tokens, audio, transcripts, and other accounts are never included.",
+  "diagnosticsPreparing": "Preparing…",
+  "diagnosticsCopyReport": "Copy full report",
+  "diagnosticsClearLog": "Clear log",
+  "diagnosticsEmpty": "No diagnostic events yet. Connect a device and sync to populate this log, then refresh.",
+  "trayQuickCapture": "Quick capture",
+  "trayOpenLibrary": "Open notes library",
+  "trayStopRecording": "Stop recording",
+  "trayQuit": "Quit",
+  "audioBack10": "Back 10 seconds",
+  "audioForward10": "Forward 10 seconds",
+  "importChooseAudio": "Choose audio",
+  "importTitle": "Import existing audio",
+  "importDescription": "WAV, MP3, M4A, and other ffmpeg-supported formats use the same private transcription pipeline.",
+  "syncTransferringProgress": "Transferring {percent}% · {remaining} left",
+  "@syncTransferringProgress": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "syncTransferring": "Transferring from the device…",
+  "syncWaitingOnDevice": "{duration} waiting on the device",
+  "@syncWaitingOnDevice": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "syncSyncedCount": "{count, plural, =1{1 recording synced} other{{count} recordings synced}}",
+  "@syncSyncedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "floatingConsentBody": "Tell everyone that NeoRecall is recording and make sure you are allowed to capture the conversation. Recording is always visibly indicated.",
+  "sourcesLoadFailed": "Failed to load sources: {error}",
+  "@sourcesLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sourcesUpdateFailed": "Failed to update: {error}",
+  "@sourcesUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sourcesDisconnect": "Disconnect",
+  "sourcesDisconnectBody": "Stop this source? Existing transcripts stay in NeoRecall.",
+  "sourcesDisconnectFailed": "Failed to disconnect: {error}",
+  "@sourcesDisconnectFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sourcesDescription": "Services that can feed NeoRecall audio. Wearables and a NeoRecall Desk are set up from Record.",
+  "sourcesLiveCapture": "Live capture",
+  "sourcesEmptyTitle": "Nothing to connect yet",
+  "sourcesEmptyMessage": "Live sources appear here as they become available for your account.",
+  "sourcesLastSynced": "Last synced {when}",
+  "@sourcesLastSynced": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "sourcesHowItWorks": "How it works",
+  "sourcesOauthNote": "NeoRecall imports cloud recordings after the platform finishes them — it does not join the live call.",
+  "sourcesJustNow": "just now",
+  "sourcesMinutesAgo": "{minutes}m ago",
+  "@sourcesMinutesAgo": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "sourcesHoursAgo": "{hours}h ago",
+  "@sourcesHoursAgo": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "sourcesSyncNow": "Sync now",
+  "sourceStatusConnected": "Connected",
+  "sourceStatusError": "Error",
+  "sourceStatusNotConfigured": "Not configured",
+  "sourceStatusPaused": "Paused",
+  "discordDefaultName": "My Discord Bot",
+  "discordError": "Error: {error}",
+  "@discordError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "discordTitle": "Connect Discord",
+  "discordDescription": "NeoRecall joins voice channels as a bot and records the people you list. Create a bot in the Discord Developer Portal, invite it to your server, then paste its token here.",
+  "discordUsersLabel": "Users to record",
+  "discordUsersHelper": "Comma-separated Discord usernames",
+  "discordTokenLabel": "Bot token",
+  "discordTokenHelper": "Stored only on your NeoRecall server",
+  "discordHowTo": "How to create the bot",
+  "discordIntentsNote": "No privileged intents are required. The bot only listens — it never speaks.",
+  "discordConnect": "Connect Account",
+  "discordSteps": "1. Open the Discord Developer Portal and create an application.\n2. Open the \"Bot\" tab, then \"Reset Token\" and copy the token into the field above.\n3. In \"OAuth2 → URL Generator\", tick the \"bot\" scope and the \"View Channels\", \"Connect\", and \"Speak\" permissions.\n4. Open the generated URL and invite the bot to your server.\n\nNo privileged intents are required. The bot only listens — it never speaks.",
+  "apiRequestTimeout": "The server did not respond in time. Check that it is running and reachable, then try again.",
+  "apiServerUnreachable": "NeoRecall could not connect to the server. Check that it is online and that this device can reach it.",
+  "apiInvalidResponse": "The server returned a response NeoRecall could not read (HTTP {status}).",
+  "@apiInvalidResponse": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "apiServerUnavailable": "The NeoRecall server is unavailable (HTTP {status}). Try again shortly or check the server.",
+  "@apiServerUnavailable": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "apiRequestRejected": "The NeoRecall server rejected the request (HTTP {status}).",
+  "@apiRequestRejected": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "apiUploadInterrupted": "The connection was interrupted while uploading. It will retry automatically.",
+  "apiContextUploadInterrupted": "The context upload was interrupted. It remains stored locally and will retry.",
+  "apiImportInterrupted": "The connection was interrupted while uploading. Try the import again.",
+  "controllerSecurityKeyAdded": "Security key added.",
+  "controllerWrongPassword": "That password is not correct.",
+  "controllerInvalidTwoFactor": "That authentication code is not valid. Codes expire quickly — try the current one.",
+  "controllerTwoFactorRequired": "This account needs an authenticator code to confirm.",
+  "controllerDeleteFailed": "The account could not be deleted: {error}",
+  "@controllerDeleteFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerNoNewRecordings": "No new recordings on {device} to sync.",
+  "@controllerNoNewRecordings": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerSyncFailed": "Sync of {device} failed: {message}",
+  "@controllerSyncFailed": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      },
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerIncompleteUrl": "Enter a complete server URL including http:// or https://.",
+  "controllerWidgetStopped": "Recording stopped from the home-screen widget.",
+  "controllerWidgetSignIn": "Sign in to complete highlights from the home screen.",
+  "controllerWidgetStarted": "Phone recording started from the home-screen widget.",
+  "controllerWidgetStartFailed": "The home-screen widget could not start recording: {error}",
+  "@controllerWidgetStartFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerScheduleWaiting": "Recording is waiting for the next configured daily window.",
+  "controllerRecoveryWaiting": "Background recording recovery is waiting: {error}",
+  "@controllerRecoveryWaiting": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerSourceRecoveryFailed": "Audio source recovery failed: {error}",
+  "@controllerSourceRecoveryFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerCaptureRecovered": "Audio capture recovered after an interruption.",
+  "controllerTimelineLoadFailed": "That part of the timeline could not be loaded just now.",
+  "controllerMomentLoadFailed": "The rest of this moment could not be loaded just now.",
+  "controllerRewriteQueued": "Writing this moment up again. It will update here when ready.",
+  "controllerImportQueued": "Import uploaded. Local transcription has been queued.",
+  "controllerNoteEmpty": "Write a note before saving it.",
+  "controllerNoteTooLong": "Notes may contain at most {maximum} characters.",
+  "@controllerNoteTooLong": {
+    "placeholders": {
+      "maximum": {
+        "type": "int"
+      }
+    }
+  },
+  "controllerFileTooLarge": "This file is larger than the server limit.",
+  "controllerContextWhileRecording": "Context can only be added while recording is active.",
+  "controllerContextStorageUnavailable": "Recording context storage is unavailable.",
+  "controllerContextIntegrity": "The locally stored context file failed its integrity check.",
+  "controllerMergeTooFew": "Select at least two memories to merge.",
+  "controllerMergeTooMany": "Select at most {maximum} memories to merge.",
+  "@controllerMergeTooMany": {
+    "placeholders": {
+      "maximum": {
+        "type": "int"
+      }
+    }
+  },
+  "controllerStorageFull": "Storage full — recording stopped",
+  "liveEtaLeft": "about {duration} left",
+  "@liveEtaLeft": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "liveStorageFullDetail": "Free device storage, then reopen NeoRecall to resume safely.",
+  "liveStorageFullIssue": "No local space remains for another durable audio block.",
+  "liveSourceBluetooth": "Bluetooth device",
+  "liveRecordingFrom": "Recording from {source}",
+  "@liveRecordingFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "liveRecordingUploading": "Recording safely · uploading in background",
+  "liveRecordingSafely": "Recording safely to this device",
+  "liveWatchTransferDetail": "Audio is moving into protected phone storage",
+  "liveUploadingTitle": "Uploading recordings",
+  "liveUploadingDetail": "Local originals stay protected until processing is verified",
+  "liveTranscribingDetail": "Audio is safely stored while the transcript is created",
+  "liveFinalizingTitle": "Finalizing transcript",
+  "liveFinalizingDetail": "Waiting for verified persistence and server audio deletion",
+  "liveQueuedTitle": "Recordings safely queued",
+  "liveQueuedDetail": "Waiting for the next processing step",
+  "liveIdleTitle": "NeoRecall is ready",
+  "liveIdleDetail": "No recording or processing is active",
+  "liveBytesQueued": "{size} queued",
+  "@liveBytesQueued": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "widgetIdleTitle": "Ready to record",
+  "widgetIdleDetail": "Nothing is capturing or waiting.",
+  "statusManualRetry": "A recording needs a manual upload retry.",
+  "statusUploadFailed": "A recording upload failed and will retry automatically.",
+  "statusOffline": "Offline — audio remains safely stored on this device.",
+  "statusWaitingForWifi": "Waiting for Wi‑Fi because mobile-data uploads are disabled.",
+  "watchDigestSent": "Today was sent to the watch.",
+  "watchCheckAgain": "Check again",
+  "watchTitle": "Record from your wrist",
+  "watchDescription": "The watch records on its own and holds every clip until this phone confirms it was transcribed and the server copy deleted. Today’s transcript, memories and commitments are sent back to the watch so they can be read without the phone.",
+  "watchLooking": "Looking for paired watches…",
+  "watchSending": "Sending…",
+  "watchSendToday": "Send today now",
+  "watchNotInstalled": "NeoRecall not installed",
+  "watchOutOfRange": "Installed · out of range",
+  "watchConnected": "Installed · connected",
+  "watchReady": "READY",
+  "watchSetUp": "SET UP",
+  "watchNonePaired": "No paired watch found. Pair the watch with this phone in the Wear OS app first — NeoRecall can only see watches Android has already paired.",
+  "watchInstallEyebrow": "Installing on the watch",
+  "watchInstallIntro": "NeoRecall for Wear OS ships as its own APK, signed with the same key as this app, and is sideloaded once. It is not on the Play Store, so the watch needs developer options turned on for the install and nothing after that.",
+  "watchStep1Title": "Download the watch APK",
+  "watchStep1Detail": "Take NeoRecall-WearOS-<version>.apk from the latest release, onto a computer that is on the same network as the watch.",
+  "watchReleasesLabel": "Releases",
+  "watchStep2Title": "Turn on wireless debugging on the watch",
+  "watchStep2Detail": "Settings → System → About → tap Build number seven times, then Settings → Developer options → ADB debugging and Wireless debugging. The watch shows its IP address there.",
+  "watchStep3Title": "Install it over Wi-Fi",
+  "watchStep3Detail": "From the computer holding the APK, with the watch IP from the previous step:",
+  "watchConnectLabel": "Connect",
+  "watchInstallLabel": "Install",
+  "watchStep4Title": "Open it once on the watch",
+  "watchStep4Detail": "Allow the microphone, and this page turns to Installed. Add the NeoRecall tiles by long-pressing the watch face, and the complications from the watch face editor.",
+  "watchInstallFootnote": "Developer options can be turned back off afterwards — the app stays installed and keeps working.",
+  "providerContinue": "Continue",
+  "providerChoose": "Choose a {workload} provider.",
+  "@providerChoose": {
+    "placeholders": {
+      "workload": {
+        "type": "String"
+      }
+    }
+  },
+  "providerNeedsBaseUrl": "{provider} needs a base URL.",
+  "@providerNeedsBaseUrl": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "providerSaved": "Saved. The server uses these services from now on.",
+  "providerLoadFailed": "The provider settings could not be loaded.",
+  "providerTryAgain": "Try again",
+  "providerIntro": "NeoRecall does the speech detection and speaker matching itself, but the words and the written memories come from services you choose.",
+  "providerTesting": "Testing…",
+  "providerSaving": "Saving…",
+  "providerSaveAndTest": "Save and test",
+  "providerSaveOnly": "Save only",
+  "providerSetUpLater": "Set these up later",
+  "providerKeyStored": "key stored",
+  "providerServiceLabel": "Service",
+  "providerBaseUrlLabel": "Base URL",
+  "providerApiKeyStoredLabel": "API key (leave empty to keep the stored one)",
+  "providerApiKeyLabel": "API key",
+  "providerModelOptionalLabel": "Model (optional)",
+  "providerModelLabel": "Model",
+  "providerFindModels": "Find models",
+  "providerLegTranscription": "Transcription",
+  "providerLegSpeakerIdentity": "Speaker identity",
+  "providerLegMemoryWriting": "Memory writing",
+  "providerTranscriptionSubtitle": "Turns recorded speech into words. Speaker identity stays on this machine.",
+  "providerMemorySubtitle": "Writes titles, summaries, and memories from the transcript.",
+  "installFailed": "NeoRecall setup could not finish: {error}",
+  "@installFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "installFailedShort": "NeoRecall setup could not finish.",
+  "actionBack": "Back",
+  "installEyebrow": "LOCAL SETUP",
+  "installIntro": "NeoRecall will be downloaded from GitHub, installed as a background service, and connected to this app. Both channels can be switched later.",
+  "installChannelStable": "Stable",
+  "installChannelStableDescription": "Released versions only. Recommended for daily use.",
+  "installChannelRecommended": "Recommended",
+  "installChannelBeta": "Beta",
+  "installChannelBetaDescription": "New features first, with the rough edges that come with them.",
+  "installDirectoryLabel": "Install directory",
+  "installMissingRequirements": "Install {items} on this computer first, then check again.",
+  "@installMissingRequirements": {
+    "placeholders": {
+      "items": {
+        "type": "String"
+      }
+    }
+  },
+  "installCheckAgain": "Check again",
+  "installStart": "Install the {channel} channel",
+  "@installStart": {
+    "placeholders": {
+      "channel": {
+        "type": "String"
+      }
+    }
+  },
+  "installPreparing": "Preparing NeoRecall…",
+  "installModelsNote": "The first install downloads about 165 MB of local models, so this can take a few minutes.",
+  "installDetails": "Setup details",
+  "installRunning": "NeoRecall is running{location}. One step left: choose the services that transcribe your recordings and write your memories.",
+  "@installRunning": {
+    "placeholders": {
+      "location": {
+        "type": "String"
+      }
+    }
+  },
+  "installLocationAt": " at {url}",
+  "@installLocationAt": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "installNoAdminKey": "This computer would not store the administrator key, so these services can be set up now but not changed from Settings later. The admin dashboard at /admin can still change them.",
+  "installCreateAccount": "Create your account",
+  "installDone": "NeoRecall is installed and running{version}.",
+  "@installDone": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "installVersionSuffix": " ({version})",
+  "@installVersionSuffix": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "installCliNotLinked": "The neorecall terminal command was not linked. NeoRecall runs anyway; run \"npm link\" in {directory} if you want the command.",
+  "@installCliNotLinked": {
+    "placeholders": {
+      "directory": {
+        "type": "String"
+      }
+    }
+  },
+  "installChooseServices": "Choose transcription and memory services",
+  "actionRetry": "Retry",
+  "installChangeOptions": "Change options",
+  "installTitle": "Set up NeoRecall on this computer",
+  "wifiPasswordLabel": "Network password",
+  "wifiShowPassword": "Show password",
+  "wifiHidePassword": "Hide password",
+  "wifiJoin": "Join",
+  "applianceOpen": "Open",
+  "applianceRecordingElapsed": "Recording · {elapsed}",
+  "@applianceRecordingElapsed": {
+    "placeholders": {
+      "elapsed": {
+        "type": "String"
+      }
+    }
+  },
+  "applianceRecording": "Recording",
+  "applianceNotSeenYet": "Not seen yet",
+  "applianceReady": "Ready",
+  "applianceLastSeenMinutes": "Last seen {minutes} minutes ago",
+  "@applianceLastSeenMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceLastSeenHours": "{hours, plural, =1{Last seen 1 hour ago} other{Last seen {hours} hours ago}}",
+  "@applianceLastSeenHours": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceLastSeenDays": "{days, plural, =1{Last seen 1 day ago} other{Last seen {days} days ago}}",
+  "@applianceLastSeenDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceConnecting": "Connecting…",
+  "applianceSettingsTooltip": "Device settings",
+  "applianceRecordingBadge": "RECORDING",
+  "applianceReadyBadge": "READY",
+  "applianceOutOfRangeBadge": "OUT OF RANGE",
+  "applianceOutOfRangeBody": "Out of range. This page shows what the device last reported. A recording already running is not affected — the device keeps recording and sending on its own.",
+  "applianceSoundEyebrow": "SOUND",
+  "appliancePlaysOutOf": "Plays out of",
+  "applianceSpeaker": "Speaker",
+  "applianceHeadphones": "Headphones",
+  "applianceRecordsWith": "Records with",
+  "applianceOwnMicrophones": "Its own microphones",
+  "applianceHeadset": "Headset",
+  "applianceHeadsetQualityNote": "While recording, what you hear drops in quality — that is how Bluetooth headsets work.",
+  "applianceHeadphonesEyebrow": "HEADPHONES",
+  "applianceLooking": "Looking…",
+  "applianceFind": "Find",
+  "applianceNoHeadphones": "No headphones yet. Put yours in pairing mode and tap Find.",
+  "applianceHeadphonePaired": "Paired",
+  "applianceHeadphoneInRange": "In range",
+  "applianceDisconnect": "Disconnect",
+  "applianceConnect": "Connect",
+  "applianceNotSetUp": "Not set up yet",
+  "applianceSending": "{count, plural, =1{Sending 1 recording} other{Sending {count} recordings}}",
+  "@applianceSending": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceWaitingToSend": "{count, plural, =1{1 recording waiting to be sent} other{{count} recordings waiting to be sent}}",
+  "@applianceWaitingToSend": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceReadyWithHeadset": "Ready · {headset}",
+  "@applianceReadyWithHeadset": {
+    "placeholders": {
+      "headset": {
+        "type": "String"
+      }
+    }
+  },
+  "applianceSettingsTitle": "Device settings",
+  "applianceNameEyebrow": "NAME",
+  "applianceNameHint": "Desk in the study",
+  "applianceNetworkEyebrow": "NETWORK",
+  "applianceChange": "Change",
+  "applianceNetworkOnline": "Connected. Recordings are sent when you stop recording.",
+  "applianceNetworkOffline": "Not connected. Recordings are kept on the device until it is.",
+  "applianceSoundCheckEyebrow": "SOUND CHECK",
+  "applianceSoundCheckLabel": "Have the device play a tone and listen for it.",
+  "applianceCheck": "Check",
+  "applianceSoftwareEyebrow": "SOFTWARE",
+  "applianceVersionUnknown": "Version unknown",
+  "applianceVersion": "Version {version}",
+  "@applianceVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "applianceCheckNow": "Check now",
+  "applianceAutoUpdateTitle": "Keep this device up to date",
+  "applianceAutoUpdateDescription": "Checks once a day and installs new versions by itself. It never interrupts a recording — an update waits until you have stopped.",
+  "applianceRemoveEyebrow": "REMOVE",
+  "applianceRemoveDescription": "Takes this device off your account. Recordings already sent stay in NeoRecall; anything still waiting on the device is lost.",
+  "applianceRemoveAction": "Remove this device",
+  "applianceRemoveTitle": "Remove this device?",
+  "applianceRemovePending": "{count, plural, =1{It still has 1 recording that has not been sent. Removing it now loses it.} other{It still has {count} recordings that have not been sent. Removing it now loses them.}}",
+  "@applianceRemovePending": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "applianceRemoveBody": "You can set it up again at any time by holding its button for five seconds.",
+  "applianceKeepIt": "Keep it",
+  "applianceBluetoothOff": "Turn Bluetooth on to set up a device.",
+  "applianceBluetoothUnsupported": "This device cannot use Bluetooth.",
+  "appliancePairFailed": "Could not pair. Hold the button on the device for five seconds until it beeps three times, then try again.",
+  "applianceNoAnswer": "The device did not answer. Check the network and try again.",
+  "applianceAddTitle": "Add a NeoRecall Desk",
+  "applianceLookingIntro": "Plug the device in and wait for its short rising tone. If it has been set up before, hold its button for five seconds first.",
+  "applianceNothingFound": "Nothing found yet",
+  "applianceNothingFoundMessage": "Hold the button on the device for five seconds, then look again.",
+  "applianceSetUpAction": "Set up",
+  "applianceLookAgain": "Look again",
+  "appliancePressButton": "Press the button on {device}",
+  "@appliancePressButton": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "applianceTheDevice": "the device",
+  "appliancePressButtonWhy": "The device has no screen, so pressing its button is how it knows the request came from someone standing next to it.",
+  "applianceLookingForNetworks": "Looking for networks…",
+  "applianceNoNetworks": "No networks found yet.",
+  "applianceSettingUp": "Setting the device up…",
+  "applianceSettingUpDetail": "It is joining your network and signing in.",
+  "applianceDoneTitle": "Ready",
+  "applianceDoneBody": "Choose \"{name}\" as the speaker and microphone on your computer, then press its button to record.",
+  "@applianceDoneBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "actionOk": "OK",
+  "watchCopyLabel": "Copy {label}",
+  "@watchCopyLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "backgroundRuntimeFailed": "Background runtime could not start: {error}",
+  "@backgroundRuntimeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "backgroundStatusFailed": "Background status could not be updated: {error}",
+  "@backgroundStatusFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "backgroundHostUnavailable": "Android background host is temporarily unavailable: {error}",
+  "@backgroundHostUnavailable": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  }
+}

@@ -21,7 +21,10 @@ void main() {
     expect(String.fromCharCodes(wav.sublist(36, 40)), 'data');
 
     int u32(int at) =>
-        wav[at] | (wav[at + 1] << 8) | (wav[at + 2] << 16) | (wav[at + 3] << 24);
+        wav[at] |
+        (wav[at + 1] << 8) |
+        (wav[at + 2] << 16) |
+        (wav[at + 3] << 24);
     int u16(int at) => wav[at] | (wav[at + 1] << 8);
     expect(u16(20), 1, reason: 'PCM format tag');
     expect(u16(22), 1, reason: 'mono');
@@ -30,18 +33,27 @@ void main() {
     expect(u32(40), 8, reason: 'data chunk size = PCM byte length');
     expect(wav.length, 44 + 8);
     // Payload survived round-trip.
-    expect(wav.sublist(44), <int>[0x10, 0x00, 0x20, 0x00, 0x30, 0x00, 0x40, 0x00]);
+    expect(wav.sublist(44), <int>[
+      0x10,
+      0x00,
+      0x20,
+      0x00,
+      0x30,
+      0x00,
+      0x40,
+      0x00,
+    ]);
     assembler.dispose();
   });
 
-  test('OfflineWavAssembler yields a header-only WAV when no audio decoded', () {
-    final assembler = OfflineWavAssembler(codec: WearableAudioCodec.pcm16);
-    final wav = assembler.toWav();
-    expect(wav.length, 44);
-    expect(
-      wav[40] | (wav[41] << 8) | (wav[42] << 16) | (wav[43] << 24),
-      0,
-    );
-    assembler.dispose();
-  });
+  test(
+    'OfflineWavAssembler yields a header-only WAV when no audio decoded',
+    () {
+      final assembler = OfflineWavAssembler(codec: WearableAudioCodec.pcm16);
+      final wav = assembler.toWav();
+      expect(wav.length, 44);
+      expect(wav[40] | (wav[41] << 8) | (wav[42] << 16) | (wav[43] << 24), 0);
+      assembler.dispose();
+    },
+  );
 }

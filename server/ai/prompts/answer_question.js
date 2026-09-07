@@ -9,7 +9,7 @@ function answerMessages(question, context, frame = {}) {
       role: 'system',
       content: [
         "Answer the user's question using only the supplied NeoRecall context.",
-        'Respond in the language used by the question.',
+        'Answer in the output language, whatever language the question or the context is in.',
         'The context is that user\'s own recorded life. Items of kind "memory", "mini_memory" and "daily_summary" are the written record: already sorted, dated and titled, and they are what you answer from. Items of kind "segment" are raw transcript speech — reach for them for exact wording, for who said what, or when the written record does not cover the question, and never prefer them to a memory that says the same thing.',
         'Each item carries the local time it happened, and nowLocal is the user\'s current local time — use them to place events relative to now and to order what you report.',
         'When the question asks what a period contained, report what the context actually holds for that period, most important first, and keep it to what a person would want read back to them.',

@@ -13,6 +13,7 @@ import '../devices/appliance/ui/appliance_capture_section.dart';
 import '../devices/audio_device_adapter.dart';
 import 'record_controls.dart';
 import 'sync_cards.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Everything the two sheets need from the Record screen.
 ///
@@ -122,7 +123,7 @@ class DeviceChip extends StatelessWidget {
           Icon(Icons.add_rounded, size: 17, color: palette.textSecondary),
           const SizedBox(width: 7),
           Text(
-            'Add device',
+            AppL10n.of(context).deviceAddDevice,
             style: TextStyle(
               color: palette.textSecondary,
               fontSize: 12.5,
@@ -138,7 +139,9 @@ class DeviceChip extends StatelessWidget {
           _DeviceGlyph(
             charge: battery == null ? null : battery / 100,
             connected: connected,
-            icon: showDesk ? Icons.speaker_group_outlined : Icons.mic_none_rounded,
+            icon: showDesk
+                ? Icons.speaker_group_outlined
+                : Icons.mic_none_rounded,
           ),
           const SizedBox(width: 9),
           Column(
@@ -164,8 +167,8 @@ class DeviceChip extends StatelessWidget {
                 battery != null
                     ? '$battery%'
                     : connected
-                    ? 'Connected'
-                    : 'Not connected',
+                    ? AppL10n.of(context).deviceConnected
+                    : AppL10n.of(context).deviceNotConnected,
                 style: monoMetricStyle(palette, size: 10),
               ),
             ],
@@ -177,8 +180,8 @@ class DeviceChip extends StatelessWidget {
     return Semantics(
       button: true,
       label: label == null
-          ? 'Add a device'
-          : 'Manage $label',
+          ? AppL10n.of(context).deviceAddDeviceSemantics
+          : AppL10n.of(context).deviceManageSemantics(label),
       child: Material(
         key: chipKey,
         color: palette.bgTertiary,
@@ -327,7 +330,9 @@ class _DeviceSheet extends StatelessWidget {
         final controller = actions.controller;
         final label = controller.preferredDeviceLabel;
         final connected = label != null && controller.deviceConnected;
-        final battery = connected ? controller.preferredDeviceBatteryLevel : null;
+        final battery = connected
+            ? controller.preferredDeviceBatteryLevel
+            : null;
         final desks = visibleAppliances(
           controller.devices,
           controller.appliance,
@@ -338,11 +343,13 @@ class _DeviceSheet extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text('No device yet', style: heroTitleStyle(palette, size: 18)),
+              Text(
+                AppL10n.of(context).deviceNoneTitle,
+                style: heroTitleStyle(palette, size: 18),
+              ),
               const SizedBox(height: 6),
               Text(
-                'NeoRecall records with the phone microphone until you connect '
-                'a wearable or set up a Desk.',
+                AppL10n.of(context).deviceNoneBody,
                 style: TextStyle(
                   color: palette.textMuted,
                   fontSize: 12.5,
@@ -362,8 +369,8 @@ class _DeviceSheet extends StatelessWidget {
                     : const Icon(Icons.bluetooth_searching_rounded, size: 18),
                 label: Text(
                   controller.scanningWearables
-                      ? 'Scanning…'
-                      : 'Scan for wearables',
+                      ? AppL10n.of(context).deviceScanning
+                      : AppL10n.of(context).deviceScanForWearables,
                 ),
               ),
               const SizedBox(height: AppSpacing.xs),
@@ -375,7 +382,7 @@ class _DeviceSheet extends StatelessWidget {
                   size: 18,
                   color: palette.textMuted,
                 ),
-                title: 'Set up a NeoRecall Desk',
+                title: AppL10n.of(context).deviceSetUpDesk,
                 trailing: const RowChevron(),
                 onTap: () {
                   Navigator.of(context).pop();
@@ -419,8 +426,8 @@ class _DeviceSheet extends StatelessWidget {
                           Flexible(
                             child: Text(
                               connected
-                                  ? 'Connected'
-                                  : 'Remembered — not connected right now',
+                                  ? AppL10n.of(context).deviceConnected
+                                  : AppL10n.of(context).deviceRemembered,
                               style: TextStyle(
                                 color: palette.textSecondary,
                                 fontSize: 12.5,
@@ -439,7 +446,7 @@ class _DeviceSheet extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: _Stat(
-                    label: 'Battery',
+                    label: AppL10n.of(context).deviceStatBattery,
                     value: battery == null ? '—' : '$battery',
                     unit: battery == null ? null : '%',
                   ),
@@ -447,22 +454,22 @@ class _DeviceSheet extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _Stat(
-                    label: 'Synced',
+                    label: AppL10n.of(context).deviceStatSynced,
                     value: '${controller.deviceStorageSyncedCount}',
-                    unit: 'recordings',
+                    unit: AppL10n.of(context).deviceStatSyncedUnit,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _Stat(
-                    label: 'Left',
+                    label: AppL10n.of(context).deviceStatLeft,
                     value: progress == null || progress.pendingSeconds <= 0
                         ? '0'
                         : DeviceSyncStatusView.formatDuration(
                             progress.pendingSeconds,
                           ),
                     unit: progress == null || progress.pendingSeconds <= 0
-                        ? 'queued'
+                        ? AppL10n.of(context).deviceStatQueued
                         : null,
                   ),
                 ),
@@ -473,12 +480,8 @@ class _DeviceSheet extends StatelessWidget {
               const SizedBox(height: AppSpacing.md),
               Text(
                 controller.preferredDeviceStreamsLive
-                    ? 'This device can record on its own as well. Anything it '
-                          'captured while you were away syncs here when it '
-                          'connects, or you can pull it now.'
-                    : 'This device records on its own — press record and stop '
-                          'on the device itself. Recordings sync here when it '
-                          'connects, or you can pull them now.',
+                    ? AppL10n.of(context).deviceOfflineFirstStreams
+                    : AppL10n.of(context).deviceOfflineFirstOnly,
                 style: TextStyle(
                   color: palette.textSecondary,
                   fontSize: 12.5,
@@ -488,11 +491,9 @@ class _DeviceSheet extends StatelessWidget {
             ],
             if (stranded) ...<Widget>[
               const SizedBox(height: AppSpacing.md),
-              const InlineMessage(
+              InlineMessage(
                 icon: Icons.cloud_off_rounded,
-                message:
-                    'The device has recordings but no Wi-Fi. They can move to '
-                    'this phone over Bluetooth and upload from here later.',
+                message: AppL10n.of(context).deviceStranded,
               ),
             ],
             // What the transfer is actually doing. An indeterminate spinner
@@ -516,8 +517,8 @@ class _DeviceSheet extends StatelessWidget {
                     : const Icon(Icons.download_rounded, size: 18),
                 label: Text(
                   controller.deviceStorageSyncing
-                      ? 'Moving recordings…'
-                      : 'Move recordings to this phone',
+                      ? AppL10n.of(context).deviceMovingRecordings
+                      : AppL10n.of(context).deviceMoveRecordings,
                 ),
               ),
             ],
@@ -537,7 +538,7 @@ class _DeviceSheet extends StatelessWidget {
                 size: 18,
                 color: palette.textMuted,
               ),
-              title: 'Scan for another wearable',
+              title: AppL10n.of(context).deviceScanAnother,
               trailing: const RowChevron(),
               onTap: controller.scanningWearables
                   ? null
@@ -553,7 +554,7 @@ class _DeviceSheet extends StatelessWidget {
                 size: 18,
                 color: palette.textMuted,
               ),
-              title: 'Device and sync diagnostics',
+              title: AppL10n.of(context).deviceDiagnostics,
               trailing: const RowChevron(),
               onTap: () {
                 Navigator.of(context).pop();
@@ -568,7 +569,7 @@ class _DeviceSheet extends StatelessWidget {
                 size: 18,
                 color: palette.danger,
               ),
-              title: 'Forget this device',
+              title: AppL10n.of(context).deviceForget,
               onTap: controller.isRecording
                   ? null
                   : () {
@@ -584,7 +585,7 @@ class _DeviceSheet extends StatelessWidget {
                   size: 18,
                   color: palette.textMuted,
                 ),
-                title: 'Set up a NeoRecall Desk',
+                title: AppL10n.of(context).deviceSetUpDesk,
                 trailing: const RowChevron(),
                 onTap: () {
                   Navigator.of(context).pop();
@@ -729,13 +730,15 @@ class _SourceSheetState extends State<_SourceSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text('Record from', style: heroTitleStyle(palette, size: 18)),
+            Text(
+              AppL10n.of(context).sourceRecordFrom,
+              style: heroTitleStyle(palette, size: 18),
+            ),
             const SizedBox(height: 6),
             Text(
               locked
-                  ? 'The source is locked while a recording is running.'
-                  : 'Only one source records at a time. The choice sticks '
-                        'until you change it.',
+                  ? AppL10n.of(context).sourceLockedWhileRecording
+                  : AppL10n.of(context).sourceOneAtATime,
               style: TextStyle(
                 color: palette.textMuted,
                 fontSize: 12.5,
@@ -746,19 +749,22 @@ class _SourceSheetState extends State<_SourceSheet> {
 
             _SourceOptionTile(
               icon: Icons.smartphone_rounded,
-              title: actions.isMobile ? 'Phone microphone' : 'This computer',
+              title: actions.isMobile
+                  ? AppL10n.of(context).recordSourcePhoneMicrophone
+                  : AppL10n.of(context).sourceThisComputer,
               subtitle: actions.isMobile
-                  ? 'Always available, nothing to connect'
-                  : 'Microphone, and system audio if you want it',
+                  ? AppL10n.of(context).sourcePhoneSubtitle
+                  : AppL10n.of(context).sourceComputerSubtitle,
               selected: _selected == CaptureSource.phone,
               onTap: locked ? null : () => _select(CaptureSource.phone),
             ),
             // Desktop and web can mix inputs, so the two toggles belong to the
             // phone option rather than to the list.
-            if (!actions.isMobile && _selected == CaptureSource.phone) ...<Widget>[
+            if (!actions.isMobile &&
+                _selected == CaptureSource.phone) ...<Widget>[
               const SizedBox(height: 4),
               _InputToggle(
-                label: 'Microphone',
+                label: AppL10n.of(context).recordSourceMicrophone,
                 value: _microphone,
                 onChanged: locked
                     ? null
@@ -766,8 +772,8 @@ class _SourceSheetState extends State<_SourceSheet> {
               ),
               _InputToggle(
                 label: actions.isDesktop
-                    ? 'Device audio — everything this machine plays'
-                    : 'Tab or system audio',
+                    ? AppL10n.of(context).sourceDeviceAudioDesktop
+                    : AppL10n.of(context).sourceTabOrSystemAudio,
                 value: _systemAudio,
                 onChanged: locked
                     ? null
@@ -778,19 +784,26 @@ class _SourceSheetState extends State<_SourceSheet> {
 
             _SourceOptionTile(
               icon: Icons.bluetooth_rounded,
-              title: deviceLabel ?? 'Wearable',
+              title: deviceLabel ?? AppL10n.of(context).recordSourceWearable,
               subtitle: deviceLabel == null
-                  ? 'No wearable connected yet'
+                  ? AppL10n.of(context).sourceNoWearable
                   : controller.deviceConnected
-                  ? 'Connected${controller.preferredDeviceBatteryLevel == null ? '' : ' · ${controller.preferredDeviceBatteryLevel}%'}'
-                  : 'Remembered — not connected right now',
+                  ? (controller.preferredDeviceBatteryLevel == null
+                        ? AppL10n.of(context).deviceConnected
+                        : AppL10n.of(context).sourceConnectedWithBattery(
+                            controller.preferredDeviceBatteryLevel!,
+                          ))
+                  : AppL10n.of(context).deviceRemembered,
               selected: _selected == CaptureSource.wearable,
               enabled: deviceLabel != null,
               trailingAction: deviceLabel == null
-                  ? (label: 'Scan', onTap: () {
-                      Navigator.of(context).pop();
-                      unawaited(actions.onScan());
-                    })
+                  ? (
+                      label: AppL10n.of(context).sourceScan,
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        unawaited(actions.onScan());
+                      },
+                    )
                   : null,
               onTap: locked || deviceLabel == null
                   ? null
@@ -803,14 +816,17 @@ class _SourceSheetState extends State<_SourceSheet> {
             if (desks.isEmpty)
               _SourceOptionTile(
                 icon: Icons.speaker_group_outlined,
-                title: 'NeoRecall Desk',
-                subtitle: 'Not set up',
+                title: AppL10n.of(context).recordSourceDesk,
+                subtitle: AppL10n.of(context).sourceDeskNotSetUp,
                 selected: false,
                 enabled: false,
-                trailingAction: (label: 'Set up', onTap: () {
-                  Navigator.of(context).pop();
-                  unawaited(actions.onAddDesk());
-                }),
+                trailingAction: (
+                  label: AppL10n.of(context).sourceSetUp,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    unawaited(actions.onAddDesk());
+                  },
+                ),
                 onTap: null,
               )
             else
@@ -819,7 +835,7 @@ class _SourceSheetState extends State<_SourceSheet> {
                 _SourceOptionTile(
                   icon: Icons.speaker_group_outlined,
                   title: applianceName(desks[index]),
-                  subtitle: 'Records the room on its own',
+                  subtitle: AppL10n.of(context).sourceDeskSubtitle,
                   selected:
                       _selected == CaptureSource.desk &&
                       actions.selectedDeskId == desks[index]['id'],
@@ -836,21 +852,22 @@ class _SourceSheetState extends State<_SourceSheet> {
             // something; an empty list is not a section.
             if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
               const SizedBox(height: AppSpacing.md + 2),
-              const SectionLabel(label: 'Found nearby'),
+              SectionLabel(label: AppL10n.of(context).sourceFoundNearby),
               for (final device in controller.discoveredWearables)
                 HairlineRow(
                   minHeight: 52,
                   title: device.displayName,
-                  subtitle:
-                      '${device.metadata['type'] ?? 'wearable'} · ready for audio',
+                  subtitle: AppL10n.of(context).sourceReadyForAudio(
+                    '${device.metadata['type'] ?? AppL10n.of(context).sourceWearableFallback}',
+                  ),
                   trailing: TextButton(
                     onPressed: locked
                         ? null
                         : () => unawaited(actions.onConnectDevice(device)),
                     child: Text(
                       controller.preferredDeviceLabel == device.displayName
-                          ? 'Reconnect'
-                          : 'Connect',
+                          ? AppL10n.of(context).sourceReconnect
+                          : AppL10n.of(context).sourceConnect,
                     ),
                   ),
                 ),
@@ -866,7 +883,7 @@ class _SourceSheetState extends State<_SourceSheet> {
                 size: 18,
                 color: palette.textMuted,
               ),
-              title: 'Import an audio file',
+              title: AppL10n.of(context).sourceImportAudio,
               trailing: const RowChevron(),
               onTap: controller.loading
                   ? null
@@ -877,8 +894,7 @@ class _SourceSheetState extends State<_SourceSheet> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Recording privately spoken words may require everyone’s consent. '
-              'NeoRecall never hides that it is recording.',
+              AppL10n.of(context).sourceConsentNote,
               style: TextStyle(
                 color: palette.textMuted,
                 fontSize: 11.5,
@@ -888,8 +904,7 @@ class _SourceSheetState extends State<_SourceSheet> {
             if (kIsWeb) ...<Widget>[
               const SizedBox(height: AppSpacing.xs),
               Text(
-                'The browser opens its own Bluetooth chooser, and capture '
-                'continues only while this tab stays active.',
+                AppL10n.of(context).sourceWebBluetoothNote,
                 style: TextStyle(
                   color: palette.textMuted,
                   fontSize: 11.5,

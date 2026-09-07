@@ -159,9 +159,7 @@ class UniversalGattTransport implements GattTransport {
   @override
   Stream<GattAvailability> get availabilityChanges {
     if (kIsWeb) return const Stream<GattAvailability>.empty();
-    return UniversalBle.availabilityStream
-        .map(_mapAvailability)
-        .distinct();
+    return UniversalBle.availabilityStream.map(_mapAvailability).distinct();
   }
 
   @override

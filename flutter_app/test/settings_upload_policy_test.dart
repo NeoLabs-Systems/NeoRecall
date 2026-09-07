@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_settings.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   testWidgets('Wi-Fi-only switch applies immediately without page Save', (
@@ -16,6 +17,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: Scaffold(
           body: SettingsScreen(
@@ -58,6 +61,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: Scaffold(
           body: SettingsScreen(
