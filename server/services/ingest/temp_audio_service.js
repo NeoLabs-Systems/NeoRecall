@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('temp-audio');
@@ -24,9 +25,28 @@ function unlinkStrict(file) {
   }
 }
 
+// Conditioned copies that outlived the job that made them. Nothing references
+// these from the database — the inference host deletes its own in a finally
+// block and again on exit — so the only way one survives is a hard kill, and
+// the only safe rule is age: nothing legitimately lives past a single
+// transcription deadline.
+function sweepDerived(audioWork) {
+  const maximumAgeMs = getConfig().transcriptionTimeoutMs + 60_000;
+  let removed = 0;
+  for (const entry of fs.readdirSync(audioWork, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.resolve(audioWork, entry.name);
+    if (Date.now() - fs.statSync(file).mtimeMs > maximumAgeMs) {
+      unlinkStrict(file);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function sweep() {
   const db = getDatabase();
-  const { audioTmp } = ensureRuntimeDirs();
+  const { audioTmp, audioWork } = ensureRuntimeDirs();
   const referenced = new Set(db.prepare('SELECT temporary_path FROM audio_chunks WHERE temporary_path IS NOT NULL').all().map((row) => path.resolve(row.temporary_path)));
   let removed = 0;
   for (const entry of fs.readdirSync(audioTmp, { withFileTypes: true })) {
@@ -38,6 +58,7 @@ function sweep() {
       removed += 1;
     }
   }
+  removed += sweepDerived(audioWork);
   const pending = db.prepare("SELECT id,temporary_path FROM audio_chunks WHERE state='persisted_cleanup_pending'").all();
   for (const chunk of pending) {
     const fullChunk = db.prepare('SELECT * FROM audio_chunks WHERE id=?').get(chunk.id);
@@ -51,4 +72,4 @@ function sweep() {
   return removed;
 }
 
-module.exports = { incomingPath, chunkPath, unlinkStrict, sweep };
+module.exports = { incomingPath, chunkPath, unlinkStrict, sweep, sweepDerived };

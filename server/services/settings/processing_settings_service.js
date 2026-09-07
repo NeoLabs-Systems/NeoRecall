@@ -18,6 +18,14 @@ const schema = z.object({
   speakerClusterMargin: z.number().min(0).max(2).optional(),
   speakerContinuityGapMs: z.number().int().min(0).max(60_000).optional(),
   speakerClusterContinuityThreshold: z.number().min(-1).max(1).optional(),
+  // Audio conditioning. Only the values worth changing without a restart: a
+  // switch to stop it outright on a live system, and the two knobs that decide
+  // how hard it acts. Which normalizer and which output format are deployment
+  // decisions, and stay in the environment.
+  audioPreprocessEnabled: z.boolean().optional(),
+  audioPreprocessHighpassHz: z.number().int().min(0).max(300).optional(),
+  audioPreprocessDenoiseDb: z.number().min(0.01).max(97).optional(),
+  audioPreprocessMaxGain: z.number().min(1).max(100).optional(),
   dedupeTokenSimilarity: z.number().min(0).max(1).optional(),
   dedupeTimeToleranceMs: z.number().int().min(0).max(30_000).optional(),
   transcriptRepetitionMinimumRepeats: z.number().int().min(3).max(1_000).optional(),

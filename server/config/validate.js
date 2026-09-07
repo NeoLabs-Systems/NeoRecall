@@ -22,6 +22,12 @@ function validateConfig(config, { promptReserveTokens }) {
   if (config.conversationPreviewMinCharacters > config.conversationMaximumCharacters) {
     throw new Error('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS must not exceed NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS.');
   }
+  // A conditioning step that outlives the request it prepares audio for would
+  // hold a worker past the point where the transcription attempt has already
+  // been abandoned.
+  if (config.audioPreprocessTimeoutMs > config.transcriptionTimeoutMs) {
+    throw new Error('NEORECALL_AUDIO_PREPROCESS_TIMEOUT_MS must not exceed TRANSCRIPTION_REQUEST_TIMEOUT_MS.');
+  }
   // An output budget the context cannot also hold a prompt beside would leave
   // nothing to send. Caught at startup, where it is a one-line fix, rather than
   // as a scheduler exception on the first conversation of the day.

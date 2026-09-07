@@ -120,14 +120,31 @@ recording, and drains stored files over a separate notify characteristic.
 
 ## Processing pipeline
 
-Each independently decodable audio chunk is first read locally. A 640 KB
-voice-activity detector decides whether it contains speech at all — if it does
+Before it is transcribed, the chunk is conditioned: a short ffmpeg
+filter chain removes rumble and any DC offset, applies gentle spectral
+denoising, normalizes the level, and resamples to 16 kHz behind a limiter.
+It is ordinary signal processing with no notion of language in it, so it helps
+every language the same way, and it exists because the recordings arrive from
+pocket wearables, meeting bots and imported files tens of decibels apart. Every
+stage is sample-count and channel-count exact by design — the diarization turns,
+the transcript timestamps and the speaker previews cut later from the original
+chunk all describe one timeline, and a filter that added or removed samples
+would slide them apart with nothing to notice it. Conditioning never fails a
+chunk: any error falls back to the original bytes, and the derived copy is
+deleted when the request that needed it ends.
+
+The local pass reads the recording as it arrived rather than the conditioned
+copy. Conditioning helps a transcription service and measurably hurts the
+segmentation and speaker-embedding models, which were trained on unprocessed
+speech; because conditioning does not move the timeline, the two passes can read
+different files and still describe the same recording. A 640 KB voice-activity
+detector decides whether it contains speech at all — if it does
 not, the chunk is silence, no request is made, and the receipt is terminal
 without anything leaving the machine. When there is speech, a diarization model
 and a speaker-embedding model produce speaker turns with a voice fingerprint
 each.
 
-The chunk is then sent unchanged to the configured transcription service.
+The conditioned chunk is sent to the configured transcription service.
 OpenAI-compatible endpoints receive multipart form data with a `file` field plus
 the configured `model`, `language`, and `response_format` fields; native Deepgram
 and AssemblyAI adapters normalize their responses into the same timestamped

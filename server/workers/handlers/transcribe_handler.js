@@ -273,8 +273,10 @@ async function handle(job, inference) {
   const inferenceStartedAt = process.hrtime.bigint();
   const userSettings = settings.get(chunk.user_id);
   const vocabulary = settings.transcriptionVocabulary(chunk.user_id);
+  let preprocess = null;
   const inferredSegments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
-    vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled });
+    durationMs: chunk.duration_ms, vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled },
+  { onDiagnostics: (message) => { preprocess = message.preprocess; } });
   const quality = transcriptQuality.compactSegments(inferredSegments, processingSettings.get());
   const segments = quality.segments;
   if (quality.changedSegments) logger.warn('Compacted degenerate ASR repetition', {
@@ -293,8 +295,16 @@ async function handle(job, inference) {
     speakers: new Set(segments.map((segment) => segment.diarizationSpeaker).filter((value) => value !== null && value !== undefined)).size,
   });
   const inferenceSeconds = Number(process.hrtime.bigint() - inferenceStartedAt) / 1e9;
+  const audioSeconds = chunk.duration_ms / 1000;
   db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
-    VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));
+    VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / audioSeconds);
+  // Recorded separately from the pipeline total, which already contains it, so
+  // "conditioning became expensive" stays distinguishable from "the
+  // transcription service became slow".
+  if (preprocess?.seconds && audioSeconds > 0) {
+    db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
+      VALUES (?,?,'audio_preprocess_rtf',?,'ratio')`).run(job.id, chunk.user_id, preprocess.seconds / audioSeconds);
+  }
   const count = persistSegments(chunk, segments);
   captureSpeakerPreviews(chunk, count);
   if (count && userSettings.recurringSpeakerMatching) {

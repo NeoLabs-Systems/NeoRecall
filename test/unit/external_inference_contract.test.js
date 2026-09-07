@@ -19,6 +19,20 @@ test('NeoRecall exposes no in-process LLM or transcription provider', () => {
     'nothing that recognizes speech or generates text may be a hard dependency');
 });
 
+test('audio conditioning stays inside what already ships', () => {
+  // Conditioning is deliberately built from the ffmpeg binary the project
+  // already depends on. The moment it reaches for a native audio library it
+  // becomes a platform requirement for transcription, which is the thing this
+  // whole file exists to prevent.
+  const source = fs.readFileSync(path.join(__dirname, '../../server/transcription/audio_preprocess.js'), 'utf8');
+  const required = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]);
+  assert.deepEqual(
+    required.filter((name) => !name.startsWith('node:') && !name.startsWith('.') && name !== 'ffmpeg-static'),
+    [],
+    'audio conditioning may only use node built-ins, ffmpeg-static and local modules',
+  );
+});
+
 test('speaker resolution degrades to nothing rather than failing without the audio runtime', () => {
   // The native runtime is optional, so an installation without it must still
   // transcribe — just with no speaker on the segments. Every job type added for

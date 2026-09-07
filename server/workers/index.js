@@ -34,6 +34,8 @@ function spawnInferenceHost() {
     }
     const entry = pending.get(message.requestId);
     if (!entry) return;
+    // Progress notes about a request still in flight, not its answer.
+    if (message.type === 'diagnostics') { entry.onDiagnostics?.(message); return; }
     pending.delete(message.requestId);
     if (message.type === 'result') entry.resolve(message.segments);
     else entry.reject(Object.assign(new Error(message.error.message), message.error));
@@ -53,14 +55,14 @@ function spawnInferenceHost() {
     timer.unref();
   });
 }
-function inference(input) {
+function inference(input, { onDiagnostics } = {}) {
   return new Promise((resolve, reject) => {
     if (!child || !child.connected) {
       reject(Object.assign(new Error('Inference host unavailable.'), { code: 'INFERENCE_HOST_EXITED' }));
       return;
     }
     const requestId = crypto.randomUUID();
-    pending.set(requestId, { resolve, reject });
+    pending.set(requestId, { resolve, reject, onDiagnostics });
     child.send({ type: 'transcribe', requestId, input }, (err) => {
       if (err) { pending.delete(requestId); reject(Object.assign(err, { code: 'INFERENCE_HOST_EXITED' })); }
     });
@@ -78,6 +80,25 @@ try {
   logger.info('Inference providers', require('../services/settings/provider_settings_service').describeForLog());
 } catch (error) {
   logger.warn('Could not read the inference provider configuration', { error: error.message });
+}
+// Conditioning the audio that diarization hears changes the conditions a voice
+// is measured under. Voices enrolled before this was switched on were measured
+// without it, so the two are no longer directly comparable and a familiar
+// person can start reading as somebody new. Said once, at start-up, and only
+// when there is actually something already enrolled to be affected.
+try {
+  const { getConfig } = require('../config');
+  if (getConfig().audioPreprocessTarget === 'stt+analysis') {
+    const enrolled = require('../db/database').getDatabase().prepare('SELECT COUNT(*) count FROM voiceprints').get().count;
+    if (enrolled) {
+      logger.warn('Conditioned audio now also feeds speaker detection, and these voices were learned without it', {
+        enrolledVoices: enrolled,
+        remedy: 'Run the Speakers screen\'s re-detect once so recent recordings are resolved under the same conditions, or set NEORECALL_AUDIO_PREPROCESS_TARGET=stt to keep speaker detection on the original audio.',
+      });
+    }
+  }
+} catch (error) {
+  logger.warn('Could not check enrolled voices against the audio conditioning mode', { error: error.message });
 }
 
 runner.run({ inference, isInferenceReady: () => inferenceReady, signal: controller.signal })

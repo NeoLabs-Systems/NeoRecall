@@ -1,33 +1,64 @@
 'use strict';
 
 const { getProvider } = require('../transcription/provider_registry');
+const audioPreprocess = require('../transcription/audio_preprocess');
 const localAnalysis = require('../transcription/local_analysis');
 const { alignSegments } = require('../transcription/speaker_alignment');
+const { getConfig } = require('../config');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('inference-host');
 
 // Turns one chunk of audio into transcript segments that know who was speaking.
-// Runs local VAD/diarization first so silent chunks are never sent to the
-// transcription service, then joins the returned segments to the local speaker
-// turns by timestamp overlap. The native runtime and models are optional; without
-// them the chunk is still transcribed, just without a speaker.
-async function transcribe(input) {
-  const analysis = localAnalysis.analyze(input.filename);
-  if (!analysis.hasSpeech) return [];
-  const segments = await getProvider().transcribe({
-    filename: input.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
-    vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
+// Conditions the audio first, then runs local VAD/diarization so silent chunks
+// are never sent to the transcription service, then joins the returned segments
+// to the local speaker turns by timestamp overlap. Conditioning, the native
+// runtime and the models are all optional; without any of them the chunk is
+// still transcribed, just from the original bytes and without a speaker.
+//
+// Conditioning is duration-preserving by construction, which is what lets the
+// speaker turns measured here still describe the original recording — the
+// speaker previews cut later read that original file.
+async function transcribe(input, report = () => {}) {
+  const prepared = audioPreprocess.prepare(input.filename, {
+    channelLayout: input.channelLayout, durationMs: input.durationMs,
   });
-  if (!analysis.analyzed || !analysis.turns.length) return segments;
-  return alignSegments(segments, analysis.turns);
+  report({ seconds: prepared.seconds, applied: prepared.applied, fellBack: prepared.fellBack });
+  try {
+    // Speaker detection reads the original recording by default. Conditioning
+    // helps a transcription service and hurts the local audio models, which
+    // were trained on unprocessed speech and read the low frequencies a
+    // high-pass removes as part of who is talking. See
+    // docs/docs/configuration.md.
+    const analysisFile = getConfig().audioPreprocessTarget === 'stt+analysis' ? prepared.filename : input.filename;
+    const analysis = localAnalysis.analyze(analysisFile);
+    if (!analysis.hasSpeech) return [];
+    if (prepared.applied.length) {
+      logger.info('Conditioned audio before transcription', {
+        applied: prepared.applied, seconds: Number(prepared.seconds.toFixed(3)),
+        inputLufs: prepared.inputLufs, outputLufs: prepared.outputLufs,
+      });
+    }
+    const segments = await getProvider().transcribe({
+      filename: prepared.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
+      vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
+    });
+    if (!analysis.analyzed || !analysis.turns.length) return segments;
+    return alignSegments(segments, analysis.turns);
+  } finally {
+    // The single deletion point, and it has to stay one: derived audio must not
+    // outlive the request that needed it.
+    prepared.cleanup();
+  }
 }
 
 if (require.main === module) {
   process.on('message', async (message) => {
     if (!message || message.type !== 'transcribe') return;
     try {
-      const segments = await transcribe(message.input);
+      const segments = await transcribe(message.input, (preprocess) => {
+        process.send?.({ type: 'diagnostics', requestId: message.requestId, preprocess });
+      });
       process.send?.({ type: 'result', requestId: message.requestId, segments });
     } catch (error) {
       logger.error('Inference request failed', { error });

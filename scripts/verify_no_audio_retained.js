@@ -15,6 +15,13 @@ function main() {
   const files = fs.readdirSync(runtime.audioTmp, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => require('node:path').join(runtime.audioTmp, entry.name));
   const unreferenced = files.filter((file) => !referenced.has(file));
   if (unreferenced.length) throw new Error(`Unreferenced temporary audio remains: ${unreferenced.join(', ')}`);
+  // Conditioned copies live only for the length of one inference request, so
+  // anything still here is audio the machine failed to let go of.
+  const derived = fs.readdirSync(runtime.audioWork, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => require('node:path').join(runtime.audioWork, entry.name))
+    .filter((file) => Date.now() - fs.statSync(file).mtimeMs > 60_000);
+  if (derived.length) throw new Error(`Derived preprocessing audio remains: ${derived.join(', ')}`);
   const audioBlobs = db.prepare(`SELECT COUNT(*) count FROM audio_chunks
     WHERE typeof(temporary_path)='blob' OR typeof(transcript_sha256)='blob'`).get().count;
   if (audioBlobs) throw new Error('Audio chunk metadata contains an unexpected BLOB.');

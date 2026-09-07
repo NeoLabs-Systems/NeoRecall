@@ -1,6 +1,6 @@
 'use strict';
 
-const { integer, number, boolean, jsonObject } = require('./config/env');
+const { integer, number, boolean, enumeration, jsonObject } = require('./config/env');
 const { validateConfig } = require('./config/validate');
 
 
@@ -90,6 +90,66 @@ function buildConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
+    // Audio conditioning before inference. A short ffmpeg filter chain that
+    // levels and cleans a chunk so the transcription service hears the same
+    // recording under better conditions. Pure signal processing: no language is
+    // assumed anywhere in it, so it helps every language the same way.
+    //
+    // Every stage is sample-count exact. That is not a preference but the
+    // condition the rest of the pipeline rests on: diarization turns, segment
+    // timestamps and the speaker previews cut from the original chunk all
+    // describe one timeline, and a filter that added or removed samples would
+    // shift them apart silently. Nothing that trims, gates or stretches belongs
+    // in this chain.
+    audioPreprocessEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_ENABLED', true),
+    // Which passes read the conditioned audio. The transcription service only,
+    // by default, and that default is measured rather than cautious: the
+    // segmentation and speaker-embedding models were trained on unprocessed
+    // recordings, and on the two-speaker fixture in test/fixtures every
+    // conditioned variant separated the voices worse than the raw audio did —
+    // the high-pass alone merged both people into one speaker, because a voice's
+    // identity partly lives in the low frequencies it removes. 'stt+analysis'
+    // feeds them the conditioned audio too; see docs/docs/configuration.md
+    // before setting it.
+    audioPreprocessTarget: enumeration('NEORECALL_AUDIO_PREPROCESS_TARGET', 'stt', ['stt', 'stt+analysis']),
+    // Rumble, handling noise and mains hum live below speech. No language
+    // carries meaning down there, so removing it is free accuracy; it also
+    // removes any DC offset the capture device introduced. 0 disables the stage.
+    audioPreprocessHighpassHz: integer('NEORECALL_AUDIO_PREPROCESS_HIGHPASS_HZ', 70, { min: 0, max: 300 }),
+    // Spectral denoising, deliberately gentle. Aggressive noise reduction
+    // smooths the onset of plosives and fricatives, which is exactly the detail
+    // an acoustic model reads; 6 dB against a low noise floor cleans a hissy
+    // room without eroding consonants. Raise it only for consistently noisy
+    // recordings, and measure the transcripts afterwards.
+    audioPreprocessDenoiseEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_DENOISE_ENABLED', true),
+    audioPreprocessDenoiseDb: number('NEORECALL_AUDIO_PREPROCESS_DENOISE_DB', 6, { min: 0.01, max: 97 }),
+    audioPreprocessDenoiseFloorDb: number('NEORECALL_AUDIO_PREPROCESS_DENOISE_FLOOR_DB', -40, { min: -80, max: -20 }),
+    // Level normalization. A pocket wearable and a desk microphone arrive tens
+    // of decibels apart, and quiet audio is where transcription degrades first.
+    // 'dynaudnorm' is the default because it costs almost nothing; 'loudnorm'
+    // is the broadcast-correct answer at roughly ten times the CPU, since it
+    // upsamples internally for true-peak measurement.
+    audioPreprocessNormalizer: enumeration('NEORECALL_AUDIO_PREPROCESS_NORMALIZER', 'dynaudnorm', ['dynaudnorm', 'loudnorm', 'speechnorm', 'off']),
+    // Ceiling on how much a quiet passage may be lifted, so a near-silent room's
+    // noise floor is never amplified into something that looks like speech.
+    audioPreprocessMaxGain: number('NEORECALL_AUDIO_PREPROCESS_MAX_GAIN', 8, { min: 1, max: 100 }),
+    // Only read when the normalizer is 'loudnorm'.
+    audioPreprocessTargetLufs: number('NEORECALL_AUDIO_PREPROCESS_TARGET_LUFS', -18, { min: -40, max: -5 }),
+    audioPreprocessTruePeakDb: number('NEORECALL_AUDIO_PREPROCESS_TRUE_PEAK_DB', -2, { min: -9, max: 0 }),
+    // Clipping is the one way normalization can make transcription worse, so
+    // the chain ends behind a limiter.
+    audioPreprocessLimiterEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_LIMITER_ENABLED', true),
+    audioPreprocessLimiterPeak: number('NEORECALL_AUDIO_PREPROCESS_LIMITER_PEAK', 0.95, { min: 0.0625, max: 1 }),
+    // Every transcription service resamples to 16 kHz internally, so arriving
+    // there already is not a loss, and it makes the upload predictable.
+    audioPreprocessSampleRate: integer('NEORECALL_AUDIO_PREPROCESS_SAMPLE_RATE', 16_000, { min: 8_000, max: 48_000 }),
+    // 'flac' is lossless at roughly half the bytes, for a metered uplink.
+    audioPreprocessFormat: enumeration('NEORECALL_AUDIO_PREPROCESS_FORMAT', 'wav', ['wav', 'flac']),
+    audioPreprocessTimeoutMs: integer('NEORECALL_AUDIO_PREPROCESS_TIMEOUT_MS', 120_000, { min: 1_000, max: 600_000 }),
+    // Conditioning is proportional to length, and an unexpectedly long import
+    // should reach the transcription service rather than sit in ffmpeg. 0 lifts
+    // the cap.
+    audioPreprocessMaxDurationMs: integer('NEORECALL_AUDIO_PREPROCESS_MAX_DURATION_MS', 1_800_000, { min: 0, max: 86_400_000 }),
     customVocabularyMaxTerms: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS', 100, { min: 1, max: 1_000 }),
     customVocabularyMaxTermLength: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH', 120, { min: 1, max: 500 }),
     vocabularyCorrectionMinimumLength: integer('NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH', 8, { min: 4, max: 100 }),

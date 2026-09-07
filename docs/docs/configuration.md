@@ -129,6 +129,85 @@ Previews never create memories; consolidation replaces the insight and marks it 
 
 `NEORECALL_IMPORT_SESSION_CONTINUITY_MS` is how large a gap may be between two imports from one device before they stop counting as the same recording stream. It has to comfortably exceed the client's device-sync poll and its failure backoff.
 
+## Audio conditioning
+
+Recordings reach the server from pocket wearables with millimetre microphones,
+from meeting bots, from Discord and from files somebody imported, and they
+arrive tens of decibels apart with whatever rumble and hiss the room
+contributed. Before anything listens to a chunk, a short ffmpeg filter chain
+levels and cleans it. It is ordinary signal processing — a high-pass, gentle
+spectral denoising, level normalization, a limiter — and none of it knows which
+language is being spoken, so it helps every language the same way.
+
+Nothing in the chain changes how long the recording is. That is not a
+preference: speaker turns, transcript timestamps and the voice previews cut
+later from the original chunk all describe one timeline, and a stage that added
+or removed audio would slide them apart silently. Nothing that trims, gates or
+stretches belongs here.
+
+If conditioning fails for any reason — an unreadable chunk, a missing filter, a
+deadline — the original recording is transcribed instead and a warning is
+logged. The worst this feature can do is nothing.
+
+`NEORECALL_AUDIO_PREPROCESS_ENABLED=false` turns it off entirely.
+
+`NEORECALL_AUDIO_PREPROCESS_HIGHPASS_HZ` (70 Hz) removes rumble, handling noise
+and any DC offset the capture device introduced; no language carries meaning
+that low. 0 disables the stage.
+
+`NEORECALL_AUDIO_PREPROCESS_DENOISE_DB` (6 dB) is deliberately gentle. Strong
+noise reduction smooths the onset of plosives and fricatives, which is exactly
+the detail an acoustic model reads, so it can cost more accuracy than the noise
+did. Raise it only for consistently noisy recordings, and compare the
+transcripts afterwards. `NEORECALL_AUDIO_PREPROCESS_DENOISE_ENABLED=false`
+removes the stage.
+
+`NEORECALL_AUDIO_PREPROCESS_NORMALIZER` decides how the level is evened out.
+`dynaudnorm` is the default and costs almost nothing. `loudnorm` is the
+broadcast-correct answer and roughly ten times more expensive, because it
+resamples internally to measure true peaks; it is also the only mode that
+reports the loudness it measured, which the log then carries.
+`speechnorm` is more aggressive and lifts the noise between words along with the
+speech. `off` leaves levels alone. `NEORECALL_AUDIO_PREPROCESS_MAX_GAIN` caps
+how far a quiet passage may be lifted, so a near-silent room's noise floor is
+never amplified into something that looks like speech.
+
+`NEORECALL_AUDIO_PREPROCESS_FORMAT=flac` roughly halves what is uploaded, at no
+loss, for a metered connection — conditioned audio is uncompressed by default,
+which is several times the size of the Opus a wearable sends.
+`NEORECALL_AUDIO_PREPROCESS_MAX_DURATION_MS` sends unusually long recordings
+straight to the service instead of holding them in ffmpeg.
+
+`audioPreprocessEnabled`, `audioPreprocessHighpassHz`, `audioPreprocessDenoiseDb`
+and `audioPreprocessMaxGain` are also processing settings, so they can be
+changed on a running server without a restart.
+
+### Speaker detection reads the original recording
+
+`NEORECALL_AUDIO_PREPROCESS_TARGET` decides which passes hear the conditioned
+audio. The default, `stt`, gives it only to the transcription service; speech
+detection and speaker identity keep reading the recording as it arrived.
+
+That default is a measurement, not caution. The segmentation and
+speaker-embedding models were trained on unprocessed speech, and on the
+two-speaker test fixture every conditioned variant separated the voices worse
+than the raw audio did. The high-pass on its own was the most damaging: it
+merged both people into a single speaker, because part of what distinguishes one
+voice from another lives in exactly the low frequencies it removes. Conditioning
+helps a transcription service and hurts these models, so each gets the audio it
+does better with — which is safe only because conditioning does not move the
+timeline, so both passes still describe the same recording.
+
+`stt+analysis` gives the conditioned audio to all of them. There is a second
+cost to it beyond the above: a voice fingerprint is only comparable to one taken
+under the same conditions, so people enrolled before the switch can start reading
+as somebody new. The server says so once at start-up when it finds enrolled
+voices, and the Speakers screen's re-detect re-resolves recent recordings under
+the current conditions and folds duplicate profiles back together.
+
+If you do try it, compare the speaker labels on a recording you know before
+leaving it on.
+
 ## Speech detection and speaker identity
 
 These two run on the audio itself, in the NeoRecall process, and they are the
