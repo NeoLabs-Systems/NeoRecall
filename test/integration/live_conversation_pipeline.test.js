@@ -19,6 +19,7 @@ process.env.NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS = '0';
 const { createApp } = require('../../server/app');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
 const boundaryHandler = require('../../server/workers/handlers/boundary_handler');
+const resolveSpeakersHandler = require('../../server/workers/handlers/resolve_speakers_handler');
 const insights = require('../../server/services/conversations/conversation_insight_service');
 const consolidation = require('../../server/services/memories/consolidation_service');
 const processingSettings = require('../../server/services/settings/processing_settings_service');
@@ -60,6 +61,21 @@ async function recordingUser(username) {
 
 /// Appends one fully transcribed chunk with its segments, as the transcribe
 /// handler would once a chunk reaches a terminal state.
+// Closing a conversation queues a speaker re-resolution, and consolidation
+// deliberately waits for it so the model never reads labels that are about to
+// change. A worker drains that queue in a running server; these tests drive the
+// pipeline by hand and so have to drain it themselves.
+async function settleSpeakerResolution(userId) {
+  const db = getDatabase();
+  const pending = db.prepare(`SELECT * FROM jobs WHERE type='resolve_speakers' AND user_id=?
+    AND status IN ('queued','leased')`).all(userId);
+  for (const job of pending) {
+    await resolveSpeakersHandler.handle(job);
+    db.prepare(`UPDATE jobs SET status='completed',completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id=?`).run(job.id);
+  }
+}
+
 function appendChunk({ userId, sessionId, sourceId }, sequence, segments) {
   const db = getDatabase();
   const chunkId = crypto.randomUUID();
@@ -192,6 +208,7 @@ test('a conversation the model cannot partition is isolated and then quarantined
   appendChunk(recording, 1, [{ startedAt: iso(-3_600_000), endedAt: iso(-3_500_000), text: 'Zweite abgeschlossene Konversation mit genug Inhalt.' }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
+  await settleSpeakerResolution(recording.userId);
   const [older, newer] = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
   assert.ok(older && newer && older !== newer);
   // Narrowing is only observable when a run is allowed to carry more than one
@@ -233,6 +250,7 @@ test('the audio floor is off by default and still enforced when an operator sets
   appendChunk(recording, 0, [{ startedAt: iso(-3_650_000), endedAt: iso(-3_600_000), text: 'Kurze Notiz. '.repeat(400) }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
+  await settleSpeakerResolution(recording.userId);
 
   const conversation = db.prepare('SELECT * FROM conversations WHERE user_id=?').get(recording.userId);
   assert.equal(Date.parse(conversation.ended_at) - Date.parse(conversation.started_at), 50_000);

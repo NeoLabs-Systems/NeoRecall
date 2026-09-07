@@ -25,6 +25,7 @@ const schema = z.object({
   contextOriginalRetentionDays: z.number().int().min(1).max(365).optional(),
   keepRawAudio: z.boolean().optional(),
   vocabularyCorrectionEnabled: z.boolean().optional(),
+  deferredSpeakerResolution: z.boolean().optional(),
 });
 
 const keyMap = Object.freeze({
@@ -38,6 +39,7 @@ const keyMap = Object.freeze({
   contextOriginalRetentionDays: 'context_original_retention_days',
   keepRawAudio: 'keep_raw_audio',
   vocabularyCorrectionEnabled: 'vocabulary_correction_enabled',
+  deferredSpeakerResolution: 'deferred_speaker_resolution',
 });
 
 // Column name back to API name, so reading a row is a lookup rather than a
@@ -64,6 +66,10 @@ function defaults() {
     contextOriginalRetentionDays: 7,
     keepRawAudio: true,
     vocabularyCorrectionEnabled: true,
+  // Re-resolving a finished conversation's speakers is a correction, not a
+  // feature: without it a voice too briefly heard in any single chunk never
+  // attaches to a person and every cluster keeps its own Speaker N.
+  deferredSpeakerResolution: true,
   };
 }
 

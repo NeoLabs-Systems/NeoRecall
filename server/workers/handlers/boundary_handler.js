@@ -3,6 +3,7 @@
 const { getDatabase } = require('../../db/database');
 const processingSettings = require('../../services/settings/processing_settings_service');
 const boundary = require('../../services/conversations/boundary_service');
+const jobs = require('../../services/jobs/job_service');
 const membership = require('../../services/conversations/conversation_membership_service');
 const vectors = require('../../transcription/speaker_embeddings');
 const { createLogger } = require('../../utils/logger');
@@ -19,6 +20,30 @@ function blocksForSegments(database, segments) {
       characterCount: segment.text.length,
     };
   });
+}
+
+// Asks for a conversation's speakers to be re-resolved now that it is finished.
+//
+// Enqueued inside the same transaction that closes the conversation, because
+// consolidation decides what to work on from a scheduler tick and would
+// otherwise be free to pick the conversation up in the gap between the two
+// writes — reading provisional speaker labels that were about to be corrected.
+// The unique index on (type, resource_id) collapses repeats, so re-detection
+// running again over the same conversation costs nothing.
+//
+// Derived work must never be the reason a conversation fails to close, so a
+// queue that refuses the job is logged and forgotten; the next boundary pass
+// over the same conversation will try again.
+function requestSpeakerResolution(database, userId, conversationId) {
+  try {
+    jobs.enqueue({
+      userId, resourceType: 'conversation', resourceId: conversationId, type: 'resolve_speakers', priority: 30,
+    }, database);
+  } catch (error) {
+    logger.warn('Could not queue speaker resolution for a closed conversation', {
+      userId, conversationId, errorCode: error.code || 'SPEAKER_RESOLUTION_ENQUEUE_FAILED', error,
+    });
+  }
 }
 
 const BOUNDARY_METHOD = 'time-context-embedding';
@@ -45,6 +70,7 @@ function persistGroup(database, userId, group, state, { inheritId = null, charac
   }
   membership.assignSegments(database, userId, id, group.segmentIds);
   membership.rebuildConversationSpeakers(database, userId, id);
+  if (state === 'closed') requestSpeakerResolution(database, userId, id);
   return id;
 }
 
@@ -98,8 +124,20 @@ async function handle(job) {
       // any more, so remove the empty shell rather than leave it open forever.
       if (open && !anchorClaimed) db.prepare('DELETE FROM conversations WHERE id=? AND user_id=?').run(open.id, job.user_id);
     }
-    closed = db.prepare(`UPDATE conversations SET state='closed',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE user_id=? AND state='open' AND ended_at<=?`).run(job.user_id, new Date(Date.now() - config.conversationQuietCloseMs).toISOString()).changes;
+    // The sweep that closes a conversation nothing is feeding any more. Its ids
+    // are selected before the update rather than after, because once the state
+    // has changed there is no longer anything that distinguishes the rows this
+    // pass closed from those closed earlier — and each one needs its speakers
+    // re-resolved.
+    const quietBefore = new Date(Date.now() - config.conversationQuietCloseMs).toISOString();
+    const stale = db.prepare(`SELECT id FROM conversations
+      WHERE user_id=? AND state='open' AND ended_at<=?`).all(job.user_id, quietBefore).map((row) => row.id);
+    for (const conversationId of stale) {
+      db.prepare(`UPDATE conversations SET state='closed',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id=? AND user_id=?`).run(conversationId, job.user_id);
+      requestSpeakerResolution(db, job.user_id, conversationId);
+    }
+    closed = stale.length;
   })();
   // Only when something moved. Boundary detection runs whenever new speech
   // arrives and usually has nothing to do, so an unconditional line would say

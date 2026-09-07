@@ -31,13 +31,17 @@ function mergeClusters(database, { userId, target, source }) {
   const affectedConversations = database.prepare(`SELECT DISTINCT conversation_id FROM transcript_segments
     WHERE user_id=? AND conversation_id IS NOT NULL AND speaker_cluster_id IN (?,?)`)
     .all(userId, target.id, source.id).map((row) => row.conversation_id);
-  const targetCentroid = vectors.fromBuffer(target.centroid_embedding);
-  const sourceCentroid = vectors.fromBuffer(source.centroid_embedding);
+  // Directions, not raw vectors, for the reason updateCentroid gives: magnitude
+  // tracks loudness rather than identity, so an un-normalized merge lets the
+  // louder of the two halves decide where the surviving voice sits.
+  const targetCentroid = vectors.normalize(vectors.fromBuffer(target.centroid_embedding));
+  const sourceCentroid = vectors.normalize(vectors.fromBuffer(source.centroid_embedding));
   const total = target.sample_count + source.sample_count;
-  const centroid = new Float32Array(targetCentroid.length);
-  for (let i = 0; i < centroid.length; i += 1) {
-    centroid[i] = (targetCentroid[i] * target.sample_count + sourceCentroid[i] * source.sample_count) / total;
+  const merged = new Float32Array(targetCentroid.length);
+  for (let i = 0; i < merged.length; i += 1) {
+    merged[i] = (targetCentroid[i] * target.sample_count + sourceCentroid[i] * source.sample_count) / total;
   }
+  const centroid = vectors.normalize(merged);
   database.prepare('UPDATE transcript_segments SET speaker_cluster_id=? WHERE speaker_cluster_id=? AND user_id=?').run(target.id, source.id, userId);
   database.prepare('UPDATE speaker_turns SET cluster_id=? WHERE cluster_id=? AND user_id=?').run(target.id, source.id, userId);
   // A conversation may already list both halves; the primary key forbids a
@@ -89,6 +93,17 @@ function collapseSessionClustersByVoiceprint(database, { userId, sessionId }) {
   return merged;
 }
 
+// Mints a session-scoped voice. Ordinals number the voices heard in one
+// recording, so they are allocated here and nowhere else.
+function createCluster(database, { userId, sessionId, embedding }) {
+  const ordinal = database.prepare('SELECT COALESCE(MAX(local_ordinal),0)+1 ordinal FROM speaker_clusters WHERE session_id=?').get(sessionId).ordinal;
+  const id = crypto.randomUUID();
+  database.prepare(`INSERT INTO speaker_clusters
+    (id,user_id,session_id,local_ordinal,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
+    VALUES (?,?,?,?,?,?,?,1)`).run(id, userId, sessionId, ordinal, storeVector(embedding), modelName, embedding.length);
+  return database.prepare('SELECT * FROM speaker_clusters WHERE id=?').get(id);
+}
+
 // Resolves the speaker cluster (a session-scoped voice identity) an embedding
 // belongs to, creating one if none matches confidently. `continuity` lets the
 // cluster active at the end of the previous chunk win at a relaxed bar, so a
@@ -128,12 +143,7 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
   }
   if (!cluster) {
     if (!reliable) return null;
-    const ordinal = database.prepare('SELECT COALESCE(MAX(local_ordinal),0)+1 ordinal FROM speaker_clusters WHERE session_id=?').get(sessionId).ordinal;
-    const id = crypto.randomUUID();
-    database.prepare(`INSERT INTO speaker_clusters
-      (id,user_id,session_id,local_ordinal,centroid_embedding,embedding_model,embedding_dimensions,sample_count)
-      VALUES (?,?,?,?,?,?,?,1)`).run(id, userId, sessionId, ordinal, storeVector(embedding), modelName, embedding.length);
-    return database.prepare('SELECT * FROM speaker_clusters WHERE id=?').get(id);
+    return createCluster(database, { userId, sessionId, embedding });
   }
   if (!reliable) return cluster;
   const centroid = vectors.updateCentroid(vectors.fromBuffer(cluster.centroid_embedding), cluster.sample_count, embedding);
@@ -143,7 +153,19 @@ function resolveCluster(database, { userId, sessionId, embedding, continuity = n
 }
 
 // Updates an enrolled voice with a fresh sample and returns the stored row.
-function reinforce(database, voiceprint, embedding) {
+//
+// Reinforcement is not automatic, because the caller's reason for picking this
+// voice is not always evidence about the voice. A cluster carries whatever turns
+// were assigned to it, including a few from a bad early match, and following
+// that assignment blindly walks a named person's centroid toward somebody else
+// one sample at a time, with nothing to stop it. A sample the profile does not
+// even faintly resemble still gets the profile's label — the cluster's history
+// is the better evidence there — but it does not get to move it.
+function reinforce(database, voiceprint, embedding, { minimumScore = null } = {}) {
+  if (minimumScore !== null) {
+    const current = voiceprintStorage.readCentroid(voiceprint.centroid_embedding);
+    if (vectors.cosine(current, embedding) < minimumScore) return voiceprint;
+  }
   const centroid = vectors.updateCentroid(voiceprintStorage.readCentroid(voiceprint.centroid_embedding), voiceprint.sample_count, embedding);
   const sealed = voiceprintStorage.sealCentroid(centroid);
   database.prepare(`UPDATE voiceprints SET centroid_embedding=?,sample_count=sample_count+1,
@@ -174,17 +196,25 @@ function reinforce(database, voiceprint, embedding) {
 // The previous rule enrolled on every one of those but the first, which made
 // duplicates self-amplifying: once someone had two profiles, their next chunk
 // scored alike against both, read as contested, and minted a third.
-function resolveVoiceprint(database, { userId, clusterId, embedding, enabled, speechMs = null }) {
+// `excluded` names voices this embedding is already known not to be — a caller
+// that has independent evidence of difference, such as two speakers heard
+// talking over each other, and must not have that evidence undone one level
+// down by matching them to the same person anyway.
+function resolveVoiceprint(database, { userId, clusterId, embedding, enabled, speechMs = null, excluded = null }) {
   if (!enabled) return null;
+  const config = processingSettings.get();
+  const forbidden = excluded && excluded.size ? excluded : null;
   const assigned = clusterId ? stickyVoiceprintForCluster(database, { userId, clusterId }) : null;
-  if (assigned) return reinforce(database, assigned, embedding);
+  if (assigned && !(forbidden && forbidden.has(assigned.id))) {
+    return reinforce(database, assigned, embedding, { minimumScore: config.voiceEnrollFloor });
+  }
   const rows = database.prepare('SELECT * FROM voiceprints WHERE user_id=? AND matching_enabled=1 AND embedding_model=? AND embedding_dimensions=?')
-    .all(userId, modelName, embedding.length);
+    .all(userId, modelName, embedding.length)
+    .filter((row) => !(forbidden && forbidden.has(row.id)));
   // Voiceprint centroids are sealed at rest. Ranking the ciphertext as a
   // vector scores every enrolled voice at -1 and mints a duplicate.
   const ranked = voiceprintStorage.rankVoiceprints(embedding, rows);
   const best = ranked[0]; const runnerUp = ranked[1];
-  const config = processingSettings.get();
   if (best && best.score >= config.voiceMatchThreshold) {
     const contested = runnerUp && runnerUp.score < config.voiceMatchThreshold
       && best.score - runnerUp.score < config.voiceMatchMargin;
@@ -204,6 +234,6 @@ function resolveVoiceprint(database, { userId, clusterId, embedding, enabled, sp
 }
 
 module.exports = {
-  resolveCluster, resolveVoiceprint, stickyVoiceprintForCluster, mergeClusters,
+  resolveCluster, createCluster, resolveVoiceprint, stickyVoiceprintForCluster, mergeClusters,
   collapseSessionClustersByVoiceprint, modelName,
 };

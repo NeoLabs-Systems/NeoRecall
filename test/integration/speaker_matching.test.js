@@ -485,7 +485,7 @@ test('a named speaker is never merged into a differently named one', () => {
   const service = require('../../server/services/speakers/speaker_service');
   const config = limits();
   const rows = [
-    { id: 'a', display_name: 'Frank', entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
+    { id: 'a', display_name: 'Mara', entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
       centroid_embedding: voiceprintStorage.sealCentroid(new Float32Array([1, 0])) },
     { id: 'b', display_name: 'Anna', entity_id: null, sample_count: 4, embedding_model: matching.modelName, embedding_dimensions: 2,
       centroid_embedding: voiceprintStorage.sealCentroid(centroidWithSimilarity(0.99)) },

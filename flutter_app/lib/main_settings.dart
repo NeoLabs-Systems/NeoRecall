@@ -140,6 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'consolidationIntervalMs': current['consolidationIntervalMs'],
       'timezone': current['timezone'],
       'recurringSpeakerMatching': current['recurringSpeakerMatching'],
+      'deferredSpeakerResolution': current['deferredSpeakerResolution'],
       'diarizationEnabled': current['diarizationEnabled'],
       'chunkTargetMs': current['chunkTargetMs'],
       'chunkOverlapMs': current['chunkOverlapMs'],
@@ -921,6 +922,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: const Text('Recurring speaker matching'),
               subtitle: const Text(
                 'Match known voiceprints across recordings.',
+              ),
+            ),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value:
+                  available &&
+                  (current['deferredSpeakerResolution'] as bool? ?? true),
+              onChanged: available
+                  ? (value) => setState(
+                      () => current['deferredSpeakerResolution'] = value,
+                    )
+                  : null,
+              title: const Text('Review speakers when a conversation ends'),
+              subtitle: const Text(
+                'Look again at who spoke once the whole conversation can be heard, '
+                'so one person is not listed several times. Speaker labels may '
+                'change shortly after a recording finishes.',
               ),
             ),
           ],

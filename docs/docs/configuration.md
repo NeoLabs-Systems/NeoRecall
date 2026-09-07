@@ -316,6 +316,101 @@ if different people are being merged, raise it. Note that
 points the other way — it is a distance, so raising it yields fewer speakers. They
 were one setting until they were found to be pulling in opposite directions.
 
+### When the recording already knows who is speaking
+
+Everything above is inference, and inference is what produces the same person
+twice. Some recordings never needed it. A capture path that receives a separate
+stream per participant is *told* whose stream it is, and working that out again
+from the sound of the voice is both slower and worse than the fact it was handed.
+
+Any source can say so, in the metadata it already sends when it registers:
+
+```json
+{ "speaker": { "key": "chat:1234", "name": "Mara" } }
+```
+
+`key` is opaque and scoped to the user — namespace it (`"<source>:<id>"`) so two
+sources cannot collide. Nothing in the server knows what produced a key, and no
+integration is named anywhere in that path: a source that knows, says so, and one
+that does not says nothing and is matched acoustically exactly as before. This is
+why it works the same for a chat bot, a per-participant recorder, or a client
+that simply knows it is one person's headset.
+
+A declared stream skips voice matching entirely. The person is resolved first and
+the recording-local voice follows from them, which prevents two failures rather
+than repairing them: one person cannot split into several labels however badly a
+fingerprint was measured, and two people who happen to sound alike cannot collapse
+into one. `name` only ever fills a gap — it is stored as `inferred`, so a name the
+user sets, or one consolidation reads out of a self-introduction, always wins.
+
+The second benefit is larger than the first. A declared stream is *labelled
+speech*, which acoustic matching never gets, so the profile it builds is correct
+by construction — and that profile is then what recognises the same person on a
+room microphone or a pendant, where nothing is declared. Fingerprinting is
+withheld for any chunk that turned out to carry more than one voice: the stream
+still belongs to the person it names, so their label stands, but a second person
+audible behind an open microphone must not be learned as them.
+
+`npm run speakers:report` shows how many profiles were identified this way rather
+than by voice. A high share is the cheapest accuracy an installation can have.
+
+### Looking again once the conversation ends
+
+Everything above decides who is speaking from one chunk of audio at a time,
+because while a recording is running that is all there is. Two costs follow. A
+voice re-segmented at a chunk boundary can drift below the matching bar and start
+a second identity; and a fingerprint pooled from a few seconds is often too
+little speech to enroll anyone at all, so its turns attach to no durable person —
+and with nothing to group them by, each cluster keeps its own `Speaker N`. That
+is the "one person, three labels" complaint, and neither cost is a threshold that
+could be tuned away. Both are consequences of having to decide early.
+
+When a conversation closes, that constraint is gone: every voice in it is on the
+table, and the speech behind each one is conversation-scale rather than
+chunk-scale, which clears the enrollment floor per-chunk speech usually cannot.
+Closing therefore queues one pass that re-asks the question with the whole
+conversation in view. It groups the conversation's voices by average-linkage
+similarity at `NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD`, refusing any pair
+heard speaking over each other on the same recording — the one thing that proves
+two voices are two people — and any pair already carrying different names the
+user set. Then it resolves each group to a person once, with all of its speech
+behind the decision. Turned off per user with **Review speakers when a
+conversation ends**; `NEORECALL_SPEAKER_REDETECT_DAYS` (default `30`) bounds how
+far back the Speakers screen's re-detect re-runs it.
+
+Labels can therefore change shortly after a recording finishes. That is safe
+because of when it happens: consolidation only ever reads conversations that have
+closed, and is held back from any conversation still waiting on this pass, so
+corrections land before the model reads a speaker label rather than contradicting
+something already written. Clusters are folded together only within one
+recording session — `speaker_clusters` is unique on its session and the live
+resolver looks a cluster up by session, so a row moved out of its own session
+would become invisible to the recording still producing it, which would mint a
+replacement every chunk. The same voice heard in two sessions is given the same
+voiceprint instead, which collapses the label just as well and destroys nothing.
+
+Reconciling duplicate profiles is queued rather than run inline for the same
+reason it exists at all: it compares every enrolled voice against every other one
+inside a transaction, and doing that once per chunk put the cost on the path that
+has audio waiting to be deleted and a receipt waiting to be issued.
+
+A conversation queues its own resolution when it closes, so on a healthy server
+nothing else is needed. Because nothing otherwise ever revisits a closed
+conversation, hourly maintenance also sweeps for conversations that finished but
+still contain speech belonging to no durable person — the state this pass exists
+to correct — and queues those. That covers a worker that was down at the wrong
+moment, a job that ran out of attempts, and conversations recorded before any of
+this existed. Both the sweep and re-detect are capped per run so an upgrade turns
+into a steady backlog rather than a stall; whatever is not queued this hour is
+queued the next, since the condition stays true until the pass has actually run.
+
+`npm run speakers:report` prints what this actually looks like on an
+installation — how many profiles are duplicates of each other, how much speech
+carries no durable identity, and where the similarity scores really fall.
+Thresholds here were chosen against a two-speaker measurement, which is a guess
+about anybody else's recordings; run the report before changing one and again
+afterwards.
+
 Consolidation then identifies people from the transcript — a self-introduction,
 or another speaker naming them — and names that speaker's voiceprint from the
 same response, at no extra request. It never overwrites a name set by hand.

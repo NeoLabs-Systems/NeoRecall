@@ -132,6 +132,11 @@ function buildConfig() {
     // below voiceMatchThreshold — it is what lets the Speakers screen's re-detect
     // repair duplicates that ordinary matching can never reach.
     voiceRepairThreshold: number('NEORECALL_VOICE_REPAIR_THRESHOLD', 0.50, { min: -1, max: 1 }),
+    // How far back the Speakers screen's re-detect re-resolves conversations.
+    // Bounded because the user is waiting on the response: a year of recordings
+    // would be a request that never returns, and the recent past is where a
+    // wrongly split speaker is still worth correcting on screen.
+    speakerRedetectDays: integer('NEORECALL_SPEAKER_REDETECT_DAYS', 30, { min: 1, max: 3650 }),
     // Distance for grouping voices inside one chunk; a larger value merges more.
     // A separate setting from speakerClusterThreshold below: this is a distance
     // (higher = fewer speakers), that is a similarity (higher = more speakers).

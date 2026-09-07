@@ -45,6 +45,7 @@
     "load:backlog": "node scripts/load_backlog.js",
     "verify:models": "node scripts/verify_models.js",
     "verify:no-audio": "node scripts/verify_no_audio_retained.js",
+    "speakers:report": "node scripts/speaker_report.js",
     "flutter:test": "cd flutter_app && flutter test",
     "flutter:analyze": "cd flutter_app && flutter analyze",
     "build:web": "cd flutter_app && flutter build web --release --base-href /app/",

@@ -14,6 +14,8 @@ function handlerFor(type) {
   if (['cleanup_chunk_audio', 'sweep_temp_audio'].includes(type)) return require('./handlers/cleanup_handler');
   if (type === 'embed_search_documents') return require('./handlers/embed_handler');
   if (type === 'detect_boundaries') return require('./handlers/boundary_handler');
+  if (type === 'resolve_speakers') return require('./handlers/resolve_speakers_handler');
+  if (type === 'reconcile_speakers') return require('./handlers/reconcile_speakers_handler');
   if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
   if (type === 'rewrite_merged_memory') return require('./handlers/memory_merge_handler');

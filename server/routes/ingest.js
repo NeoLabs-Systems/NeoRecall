@@ -24,7 +24,18 @@ router.use(requireAuth, requireScope('ingest:write'));
 const sourceSchema = z.object({
   id: z.string().uuid().optional(), clientUuid: z.string().min(8).max(128), kind: z.enum(['microphone', 'system', 'combined', 'import', 'wearable']),
   channelLayout: z.string().min(1).max(80), sampleRate: z.number().int().positive().max(384000),
-  sampleFormat: z.string().min(1).max(40), metadata: z.record(z.unknown()).optional(),
+  sampleFormat: z.string().min(1).max(40),
+  // Free-form, with one key this server understands. A source that already knows
+  // whose voice it is carrying declares it here, and speaker identity is taken
+  // from that rather than worked out from the sound. `key` is opaque and scoped
+  // to the user — namespace it ("<source>:<id>") so two sources cannot collide.
+  // `name` is only a starting suggestion and never overwrites a name already set.
+  metadata: z.record(z.unknown()).and(z.object({
+    speaker: z.object({
+      key: z.string().min(1).max(200),
+      name: z.string().min(1).max(120).nullish(),
+    }).optional(),
+  })).optional(),
 });
 router.post('/sessions', validate(z.object({
   id: z.string().uuid().optional(), deviceId: z.string().uuid(), clientUuid: z.string().min(8).max(128), startedAt: z.string().datetime(),

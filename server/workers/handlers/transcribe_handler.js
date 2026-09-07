@@ -13,6 +13,7 @@ const deduper = require('../../transcription/token_deduper');
 const transcriptQuality = require('../../transcription/transcript_quality');
 const matching = require('../../transcription/speaker_matching');
 const speakerPreviews = require('../../services/speakers/speaker_preview_service');
+const sourceIdentity = require('../../speakers/source_identity');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('transcribe-handler');
@@ -139,6 +140,13 @@ function persistSegments(chunk, inferred) {
     const speakerCache = new Map();
     const continuity = boundaryContinuity(db, chunk);
     const recurringMatching = settings.get(chunk.user_id).recurringSpeakerMatching;
+    // Whether this recording already knows whose voice it carries. Almost no
+    // source does; the ones that do make every acoustic decision below moot.
+    const declared = sourceIdentity.declaredSpeaker(db, chunk.source_id);
+    // A declaration says whose stream this is. If the chunk turned out to hold
+    // more than one voice, somebody else was audible on it — still that person's
+    // stream, so the label stands, but not evidence of what they sound like.
+    const exclusive = new Set(clean.map((segment) => segment.diarizationSpeaker)).size <= 1;
     const insertSegment = db.prepare(`INSERT INTO transcript_segments
       (public_id,user_id,chunk_id,speaker_cluster_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text,language,asr_confidence,speaker_confidence,overlapping_speech)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -152,20 +160,38 @@ function persistSegments(chunk, inferred) {
         let resolved = speakerCache.get(key);
         if (!resolved) {
           const embedding = segment.speakerEmbedding instanceof Float32Array ? segment.speakerEmbedding : new Float32Array(Object.values(segment.speakerEmbedding));
-          const anchor = continuity.get(segment.sourceComponent || 'combined');
-          const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
-          cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
-            continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null,
-            // The pooled speech behind the fingerprint when diarization supplied
-            // it, falling back to this segment's own length.
-            durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
-          // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
-          voiceprint = cluster
-            ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching,
-              // Enrolling a person is permanent, so it is gated on the same
-              // pooled speech the fingerprint was actually measured from.
-              speechMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) })
-            : null;
+          if (declared) {
+            // Nothing acoustic runs. Matching exists to answer a question this
+            // recording already answered, and re-deriving it from the audio can
+            // only be wrong more often than the source that was there. The person
+            // is resolved first, and the recording-local voice follows from them
+            // — the reverse of the anonymous path below, where the voice has to
+            // be found before there is any hope of naming who it belongs to.
+            voiceprint = sourceIdentity.reinforceDeclared(
+              db,
+              sourceIdentity.voiceprintForKey(db, { userId: chunk.user_id, ...declared }),
+              embedding,
+              { exclusive },
+            );
+            cluster = sourceIdentity.clusterForDeclared(db, {
+              userId: chunk.user_id, sessionId: chunk.session_id, voiceprintId: voiceprint.id, embedding,
+            });
+          } else {
+            const anchor = continuity.get(segment.sourceComponent || 'combined');
+            const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
+            cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
+              continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null,
+              // The pooled speech behind the fingerprint when diarization supplied
+              // it, falling back to this segment's own length.
+              durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
+            // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
+            voiceprint = cluster
+              ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching,
+                // Enrolling a person is permanent, so it is gated on the same
+                // pooled speech the fingerprint was actually measured from.
+                speechMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) })
+              : null;
+          }
           resolved = { cluster, voiceprint, embedding };
           speakerCache.set(key, resolved);
         } else ({ cluster, voiceprint } = resolved);
@@ -260,14 +286,19 @@ async function handle(job, inference) {
   captureSpeakerPreviews(chunk, count);
   if (count && userSettings.recurringSpeakerMatching) {
     try {
-      const result = require('../../services/speakers/speaker_service').reevaluate(chunk.user_id);
-      if (result.mergedCount) logger.info('Reconciled recurring speaker profiles', {
-        userId: chunk.user_id, merged: result.mergedCount, remaining: result.remainingCount,
-      });
+      // Queued rather than run here. Reconciliation compares every enrolled
+      // voice against every other inside a transaction, and running it once per
+      // chunk put that cost on the path that has audio waiting to be deleted and
+      // a receipt waiting to be issued. Keyed on the user, the queue's unique
+      // index collapses a recording's worth of requests into one pass.
+      jobs.enqueue({
+        userId: chunk.user_id, resourceType: 'user', resourceId: chunk.user_id,
+        type: 'reconcile_speakers', priority: 5,
+      }, db);
     } catch (error) {
       // Identity cleanup is derived state. It must never prevent audio deletion
       // and the terminal receipt after transcript persistence has succeeded.
-      logger.warn('Recurring speaker reconciliation failed', {
+      logger.warn('Could not queue recurring speaker reconciliation', {
         userId: chunk.user_id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
       });
     }

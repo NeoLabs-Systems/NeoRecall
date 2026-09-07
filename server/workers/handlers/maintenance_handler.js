@@ -31,12 +31,14 @@ async function handle(job) {
     const importOrphansRemoved = importService.sweepOrphans();
     const contextOriginalsRemoved = require('../../services/context/context_service').cleanupExpiredOriginals();
     let speakerProfilesMerged = 0;
+    let speakerConversationsQueued = 0;
     const userSettings = require('../../services/settings/settings_service');
     const speakers = require('../../services/speakers/speaker_service');
     for (const user of db.prepare('SELECT id FROM users WHERE disabled_at IS NULL').all()) {
-      if (!userSettings.get(user.id).recurringSpeakerMatching) continue;
+      const settings = userSettings.get(user.id);
       try {
-        speakerProfilesMerged += speakers.reevaluate(user.id).mergedCount;
+        if (settings.recurringSpeakerMatching) speakerProfilesMerged += speakers.reevaluate(user.id).mergedCount;
+        if (settings.deferredSpeakerResolution) speakerConversationsQueued += speakers.sweepUnresolvedConversations(user.id);
       } catch (error) {
         // Profile reconciliation is derived cleanup. One malformed legacy row
         // must not prevent receipts, imports, summaries, or retention work.
@@ -45,6 +47,9 @@ async function handle(job) {
         });
       }
     }
+    if (speakerConversationsQueued) logger.info('Queued speaker resolution for conversations that never got it', {
+      conversations: speakerConversationsQueued,
+    });
     for (const expired of db.prepare("SELECT * FROM imports WHERE state='failed' AND expires_at<?").all(new Date().toISOString())) {
       if (expired.temporary_path) { try { require('node:fs').unlinkSync(expired.temporary_path); } catch (_) {} }
       const session = db.prepare('SELECT id FROM recording_sessions WHERE user_id=? AND client_uuid=?').get(expired.user_id, `import-${expired.id}`);
@@ -56,7 +61,10 @@ async function handle(job) {
       }
       db.prepare("UPDATE imports SET temporary_path=NULL,state='cancelled',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(expired.id);
     }
-    return { finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved, speakerProfilesMerged };
+    return {
+      finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved,
+      speakerProfilesMerged, speakerConversationsQueued,
+    };
   }
   return { skipped: true };
 }

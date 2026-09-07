@@ -8,16 +8,26 @@ const vectors = require('../../transcription/speaker_embeddings');
 const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
 
+// The people worth showing.
+//
+// A voice normally has to come with enough clean audio to recognise by ear,
+// because the only way to tell one unnamed profile from another is to listen to
+// it, and a list of clips too short to identify is worse than no list. A voice
+// the recording itself identified is the exception: it already has a name and an
+// exact identity, so waiting for a preview clip before admitting it exists would
+// hide the people the server is most certain about. The client already renders a
+// missing preview as pending and disables playback.
 function list(userId) {
   const { speakerDisplayMinimumPreviewMs } = getConfig();
   return getDatabase().prepare(`SELECT v.id,v.display_name,v.embedding_model,v.sample_count,v.matching_enabled,v.created_at,v.updated_at,
     (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count,
     (SELECT SUM(end_ms - start_ms) FROM speaker_turns st WHERE st.voiceprint_id=v.id) total_duration_ms,
-    p.duration_ms preview_duration_ms
+    CASE WHEN p.duration_ms>=? THEN p.duration_ms END preview_duration_ms
     FROM voiceprints v
-    JOIN speaker_previews p ON p.voiceprint_id=v.id
-    WHERE v.user_id=? AND p.duration_ms>=?
-    ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId, speakerDisplayMinimumPreviewMs);
+    LEFT JOIN speaker_previews p ON p.voiceprint_id=v.id
+    WHERE v.user_id=? AND (p.duration_ms>=? OR v.external_key IS NOT NULL)
+    ORDER BY COALESCE(v.display_name,''),v.created_at`)
+    .all(speakerDisplayMinimumPreviewMs, userId, speakerDisplayMinimumPreviewMs);
 }
 
 function getOwned(userId, id) {
@@ -167,6 +177,78 @@ function preferredMergeTarget(first, second) {
   return first.created_at <= second.created_at ? first : second;
 }
 
+// How many conversations one sweep or one press of re-detect may queue.
+//
+// Both are bounded for the same reason from two directions: the sweep runs every
+// hour and must not turn an upgrade into an hours-long backlog that starves
+// transcription, and re-detect is an HTTP request somebody is waiting on. What
+// is not queued this time is queued next time, because the condition that
+// selects a conversation stays true until the pass has actually run.
+const RESOLUTION_BATCH = 200;
+
+// Conversations that finished but never had their speakers looked at again.
+//
+// A conversation queues its own resolution when it closes, so in a healthy
+// server this finds nothing. It exists for the times that did not happen: the
+// worker was down when the conversation closed, the queue refused the job, the
+// job failed its last attempt, or the conversation predates this pass entirely.
+// Left alone, those conversations keep the split labels they were written with
+// forever, because nothing else ever revisits a closed conversation.
+//
+// "Never looked at" is read from the evidence rather than from a flag: speech
+// that resolved to no durable person is exactly the state the pass exists to
+// correct, and it stays true until it has run — which makes the sweep naturally
+// idempotent and needs no schema to remember what it has done.
+function sweepUnresolvedConversations(userId) {
+  const db = getDatabase();
+  const since = new Date(Date.now() - getConfig().speakerRedetectDays * 24 * 60 * 60_000).toISOString();
+  const conversations = db.prepare(`SELECT c.id FROM conversations c
+    WHERE c.user_id=? AND c.state<>'open' AND c.ended_at>=?
+      AND EXISTS (SELECT 1 FROM transcript_segments t JOIN speaker_turns st
+        ON st.chunk_id=t.chunk_id AND st.cluster_id=t.speaker_cluster_id
+        WHERE t.conversation_id=c.id AND st.voiceprint_id IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type='resolve_speakers' AND j.resource_id=c.id
+        AND j.status IN ('queued','leased'))
+    ORDER BY c.ended_at DESC LIMIT ?`).all(userId, since, RESOLUTION_BATCH);
+  return queueResolution(db, userId, conversations.map((row) => row.id));
+}
+
+function queueResolution(database, userId, conversationIds) {
+  const jobs = require('../jobs/job_service');
+  let queued = 0;
+  for (const conversationId of conversationIds) {
+    try {
+      jobs.enqueue({
+        userId, resourceType: 'conversation', resourceId: conversationId, type: 'resolve_speakers', priority: 30,
+      }, database);
+      queued += 1;
+    } catch {
+      // Already queued, or the queue refused it. Neither is worth failing the
+      // sweep or the request the user is waiting on.
+    }
+  }
+  return queued;
+}
+
+// Queues a fresh look at who spoke in each recent conversation.
+//
+// The profile list and the transcripts are two views of one mistake: a voice
+// split in two shows up as a duplicate person in the list and as two speaker
+// labels in the conversation it was heard in. Repairing only the list leaves
+// every transcript still reading the wrong way, so re-detect asks for both.
+//
+// Queued rather than run inline. Re-resolving a month of conversations is more
+// work than an HTTP request should hold open, and the queue already collapses
+// repeats per conversation, so pressing the button twice costs nothing.
+function requestConversationResolution(userId) {
+  const db = getDatabase();
+  const since = new Date(Date.now() - getConfig().speakerRedetectDays * 24 * 60 * 60_000).toISOString();
+  const conversations = db.prepare(`SELECT id FROM conversations
+    WHERE user_id=? AND state<>'open' AND ended_at>=? ORDER BY ended_at DESC LIMIT ?`)
+    .all(userId, since, RESOLUTION_BATCH);
+  return queueResolution(db, userId, conversations.map((row) => row.id));
+}
+
 // `repair` is the Speakers screen's re-detect: the user has looked at the list,
 // seen one person listed several times, and asked for it to be sorted out. That
 // is a different situation from the automatic pass after each chunk, and it gets
@@ -230,6 +312,8 @@ function remove(userId, id) {
 
 module.exports = {
   list,
+  requestConversationResolution,
+  sweepUnresolvedConversations,
   update,
   merge,
   mergeMany,

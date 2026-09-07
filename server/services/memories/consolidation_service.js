@@ -87,9 +87,29 @@ function failureBackoff(userId) {
   };
 }
 
+// A conversation whose speakers are still being re-resolved is not ready to be
+// read.
+//
+// Closing a conversation queues one pass that can fold two speaker labels into
+// one and attach voices to the people they belong to. Consolidating before that
+// finishes means the model reads labels that are about to change, and worse,
+// names a voiceprint the pass is about to merge away — a wrong name on a real
+// person, arrived at from evidence that no longer exists.
+//
+// Only a job still queued or leased holds the conversation back. One that
+// failed leaves it eligible again rather than stranding it forever, which is the
+// right trade: consolidating with provisional speaker labels is a worse outcome
+// than never consolidating at all only while the pass might still run.
+function awaitingSpeakerResolution(userId, conversationId) {
+  return Boolean(getDatabase().prepare(`SELECT 1 FROM jobs
+    WHERE type='resolve_speakers' AND resource_id=? AND user_id=? AND status IN ('queued','leased') LIMIT 1`)
+    .get(conversationId, userId));
+}
+
 function candidateConversations(userId) {
   return material.listByState(userId, ['closed'])
     .filter((conversation) => material.isComplete(userId, conversation.id))
+    .filter((conversation) => !awaitingSpeakerResolution(userId, conversation.id))
     .filter((conversation) => contextMaterial.sessionComplete(userId, conversation.session_id));
 }
 
@@ -605,6 +625,7 @@ function latest(userId) {
 }
 
 module.exports = {
+  awaitingSpeakerResolution,
   eligibility, request, execute, latest, failureBackoff, validateReferences, applyMemoryWorthinessFloors,
   anchorMemoryRanges, localDate,
   recordValidationFailure, buildCandidates, persist, VALIDATION_FAILURE_CODES,

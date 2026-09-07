@@ -17,9 +17,14 @@ function assignSegments(database, userId, conversationId, segmentIds, { publicId
 function rebuildConversationSpeakers(database, userId, conversationId) {
   database.prepare('DELETE FROM conversation_speakers WHERE conversation_id=?').run(conversationId);
   const speakers = database.prepare(`SELECT t.speaker_cluster_id cluster_id,
+      -- Which person this cluster resolves to, decided the way
+      -- stickyVoiceprintForCluster decides it: by how often the cluster has
+      -- actually been assigned to a voice, not by whichever turn came first.
+      -- A cluster picks up the occasional stray turn from a bad early match,
+      -- and taking the earliest lets exactly that turn name the speaker.
       (SELECT st.voiceprint_id FROM speaker_turns st
-        WHERE st.chunk_id=t.chunk_id AND st.cluster_id=t.speaker_cluster_id AND st.voiceprint_id IS NOT NULL
-        ORDER BY st.start_ms LIMIT 1) voiceprint_id,
+        WHERE st.cluster_id=t.speaker_cluster_id AND st.user_id=t.user_id AND st.voiceprint_id IS NOT NULL
+        GROUP BY st.voiceprint_id ORDER BY COUNT(*) DESC,MAX(st.created_at) DESC LIMIT 1) voiceprint_id,
       MIN(t.started_at) first_seen_at
     FROM transcript_segments t
     WHERE t.conversation_id=? AND t.user_id=? AND t.speaker_cluster_id IS NOT NULL

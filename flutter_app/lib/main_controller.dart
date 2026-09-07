@@ -113,6 +113,7 @@ class NeoRecallController extends ChangeNotifier
     'effectiveConsolidationIntervalMs': 3600000,
     'timezone': 'UTC',
     'recurringSpeakerMatching': true,
+    'deferredSpeakerResolution': true,
     'diarizationEnabled': true,
     'chunkTargetMs': 30000,
     'chunkOverlapMs': 2000,
@@ -757,6 +758,14 @@ class NeoRecallController extends ChangeNotifier
     'memoket',
     'plaud',
   };
+
+  /// True when a dropped wearable live stream should continue on the phone mic.
+  ///
+  /// Offline-first devices keep the take on flash. Switching to the microphone
+  /// sends stop, and the later Bluetooth resume sends start — one recording
+  /// becomes many, including when the app is in the background.
+  bool get shouldFailoverWearableToPhoneMicrophone =>
+      !preferredDeviceIsOfflineFirst;
 
   /// True when the connected wearable is an offline-first (button-record-on-
   /// device) type, so the UI can present "sync recordings" as the primary flow.
@@ -2510,7 +2519,18 @@ class NeoRecallController extends ChangeNotifier
     if ((state == DeviceTransportState.disconnected ||
             state == DeviceTransportState.faulted) &&
         activeKind == 'wearable') {
-      unawaited(_restartMobileCapture(useBluetooth: false));
+      if (!shouldFailoverWearableToPhoneMicrophone) {
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'wearable_link_dropped_kept_take',
+          details: <String, Object?>{
+            'device': audioDeviceSessions.preferredDevice?.displayName,
+            'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+          },
+        );
+      } else {
+        unawaited(_restartMobileCapture(useBluetooth: false));
+      }
     } else if (connected &&
         preferBluetoothCapture &&
         activeKind == 'microphone') {
@@ -2550,6 +2570,20 @@ class NeoRecallController extends ChangeNotifier
     CapturePipelineInterruption interruption,
   ) async {
     if (_switchingMobileSource || _stoppingRecording || !isRecording) return;
+    // A Gem still recording on flash must not be stopped to open a new take
+    // just because the live BLE stream stalled for a few seconds.
+    if (interruption.sourceKind == 'wearable' &&
+        !shouldFailoverWearableToPhoneMicrophone) {
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'wearable_stall_kept_take',
+        details: <String, Object?>{
+          'reason': interruption.reason,
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+        },
+      );
+      return;
+    }
     final useBluetooth = capability?.sourceKind == 'wearable';
     _switchingMobileSource = true;
     try {

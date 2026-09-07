@@ -14,7 +14,10 @@ router.get('/', requireScope('speakers:read'), (req, res) => res.json({ speakers
 router.post('/reevaluate', requireScope('speakers:write'), (req, res) => {
   // The user asked for this from the Speakers screen, having seen the duplicates
   // themselves; the automatic pass after each chunk stays at the strict bar.
-  res.json(service.reevaluate(req.auth.userId, { repair: true }));
+  // Recent conversations are re-resolved too, because a duplicate in the list
+  // and a split speaker in a transcript are the same mistake seen twice.
+  const queuedConversations = service.requestConversationResolution(req.auth.userId);
+  res.json({ ...service.reevaluate(req.auth.userId, { repair: true }), queuedConversations });
 });
 router.get('/:id/preview', requireScope('speakers:read'), (req, res, next) => {
   try {
