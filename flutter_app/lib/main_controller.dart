@@ -3396,8 +3396,7 @@ class NeoRecallController extends ChangeNotifier
           .toList();
       final retrieval = payload['retrieval'];
       if (retrieval is Map) {
-        turn.considered = (retrieval['considered'] as num?)?.toInt() ?? turn.sources.length;
-        turn.weakCount = (retrieval['weakCount'] as num?)?.toInt() ?? 0;
+        turn.readRetrieval(Map<String, dynamic>.from(retrieval));
       }
     } catch (exception) {
       turn.error = _describeAskFailure(exception);

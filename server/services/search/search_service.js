@@ -110,4 +110,15 @@ async function search(userId, query, { limit = 20, kinds = [], from = null, to =
   return { results: candidates, weakCount };
 }
 
-module.exports = { search, ftsExpression, cosineSimilarity };
+// The most recent thing the archive holds, whatever kind it is.
+//
+// Read when a question's period comes back empty: "nothing was recorded today"
+// is only half an answer, and the other half — when something last was — is
+// usually the part that explains why.
+function latestActivity(userId, { kinds = [] } = {}) {
+  const kindClause = kinds.length ? ` AND kind IN (${kinds.map(() => '?').join(',')})` : '';
+  return getDatabase().prepare(`SELECT kind,title,occurred_at FROM search_documents
+    WHERE user_id=?${kindClause} ORDER BY occurred_at DESC LIMIT 1`).get(userId, ...kinds) || null;
+}
+
+module.exports = { search, latestActivity, ftsExpression, cosineSimilarity };

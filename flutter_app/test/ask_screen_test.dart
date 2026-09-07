@@ -80,4 +80,24 @@ void main() {
     expect(find.text('Who was at the standup?'), findsOneWidget);
     expect(find.textContaining('could not be answered'), findsOneWidget);
   });
+
+  testWidgets('a question read as a period says which period, and in whose clock', (tester) async {
+    final controller = NeoRecallController();
+    addTearDown(controller.dispose);
+    controller.askTurns = <AskTurn>[
+      AskTurn(question: 'What did I do today?')
+        ..answer = 'Nothing is recorded for today.'
+        ..considered = 0
+        ..timezone = 'UTC'
+        ..periodFrom = DateTime(2026, 7, 13)
+        ..periodTo = DateTime(2026, 7, 14),
+    ];
+    await pumpAsk(tester, controller);
+    await tester.pumpAndSettle();
+
+    // A whole day reads as one date, and the account timezone is on screen so a
+    // day read in the wrong clock is visible rather than merely wrong.
+    expect(find.textContaining('UTC'), findsOneWidget);
+    expect(find.textContaining('NOTHING RECORDED'), findsOneWidget);
+  });
 }

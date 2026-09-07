@@ -54,16 +54,25 @@ function windowFor(plan, timezone) {
   }
 }
 
-// Runs the plan's restatements and keeps each document once, at its best rank.
-async function retrieve(userId, plan, window, limit) {
+// The record consolidation already wrote, and the raw speech underneath it.
+const WRITTEN_KINDS = Object.freeze(['memory', 'mini_memory', 'daily_summary']);
+const TRANSCRIPT_KINDS = Object.freeze(['segment']);
+
+// Runs the plan's restatements over one layer of the archive and keeps each
+// document once, at its best rank.
+async function retrieveLayer(userId, plan, window, kinds, limit) {
+  if (limit <= 0) return { results: [], weakCount: 0 };
   const queries = plan.searchQueries.slice(0, getConfig().askMaxSearchQueries);
   const best = new Map();
   let weakCount = 0;
   for (const query of queries) {
     const found = await searchService.search(userId, query, {
-      limit, kinds: plan.kinds, from: window.from, to: window.to, wholeWindow: plan.wholePeriod,
+      limit, kinds, from: window.from, to: window.to, wholeWindow: plan.wholePeriod,
     });
-    weakCount += found.weakCount;
+    // The same neighbours are re-read by every restatement, so the largest
+    // single count is how many were filtered — a sum would report the same
+    // dropped rows once per query.
+    weakCount = Math.max(weakCount, found.weakCount);
     for (const result of found.results) {
       const current = best.get(result.id);
       if (!current || result.score > current.score) best.set(result.id, result);
@@ -72,18 +81,64 @@ async function retrieve(userId, plan, window, limit) {
   return { results: [...best.values()].sort((left, right) => right.score - left.score).slice(0, limit), weakCount };
 }
 
+/**
+ * Retrieval in two layers, written record first.
+ *
+ * A memory is a dated, titled account of an occasion; a segment is thirty
+ * seconds of speech with no idea what it belongs to. Asked what a day held, the
+ * first is the answer and the second is footnotes — so they are retrieved
+ * separately and the transcript gets the smaller share, instead of both
+ * competing for one list where the day's raw speech simply outnumbers what was
+ * written about it.
+ *
+ * A question that named the kinds it wants is taken at its word, and a
+ * restriction that finds nothing is lifted rather than returned as an empty
+ * archive.
+ */
+async function retrieve(userId, plan, window) {
+  const config = getConfig();
+  const total = config.askMemoryContextLimit + config.askTranscriptContextLimit;
+  if (plan.kinds.length) {
+    const chosen = await retrieveLayer(userId, plan, window, plan.kinds, total);
+    if (chosen.results.length) return chosen;
+    const unrestricted = await retrieveLayer(userId, plan, window, [], total);
+    return { ...unrestricted, widened: true };
+  }
+  const written = await retrieveLayer(userId, plan, window, WRITTEN_KINDS, config.askMemoryContextLimit);
+  const spoken = await retrieveLayer(userId, plan, window, TRANSCRIPT_KINDS, config.askTranscriptContextLimit);
+  return {
+    results: [...written.results, ...spoken.results],
+    weakCount: Math.max(written.weakCount, spoken.weakCount),
+  };
+}
+
 async function ask(userId, question) {
   const timezone = settings.get(userId).timezone;
   const nowLocal = localDateTimeNow(timezone);
   const plan = await planFor(userId, question, nowLocal, timezone);
   const window = windowFor(plan, timezone);
-  const { results, weakCount } = await retrieve(userId, plan, window, 16);
+  // A period the plan could not put a range on is not a period. Retrieving the
+  // "whole window" of an unbounded archive would return its newest rows for any
+  // question at all.
+  if (!window.from && !window.to) plan.wholePeriod = false;
+  const { results, weakCount } = await retrieve(userId, plan, window);
 
   const context = results.map((result) => ({
     sourceId: `${result.kind}:${result.source_id}`, kind: result.kind, timestamp: result.occurred_at, title: result.title, text: result.body,
   }));
   const allowed = new Map(results.map((result) => [`${result.kind}:${result.source_id}`, result]));
-  const frame = { nowLocal, timezone, period: plan.fromLocal || plan.toLocal ? { fromLocal: plan.fromLocal, toLocal: plan.toLocal } : null };
+  const period = plan.fromLocal || plan.toLocal ? { fromLocal: plan.fromLocal, toLocal: plan.toLocal } : null;
+  const frame = { nowLocal, timezone, period };
+  // Nothing found is a finding. Told when the archive last holds anything, the
+  // answer can say why the period looks empty — a day not yet consolidated, a
+  // gap in recording, an account whose timezone is not the one being lived in —
+  // instead of reporting that nothing happened.
+  if (!results.length) {
+    const latest = searchService.latestActivity(userId);
+    frame.archive = latest
+      ? { holdsNothingForThePeriod: true, latestActivityAt: latest.occurred_at, latestActivityTitle: latest.title }
+      : { holdsNothingForThePeriod: true, empty: true };
+  }
   const response = await aiEngine.answer(userId, question, context, () => reserveAttempt(userId), frame);
 
   const citations = response.value.citations.filter((citation) => allowed.has(citation.sourceId)).map((citation) => {
@@ -107,7 +162,8 @@ async function ask(userId, question) {
     retrieval: {
       considered: results.length,
       weakCount,
-      period: frame.period,
+      period,
+      timezone,
       wholePeriod: plan.wholePeriod,
     },
   };

@@ -300,6 +300,12 @@ function buildConfig() {
     // period, not from whatever happens to resemble the words in it. This caps
     // how many documents such a question may read out of its time window.
     askTimeWindowLimit: integer('NEORECALL_ASK_TIME_WINDOW_LIMIT', 40, { min: 1, max: 200 }),
+    // Ask reads the written record first. Memories, their details and daily
+    // summaries are what consolidation already sorted, dated and titled;
+    // transcript segments are the raw speech behind them, worth a few slots for
+    // exact wording but not worth crowding out the layer written from them.
+    askMemoryContextLimit: integer('NEORECALL_ASK_MEMORY_CONTEXT_LIMIT', 12, { min: 1, max: 100 }),
+    askTranscriptContextLimit: integer('NEORECALL_ASK_TRANSCRIPT_CONTEXT_LIMIT', 4, { min: 0, max: 100 }),
     searchWeights: {
       relevance: relevanceWeight / searchWeightTotal,
       recency: recencyWeight / searchWeightTotal,

@@ -251,6 +251,13 @@ class _Answer extends StatelessWidget {
             ),
           ],
         ),
+        if (turn.hasPeriod) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.only(left: 21),
+            child: _PeriodLine(turn: turn),
+          ),
+        ],
         if (turn.sources.isNotEmpty) ...<Widget>[
           const SizedBox(height: AppSpacing.lg),
           SectionLabel(label: 'Sources', trailing: '${turn.sources.length}'),
@@ -286,6 +293,52 @@ class _Answer extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Which stretch of time the question was read as, and in whose clock.
+///
+/// Only shown when the question had a period in it. It is the one place the
+/// account's timezone becomes visible: an answer about "today" read in UTC by
+/// somebody living two hours east is wrong in a way nothing else on the screen
+/// would reveal.
+class _PeriodLine extends StatelessWidget {
+  const _PeriodLine({required this.turn});
+
+  final AskTurn turn;
+
+  String _label(BuildContext context) {
+    final localizations = MaterialLocalizations.of(context);
+    final from = turn.periodFrom;
+    final to = turn.periodTo;
+    String at(DateTime value) =>
+        '${localizations.formatShortDate(value)} '
+        '${value.hour.toString().padLeft(2, '0')}:'
+        '${value.minute.toString().padLeft(2, '0')}';
+    // A whole day reads as a day, not as two midnights.
+    if (from != null &&
+        to != null &&
+        from.hour == 0 &&
+        from.minute == 0 &&
+        to.difference(from) == const Duration(days: 1)) {
+      return localizations.formatShortDate(from);
+    }
+    if (from != null && to != null) return '${at(from)} – ${at(to)}';
+    if (from != null) return 'from ${at(from)}';
+    return 'until ${at(to!)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    return Text(
+      <String>[
+        'Read ${_label(context)}',
+        ?turn.timezone,
+        if (turn.considered == 0) 'nothing recorded',
+      ].join(' · ').toUpperCase(),
+      style: sectionEyebrowStyle(palette),
     );
   }
 }

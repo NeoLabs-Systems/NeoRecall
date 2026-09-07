@@ -18,7 +18,7 @@ function planQueryMessages({ question, nowLocal, timezone }) {
         'Set both to null when the question is not about a time at all.',
         'Set wholePeriod to true when the question asks what a period contained, and false when it asks about a subject that merely happens to sit in one.',
         'searchQueries: between one and three restatements of what to look for, in the language of the question, keeping names and other proper nouns exactly as written. Drop the time words from them — the range already carries the time. For a wholePeriod question a single short restatement is enough.',
-        'kinds restricts the archive to some of "segment", "memory", "mini_memory", "daily_summary"; leave it empty unless the question names what it wants.',
+        'Leave kinds empty. Retrieval already reads the written record first and the raw transcript second; set kinds only when the question explicitly asks for one layer — verbatim wording or who said what ("segment"), or the day\'s own summary ("daily_summary") — and understand that doing so hides everything else from the answer.',
         'Return only the JSON object.',
       ].join(' '),
     },

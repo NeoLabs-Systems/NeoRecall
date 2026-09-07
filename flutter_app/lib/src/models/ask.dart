@@ -58,5 +58,26 @@ class AskTurn {
   int considered = 0;
   int weakCount = 0;
 
+  /// The stretch of time the question was read as, as local wall-clock strings,
+  /// and the account timezone they were resolved in. Shown because an account
+  /// still set to UTC while its owner lives elsewhere answers "today" with
+  /// somebody else's day, and there is no way to see that from the answer.
+  DateTime? periodFrom;
+  DateTime? periodTo;
+  String? timezone;
+
   bool get isPending => answer == null && error == null;
+
+  bool get hasPeriod => periodFrom != null || periodTo != null;
+
+  void readRetrieval(Map<String, dynamic> retrieval) {
+    considered = (retrieval['considered'] as num?)?.toInt() ?? considered;
+    weakCount = (retrieval['weakCount'] as num?)?.toInt() ?? 0;
+    timezone = retrieval['timezone'] as String?;
+    final period = retrieval['period'];
+    if (period is Map) {
+      periodFrom = DateTime.tryParse(period['fromLocal'] as String? ?? '');
+      periodTo = DateTime.tryParse(period['toLocal'] as String? ?? '');
+    }
+  }
 }
