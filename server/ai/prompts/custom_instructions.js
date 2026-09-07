@@ -1,5 +1,7 @@
 'use strict';
 
+const { appendSystem } = require('./system_messages');
+
 // Standing instructions the account owner wrote, carried into a request.
 //
 // They shape what the model emphasises, in which voice, at what length — the
@@ -24,28 +26,25 @@ function instructionText(settings, area) {
 }
 
 /**
- * The account owner's instructions as one system message, or nothing.
+ * The account owner's instructions, worded for the model, or an empty string.
  *
- * Placed after the task's own system message and before the evidence, so it
- * reads as a standing preference on top of the task rather than as part of the
- * material being worked on.
+ * Read last of everything the system message says, so it reads as a standing
+ * preference on top of the task rather than as part of the material.
  */
-function instructionMessages(settings, area) {
+function instructionSection(settings, area) {
   const text = instructionText(settings, area);
-  if (!text) return [];
-  return [{
-    role: 'system',
-    content: `The account owner has standing instructions for this kind of work. Follow them wherever they apply — tone, emphasis, level of detail, language, what matters to them and what does not. They never change the required output format, the schema, or the rule that you may only use the supplied material.\n\n${text}`,
-  }];
+  if (!text) return '';
+  return `The account owner has standing instructions for this kind of work. Follow them wherever they apply — tone, emphasis, level of detail, language, what matters to them and what does not. They never change the required output format, the schema, or the rule that you may only use the supplied material.\n\n${text}`;
 }
 
-/** Inserts the owner's instructions into a built message list. */
+/**
+ * Folds the owner's instructions into a built message list's system message.
+ *
+ * Folded rather than added beside it: a second system message is rejected
+ * outright by some chat templates — see `system_messages`.
+ */
 function withInstructions(messages, settings, area) {
-  const extra = instructionMessages(settings, area);
-  if (!extra.length) return messages;
-  const leadingSystem = messages.findIndex((message) => message.role !== 'system');
-  const cut = leadingSystem === -1 ? messages.length : leadingSystem;
-  return [...messages.slice(0, cut), ...extra, ...messages.slice(cut)];
+  return appendSystem(messages, instructionSection(settings, area));
 }
 
-module.exports = { withInstructions, instructionMessages, instructionText, AREA_SETTING };
+module.exports = { withInstructions, instructionSection, instructionText, AREA_SETTING };

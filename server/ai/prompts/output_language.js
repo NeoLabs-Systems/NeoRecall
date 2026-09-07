@@ -1,5 +1,7 @@
 'use strict';
 
+const { appendSystem } = require('./system_messages');
+
 // The language the product writes back in.
 //
 // Transcription and retrieval stay multilingual whatever this says: a German
@@ -57,21 +59,15 @@ function languageDirective(language) {
 }
 
 /**
- * Inserts the language directive into a built message list.
+ * Folds the language directive into a built message list's system message.
  *
- * Placed after the task's own system messages and before the owner's standing
- * instructions, so an instruction that says something more specific about
- * language is read last and wins.
+ * Appended after the task's own instructions and before the owner's standing
+ * ones, so an instruction that says something more specific about language is
+ * read last and wins. It is folded rather than added because a second system
+ * message is rejected outright by some chat templates — see `system_messages`.
  */
 function withOutputLanguage(messages, code) {
-  const language = resolveLanguage(code);
-  const leadingSystem = messages.findIndex((message) => message.role !== 'system');
-  const cut = leadingSystem === -1 ? messages.length : leadingSystem;
-  return [
-    ...messages.slice(0, cut),
-    { role: 'system', content: languageDirective(language) },
-    ...messages.slice(cut),
-  ];
+  return appendSystem(messages, languageDirective(resolveLanguage(code)));
 }
 
 module.exports = { LANGUAGES, LANGUAGE_CODES, DEFAULT_LANGUAGE, resolveLanguage, languageDirective, withOutputLanguage };

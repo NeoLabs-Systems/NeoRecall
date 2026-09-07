@@ -21,12 +21,14 @@ test('global and area instructions both apply, global first', () => {
 
 test('instructions land after the task and before the evidence', () => {
   const built = withInstructions(messages, { instructionsGlobal: 'Always German.' }, 'summaries');
-  assert.deepEqual(built.map((message) => message.role), ['system', 'system', 'user']);
-  assert.equal(built[0].content, 'task');
-  assert.match(built[1].content, /Always German\./);
+  // One system message, not two: several chat templates reject a second one
+  // outright, whatever it says. See prompts/system_messages.
+  assert.deepEqual(built.map((message) => message.role), ['system', 'user']);
+  assert.match(built[0].content, /^task\n\n/);
+  assert.match(built[0].content, /Always German\./);
   // The output contract is not the user's to change, and the message says so.
-  assert.match(built[1].content, /never change the required output format/);
-  assert.equal(built[2].content, 'evidence');
+  assert.match(built[0].content, /never change the required output format/);
+  assert.equal(built[1].content, 'evidence');
 });
 
 test('whitespace-only instructions are no instructions', () => {
