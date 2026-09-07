@@ -176,6 +176,11 @@ function buildConfig() {
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
+    // Live capture and a later drain of the same wearable share one device id,
+    // so cross-device exact-utterance dedupe never sees them. If this fraction
+    // of an incoming chunk's timeline is already present on another source of
+    // that device, transcription is skipped.
+    sameDeviceCoverageRatio: number('NEORECALL_SAME_DEVICE_COVERAGE_RATIO', 0.5, { min: 0, max: 1 }),
     // ASR services occasionally fill a short timestamp with the same token
     // template dozens of times. Detect that structurally and only when the
     // resulting speaking rate is implausible; no vocabulary or phrase list is

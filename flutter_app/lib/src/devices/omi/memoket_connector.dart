@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../../diagnostics/client_diagnostic_log.dart';
+import '../wearable_ingested_files.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
 import 'memoket_protocol.dart';
@@ -114,6 +115,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         WearableDeviceUuids.memoketFileNotify,
       )).listen(_handleFileChunk),
     );
+    await WearableIngestedFiles.hydrate(device.id);
+    _liveIngestedIds.addAll(WearableIngestedFiles.ids(device.id));
     await _subscribeStandardBattery();
     // CCCD writes must finish before the first control write. Android's GATT
     // queue drops overlapping writes as a pigeon channel-error.
@@ -308,7 +311,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     // Only drop the on-device copy when live frames actually reached the
     // capture pipeline. Deleting after a silent take loses the only backup.
     if (filename != null && _liveEmittedFrames > 0) {
-      _liveIngestedIds.add(filename);
+      await _rememberLiveIngested(filename);
       await _deleteStoredFile(
         MemoketStoredFile(
           filename: filename,
@@ -336,9 +339,15 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         _firmware = MemoketProtocol.firmwareVersion(data);
       case MemoketProtocol.opRecordStart:
         _deviceLive = true;
-        _liveEmittedFrames = 0;
         final name = MemoketProtocol.recordingFilename(data);
-        if (name != null) _liveFilename = name;
+        // A reconnect start notify for the same take must not zero the frame
+        // count — stop uses that to know the live path already ingested it.
+        if (name != null && name != _liveFilename) {
+          _liveEmittedFrames = 0;
+          _liveFilename = name;
+        } else if (name != null) {
+          _liveFilename = name;
+        }
         final started = _started;
         if (started != null && !started.isCompleted) {
           started.complete(name ?? '');
@@ -415,6 +424,17 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       _liveEmittedFrames += 1;
       audioBytes.add(frame);
     }
+    final liveName = _liveFilename;
+    if (liveName != null &&
+        _liveEmittedFrames > 0 &&
+        !_liveIngestedIds.contains(liveName)) {
+      unawaited(_rememberLiveIngested(liveName));
+    }
+  }
+
+  Future<void> _rememberLiveIngested(String fileId) async {
+    _liveIngestedIds.add(fileId);
+    await WearableIngestedFiles.remember(device.id, fileId);
   }
 
   void _emitDeviceControl(int code) {
@@ -494,9 +514,23 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         'try syncing again.',
       );
     }
-    final files = MemoketProtocol.uniqueStoredFiles(
-      await _listStoredFiles(),
-    ).where((file) => !_liveIngestedIds.contains(file.id)).toList();
+    await WearableIngestedFiles.hydrate(device.id);
+    _liveIngestedIds.addAll(WearableIngestedFiles.ids(device.id));
+    final listed = MemoketProtocol.uniqueStoredFiles(await _listStoredFiles());
+    final already = listed
+        .where((file) => _liveIngestedIds.contains(file.id))
+        .toList();
+    for (final file in already) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'memoket_skip_already_ingested',
+        details: <String, Object?>{'id': file.id},
+      );
+      await _deleteStoredFile(file);
+    }
+    final files = listed
+        .where((file) => !_liveIngestedIds.contains(file.id))
+        .toList();
     _lastFilesListed = files.length;
     ClientDiagnosticLog.instance.record(
       'bluetooth_audio',
@@ -568,7 +602,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
             capturedAt: file.capturedAt,
           ),
         );
-        _liveIngestedIds.add(file.id);
+        await _rememberLiveIngested(file.id);
         await _deleteStoredFile(file);
         count += 1;
         _publishProgress(

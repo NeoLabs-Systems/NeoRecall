@@ -10,6 +10,7 @@ const jobs = require('../../services/jobs/job_service');
 const settings = require('../../services/settings/settings_service');
 const searchIndex = require('../../embeddings/search_index_service');
 const deduper = require('../../transcription/token_deduper');
+const sameDeviceCoverage = require('../../transcription/same_device_coverage');
 const transcriptQuality = require('../../transcription/transcript_quality');
 const matching = require('../../transcription/speaker_matching');
 const speakerPreviews = require('../../services/speakers/speaker_preview_service');
@@ -74,9 +75,10 @@ function previousSegments(database, chunk) {
     .all(chunk.source_id, chunk.sequence, Math.max(0, chunk.sequence - 2));
 }
 
-// Already-persisted transcript segments from another physical client whose
-// corrected time range could describe the same utterance. The exact-word
-// predicate is applied separately; this query only bounds the candidate set.
+// Already-persisted transcript segments from another source whose corrected
+// time range could describe the same utterance — another device, or the same
+// wearable's live stream versus a later file import. The exact-word predicate
+// is applied separately; this query only bounds the candidate set.
 function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs) {
   if (!segments.length) return [];
   const earliest = Math.min(...segments.map((segment) => segment.startMs)) - timeToleranceMs;
@@ -87,9 +89,9 @@ function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs
     FROM transcript_segments t
     JOIN audio_chunks c ON c.id=t.chunk_id
     JOIN recording_sessions r ON r.id=c.session_id
-    WHERE t.user_id=? AND r.device_id<>? AND t.started_at<=? AND t.ended_at>=?
+    WHERE t.user_id=? AND c.source_id<>? AND t.started_at<=? AND t.ended_at>=?
     ORDER BY t.started_at`)
-    .all(chunk.user_id, session.device_id, new Date(latest).toISOString(), new Date(earliest).toISOString());
+    .all(chunk.user_id, chunk.source_id, new Date(latest).toISOString(), new Date(earliest).toISOString());
 }
 
 function updateContiguous(database, sourceId) {
@@ -256,6 +258,17 @@ async function handle(job, inference) {
     return finishCleanup(chunk, chunk.transcript_segment_count || 0);
   }
   if (!chunk.temporary_path) throw Object.assign(new Error('Server audio is missing and must be uploaded again.'), { code: 'AUDIO_REUPLOAD_REQUIRED', retryable: false });
+  const session = db.prepare('SELECT * FROM recording_sessions WHERE id=? AND user_id=?').get(chunk.session_id, chunk.user_id);
+  if (session && sameDeviceCoverage.isCovered(db, chunk, session)) {
+    logger.info('Skipped transcription already covered by the same device', {
+      chunkId: chunk.id,
+      sourceId: chunk.source_id,
+      deviceId: session.device_id,
+      coverage: Number(sameDeviceCoverage.coverageRatio(db, chunk, session).toFixed(2)),
+    });
+    persistSegments(chunk, []);
+    return finishCleanup(chunk, 0);
+  }
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
   const userSettings = settings.get(chunk.user_id);

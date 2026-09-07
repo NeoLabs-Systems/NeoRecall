@@ -12,8 +12,15 @@ import 'package:neorecall/src/devices/omi/memoket_protocol.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
 import 'package:neorecall/src/devices/omi/ring_protocol.dart';
+import 'package:neorecall/src/devices/wearable_ingested_files.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    WearableIngestedFiles.resetForTest();
+  });
+
   test('OmiGlass uses its documented Opus fallback codec', () async {
     final connector = OmiGlassConnector(
       device: _device(WearableDeviceType.omiGlass),
@@ -756,6 +763,37 @@ void main() {
       unawaited(connector.dispose());
       async.flushMicrotasks();
     });
+  });
+
+  test('Memoket drain skips a file already captured live', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await WearableIngestedFiles.remember(
+      'device-id',
+      '20260905_222817_2.opus',
+    );
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    final chunk = List<int>.filled(480, 0xbc);
+    _bindMemoketReplies(transport, fileChunk: chunk);
+    await connector.connect();
+    final count = await connector.drainStoredAudio((_) async {});
+    expect(count, 0);
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDownload,
+      ),
+      isFalse,
+    );
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDelete,
+      ),
+      isTrue,
+    );
+    await connector.dispose();
   });
 
   test(
