@@ -22,6 +22,18 @@ function validateConfig(config, { promptReserveTokens }) {
   if (config.conversationPreviewMinCharacters > config.conversationMaximumCharacters) {
     throw new Error('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS must not exceed NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS.');
   }
+  // Every conversation is already cut at the hard gap, so an occasion gap below
+  // it could never join two fragments, and a settle delay below it writes the
+  // first fragment up before the pause that follows has even ended.
+  if (config.memoryOccasionGapMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_MEMORY_OCCASION_GAP_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.memorySettleMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_MEMORY_SETTLE_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.memoryOccasionMaxWaitMs <= config.memorySettleMs) {
+    throw new Error('NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS must be longer than NEORECALL_MEMORY_SETTLE_MS.');
+  }
   // A conditioning step that outlives the request it prepares audio for would
   // hold a worker past the point where the transcription attempt has already
   // been abandoned.

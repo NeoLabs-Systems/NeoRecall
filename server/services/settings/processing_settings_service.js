@@ -55,6 +55,14 @@ const schema = z.object({
   maxMemoryContinuationCandidates: z.number().int().min(0).max(32).optional(),
   memoryContinuationLookbackMs: z.number().int().min(0).max(30 * 24 * 60 * 60_000).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),
+  memoryOccasionGapMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
+  memorySettleMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
+  memoryOccasionMaxWaitMs: z.number().int().min(60_000).max(7 * 24 * 60 * 60_000).optional(),
+  memoryDedupeEnabled: z.boolean().optional(),
+  memoryDedupeSimilarityThreshold: z.number().min(0).max(1).optional(),
+  memoryDedupeWindowMs: z.number().int().min(0).max(30 * 24 * 60 * 60_000).optional(),
+  memoryDedupeMaxPairsPerRun: z.number().int().min(0).max(500).optional(),
+  memoryDedupeNeighbours: z.number().int().min(1).max(50).optional(),
   consolidationMaxFailures: z.number().int().min(1).max(100).optional(),
 }).strict();
 
@@ -99,6 +107,21 @@ function update(input) {
   }
   if (next.conversationPreviewMinCharacters > next.conversationMaximumCharacters) {
     throw new HttpError(400, 'INVALID_MATERIAL_LIMITS', 'The preview threshold must not exceed the conversation character limit, or no conversation would ever be previewed.');
+  }
+  // An occasion gap narrower than the boundary gap could never join anything:
+  // every conversation is cut at the hard gap, so a shorter occasion gap means
+  // no two fragments are ever read as one sitting.
+  if (next.memoryOccasionGapMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The occasion gap must be at least as long as the hard boundary gap, or fragments of one sitting could never be joined.');
+  }
+  // Settling has to outlast an ordinary pause. Below the hard gap the first
+  // fragment is written up before the pause that follows it has even ended,
+  // which is the duplicate-card behaviour this exists to prevent.
+  if (next.memorySettleMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The settle delay must be at least as long as the hard boundary gap, or a fragment is written up before the pause after it has ended.');
+  }
+  if (next.memoryOccasionMaxWaitMs <= next.memorySettleMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The maximum occasion wait must be longer than the settle delay.');
   }
   const db = getDatabase();
   db.transaction(() => {

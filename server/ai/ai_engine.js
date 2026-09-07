@@ -5,12 +5,14 @@ const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationT
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
 const { answerSchema } = require('./schemas/answer_schema');
 const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
+const { memoryDedupeSchema, memoryDedupeJsonSchema } = require('./schemas/memory_dedupe_schema');
 const { dailySummarySchema, dailySummaryJsonSchema } = require('./schemas/daily_summary_schema');
 const { prepareConsolidationRequest, restoreReferenceIds, carryOverFor } = require('./prompts/consolidate_memories');
 const { conversationPreviewMessages } = require('./prompts/preview_conversation');
 const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
+const { dedupeMemoryMessages } = require('./prompts/dedupe_memories');
 const contextAnalysis = require('./prompts/analyze_context');
 const memoryContextRewrite = require('./prompts/rewrite_memory_context');
 const { inputBudgetCharacters } = require('./context_budget');
@@ -394,7 +396,44 @@ async function rewriteMergedMemory(userId, memories) {
   });
 }
 
+// Decides whether two finished cards describe the same occasion.
+//
+// Shares the merge purpose because it is the same piece of work seen one step
+// earlier: this asks whether to merge, rewriteMergedMemory writes the result.
+// The answer is a sentence and a boolean, so it costs a fraction of the cards
+// it reads — which is what makes running it over a backlog affordable.
+async function judgeDuplicateMemories(userId, left, right, evidence) {
+  const config = getConfig();
+  return withRetries(async () => {
+    const response = await provider().chatJSON({
+      userId,
+      purpose: 'memory_merge',
+      messages: dedupeMemoryMessages(left, right, evidence),
+      maxTokens: config.aiPreviewMaxOutputTokens,
+      responseFormat: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'neorecall_memory_dedupe',
+          strict: true,
+          schema: memoryDedupeJsonSchema,
+        },
+      },
+    });
+    const parsed = memoryDedupeSchema.safeParse(response.value);
+    if (!parsed.success) {
+      markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+      throw Object.assign(new Error('Duplicate-memory output did not match the required schema.'), {
+        code: 'AI_SCHEMA_INVALID',
+        details: parsed.error.flatten(),
+        aiRequestId: response.requestId,
+      });
+    }
+    return { value: parsed.data, requestId: response.requestId };
+  });
+}
+
 module.exports = {
   consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, rewriteMergedMemory,
+  judgeDuplicateMemories,
   writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };

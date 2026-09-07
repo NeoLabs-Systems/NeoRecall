@@ -373,13 +373,49 @@ function buildConfig() {
     minMemoryEvidenceMs: integer('NEORECALL_MIN_MEMORY_EVIDENCE_MS', 120_000, { min: 0 }),
     minMemoryEvidenceChars: integer('NEORECALL_MIN_MEMORY_EVIDENCE_CHARS', 400, { min: 0 }),
     maxConsolidationInputChars: integer('NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS', 250_000, { min: 1000 }),
-    // How many conversations one run may carry. Batching several into a single
-    // request used to amortize a per-request price; it also asked the model to
-    // hold several unrelated occasions in mind at once, which is the harder job
-    // and the one it does worse. One conversation per run is the accurate unit —
-    // it is what a memory is anchored to — and the scheduler starts the next run
-    // on its next tick, so a backlog still drains continuously.
-    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 1, { min: 1, max: 200 }),
+    // How many conversations one run may carry.
+    //
+    // Batching several into a single request used to amortize a per-request
+    // price; it also asked the model to hold several unrelated occasions in mind
+    // at once, which is the harder job and the one it does worse. That objection
+    // still stands and is why a run never carries an arbitrary batch: what it
+    // carries is one *occasion* — a chain of consecutive conversations from the
+    // same recording, none separated from the next by more than
+    // NEORECALL_MEMORY_OCCASION_GAP_MS. Those are fragments of one sitting rather
+    // than unrelated material, and showing them together is what lets the model
+    // write one memory instead of one per fragment.
+    //
+    // This is the ceiling on that chain, not a batch size. A pause every few
+    // minutes through a long meeting is ordinary, so it has to be comfortably
+    // above the handful of fragments an hour of speech produces; the character
+    // and duration limits below are what actually bound the request.
+    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 12, { min: 1, max: 200 }),
+    // Up to this gap, two consecutive conversations from one recording are read
+    // as the same real-world occasion and consolidated together.
+    //
+    // Conversation boundaries are provisional: NEORECALL_CONVERSATION_HARD_GAP_MS
+    // cuts the stream after three minutes of quiet, which is a normal pause in a
+    // meeting, a lesson or a meal. Left alone, each piece became its own memory
+    // card minutes apart. This is the wider, occasion-sized gap that decides
+    // whether those pieces are shown to the model as one thing.
+    memoryOccasionGapMs: integer('NEORECALL_MEMORY_OCCASION_GAP_MS', 15 * 60_000, { min: 0 }),
+    // How long an occasion must have been quiet before it is written up, while
+    // its recording is still running.
+    //
+    // A conversation that just ended is exactly the one someone is about to look
+    // for, so nothing waits once the recording has stopped — a stopped recording
+    // is proof the occasion is over. While it is still running there is no such
+    // proof, and writing up the first fragment immediately is what produced three
+    // cards for one meeting. Sized above the hard gap so an ordinary pause cannot
+    // beat it.
+    memorySettleMs: integer('NEORECALL_MEMORY_SETTLE_MS', 8 * 60_000, { min: 0 }),
+    // The longest a fragment may be held back waiting for its occasion to end.
+    //
+    // An always-on recording never stops, and a chain that keeps growing would
+    // otherwise postpone every memory for as long as someone keeps talking. At
+    // this age the chain is written up with whatever it has; the continuation
+    // mechanism folds later fragments into that card.
+    memoryOccasionMaxWaitMs: integer('NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS', 60 * 60_000, { min: 60_000 }),
     // Recent cards shown to the consolidation model as possible fragments of
     // the same real-world occasion. This bounds context only: timestamps,
     // recording continuity and transcript meaning still decide whether the
@@ -395,6 +431,34 @@ function buildConfig() {
     // rewrite second. Keep the request bounded for database/query safety while
     // allowing a person to clean up a substantial backlog in one operation.
     memoryMergeMaxItems: integer('NEORECALL_MEMORY_MERGE_MAX_ITEMS', 100, { min: 2, max: 500 }),
+    // The safety net under memory generation: a sweep that finds cards which
+    // describe the same occasion and folds them together.
+    //
+    // Consolidating a whole occasion at once is the real fix and handles the
+    // ordinary case. It cannot handle every case: a device that reconnects
+    // starts a new recording stream, an occasion longer than
+    // NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS is written up before it ends, and a
+    // fragment that finished transcribing late arrives after its neighbours were
+    // already written. Each leaves two cards for one sitting.
+    //
+    // Retrieval is the memory search index that already exists, so nothing is
+    // embedded twice. The numeric score only decides which pairs are worth
+    // asking about; the model makes the actual same-occasion decision, exactly as
+    // it does for continuation.
+    memoryDedupeEnabled: boolean('NEORECALL_MEMORY_DEDUPE_ENABLED', true),
+    // How alike two cards must read before the model is asked about them at all.
+    // Cosine over multilingual-e5 embeddings, whose similarities sit high even
+    // for unrelated text, so this is deliberately close to 1. Lower it and the
+    // sweep asks more questions; it never merges anything on this number alone.
+    memoryDedupeSimilarityThreshold: number('NEORECALL_MEMORY_DEDUPE_SIMILARITY_THRESHOLD', 0.88, { min: 0, max: 1 }),
+    // How far apart two cards may sit and still be candidates. Two lessons of the
+    // same course on different days are two occasions and must stay two cards;
+    // this is what keeps the sweep from ever considering them.
+    memoryDedupeWindowMs: integer('NEORECALL_MEMORY_DEDUPE_WINDOW_MS', 6 * 60 * 60_000, { min: 0 }),
+    // Model requests one sweep may make. Bounds what a backlog can cost.
+    memoryDedupeMaxPairsPerRun: integer('NEORECALL_MEMORY_DEDUPE_MAX_PAIRS_PER_RUN', 20, { min: 0, max: 500 }),
+    // Nearest neighbours considered per card before filtering.
+    memoryDedupeNeighbours: integer('NEORECALL_MEMORY_DEDUPE_NEIGHBOURS', 5, { min: 1, max: 50 }),
     // Ask is answered by the same external provider. These limits keep one
     // client from queueing more generation than the provider can work through
     // while recordings are still arriving.

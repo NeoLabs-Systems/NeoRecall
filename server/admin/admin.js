@@ -104,11 +104,24 @@ const settingLabels = {
   minMemoryEvidenceChars: 'Minimum memory evidence characters',
   maxConsolidationInputChars: 'Maximum consolidation characters',
   memoryContinuationLookbackMs: 'Cross-recording memory continuation lookback (ms)',
+  maxConsolidationConversations: 'Maximum conversations per occasion',
+  memoryOccasionGapMs: 'Occasion gap (ms)',
+  memorySettleMs: 'Occasion settle delay (ms)',
+  memoryOccasionMaxWaitMs: 'Maximum occasion wait (ms)',
+  memoryDedupeEnabled: 'Merge duplicate memories automatically',
+  memoryDedupeSimilarityThreshold: 'Duplicate memory similarity threshold',
+  memoryDedupeWindowMs: 'Duplicate memory time window (ms)',
+  memoryDedupeMaxPairsPerRun: 'Duplicate memory questions per sweep',
+  memoryDedupeNeighbours: 'Duplicate memory neighbours considered',
 };
 
 function renderSettings(settings) {
   document.querySelector('#processing-settings').innerHTML = Object.entries(settings)
-    .map(([key, value]) => `<label>${escapeHtml(settingLabels[key] || key)}<input type="number" step="any" data-setting="${escapeHtml(key)}" value="${escapeHtml(value)}"></label>`)
+    // A switch is a switch. Rendering one as a number box turned it into NaN on
+    // save and failed validation for every setting on the page at once.
+    .map(([key, value]) => (typeof value === 'boolean'
+      ? `<label>${escapeHtml(settingLabels[key] || key)}<input type="checkbox" data-setting="${escapeHtml(key)}" data-boolean="1"${value ? ' checked' : ''}></label>`
+      : `<label>${escapeHtml(settingLabels[key] || key)}<input type="number" step="any" data-setting="${escapeHtml(key)}" value="${escapeHtml(value)}"></label>`))
     .join('');
 }
 
@@ -471,7 +484,8 @@ document.querySelector('#reset-provider-settings').addEventListener('click', asy
 
 document.querySelector('#save-settings').addEventListener('click', async () => {
   try {
-    const settings = Object.fromEntries([...document.querySelectorAll('[data-setting]')].map((input) => [input.dataset.setting, Number(input.value)]));
+    const settings = Object.fromEntries([...document.querySelectorAll('[data-setting]')]
+      .map((input) => [input.dataset.setting, input.dataset.boolean ? input.checked : Number(input.value)]));
     await api('/processing-settings', { method: 'PUT', body: JSON.stringify(settings) });
     await load();
     showToast('Processing settings saved');

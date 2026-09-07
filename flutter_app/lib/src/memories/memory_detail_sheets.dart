@@ -7,6 +7,7 @@ import '../models/memory.dart';
 import '../widgets/detail_sheet_mixin.dart';
 import 'memory_cards.dart';
 import 'memory_formatting.dart';
+import 'transcript_excerpts.dart';
 
 class MemoryDetailSheet extends StatefulWidget {
   const MemoryDetailSheet({
@@ -359,7 +360,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                           Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: Container(
-                              padding: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: palette.bgSecondary.withValues(
                                   alpha: 0.65,
@@ -402,8 +403,8 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                                                 .isNotEmpty ==
                                             true) ...<Widget>[
                                           const SizedBox(height: 5),
-                                          Text(
-                                            item['analysisText'] as String,
+                                          _ExpandableText(
+                                            text: item['analysisText'] as String,
                                             style: TextStyle(
                                               color: palette.textSoft,
                                               height: 1.4,
@@ -458,59 +459,7 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
                         style: _sectionStyle(palette),
                       ),
                       const SizedBox(height: 10),
-                      if (sources.isEmpty)
-                        Text(
-                          'No transcript excerpts are linked to this memory.',
-                          style: TextStyle(
-                            color: palette.textMuted,
-                            height: 1.4,
-                          ),
-                        )
-                      else
-                        for (final source in sources)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: palette.bgSecondary.withValues(
-                                  alpha: 0.55,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: palette.border),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  if (source['started_at'] != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 6),
-                                      child: Text(
-                                        formatTime(
-                                          DateTime.parse(
-                                            source['started_at'] as String,
-                                          ),
-                                        ),
-                                        style: TextStyle(
-                                          color: palette.accentHover,
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  Text(
-                                    source['text'] as String? ?? '',
-                                    style: TextStyle(
-                                      color: palette.textSoft,
-                                      height: 1.5,
-                                      fontSize: 13.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+                      TranscriptExcerpts(sources: sources),
                     ],
                   ),
           ),
@@ -524,6 +473,45 @@ class _MemoryDetailSheetState extends State<MemoryDetailSheet>
     fontWeight: FontWeight.w800,
     fontSize: 15,
   );
+}
+
+/// A document's analysis, which can run to several paragraphs.
+///
+/// Attaching a file to a memory adds the model's reading of it to the card. In
+/// full that is often longer than the memory itself, and it sits between the
+/// reader and the transcript below. Three lines is enough to recognise which
+/// file this is; the rest is one tap away.
+class _ExpandableText extends StatefulWidget {
+  const _ExpandableText({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_ExpandableText> createState() => _ExpandableTextState();
+}
+
+class _ExpandableTextState extends State<_ExpandableText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => setState(() => _expanded = !_expanded),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: Text(
+          widget.text,
+          style: widget.style,
+          maxLines: _expanded ? null : 3,
+          overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
 }
 
 class MiniDetailSheet extends StatefulWidget {
@@ -674,34 +662,13 @@ class _MiniDetailSheetState extends State<MiniDetailSheet>
                         ),
                       ),
                       const SizedBox(height: 10),
-                      if (sources.isEmpty)
-                        Text(
-                          'No transcript excerpts linked.',
-                          style: TextStyle(color: palette.textMuted),
-                        )
-                      else
-                        for (final source in sources)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: palette.bgSecondary.withValues(
-                                  alpha: 0.55,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: palette.border),
-                              ),
-                              child: Text(
-                                source['text'] as String? ?? '',
-                                style: TextStyle(
-                                  color: palette.textSoft,
-                                  height: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
+                      TranscriptExcerpts(
+                        sources: sources,
+                        emptyLabel: 'No transcript excerpts linked.',
+                        // A highlight cites one moment, so a clock down the
+                        // side would repeat what its own timestamp says.
+                        showTimes: false,
+                      ),
                     ],
                   ),
           ),

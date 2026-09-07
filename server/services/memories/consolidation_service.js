@@ -11,6 +11,7 @@ const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const searchIndex = require('../../embeddings/search_index_service');
 const memoryContinuity = require('./memory_continuity_service');
+const memoryOccasion = require('./memory_occasion_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
 const contextMaterial = require('../context/context_material_service');
@@ -125,25 +126,35 @@ function narrowingAfterFailure(userId) {
   return Boolean(previous && previous.state === 'failed' && VALIDATION_FAILURE_CODES.includes(previous.error_code));
 }
 
+// The conversations one run may carry: the oldest occasion still waiting.
+//
+// A run carries one occasion rather than one conversation. A pause of a few
+// minutes cuts the stream mid-meeting, and consolidating each piece on its own
+// wrote one card per piece — so the pieces of a sitting are chained back
+// together here and read as one input. They are never an arbitrary batch: the
+// chain stops at the first conversation from another recording or beyond the
+// occasion gap, which is what keeps the model from being asked to hold two
+// unrelated occasions in mind at once.
 function buildCandidates(userId) {
-  const { maxConsolidationInputChars: maxCharacters, maxConsolidationConversations: maxCount } = processingSettings.get();
+  const options = processingSettings.get();
   const narrowed = narrowingAfterFailure(userId);
-  const output = [];
-  let characters = 0;
-  for (const conversation of candidateConversations(userId)) {
-    if (output.length && (narrowed || output.length >= maxCount)) break;
-    const candidate = material.material(userId, conversation);
-    if (output.length && characters + candidate.characters > maxCharacters) break;
-    const { characters: size, ...rest } = candidate;
-    output.push(rest);
-    characters += size;
-  }
+  const candidates = candidateConversations(userId).map((conversation) => material.material(userId, conversation));
+  // After a validation failure the next run carries a single conversation, which
+  // isolates the cause. Chaining would put the whole occasion back into it.
+  const limits = {
+    occasionGapMs: options.memoryOccasionGapMs,
+    maxConversations: narrowed ? 1 : options.maxConsolidationConversations,
+    maxCharacters: options.maxConsolidationInputChars,
+    maxSpanMs: options.conversationMaximumMs,
+  };
+  const { conversations: chained, characters } = memoryOccasion.chain(candidates, limits);
+  const output = chained.map(({ characters: _size, ...rest }) => rest);
   const audioMs = output.reduce((sum, conversation) => sum + material.durationMs(conversation), 0);
   contextMaterial.attach(userId, output);
   return { conversations: output, characters, audioMs, narrowed };
 }
 
-function eligibility(userId, { ignoreBackoff = false } = {}) {
+function eligibility(userId, { ignoreBackoff = false, manual = false } = {}) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
   if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
@@ -181,6 +192,19 @@ function eligibility(userId, { ignoreBackoff = false } = {}) {
         requiredCharacters: processingConfig.minNewMaterialChars, consolidateAfter };
     }
   }
+  // The last gate: has this occasion finished happening?
+  //
+  // Everything above asks whether there is enough material; this asks whether
+  // the material is all of it. A sitting that is still running would otherwise
+  // be written up in pieces, one card per pause. Asking by hand skips it —
+  // someone who presses the button is saying they want what exists now.
+  if (!manual) {
+    const settled = memoryOccasion.readiness(userId, candidates.conversations, processingConfig);
+    if (!settled.ready) {
+      return { eligible: false, reason: settled.reason, consolidateAfter: settled.consolidateAfter,
+        materialConversations: candidates.conversations.length };
+    }
+  }
   return { eligible: true, nextEligibleAt, ...candidates };
 }
 
@@ -215,11 +239,11 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
 }
 
 function request(userId, { manual = false } = {}) {
-  let state = eligibility(userId);
+  let state = eligibility(userId, { manual });
   // Someone who presses the button has decided to try now, and is watching the
   // result — the backoff exists to stop unattended retries, not to refuse them.
   if (!state.eligible && state.reason === 'recent_failure' && manual) {
-    state = eligibility(userId, { ignoreBackoff: true });
+    state = eligibility(userId, { ignoreBackoff: true, manual });
   }
   if (!state.eligible) {
     if (manual && state.reason === 'interval') {

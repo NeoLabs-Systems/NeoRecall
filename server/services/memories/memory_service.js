@@ -592,11 +592,32 @@ async function rewriteMergedProse(userId, payload) {
 
 // Merge evidence and highlights immediately. Optional AI prose polishing is a
 // durable worker job, so a slow model never holds the user's request open.
-function merge(userId, { ids }) {
+// Merging by hand replaces the wording, because choosing to merge is choosing
+// the combined card. The duplicate sweep merges without being asked, so it must
+// not also overwrite wording someone typed themselves: when a member carries
+// prose_edited_at, that member's words survive and no rewrite is queued. This
+// is not an exception to merging — the cards are still folded into one, with
+// every highlight, topic, entity and transcript line kept.
+function editedProse(memories) {
+  const edited = memories.filter((memory) => memory.prose_edited_at)
+    .sort((left, right) => Date.parse(right.prose_edited_at) - Date.parse(left.prose_edited_at))[0];
+  if (!edited) return null;
+  return { type: edited.type, titleEn: edited.title_en, summaryEn: edited.summary_en, emoji: edited.emoji || defaultEmojiForType(edited.type) };
+}
+
+function merge(userId, { ids }, { automatic = false } = {}) {
   if (!Array.isArray(ids)) throw new HttpError(400, 'INVALID_IDS', 'Provide memory ids to merge.');
   const memories = loadMemoriesForMerge(userId, ids);
-  const structural = applyStructuralMerge(userId, memories, deterministicMergeProse(memories));
-  const rewriteJobId = queueMergedProseRewrite(userId, structural, memories);
+  const keepEdited = automatic ? editedProse(memories) : null;
+  const structural = applyStructuralMerge(userId, memories, keepEdited || deterministicMergeProse(memories));
+  // The survivor now carries wording someone typed, whichever member it came
+  // from, so it has to be marked as such — that mark is what stops later
+  // consolidation from renaming the card.
+  if (keepEdited) {
+    getDatabase().prepare(`UPDATE memories SET prose_edited_at=COALESCE(prose_edited_at,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      WHERE public_id=? AND user_id=?`).run(structural.targetPublicId, userId);
+  }
+  const rewriteJobId = keepEdited ? null : queueMergedProseRewrite(userId, structural, memories);
   const detail = memoryDetail(userId, structural.targetPublicId);
   return {
     memory: detail,

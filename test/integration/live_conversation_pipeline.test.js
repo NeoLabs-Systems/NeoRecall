@@ -201,21 +201,75 @@ test('a long conversation refreshes from its own summary instead of its whole hi
   assert.equal(rolling.characters, 35_000, 'Growth is still measured against the whole transcript.');
 });
 
+test('one sitting broken by pauses becomes one consolidation run, not one per fragment', async () => {
+  const recording = await recordingUser('occasion-user');
+  const db = getDatabase();
+  // One meeting with two ordinary pauses in it. Each pause clears the hard
+  // boundary gap, so speech grouping cuts the sitting into three conversations —
+  // which is what used to produce three memory cards minutes apart.
+  appendChunk(recording, 0, [{ startedAt: iso(-1_200_000), endedAt: iso(-1_140_000), text: 'Wir fangen mit dem Zeitplan an und gehen die offenen Punkte durch.' }]);
+  appendChunk(recording, 1, [{ startedAt: iso(-900_000), endedAt: iso(-840_000), text: 'Weiter beim Zeitplan, der Termin im September bleibt bestehen.' }]);
+  appendChunk(recording, 2, [{ startedAt: iso(-360_000), endedAt: iso(-60_000), text: 'Zum Schluss noch die Verteilung der Aufgaben im Team.' }]);
+  await boundaryHandler.handle({ user_id: recording.userId });
+  db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
+  await settleSpeakerResolution(recording.userId);
+  const fragments = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
+  assert.equal(fragments.length, 3, 'The pauses do cut the sitting into three conversations.');
+
+  // All three are read as one occasion, so one run carries the whole sitting.
+  assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), fragments);
+
+  // And while the recording is still running and the last fragment is fresh,
+  // nothing is written up at all: more of this sitting may still be coming.
+  const waiting = consolidation.eligibility(recording.userId);
+  assert.equal(waiting.eligible, false);
+  assert.equal(waiting.reason, 'occasion_unsettled');
+  assert.ok(Date.parse(waiting.consolidateAfter) > SUITE_NOW, 'It says when it will stop waiting.');
+  assert.equal(consolidation.request(recording.userId).queued, undefined);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM consolidation_runs WHERE user_id=?').get(recording.userId).count, 0);
+
+  // Asking by hand is a decision to take what exists now, and skips the wait.
+  assert.equal(consolidation.eligibility(recording.userId, { manual: true }).eligible, true);
+
+  // Once the recording stops, the whole sitting is written up in one run.
+  db.prepare('UPDATE audio_chunks SET uploaded_at=? WHERE user_id=?').run(iso(-1_200_000), recording.userId);
+  const ready = consolidation.eligibility(recording.userId);
+  assert.equal(ready.eligible, true);
+  assert.equal(ready.conversations.length, 3);
+  assert.equal(consolidation.request(recording.userId).queued, true);
+  const runs = db.prepare('SELECT id FROM consolidation_runs WHERE user_id=?').all(recording.userId);
+  assert.equal(runs.length, 1, 'One sitting, one run — not one run per fragment.');
+  const job = db.prepare("SELECT payload_json FROM jobs WHERE type='consolidate_memories' AND resource_id=?").get(runs[0].id);
+  assert.deepEqual(JSON.parse(job.payload_json).conversationIds, fragments);
+});
+
+test('a separate occasion later the same day stays its own run', async () => {
+  const recording = await recordingUser('two-occasion-user');
+  const db = getDatabase();
+  // Two sittings an hour apart on one recording. The gap is far beyond the
+  // occasion gap, so nothing joins them and each keeps its own card.
+  appendChunk(recording, 0, [{ startedAt: iso(-7_200_000), endedAt: iso(-7_140_000), text: 'Das Morgenmeeting zum Zeitplan mit dem ganzen Team.' }]);
+  appendChunk(recording, 1, [{ startedAt: iso(-3_600_000), endedAt: iso(-3_540_000), text: 'Später ein eigenes Gespräch über den Zeitplan mit der Werkstatt.' }]);
+  await boundaryHandler.handle({ user_id: recording.userId });
+  db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
+  await settleSpeakerResolution(recording.userId);
+  const [morning] = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
+  assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [morning]);
+});
+
 test('a conversation the model cannot partition is isolated and then quarantined', async () => {
   const recording = await recordingUser('quarantine-user');
   const db = getDatabase();
+  // Two conversations of one sitting: the pause between them clears the hard
+  // boundary gap, so speech grouping cuts them apart, but it stays well inside
+  // the occasion gap, so consolidation reads them as one occasion.
   appendChunk(recording, 0, [{ startedAt: iso(-7_200_000), endedAt: iso(-7_100_000), text: 'Erste abgeschlossene Konversation mit genug Inhalt.' }]);
-  appendChunk(recording, 1, [{ startedAt: iso(-3_600_000), endedAt: iso(-3_500_000), text: 'Zweite abgeschlossene Konversation mit genug Inhalt.' }]);
+  appendChunk(recording, 1, [{ startedAt: iso(-6_900_000), endedAt: iso(-6_800_000), text: 'Zweite abgeschlossene Konversation mit genug Inhalt.' }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
   await settleSpeakerResolution(recording.userId);
   const [older, newer] = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
   assert.ok(older && newer && older !== newer);
-  // Narrowing is only observable when a run is allowed to carry more than one
-  // conversation, which is not the shipped default any more — a local model does
-  // its best work on one occasion at a time. The batching path still exists for
-  // an operator who raises the limit, so the test configures it explicitly.
-  processingSettings.update({ maxConsolidationConversations: 12 });
   assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [older, newer]);
 
   // After a validation failure the next run carries a single conversation, so
@@ -236,7 +290,6 @@ test('a conversation the model cannot partition is isolated and then quarantined
 
   // Memory generation continues with the conversations that are still valid.
   assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [newer]);
-  processingSettings.update({ maxConsolidationConversations: getConfig().maxConsolidationConversations });
 });
 
 test('the audio floor is off by default and still enforced when an operator sets one', async () => {

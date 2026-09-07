@@ -32,8 +32,10 @@ async function handle(job) {
     const contextOriginalsRemoved = require('../../services/context/context_service').cleanupExpiredOriginals();
     let speakerProfilesMerged = 0;
     let speakerConversationsQueued = 0;
+    let duplicateMemoriesMerged = 0;
     const userSettings = require('../../services/settings/settings_service');
     const speakers = require('../../services/speakers/speaker_service');
+    const memoryDedupe = require('../../services/memories/memory_dedupe_service');
     for (const user of db.prepare('SELECT id FROM users WHERE disabled_at IS NULL').all()) {
       const settings = userSettings.get(user.id);
       try {
@@ -46,6 +48,10 @@ async function handle(job) {
           userId: user.id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
         });
       }
+      // The safety net under memory generation: cards that describe one sitting
+      // but were written separately. It reports its own failures and returns
+      // rather than throwing, for the same reason as the block above.
+      duplicateMemoriesMerged += (await memoryDedupe.sweep(user.id)).merged;
     }
     if (speakerConversationsQueued) logger.info('Queued speaker resolution for conversations that never got it', {
       conversations: speakerConversationsQueued,
@@ -63,7 +69,7 @@ async function handle(job) {
     }
     return {
       finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved,
-      speakerProfilesMerged, speakerConversationsQueued,
+      speakerProfilesMerged, speakerConversationsQueued, duplicateMemoriesMerged,
     };
   }
   return { skipped: true };
