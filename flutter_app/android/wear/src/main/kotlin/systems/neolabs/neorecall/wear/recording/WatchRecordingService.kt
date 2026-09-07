@@ -19,6 +19,7 @@ import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import systems.neolabs.neorecall.wear.R
 import systems.neolabs.neorecall.wear.WatchMainActivity
+import systems.neolabs.neorecall.wear.state.WatchStateRepository
 import systems.neolabs.neorecall.wear.surfaces.WatchSurfaces
 import systems.neolabs.neorecall.wear.storage.WatchRecordingStore
 import systems.neolabs.neorecall.wear.sync.WatchSyncManager
@@ -249,6 +250,7 @@ class WatchRecordingService : Service() {
   private fun broadcastState() {
     sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
     WatchSurfaces.refreshAll(this)
+    WatchStateRepository.get(this).refresh()
   }
 
   companion object {

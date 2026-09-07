@@ -36,6 +36,7 @@ fun NeoRecallWatchApp(
       SwipeDismissableNavHost(
         navController = navController,
         startDestination = WatchRoutes.HOME,
+        userSwipeEnabled = true,
       ) {
         composable(WatchRoutes.HOME) {
           HomeScreen(
@@ -49,7 +50,10 @@ fun NeoRecallWatchApp(
           )
         }
         composable(WatchRoutes.DIGEST) {
-          DigestScreen(digest = state.digest)
+          DigestScreen(
+            digest = state.digest,
+            onBack = { navController.popBackStack() },
+          )
         }
       }
     }

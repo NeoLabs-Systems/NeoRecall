@@ -34,6 +34,7 @@ class WatchStateRepository private constructor(private val context: Context) {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val refreshLock = Mutex()
   private val _state = MutableStateFlow(WatchUiState())
+  @Volatile private var pendingRecording: Boolean? = null
 
   val state: StateFlow<WatchUiState> = _state.asStateFlow()
 
@@ -47,13 +48,15 @@ class WatchStateRepository private constructor(private val context: Context) {
     scope.launch {
       refreshLock.withLock {
         val store = WatchRecordingStore.get(context)
-        val recording = WatchRecordingService.isRecording(context)
+        val recorded = WatchRecordingService.isRecording(context)
+        val recording = resolveRecording(recorded)
         _state.update { current ->
           current.copy(
             loaded = true,
             recording = recording,
             recordingStartedAtMs = if (recording) {
               WatchRecordingService.sessionStartedAt(context)
+                ?: current.recordingStartedAtMs
             } else {
               null
             },
@@ -81,6 +84,7 @@ class WatchStateRepository private constructor(private val context: Context) {
    * takes to open, which reads as a missed tap.
    */
   fun setRecordingOptimistically(recording: Boolean) {
+    pendingRecording = recording
     _state.update {
       it.copy(
         recording = recording,
@@ -91,6 +95,21 @@ class WatchStateRepository private constructor(private val context: Context) {
         },
       )
     }
+  }
+
+  /**
+   * A tap updates the button before the service has written its preference.
+   * Keep that flip until the service agrees, otherwise a refresh that ran a
+   * moment too early snaps the control back to idle while the microphone is
+   * already open.
+   */
+  private fun resolveRecording(recorded: Boolean): Boolean {
+    val pending = pendingRecording ?: return recorded
+    if (pending == recorded) {
+      pendingRecording = null
+      return recorded
+    }
+    return pending
   }
 
   private fun readPhoneLink(): PhoneLink = runCatching {

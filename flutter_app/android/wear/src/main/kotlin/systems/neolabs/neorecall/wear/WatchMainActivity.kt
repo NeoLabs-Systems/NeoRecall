@@ -5,8 +5,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,32 +30,54 @@ import systems.neolabs.neorecall.wear.ui.NeoRecallWatchApp
  */
 class WatchMainActivity : ComponentActivity() {
   private val repository by lazy { WatchStateRepository.get(this) }
+  private val permissionPrefs by lazy {
+    getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
+  }
 
   private val stateReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) = repository.refresh()
   }
 
-  private val permissionLauncher = registerForActivityResult(
-    ActivityResultContracts.RequestMultiplePermissions(),
+  private val microphonePermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
   ) { granted ->
-    if (granted[Manifest.permission.RECORD_AUDIO] == true) {
+    repository.refresh()
+    if (granted) {
+      requestNotificationPermissionIfNeeded()
       startRecording()
     } else {
       // The optimistic flip made on tap has to be undone, or a refused prompt
       // leaves a button claiming to be recording.
       repository.setRecordingOptimistically(false)
-      repository.refresh()
+      if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+        openAppSettings()
+      }
     }
   }
 
+  private val notificationPermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { repository.refresh() }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    ContextCompat.registerReceiver(
+      this,
+      stateReceiver,
+      IntentFilter(WatchRecordingService.ACTION_STATE_CHANGED),
+      ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
     setContent {
       val state by repository.state.collectAsStateWithLifecycle()
       NeoRecallWatchApp(state = state, onToggleRecording = ::toggleRecording)
     }
     WatchSyncManager.get(this).syncPending(includeEnqueued = true)
     consumeStartRequest(intent)
+  }
+
+  override fun onDestroy() {
+    unregisterReceiver(stateReceiver)
+    super.onDestroy()
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -77,42 +102,63 @@ class WatchMainActivity : ComponentActivity() {
 
   override fun onStart() {
     super.onStart()
-    ContextCompat.registerReceiver(
-      this,
-      stateReceiver,
-      IntentFilter(WatchRecordingService.ACTION_STATE_CHANGED),
-      ContextCompat.RECEIVER_NOT_EXPORTED,
-    )
     repository.refresh(includePhoneLink = true)
-  }
-
-  override fun onStop() {
-    unregisterReceiver(stateReceiver)
-    super.onStop()
+    if (!hasMicrophonePermission() && !permissionPrefs.getBoolean(KEY_PROMPTED_MICROPHONE, false)) {
+      requestMicrophonePermission()
+    }
   }
 
   private fun toggleRecording() {
-    if (WatchRecordingService.isRecording(this)) {
+    val active = WatchRecordingService.isRecording(this) || repository.state.value.recording
+    if (active) {
       repository.setRecordingOptimistically(false)
       startService(
         Intent(this, WatchRecordingService::class.java)
           .setAction(WatchRecordingService.ACTION_STOP),
       )
-      repository.refresh()
       return
     }
     if (hasMicrophonePermission()) {
-      repository.setRecordingOptimistically(true)
+      requestNotificationPermissionIfNeeded()
       startRecording()
       return
     }
-    permissionLauncher.launch(
-      buildList {
-        add(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-      }.toTypedArray(),
+    requestMicrophonePermission()
+  }
+
+  /**
+   * Asks for the microphone on its own.
+   *
+   * Wear OS often drops [ActivityResultContracts.RequestMultiplePermissions]
+   * without showing a dialog. Asking for one permission, then opening the app
+   * settings page when the system will not ask again, is what makes the on-screen
+   * "Allow microphone" control do something visible.
+   */
+  private fun requestMicrophonePermission() {
+    if (hasMicrophonePermission()) return
+    val alreadyAsked = permissionPrefs.getBoolean(KEY_PROMPTED_MICROPHONE, false)
+    permissionPrefs.edit().putBoolean(KEY_PROMPTED_MICROPHONE, true).apply()
+    if (alreadyAsked && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+      openAppSettings()
+      return
+    }
+    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+  }
+
+  private fun requestNotificationPermissionIfNeeded() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+      PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+  }
+
+  private fun openAppSettings() {
+    startActivity(
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        .setData(Uri.fromParts("package", packageName, null)),
     )
   }
 
@@ -123,16 +169,17 @@ class WatchMainActivity : ComponentActivity() {
       Intent(this, WatchRecordingService::class.java)
         .setAction(WatchRecordingService.ACTION_START),
     )
-    repository.refresh()
   }
 
   companion object {
     /** Set by the Record tile, which cannot start a microphone service itself. */
     const val EXTRA_START_ON_OPEN = "systems.neolabs.neorecall.wear.START_ON_OPEN"
+    private const val PERMISSION_PREFS = "neorecall_watch_permissions"
+    private const val KEY_PROMPTED_MICROPHONE = "prompted_microphone"
   }
 
   private fun hasMicrophonePermission(): Boolean = ContextCompat.checkSelfPermission(
     this,
     Manifest.permission.RECORD_AUDIO,
-  ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+  ) == PackageManager.PERMISSION_GRANTED
 }

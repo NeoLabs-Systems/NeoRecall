@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListState
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.material3.CompactButton
 import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
@@ -62,14 +63,15 @@ fun HomeScreen(
       modifier = Modifier.fillMaxWidth(),
     ) {
       item { BrandMark() }
-      item {
-        RecordControl(
-          recording = state.recording,
-          enabled = state.loaded,
-          onClick = onToggleRecording,
-        )
+      item(key = "capture-${state.recording}") {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          RecordControl(
+            recording = state.recording,
+            onClick = onToggleRecording,
+          )
+          CaptureCaption(state = state, onToggleRecording = onToggleRecording)
+        }
       }
-      item { CaptureCaption(state) }
       if (state.hasHeldAudio || state.phone != PhoneLink.CONNECTED) {
         item { SyncCard(state) }
       }
@@ -110,7 +112,10 @@ private fun BrandMark() {
  * capture was doing, which is more useful than a fixed slogan.
  */
 @Composable
-private fun CaptureCaption(state: WatchUiState) {
+private fun CaptureCaption(
+  state: WatchUiState,
+  onToggleRecording: () -> Unit,
+) {
   Column(
     horizontalAlignment = Alignment.CenterHorizontally,
     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
@@ -136,9 +141,16 @@ private fun CaptureCaption(state: WatchUiState) {
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
       )
+      CompactButton(onClick = onToggleRecording) {
+        Text("Stop")
+      }
+    } else if (!state.micPermitted) {
+      CompactButton(onClick = onToggleRecording) {
+        Text("Allow microphone")
+      }
     } else {
       Text(
-        text = if (state.micPermitted) "Ready to remember" else "Tap to allow the microphone",
+        text = "Ready to remember",
         color = NeoRecallPalette.textPrimary,
         fontSize = 14.sp,
         textAlign = TextAlign.Center,

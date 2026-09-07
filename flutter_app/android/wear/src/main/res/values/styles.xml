@@ -8,6 +8,11 @@
         <item name="android:navigationBarColor">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:colorAccent">#E1B052</item>
+        <!-- Wear's DeviceDefault window is translucent. A translucent activity
+             can swallow the microphone prompt and fail the microphone
+             foreground-service start that follows a grant. -->
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowSwipeToDismiss">false</item>
     </style>
 
     <!-- A tile tap must not flash a screen on its way to the microphone. -->

@@ -13,7 +13,9 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListState
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.Text
 import kotlinx.coroutines.delay
 import systems.neolabs.neorecall.wear.digest.WatchDigest
 import systems.neolabs.neorecall.wear.ui.common.EmptyState
@@ -33,11 +35,20 @@ import systems.neolabs.neorecall.wear.ui.theme.NeoRecallPalette
 @Composable
 fun DigestScreen(
   digest: WatchDigest,
+  onBack: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val listState: ScalingLazyListState = rememberScalingLazyListState()
   val now by rememberNow()
-  ScreenScaffold(scrollState = listState, modifier = modifier) { contentPadding ->
+  ScreenScaffold(
+    scrollState = listState,
+    modifier = modifier,
+    edgeButton = {
+      EdgeButton(onClick = onBack) {
+        Text("Back")
+      }
+    },
+  ) { contentPadding ->
     ScalingLazyColumn(
       state = listState,
       contentPadding = contentPadding,

@@ -5,28 +5,23 @@ import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material3.IconButton
+import androidx.wear.compose.material3.IconButtonDefaults
 import systems.neolabs.neorecall.wear.ui.theme.NeoRecallPalette
 
 /**
@@ -37,13 +32,17 @@ import systems.neolabs.neorecall.wear.ui.theme.NeoRecallPalette
  * microphone is open, and a still ring with a soft glow when it is not. On a
  * watch the difference has to be readable from the corner of an eye, without
  * reading the label under it.
+ *
+ * The drawing sits inside a Wear [IconButton] because a raw `clickable` inside
+ * [androidx.wear.compose.foundation.lazy.ScalingLazyColumn] is swallowed as
+ * scroll more often than it fires.
  */
 @Composable
 fun RecordControl(
   recording: Boolean,
-  enabled: Boolean,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
+  enabled: Boolean = true,
   diameter: Int = 84,
 ) {
   val transition = rememberInfiniteTransition(label = "record-pulse")
@@ -66,22 +65,22 @@ fun RecordControl(
   val core = if (recording) NeoRecallPalette.danger else NeoRecallPalette.accent
   val alpha = if (enabled) 1f else 0.4f
 
-  Box(
+  IconButton(
+    onClick = onClick,
+    enabled = enabled,
     modifier = modifier
       .size(diameter.dp)
-      .clickable(
-        enabled = enabled,
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
       .semantics {
-        role = Role.Button
         contentDescription = if (recording) "Stop recording" else "Start recording"
       },
-    contentAlignment = Alignment.Center,
+    colors = IconButtonDefaults.iconButtonColors(
+      containerColor = Color.Transparent,
+      contentColor = core,
+      disabledContainerColor = Color.Transparent,
+      disabledContentColor = core.copy(alpha = 0.4f),
+    ),
   ) {
-    Canvas(Modifier.size(diameter.dp)) {
+    Canvas(Modifier.fillMaxSize()) {
       val centre = Offset(size.width / 2f, size.height / 2f)
       val outer = size.minDimension / 2f
 
@@ -92,7 +91,7 @@ fun RecordControl(
           color = core.copy(alpha = alpha * 0.45f * (1f - pulse)),
           radius = haloRadius,
           center = centre,
-          style = Stroke(width = outer * 0.09f),
+          style = androidx.compose.ui.graphics.drawscope.Stroke(width = outer * 0.09f),
         )
       }
 
@@ -102,7 +101,7 @@ fun RecordControl(
         color = NeoRecallPalette.outline.copy(alpha = alpha),
         radius = outer - outer * 0.03f,
         center = centre,
-        style = Stroke(width = outer * 0.055f),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(width = outer * 0.055f),
       )
 
       // Body: a soft radial fill, dimmer at the rim, so the disc reads as lit
@@ -124,7 +123,7 @@ fun RecordControl(
         color = core.copy(alpha = alpha),
         radius = bodyRadius,
         center = centre,
-        style = Stroke(width = outer * 0.06f),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(width = outer * 0.06f),
       )
 
       // Glyph: disc when idle, rounded square when live.
