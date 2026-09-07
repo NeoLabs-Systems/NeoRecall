@@ -92,6 +92,8 @@ void main() {
     );
     expect(armed(device: memoket).shouldAutoStartLiveCapture, isFalse);
     expect(armed(device: memoket).preferredDeviceStreamsLive, isTrue);
+    expect(armed(device: memoket).shouldFailoverWearableToPhoneMicrophone, isFalse);
+    expect(armed().shouldFailoverWearableToPhoneMicrophone, isTrue);
   });
 
   test('never without a remembered device', () {

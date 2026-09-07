@@ -176,16 +176,18 @@ mixin DeviceSyncController on ChangeNotifier {
       notifyListeners();
     });
     try {
+      // Hold the radio awake for the BLE copy itself, not just the ingest that
+      // follows it. A 1.5 h Gem file takes many minutes to drain; without this
+      // the CPU sleeps mid-copy and the stall timer aborts the take.
+      await _setBackgroundSyncActive(true);
       // The connector owns its device protocol (file list/download/delete,
       // ring-buffer drain, or flash-page batch) and hands back complete
       // recordings; each is ingested through the durable import pipeline before
       // the connector removes it from the device.
       await storage.drainStoredAudio((recording) async {
         // The first transferred recording makes an automatic sweep visible:
-        // now there is real progress to report. It also tells the background
-        // host to keep the CPU awake until the transfer finishes.
+        // now there is real progress to report.
         deviceStorageSyncing = true;
-        await _setBackgroundSyncActive(true);
         notifyListeners();
         await _ingestDeviceRecording(recording);
         deviceStorageSyncedCount += 1;

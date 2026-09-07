@@ -23,8 +23,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   static const Duration _listTimeout = Duration(seconds: 4);
   static const Duration _startTimeout = Duration(seconds: 3);
   static const Duration _stopTimeout = Duration(seconds: 4);
-  static const Duration _downloadTimeout = Duration(seconds: 90);
-  static const Duration _downloadStallTimeout = Duration(seconds: 12);
+  static const Duration _downloadStallTimeout = Duration(seconds: 20);
   static const Duration _deleteTimeout = Duration(seconds: 3);
   static const int _downloadAttempts = 3;
   static const Duration _commandGap = Duration(milliseconds: 80);
@@ -80,6 +79,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   bool get supportsConcurrentCapture => false;
 
   @override
+  bool get stopDeviceOnDisconnect => false;
+
+  @override
   Stream<WearableSyncProgress> get syncProgress => _progress.stream;
 
   @override
@@ -116,11 +118,30 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     // CCCD writes must finish before the first control write. Android's GATT
     // queue drops overlapping writes as a pigeon channel-error.
     await Future<void>.delayed(_subscribeSettle);
+    // A Gem that is already recording streams live frames as soon as we
+    // subscribe. Handshake writes on that same control characteristic have
+    // stopped the take; skip them and join the stream instead.
+    if (_deviceLive || recording) {
+      _ready = true;
+      _sawControl = true;
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'handshake_skipped_live',
+        details: const <String, Object?>{
+          'reason': 'Gem was already recording when the link came up.',
+        },
+      );
+      return;
+    }
     await _handshake();
   }
 
   Future<void> _handshake() async {
     await _command(MemoketProtocol.ping, MemoketProtocol.opPing);
+    if (_deviceLive || recording) {
+      _ready = _sawControl;
+      return;
+    }
     await readBatteryLevel();
     final fw = await _command(
       MemoketProtocol.firmwareQuery,
@@ -374,9 +395,22 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   }
 
   void _handleLiveAudio(List<int> data) {
-    if ((!recording && !_deviceLive) || _downloadBuffer != null) return;
+    if (_downloadBuffer != null) return;
     final payload = MemoketProtocol.liveOpusFrame(data);
     if (payload == null) return;
+    // The start opcode can be missed after a background reconnect. Live frames
+    // are proof the Gem is recording — treat it as live so list/battery/handshake
+    // writes cannot stop the take.
+    if (!_deviceLive && !recording) {
+      _deviceLive = true;
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'live_audio_inferred',
+        details: const <String, Object?>{
+          'hint': 'Gem is recording; control writes are held.',
+        },
+      );
+    }
     for (final frame in MemoketProtocol.splitPackedOpusFrames(payload)) {
       _liveEmittedFrames += 1;
       audioBytes.add(frame);
@@ -415,6 +449,21 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     buffer.add(Uint8List.fromList(data));
     _armDownloadStall();
     _publishFileProgress(_chunkBytes(buffer));
+    _finishDownloadIfComplete();
+  }
+
+  /// The Gem's 0x02 complete notify can lag a large copy. Stop waiting once
+  /// the announced payload has actually arrived.
+  void _finishDownloadIfComplete() {
+    final file = _downloadingFile;
+    final buffer = _downloadBuffer;
+    final done = _downloadDone;
+    if (file == null || buffer == null || done == null || done.isCompleted) {
+      return;
+    }
+    if (file.byteLength > 0 && _chunkBytes(buffer) >= file.byteLength) {
+      done.complete();
+    }
   }
 
   @override
@@ -534,7 +583,13 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
           'bluetooth_audio',
           'memoket_file_failed',
           level: 'warning',
-          details: <String, Object?>{'id': file.id, 'error': error.toString()},
+          details: <String, Object?>{
+            'id': file.id,
+            'error': error.toString(),
+            'listedSeconds': file.durationSeconds,
+            'announcedBytes': file.byteLength,
+            'expectedBytes': _syncExpectedBytes,
+          },
         );
         failed += 1;
       }
@@ -639,7 +694,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
             file.filename,
           ),
         );
-        await done.future.timeout(_downloadTimeout);
+        await done.future.timeout(MemoketProtocol.downloadBudget(expected));
         for (var i = 0; i < 40 && _chunkBytes(buffer) < expected; i += 1) {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         }

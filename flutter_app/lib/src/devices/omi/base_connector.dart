@@ -32,12 +32,20 @@ abstract class WearableConnector {
 
   Future<void> onConnected() async {}
 
+  /// Whether tearing down the BLE session should also stop on-device recording.
+  ///
+  /// Omi's live stream *is* the recording, so a drop must stop it. Memoket
+  /// keeps the take on flash; sending stop here is what split one long
+  /// recording into many when Android dropped the link in the background.
+  bool get stopDeviceOnDisconnect => true;
+
   Future<void> disconnect() async {
-    if (recording) {
+    if (recording && stopDeviceOnDisconnect) {
       try {
         await stopRecording();
       } catch (_) {}
     }
+    recording = false;
     for (final sub in _subs) {
       try {
         await sub.cancel();

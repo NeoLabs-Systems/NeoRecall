@@ -197,6 +197,26 @@ class MemoketProtocol {
     return durationSeconds * 4000;
   }
 
+  /// BLE copy budget for one listed take.
+  ///
+  /// A 90-second ceiling cut off hour-long Gem files: 1.5 h of packed Opus is
+  /// tens of megabytes, which BLE will not finish that fast. Floor keeps short
+  /// files from retrying too eagerly; cap bounds a stuck transfer.
+  static Duration downloadBudget(
+    int expectedBytes, {
+    int minBytesPerSecond = 4000,
+    Duration floor = const Duration(minutes: 2),
+    Duration cap = const Duration(hours: 3),
+  }) {
+    if (expectedBytes <= 0) return floor;
+    final needed = Duration(
+      seconds: (expectedBytes / minBytesPerSecond).ceil() + 60,
+    );
+    if (needed < floor) return floor;
+    if (needed > cap) return cap;
+    return needed;
+  }
+
   static String? recordingFilename(List<int> frame) {
     if (frame.isEmpty ||
         (frame.first != opRecordStart && frame.first != opRecordStop)) {
@@ -280,6 +300,11 @@ class MemoketProtocol {
     return (microseconds + 500) ~/ 1000;
   }
 
+  /// One Ogg page holds at most 255 lacing values. 80-byte Gem frames use one
+  /// each, so 255 packets/page. Packing is what keeps a 1.5 h take under the
+  /// 32 MB ingest cap: one page per frame adds ~28 bytes × 270k frames.
+  static const int _oggMaxSegments = 255;
+
   static Uint8List wrapOpusFramesAsOgg(List<Uint8List> frames) {
     final serial = 0x4d4b4731; // 'MKG1'
     final toc = frames.isEmpty ? 0 : frames.first.first;
@@ -292,7 +317,7 @@ class MemoketProtocol {
         granule: 0,
         serial: serial,
         sequence: 0,
-        body: _opusHead(sampleRate, channels),
+        packets: <List<int>>[_opusHead(sampleRate, channels)],
       ),
     );
     pages.add(
@@ -301,28 +326,46 @@ class MemoketProtocol {
         granule: 0,
         serial: serial,
         sequence: 1,
-        body: _opusTags(),
+        packets: <List<int>>[_opusTags()],
       ),
     );
     var granule = 0;
-    for (var i = 0; i < frames.length; i += 1) {
-      final frame = frames[i];
-      if (frame.isNotEmpty) granule += opusGranuleIncrement(frame.first);
+    var sequence = 2;
+    var i = 0;
+    while (i < frames.length) {
+      final packets = <List<int>>[];
+      var segments = 0;
+      while (i < frames.length) {
+        final needed = _oggSegmentCount(frames[i].length);
+        if (packets.isNotEmpty && segments + needed > _oggMaxSegments) break;
+        packets.add(frames[i]);
+        segments += needed;
+        i += 1;
+      }
+      for (final packet in packets) {
+        if (packet.isNotEmpty) granule += opusGranuleIncrement(packet.first);
+      }
       pages.add(
         _oggPage(
-          headerType: i == frames.length - 1 ? 0x04 : 0x00,
+          headerType: i >= frames.length ? 0x04 : 0x00,
           granule: granule,
           serial: serial,
-          sequence: i + 2,
-          body: frame,
+          sequence: sequence,
+          packets: packets,
         ),
       );
+      sequence += 1;
     }
     final out = BytesBuilder();
     for (final page in pages) {
       out.add(page);
     }
     return out.toBytes();
+  }
+
+  static int _oggSegmentCount(int packetBytes) {
+    if (packetBytes <= 0) return 1;
+    return (packetBytes / 255).ceil();
   }
 
   static Uint8List _opusHead(int sampleRate, int channels) {
@@ -365,15 +408,23 @@ class MemoketProtocol {
     required int granule,
     required int serial,
     required int sequence,
-    required List<int> body,
+    required List<List<int>> packets,
   }) {
     final lacing = <int>[];
-    var remaining = body.length;
-    while (remaining >= 255) {
-      lacing.add(255);
-      remaining -= 255;
+    final body = BytesBuilder();
+    for (final packet in packets) {
+      body.add(packet);
+      var remaining = packet.length;
+      if (remaining == 0) {
+        lacing.add(0);
+        continue;
+      }
+      while (remaining >= 255) {
+        lacing.add(255);
+        remaining -= 255;
+      }
+      lacing.add(remaining);
     }
-    lacing.add(remaining);
     final header = BytesBuilder()
       ..add(ascii.encode('OggS'))
       ..add(<int>[0, headerType])
@@ -384,7 +435,7 @@ class MemoketProtocol {
       ..add(<int>[lacing.length, ...lacing]);
     final page = BytesBuilder()
       ..add(header.toBytes())
-      ..add(body);
+      ..add(body.toBytes());
     final bytes = page.toBytes();
     final crc = _oggCrc(bytes);
     bytes[22] = crc & 0xff;

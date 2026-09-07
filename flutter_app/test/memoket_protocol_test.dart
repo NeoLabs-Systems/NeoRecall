@@ -81,6 +81,17 @@ void main() {
     );
   });
 
+  test('a long Gem file is given minutes to copy, not 90 seconds', () {
+    expect(
+      MemoketProtocol.downloadBudget(10 * 1000),
+      const Duration(minutes: 2),
+    );
+    expect(
+      MemoketProtocol.downloadBudget(20 * 1024 * 1024).inMinutes,
+      greaterThanOrEqualTo(80),
+    );
+  });
+
   test('two recordings from one day keep distinct capture times', () {
     const morning = MemoketStoredFile(
       filename: '20260905_222309_2.opus',
@@ -184,6 +195,21 @@ void main() {
     expect(ogg[headAt + 12], 16000 & 0xff);
     expect(ogg[headAt + 13], (16000 >> 8) & 0xff);
     expect(_lastOggGranule(ogg), 1920);
+  });
+
+  test('Ogg wrapping packs many Opus frames onto each page', () {
+    final frames = List<Uint8List>.generate(
+      200,
+      (_) => Uint8List.fromList(<int>[0xbc, ...List<int>.filled(79, 0)]),
+    );
+    final ogg = MemoketProtocol.wrapOpusFramesAsOgg(frames);
+    const payload = 200 * 80;
+    // One Ogg page per 80-byte frame is ~35% overhead. Packed pages stay
+    // close to the Opus payload so a 1.5 h take fits the 32 MB ingest cap.
+    expect(ogg.length, lessThan(payload + 2500));
+    expect(ogg.length, greaterThan(payload));
+    expect(_lastOggGranule(ogg), 200 * 960);
+    expect(ogg, containsAllInOrder(<int>[0xbc, ...List<int>.filled(79, 0)]));
   });
 }
 
