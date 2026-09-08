@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
@@ -58,6 +59,10 @@ class WatchRecordingService : Service() {
     if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       clearActiveState()
       stopSelf()
+      // Announced like any other stop. A tap that got this far has already
+      // flipped the control to recording, and nothing else would ever put it
+      // back — the wearer would be looking at a lie until the app was reopened.
+      broadcastState()
       return
     }
     val now = System.currentTimeMillis()
@@ -270,6 +275,28 @@ class WatchRecordingService : Service() {
     fun isRecording(context: Context): Boolean = context
       .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .getBoolean(KEY_ACTIVE, false)
+
+    /**
+     * Reports every change to recording state, whoever made it.
+     *
+     * The service, the tile's stop activity and the boot recovery all write the
+     * same preferences from this one process, so listening to the file itself
+     * catches all three — including the paths that end before they reach a
+     * broadcast. The returned listener must be held by the caller: preferences
+     * keep only a weak reference to it.
+     */
+    fun observeState(
+      context: Context,
+      onChange: () -> Unit,
+    ): SharedPreferences.OnSharedPreferenceChangeListener {
+      val preferences = context.applicationContext
+        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null || key == KEY_ACTIVE || key == KEY_STARTED_AT) onChange()
+      }
+      preferences.registerOnSharedPreferenceChangeListener(listener)
+      return listener
+    }
 
     /**
      * When the current session began, for the surfaces that show a running

@@ -2579,17 +2579,23 @@ class NeoRecallController extends ChangeNotifier
   void _handleDeviceTransportState(DeviceTransportState state) {
     final previous = _lastHandledDeviceTransportState;
     _lastHandledDeviceTransportState = state;
-    ClientDiagnosticLog.instance.record(
-      'device_transport',
-      'state_changed',
-      level: state == DeviceTransportState.faulted ? 'warning' : 'info',
-      details: <String, Object?>{
-        'state': state.name,
-        'previous': previous?.name,
-        'device': audioDeviceSessions.preferredDevice?.displayName,
-        'type': audioDeviceSessions.preferredDevice?.metadata['type'],
-      },
-    );
+    // A radio that keeps failing re-announces the state it is already in. The
+    // event is still handled — the side effects below are what keep a dropped
+    // link tidy — but recording "faulted -> faulted" over and over only pushes
+    // the entries that explain a problem out of the diagnostic ring.
+    if (previous != state) {
+      ClientDiagnosticLog.instance.record(
+        'device_transport',
+        'state_changed',
+        level: state == DeviceTransportState.faulted ? 'warning' : 'info',
+        details: <String, Object?>{
+          'state': state.name,
+          'previous': previous?.name,
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+          'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+        },
+      );
+    }
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
       // Keep the last percentage across a brief radio drop. The record sheet

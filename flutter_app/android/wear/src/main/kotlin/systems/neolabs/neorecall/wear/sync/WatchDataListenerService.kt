@@ -37,6 +37,10 @@ class WatchDataListenerService : WearableListenerService() {
       val recordingId = map.getString(WearTransferProtocol.KEY_RECORDING_ID).orEmpty()
       if (recordingId.isEmpty() || !hasTerminalProof(map)) return@forEach
       if (WatchRecordingStore.get(this).acknowledge(recordingId)) {
+        // The clip is gone from the watch the moment the receipt proves it is
+        // safe. Everything that counts held clips has to be told now, or the
+        // wrist keeps showing a backlog that no longer exists.
+        WatchSurfaces.refreshAll(this)
         Wearable.getDataClient(this)
           .deleteDataItems(item.uri)
         val localNodeId = runCatching {

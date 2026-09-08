@@ -35,4 +35,17 @@ data class WatchUiState(
   val digest: WatchDigest = WatchDigest.empty,
 ) {
   val hasHeldAudio: Boolean get() = heldChunks > 0
+
+  /**
+   * True when the phone is capturing and this watch is not.
+   *
+   * Worth a line of its own: without it a session started on the phone looks
+   * from the wrist exactly like nothing happening at all.
+   */
+  val phoneRecording: Boolean
+    get() = !recording && digest.usable && digest.capture.recording
+
+  /** A link state the wearer should be told about. UNKNOWN never qualifies. */
+  val linkTroubled: Boolean
+    get() = phone == PhoneLink.DISCONNECTED || phone == PhoneLink.COMPANION_MISSING
 }

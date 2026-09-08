@@ -715,6 +715,36 @@
   "recordContextPhoto": "Photo",
   "recordContextFile": "File",
   "recordContextEmpty": "No context added yet.",
+  "recordDropTitle": "Drop to add context",
+  "recordDropHint": "The file joins the running recording and helps shape the memory.",
+  "recordDropAdded": "{count, plural, =1{1 file added as context} other{{count} files added as context}}",
+  "@recordDropAdded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recordDropRejected": "{name}: {reason}",
+  "@recordDropRejected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "recordDropUnreadable": "{name} could not be read. Drop single files, not folders.",
+  "@recordDropUnreadable": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "recordDropNoRecording": "The recording ended before the file arrived, so nothing was added.",
   "recordHighlightedMoment": "Highlighted moment",
   "recordVisibleAndActive": "Recording is visible and active",
   "recordMomentCount": "{count, plural, =1{1 moment} other{{count} moments}}",

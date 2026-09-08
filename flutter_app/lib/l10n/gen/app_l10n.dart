@@ -2107,6 +2107,42 @@ abstract class AppL10n {
   /// **'No context added yet.'**
   String get recordContextEmpty;
 
+  /// No description provided for @recordDropTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Drop to add context'**
+  String get recordDropTitle;
+
+  /// No description provided for @recordDropHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The file joins the running recording and helps shape the memory.'**
+  String get recordDropHint;
+
+  /// No description provided for @recordDropAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 file added as context} other{{count} files added as context}}'**
+  String recordDropAdded(int count);
+
+  /// No description provided for @recordDropRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}: {reason}'**
+  String recordDropRejected(String name, String reason);
+
+  /// No description provided for @recordDropUnreadable.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} could not be read. Drop single files, not folders.'**
+  String recordDropUnreadable(String name);
+
+  /// No description provided for @recordDropNoRecording.
+  ///
+  /// In en, this message translates to:
+  /// **'The recording ended before the file arrived, so nothing was added.'**
+  String get recordDropNoRecording;
+
   /// No description provided for @recordHighlightedMoment.
   ///
   /// In en, this message translates to:

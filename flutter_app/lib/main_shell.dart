@@ -10,6 +10,7 @@ import 'main_shared.dart';
 import 'main_sources.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'src/context/recording_context_drop_target.dart';
 import 'src/record/sync_cards.dart';
 import 'l10n/gen/app_l10n.dart';
 
@@ -77,62 +78,67 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
 
   @override
   Widget build(BuildContext context) {
-    return AppBackdrop(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= AppBreakpoints.rail;
-          final content = AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            // A String, not a List: ValueKey compares its value with ==, and
-            // two equal Lists are not equal, so a list key rebuilt the whole
-            // screen on every notification and threw away its scroll position.
-            child: KeyedSubtree(
-              key: ValueKey<String>(
-                '${controller.page.name}:${controller.libraryTab.name}',
-              ),
-              child: _screen(),
-            ),
-          );
-
-          if (wide) {
-            return Scaffold(
-              backgroundColor: Colors.transparent,
-              body: Row(
-                children: <Widget>[
-                  _Sidebar(
-                    controller: controller,
-                    openGroup: _openGroup,
-                    onSelectGroup: _selectGroup,
-                  ),
-                  Expanded(
-                    child: Column(
-                      children: <Widget>[
-                        _GlobalStatusBar(controller: controller),
-                        Expanded(child: ClipRect(child: content)),
-                      ],
-                    ),
-                  ),
-                ],
+    // Wrapping the shell, not the recording screen: a file dropped anywhere in
+    // the app — timeline, search, settings — joins the running recording.
+    return RecordingContextDropTarget(
+      controller: controller,
+      child: AppBackdrop(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= AppBreakpoints.rail;
+            final content = AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              // A String, not a List: ValueKey compares its value with ==, and
+              // two equal Lists are not equal, so a list key rebuilt the whole
+              // screen on every notification and threw away its scroll position.
+              child: KeyedSubtree(
+                key: ValueKey<String>(
+                  '${controller.page.name}:${controller.libraryTab.name}',
+                ),
+                child: _screen(),
               ),
             );
-          }
 
-          return Scaffold(
-            backgroundColor: Colors.transparent,
-            body: SafeArea(
-              bottom: false,
-              child: Column(
-                children: <Widget>[
-                  _GlobalStatusBar(controller: controller),
-                  Expanded(child: ClipRect(child: content)),
-                ],
+            if (wide) {
+              return Scaffold(
+                backgroundColor: Colors.transparent,
+                body: Row(
+                  children: <Widget>[
+                    _Sidebar(
+                      controller: controller,
+                      openGroup: _openGroup,
+                      onSelectGroup: _selectGroup,
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: <Widget>[
+                          _GlobalStatusBar(controller: controller),
+                          Expanded(child: ClipRect(child: content)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Scaffold(
+              backgroundColor: Colors.transparent,
+              body: SafeArea(
+                bottom: false,
+                child: Column(
+                  children: <Widget>[
+                    _GlobalStatusBar(controller: controller),
+                    Expanded(child: ClipRect(child: content)),
+                  ],
+                ),
               ),
-            ),
-            bottomNavigationBar: _TabBar(controller: controller),
-          );
-        },
+              bottomNavigationBar: _TabBar(controller: controller),
+            );
+          },
+        ),
       ),
     );
   }

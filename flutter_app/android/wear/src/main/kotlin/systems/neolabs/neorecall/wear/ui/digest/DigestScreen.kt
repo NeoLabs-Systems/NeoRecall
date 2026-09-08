@@ -1,6 +1,5 @@
 package systems.neolabs.neorecall.wear.ui.digest
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -8,7 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListState
 import androidx.wear.compose.foundation.lazy.items
@@ -20,7 +18,6 @@ import kotlinx.coroutines.delay
 import systems.neolabs.neorecall.wear.digest.WatchDigest
 import systems.neolabs.neorecall.wear.ui.common.EmptyState
 import systems.neolabs.neorecall.wear.ui.common.SectionHeader
-import systems.neolabs.neorecall.wear.ui.common.WatchCard
 import systems.neolabs.neorecall.wear.ui.common.WatchFormat
 import systems.neolabs.neorecall.wear.ui.theme.NeoRecallPalette
 
@@ -73,9 +70,10 @@ fun DigestScreen(
 
       item { TodayMetrics(digest) }
 
+      // No heading over it: one paragraph in its own card is already obviously
+      // a summary, and a label above it was a whole line spent saying so.
       val review = digest.dayInReview
       if (!review.isNullOrBlank()) {
-        item { SectionHeader("Day in review") }
         item { DayInReview(review) }
       }
 
@@ -96,14 +94,7 @@ fun DigestScreen(
               trailing = if (moment.trimmed) "last ${moment.lines.size}" else null,
             )
           }
-          items(moment.lines) { line ->
-            WatchCard(
-              background = NeoRecallPalette.surfaceLow,
-              contentPadding = PaddingValues(0.dp),
-            ) {
-              TranscriptLine(line, NeoRecallPalette.accent)
-            }
-          }
+          item { TranscriptBlock(moment.lines) }
           if (moment.trimmed) {
             item {
               DigestFooter(

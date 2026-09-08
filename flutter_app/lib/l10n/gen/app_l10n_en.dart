@@ -1318,6 +1318,38 @@ class AppL10nEn extends AppL10n {
   String get recordContextEmpty => 'No context added yet.';
 
   @override
+  String get recordDropTitle => 'Drop to add context';
+
+  @override
+  String get recordDropHint =>
+      'The file joins the running recording and helps shape the memory.';
+
+  @override
+  String recordDropAdded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count files added as context',
+      one: '1 file added as context',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recordDropRejected(String name, String reason) {
+    return '$name: $reason';
+  }
+
+  @override
+  String recordDropUnreadable(String name) {
+    return '$name could not be read. Drop single files, not folders.';
+  }
+
+  @override
+  String get recordDropNoRecording =>
+      'The recording ended before the file arrived, so nothing was added.';
+
+  @override
   String get recordHighlightedMoment => 'Highlighted moment';
 
   @override

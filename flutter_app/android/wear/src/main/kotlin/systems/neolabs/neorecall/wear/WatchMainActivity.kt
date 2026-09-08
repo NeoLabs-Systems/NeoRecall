@@ -102,10 +102,18 @@ class WatchMainActivity : ComponentActivity() {
 
   override fun onStart() {
     super.onStart()
-    repository.refresh(includePhoneLink = true)
+    // Everything on screen stays live for as long as the screen is: the phone
+    // link is otherwise only ever read here, which is what made a watch that had
+    // been open for a minute show a link state from whenever it was opened.
+    repository.startWatching()
     if (!hasMicrophonePermission() && !permissionPrefs.getBoolean(KEY_PROMPTED_MICROPHONE, false)) {
       requestMicrophonePermission()
     }
+  }
+
+  override fun onStop() {
+    repository.stopWatching()
+    super.onStop()
   }
 
   private fun toggleRecording() {

@@ -1,17 +1,22 @@
 package systems.neolabs.neorecall.wear.ui.digest
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -58,7 +63,7 @@ fun DigestTitle(digest: WatchDigest, nowMs: Long) {
           "Synced ${WatchFormat.relativeTime(received, nowMs)}"
         },
         color = if (stale) NeoRecallPalette.accent else NeoRecallPalette.textMuted,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         textAlign = TextAlign.Center,
       )
     }
@@ -73,10 +78,17 @@ fun TodayMetrics(digest: WatchDigest) {
   WatchCard {
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceEvenly,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Metric(talk, "talked", NeoRecallPalette.accent, Modifier.weight(1f))
+      // The duration needs a wider column and a smaller figure than the two
+      // counts beside it; the weights are what stop it from being clipped.
+      Metric(
+        value = talk,
+        label = "talked",
+        color = NeoRecallPalette.accent,
+        modifier = Modifier.weight(1.4f),
+        valueSize = 16.sp,
+      )
       Metric(today.memories.toString(), "kept", NeoRecallPalette.green, Modifier.weight(1f))
       Metric(
         value = today.openTasks.toString(),
@@ -95,8 +107,8 @@ fun DayInReview(text: String) {
     Text(
       text = text,
       color = NeoRecallPalette.textSecondary,
-      fontSize = 12.sp,
-      lineHeight = 16.sp,
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
     )
   }
 }
@@ -116,9 +128,9 @@ fun MomentHeader(moment: WatchDigest.Moment, nowMs: Long) {
       Text(
         text = moment.title ?: if (moment.live) "Happening now" else "Latest conversation",
         color = NeoRecallPalette.textPrimary,
-        fontSize = 14.sp,
+        fontSize = 15.sp,
         fontWeight = FontWeight.SemiBold,
-        lineHeight = 18.sp,
+        lineHeight = 19.sp,
         maxLines = 3,
         overflow = TextOverflow.Ellipsis,
       )
@@ -131,7 +143,7 @@ fun MomentHeader(moment: WatchDigest.Moment, nowMs: Long) {
       Text(
         text = momentTiming(moment, nowMs),
         color = NeoRecallPalette.textMuted,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         maxLines = 1,
       )
       if (moment.live) {
@@ -146,8 +158,8 @@ fun MomentHeader(moment: WatchDigest.Moment, nowMs: Long) {
       Text(
         text = summary,
         color = NeoRecallPalette.textSecondary,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
       )
     }
     if (moment.topics.isNotEmpty()) {
@@ -157,6 +169,35 @@ fun MomentHeader(moment: WatchDigest.Moment, nowMs: Long) {
           Pill(topic, NeoRecallPalette.info, Modifier.weight(1f, fill = false))
         }
       }
+    }
+  }
+}
+
+/**
+ * The conversation as one ruled column.
+ *
+ * Every line used to be its own rounded card. Four of them down a screen this
+ * narrow read as four separate things rather than as one conversation, and the
+ * chrome around each cost more width than the words it framed. A single rule
+ * down the left says the same thing and gives the text its column back.
+ */
+@Composable
+fun TranscriptBlock(lines: List<WatchDigest.Line>) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(start = 8.dp, end = 4.dp)
+      .height(IntrinsicSize.Min),
+  ) {
+    Box(
+      Modifier
+        .width(2.dp)
+        .fillMaxHeight()
+        .clip(RoundedCornerShape(1.dp))
+        .background(NeoRecallPalette.outline),
+    )
+    Column(Modifier.padding(start = 10.dp)) {
+      lines.forEach { line -> TranscriptLine(line, NeoRecallPalette.accent) }
     }
   }
 }
@@ -173,7 +214,7 @@ fun TranscriptLine(line: WatchDigest.Line, accent: Color) {
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(horizontal = 10.dp, vertical = 5.dp),
+      .padding(vertical = 5.dp),
   ) {
     val speaker = line.speaker
     val clock = WatchFormat.clock(line.atMs)
@@ -183,7 +224,7 @@ fun TranscriptLine(line: WatchDigest.Line, accent: Color) {
           Text(
             text = speaker,
             color = accent,
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -192,7 +233,7 @@ fun TranscriptLine(line: WatchDigest.Line, accent: Color) {
         }
         if (clock.isNotEmpty()) {
           Spacer(Modifier.width(6.dp))
-          Text(text = clock, color = NeoRecallPalette.textMuted, fontSize = 9.sp, maxLines = 1)
+          Text(text = clock, color = NeoRecallPalette.textMuted, fontSize = 11.sp, maxLines = 1)
         }
       }
       Spacer(Modifier.height(1.dp))
@@ -200,8 +241,8 @@ fun TranscriptLine(line: WatchDigest.Line, accent: Color) {
     Text(
       text = line.text,
       color = NeoRecallPalette.textSecondary,
-      fontSize = 12.sp,
-      lineHeight = 16.sp,
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
     )
   }
 }
@@ -211,15 +252,15 @@ fun TranscriptLine(line: WatchDigest.Line, accent: Color) {
 fun MemoryRow(memory: WatchDigest.Memory, nowMs: Long) {
   WatchCard {
     Row(verticalAlignment = Alignment.Top) {
-      Text(text = memory.emoji, fontSize = 14.sp)
+      Text(text = memory.emoji, fontSize = 15.sp)
       Spacer(Modifier.width(7.dp))
       Column(Modifier.weight(1f)) {
         Text(
           text = memory.title,
           color = NeoRecallPalette.textPrimary,
-          fontSize = 12.sp,
+          fontSize = 13.sp,
           fontWeight = FontWeight.Medium,
-          lineHeight = 15.sp,
+          lineHeight = 17.sp,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )
@@ -228,9 +269,9 @@ fun MemoryRow(memory: WatchDigest.Memory, nowMs: Long) {
           Text(
             text = memory.summary,
             color = NeoRecallPalette.textMuted,
-            fontSize = 10.sp,
-            lineHeight = 14.sp,
-            maxLines = 3,
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
           )
         }
@@ -245,7 +286,7 @@ fun MemoryRow(memory: WatchDigest.Memory, nowMs: Long) {
             }
           },
           color = NeoRecallPalette.textMuted,
-          fontSize = 9.sp,
+          fontSize = 11.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
@@ -265,15 +306,15 @@ fun HighlightRow(highlight: WatchDigest.Highlight, nowMs: Long) {
   }
   WatchCard(borderColor = if (highlight.overdue) tone.copy(alpha = 0.3f) else null) {
     Row(verticalAlignment = Alignment.Top) {
-      Text(text = highlight.emoji, fontSize = 13.sp)
+      Text(text = highlight.emoji, fontSize = 15.sp)
       Spacer(Modifier.width(7.dp))
       Column(Modifier.weight(1f)) {
         Text(
           text = highlight.text,
           color = NeoRecallPalette.textPrimary,
-          fontSize = 12.sp,
-          lineHeight = 16.sp,
-          maxLines = 4,
+          fontSize = 13.sp,
+          lineHeight = 18.sp,
+          maxLines = 3,
           overflow = TextOverflow.Ellipsis,
         )
         val origin = highlight.memoryTitle
@@ -288,7 +329,7 @@ fun HighlightRow(highlight: WatchDigest.Highlight, nowMs: Long) {
               Text(
                 text = origin,
                 color = NeoRecallPalette.textMuted,
-                fontSize = 9.sp,
+                fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
               )
@@ -310,7 +351,7 @@ fun DigestFooter(text: String) {
     Text(
       text = text,
       color = NeoRecallPalette.textMuted,
-      fontSize = 9.sp,
+      fontSize = 11.sp,
       textAlign = TextAlign.Center,
     )
   }

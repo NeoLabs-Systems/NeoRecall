@@ -335,6 +335,36 @@
   "recordContextPhoto": "Foto",
   "recordContextFile": "Datei",
   "recordContextEmpty": "Noch kein Kontext hinzugefügt.",
+  "recordDropTitle": "Zum Hinzufügen loslassen",
+  "recordDropHint": "Die Datei gehört zur laufenden Aufnahme und fließt in die Erinnerung ein.",
+  "recordDropAdded": "{count, plural, =1{1 Datei als Kontext hinzugefügt} other{{count} Dateien als Kontext hinzugefügt}}",
+  "@recordDropAdded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recordDropRejected": "{name}: {reason}",
+  "@recordDropRejected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "recordDropUnreadable": "{name} konnte nicht gelesen werden. Bitte einzelne Dateien statt Ordner ablegen.",
+  "@recordDropUnreadable": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "recordDropNoRecording": "Die Aufnahme endete, bevor die Datei ankam – es wurde nichts hinzugefügt.",
   "recordHighlightedMoment": "Markierte Stelle",
   "recordVisibleAndActive": "Die Aufnahme ist sichtbar und aktiv",
   "recordMomentCount": "{count, plural, =1{1 Moment} other{{count} Momente}}",

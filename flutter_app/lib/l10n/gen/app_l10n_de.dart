@@ -1328,6 +1328,38 @@ class AppL10nDe extends AppL10n {
   String get recordContextEmpty => 'Noch kein Kontext hinzugefügt.';
 
   @override
+  String get recordDropTitle => 'Zum Hinzufügen loslassen';
+
+  @override
+  String get recordDropHint =>
+      'Die Datei gehört zur laufenden Aufnahme und fließt in die Erinnerung ein.';
+
+  @override
+  String recordDropAdded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Dateien als Kontext hinzugefügt',
+      one: '1 Datei als Kontext hinzugefügt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recordDropRejected(String name, String reason) {
+    return '$name: $reason';
+  }
+
+  @override
+  String recordDropUnreadable(String name) {
+    return '$name konnte nicht gelesen werden. Bitte einzelne Dateien statt Ordner ablegen.';
+  }
+
+  @override
+  String get recordDropNoRecording =>
+      'Die Aufnahme endete, bevor die Datei ankam – es wurde nichts hinzugefügt.';
+
+  @override
   String get recordHighlightedMoment => 'Markierte Stelle';
 
   @override

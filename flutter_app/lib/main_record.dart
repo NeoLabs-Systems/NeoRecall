@@ -12,6 +12,7 @@ import 'main_shared.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/capture/capture_defaults.dart';
+import 'src/context/context_content_type.dart';
 import 'src/record/capture_orb.dart';
 import 'src/record/processing_panel.dart';
 import 'src/record/record_controls.dart';
@@ -294,35 +295,17 @@ class _RecordScreenState extends State<RecordScreen> {
       withData: true,
       type: imageOnly ? FileType.image : FileType.any,
     );
-    final file = selection?.files.single;
-    if (file?.bytes == null) return;
-    final extension = (file!.extension ?? '').toLowerCase();
-    final contentType = imageOnly
-        ? 'image/${extension == 'jpg'
-              ? 'jpeg'
-              : extension.isEmpty
-              ? 'jpeg'
-              : extension}'
-        : switch (extension) {
-            'pdf' => 'application/pdf',
-            'docx' =>
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'txt' => 'text/plain',
-            'md' => 'text/markdown',
-            'csv' => 'text/csv',
-            'json' => 'application/json',
-            'png' ||
-            'jpg' ||
-            'jpeg' ||
-            'webp' => 'image/${extension == 'jpg' ? 'jpeg' : extension}',
-            _ => 'application/octet-stream',
-          };
+    final PlatformFile? file = selection?.files.single;
+    final Uint8List? bytes = file?.bytes;
+    if (file == null || bytes == null) return;
     await _runContextAction(
       () => widget.controller.addRecordingFile(
         sessionId: sessionId,
-        bytes: file.bytes!,
+        bytes: bytes,
         name: file.name,
-        contentType: contentType,
+        contentType: imageOnly
+            ? contextImageContentTypeFor(file.name)
+            : contextContentTypeFor(file.name),
       ),
     );
   }
