@@ -274,7 +274,7 @@ class UploadPump {
           .toList(growable: false);
       for (final chunk in terminal) {
         final receipt = chunk.receipt;
-        if (receipt != null) await _acceptReceipt(chunk, receipt);
+        if (receipt != null) await _acceptReceiptGuarded(chunk, receipt);
       }
       final uploaded = chunks
           .where(
@@ -430,13 +430,50 @@ class UploadPump {
       if (!_isCurrent(pumpingAccountId)) return;
       for (final receipt in receipts) {
         final localChunk = serverToLocal[receipt['chunkId'] as String?];
-        if (localChunk != null) await _acceptReceipt(localChunk, receipt);
+        if (localChunk != null) {
+          await _acceptReceiptGuarded(localChunk, receipt);
+        }
       }
     } catch (error) {
       /* Connectivity failures leave durable audio untouched. */
       processingIssue = _issueMessage(
         'Could not refresh server processing status',
         error,
+      );
+    }
+  }
+
+  /// Accepts one receipt without letting its failure reach any other chunk.
+  ///
+  /// Acting on a receipt touches the filesystem, the ledger and the platform
+  /// host, so it can fail for reasons that belong to a single recording. An
+  /// escaping exception used to abort the whole pump cycle — and because the
+  /// periodic timer swallows it, every later chunk stayed unreleased
+  /// indefinitely with the card still reporting that all was well. The failure
+  /// is now confined to its own chunk, named in the diagnostic log, and shown
+  /// to the user; audio is untouched either way, so the next cycle retries.
+  Future<void> _acceptReceiptGuarded(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+  ) async {
+    try {
+      await _acceptReceipt(chunk, receipt);
+    } catch (error) {
+      processingIssue = _issueMessage(
+        'Could not finish securing a recording',
+        error,
+      );
+      ClientDiagnosticLog.instance.record(
+        'upload',
+        'receipt_acceptance_failed',
+        level: 'warn',
+        details: <String, Object?>{
+          'chunkId': chunk.id,
+          'serverChunkId': receipt['chunkId'],
+          'localState': chunk.state.name,
+          'receiptState': receipt['state'],
+          'reason': error.toString(),
+        },
       );
     }
   }

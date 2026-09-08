@@ -122,6 +122,7 @@ class _Store implements ChunkStore {
 class _QueueStore implements ChunkStore {
   _QueueStore(this.chunks);
   final List<AudioChunk> chunks;
+  final Set<String> releaseFailureIds = <String>{};
 
   AudioChunk _find(String id) => chunks.firstWhere((chunk) => chunk.id == id);
 
@@ -176,6 +177,9 @@ class _QueueStore implements ChunkStore {
   @override
   Future<void> release(String id) async {
     final chunk = _find(id);
+    if (releaseFailureIds.contains(id)) {
+      throw StateError('Local audio release failed for $id');
+    }
     await setState(chunk.id, LocalChunkState.released);
   }
 
@@ -541,6 +545,54 @@ void main() {
       expect(api.releasedIds, <String>['server-chunk']);
     },
   );
+
+  // One recording that cannot be released locally used to take every other
+  // recording down with it: the exception escaped the pump, the periodic timer
+  // swallowed it, and nothing behind it was ever released again.
+  test('a chunk that cannot be released never blocks the others', () async {
+    final receipt = <String, dynamic>{
+      'state': 'transcribed',
+      'persistedAt': '2026-07-13T10:00:00Z',
+      'serverAudioDeletedAt': '2026-07-13T10:00:01Z',
+      'transcriptSha256': 'hash',
+    };
+    final createdAt = DateTime.utc(2026, 7, 13);
+    final chunks = List<AudioChunk>.generate(
+      3,
+      (index) => AudioChunk(
+        id: 'chunk-$index',
+        sessionId: 'session-$index',
+        sourceId: 'source-$index',
+        sequence: 0,
+        startedAt: createdAt,
+        monotonicOffsetMs: 0,
+        durationMs: 30000,
+        overlapMs: 0,
+        channelLayout: 'mono',
+        container: 'wav',
+        codec: 'pcm_s16le',
+        sha256:
+            'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        state: LocalChunkState.terminal,
+        createdAt: createdAt,
+        receipt: <String, dynamic>{
+          ...receipt,
+          'chunkId': 'server-chunk-$index',
+        },
+      ),
+    );
+    final store = _QueueStore(chunks)..releaseFailureIds.add('chunk-0');
+    final pump = UploadPump(store: store, api: _Api())..accountId = 'account';
+
+    await pump.pump();
+
+    expect(chunks.map((chunk) => chunk.state), <LocalChunkState>[
+      LocalChunkState.terminal,
+      LocalChunkState.released,
+      LocalChunkState.released,
+    ]);
+    expect(pump.processingIssue, isNotNull);
+  });
 
   test('re-upload limits survive pump and process restarts', () async {
     final api = _Api()
