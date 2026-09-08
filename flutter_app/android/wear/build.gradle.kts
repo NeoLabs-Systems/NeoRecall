@@ -60,7 +60,6 @@ dependencies {
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("androidx.wear.compose:compose-material3:1.5.6")
     implementation("androidx.wear.compose:compose-foundation:1.5.6")
-    implementation("androidx.wear.compose:compose-navigation:1.5.6")
     implementation("androidx.wear:wear-ongoing:1.1.0")
     implementation("androidx.wear.tiles:tiles:1.5.0")
     implementation("androidx.wear.protolayout:protolayout:1.3.0")

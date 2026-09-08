@@ -83,10 +83,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('Drop to add context'), findsOneWidget);
 
-    await surface.drop(<DroppedFile>[
+    surface.drop(<DroppedFile>[
       file('brief.pdf'),
       file('shot.png', declaredType: 'image/png'),
     ]);
+    // Each file is queued in its own microtask before the outcome is shown.
+    await tester.pump();
     await tester.pump();
 
     expect(controller.added, <String>[
@@ -139,7 +141,8 @@ void main() {
       ),
     );
 
-    await surface.drop(<DroppedFile>[file('huge.pdf')]);
+    surface.drop(<DroppedFile>[file('huge.pdf')]);
+    await tester.pump();
     await tester.pump();
 
     expect(
@@ -245,11 +248,9 @@ class _FakeDropSurface implements FileDropSurface {
 
   void fail(Object error) => _onError?.call(error);
 
-  Future<void> drop(List<DroppedFile> files) async {
+  void drop(List<DroppedFile> files) {
     _onHover?.call(false);
     _onDrop?.call(files);
-    // The handler reads and queues each file before it reports the outcome.
-    await Future<void>.delayed(Duration.zero);
   }
 }
 

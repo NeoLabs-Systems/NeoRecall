@@ -27,6 +27,10 @@ import systems.neolabs.neorecall.wear.ui.NeoRecallWatchApp
  * Owns exactly three things the composition cannot: the microphone permission
  * prompt, the broadcast the recording service uses to report itself, and the
  * commands sent to that service. Everything else is state and Compose.
+ *
+ * The screen itself starts nothing. Capture is the Record tile's, and the tile
+ * routes its start through this Activity only because Android refuses a
+ * microphone foreground service to a process with no attached UI.
  */
 class WatchMainActivity : ComponentActivity() {
   private val repository by lazy { WatchStateRepository.get(this) }
@@ -46,8 +50,8 @@ class WatchMainActivity : ComponentActivity() {
       requestNotificationPermissionIfNeeded()
       startRecording()
     } else {
-      // The optimistic flip made on tap has to be undone, or a refused prompt
-      // leaves a button claiming to be recording.
+      // The optimistic flip made when the start arrived has to be undone, or a
+      // refused prompt leaves the screen claiming to be recording.
       repository.setRecordingOptimistically(false)
       if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
         openAppSettings()
@@ -69,7 +73,7 @@ class WatchMainActivity : ComponentActivity() {
     )
     setContent {
       val state by repository.state.collectAsStateWithLifecycle()
-      NeoRecallWatchApp(state = state, onToggleRecording = ::toggleRecording)
+      NeoRecallWatchApp(state = state)
     }
     WatchSyncManager.get(this).syncPending(includeEnqueued = true)
     consumeStartRequest(intent)
@@ -97,7 +101,7 @@ class WatchMainActivity : ComponentActivity() {
     if (intent?.getBooleanExtra(EXTRA_START_ON_OPEN, false) != true) return
     intent.removeExtra(EXTRA_START_ON_OPEN)
     if (WatchRecordingService.isRecording(this)) return
-    toggleRecording()
+    beginRecording()
   }
 
   override fun onStart() {
@@ -116,16 +120,11 @@ class WatchMainActivity : ComponentActivity() {
     super.onStop()
   }
 
-  private fun toggleRecording() {
-    val active = WatchRecordingService.isRecording(this) || repository.state.value.recording
-    if (active) {
-      repository.setRecordingOptimistically(false)
-      startService(
-        Intent(this, WatchRecordingService::class.java)
-          .setAction(WatchRecordingService.ACTION_STOP),
-      )
-      return
-    }
+  /**
+   * Starts capture on the tile's behalf, asking for the microphone first when it
+   * has never been granted. Stopping is the tile's own, and never passes here.
+   */
+  private fun beginRecording() {
     if (hasMicrophonePermission()) {
       requestNotificationPermissionIfNeeded()
       startRecording()
@@ -139,8 +138,9 @@ class WatchMainActivity : ComponentActivity() {
    *
    * Wear OS often drops [ActivityResultContracts.RequestMultiplePermissions]
    * without showing a dialog. Asking for one permission, then opening the app
-   * settings page when the system will not ask again, is what makes the on-screen
-   * "Allow microphone" control do something visible.
+   * settings page when the system will not ask again, is what keeps the tile's
+   * start from failing silently on a watch that has never granted the
+   * microphone.
    */
   private fun requestMicrophonePermission() {
     if (hasMicrophonePermission()) return
