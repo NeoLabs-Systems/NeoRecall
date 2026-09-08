@@ -355,9 +355,9 @@ void main() {
     },
   );
 
-  test('upload policy blocks all server work without touching audio', () async {
+  test('upload policy blocks sending audio but not queued uploads', () async {
     final api = _Api();
-    final store = _Store(_chunk());
+    final store = _Store(_chunk().copyWith(state: LocalChunkState.ready));
     final pump = UploadPump(
       store: store,
       api: api,
@@ -366,10 +366,41 @@ void main() {
 
     await pump.pump();
 
-    expect(store.requestedAccounts, isEmpty);
-    expect(api.statusIds, isEmpty);
+    expect(api.uploadedIds, isEmpty);
+    expect(store.chunk.state, LocalChunkState.ready);
     expect(store.audioDeleted, isFalse);
   });
+
+  // A phone that uploaded on Wi-Fi and then left it used to strand every
+  // already-uploaded recording: the policy gate returned before the pump could
+  // read a receipt, so the transcript stayed unproven and the local original
+  // was never released, however long the server had been finished with it.
+  test(
+    'a metered network still finishes recordings already uploaded',
+    () async {
+      final api = _Api()
+        ..receipt = <String, dynamic>{
+          'chunkId': 'server-chunk',
+          'state': 'transcribed',
+          'persistedAt': '2026-07-13T10:00:00Z',
+          'serverAudioDeletedAt': '2026-07-13T10:00:01Z',
+          'transcriptSha256': 'hash',
+        };
+      final store = _Store(_chunk());
+      final pump = UploadPump(
+        store: store,
+        api: api,
+        uploadAllowed: () async => false,
+      )..accountId = 'account';
+
+      await pump.pump();
+
+      expect(api.statusIds, <String>['server-chunk']);
+      expect(store.audioDeleted, isTrue);
+      expect(api.releasedIds, <String>['server-chunk']);
+      expect(api.uploadedIds, isEmpty);
+    },
+  );
 
   test('one-time metered override uploads the current queued audio', () async {
     final api = _Api();

@@ -216,22 +216,33 @@ class UploadPump {
         // draining, so the exceptional authorization is no longer needed.
         _clearMeteredOverride();
       }
-      if (!policyAllowed && !meteredOverride) return;
-      await _setUploadActivity(true);
-      final sessions = await store.pendingSessions(pumpingAccountId);
+      // The policy governs sending audio, not finishing recordings that were
+      // already sent. Receipt polling and release are a few hundred bytes, and
+      // they are the only thing that can free local audio — gating them behind
+      // an unmetered network left uploaded chunks, and the device originals
+      // they still own, stranded for as long as the phone stayed on mobile
+      // data.
+      final uploadsAllowed = policyAllowed || meteredOverride;
+      if (uploadsAllowed) await _setUploadActivity(true);
       final blockedSessionIds = <String>{};
-      for (final session in sessions) {
-        if (!_isCurrent(pumpingAccountId)) return;
-        try {
-          await api.syncSession(session);
+      if (uploadsAllowed) {
+        final sessions = await store.pendingSessions(pumpingAccountId);
+        for (final session in sessions) {
           if (!_isCurrent(pumpingAccountId)) return;
-          await store.markSessionSynced(session.id);
-        } catch (error) {
-          // Keep trying other sessions/devices. Network or one bad session
-          // must not freeze the entire multi-device upload ledger.
-          blockedSessionIds.add(session.id);
-          processingIssue = _issueMessage('Server session setup failed', error);
-          continue;
+          try {
+            await api.syncSession(session);
+            if (!_isCurrent(pumpingAccountId)) return;
+            await store.markSessionSynced(session.id);
+          } catch (error) {
+            // Keep trying other sessions/devices. Network or one bad session
+            // must not freeze the entire multi-device upload ledger.
+            blockedSessionIds.add(session.id);
+            processingIssue = _issueMessage(
+              'Server session setup failed',
+              error,
+            );
+            continue;
+          }
         }
       }
       if (!_isCurrent(pumpingAccountId)) return;
@@ -277,6 +288,7 @@ class UploadPump {
       final ready = chunks
           .where(
             (chunk) =>
+                uploadsAllowed &&
                 !blockedSessionIds.contains(chunk.sessionId) &&
                 (!meteredOverride ||
                     _meteredOverrideChunkIds.contains(chunk.id)) &&
