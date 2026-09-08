@@ -3237,4 +3237,17 @@ class AppL10nDe extends AppL10n {
   String backgroundHostUnavailable(String error) {
     return 'Der Android-Hintergrunddienst ist vorübergehend nicht verfügbar: $error';
   }
+
+  @override
+  String get controllerWearableAudioStalled =>
+      'Ihr Aufnahmegerät sendet keinen Ton mehr. Die Aufnahme läuft weiter und wartet darauf.';
+
+  @override
+  String get controllerWearableAudioLost =>
+      'Von Ihrem Aufnahmegerät kommt kein Ton an. Was jetzt gesprochen wird, wird nicht aufgezeichnet — verbinden Sie es neu oder nehmen Sie mit dem Telefon auf.';
+
+  @override
+  String controllerCaptureIncomplete(int minutes) {
+    return 'Von dieser Aufnahme wurde nur ein Teil erfasst; rund $minutes Minuten Ton sind nie vom Aufnahmegerät angekommen.';
+  }
 }

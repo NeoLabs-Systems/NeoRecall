@@ -783,7 +783,12 @@ void main() {
 
   test('Memoket drain skips a file already captured live', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    await WearableIngestedFiles.remember('device-id', '20260905_222817_2.opus');
+    // The listed file is ten seconds long and the live stream carried all ten.
+    await WearableIngestedFiles.remember(
+      'device-id',
+      '20260905_222817_2.opus',
+      10,
+    );
     final transport = _FakeWearableTransport();
     final connector = MemoketConnector(
       device: _device(WearableDeviceType.memoket),
@@ -808,6 +813,43 @@ void main() {
     );
     await connector.dispose();
   });
+
+  // The failure this exists to prevent: a live stream that died after a moment
+  // used to mark the whole device take as captured, and the drain then deleted
+  // the device's copy of everything that came after — the only copy there was.
+  test(
+    'Memoket drain transfers a take the live stream only partly covered',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      await WearableIngestedFiles.remember(
+        'device-id',
+        '20260905_222817_2.opus',
+        2,
+      );
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport, fileChunk: List<int>.filled(480, 0xbc));
+      await connector.connect();
+
+      final imported = <String>[];
+      final count = await connector.drainStoredAudio(
+        (recording) async => imported.add(recording.id),
+      );
+
+      expect(count, 1);
+      expect(imported, <String>['20260905_222817_2.opus']);
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDownload,
+        ),
+        isTrue,
+      );
+      await connector.dispose();
+    },
+  );
 
   test(
     'Memoket drain ignores a repeated list entry for the same file',

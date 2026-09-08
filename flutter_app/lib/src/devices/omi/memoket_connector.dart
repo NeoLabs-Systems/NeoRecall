@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../../diagnostics/client_diagnostic_log.dart';
+import '../live_coverage.dart';
 import '../wearable_ingested_files.dart';
 import 'base_connector.dart';
 import 'device_models.dart';
@@ -48,8 +49,18 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   int _lastBattery = -1;
   String? _liveFilename;
   int _liveEmittedFrames = 0;
-  final Set<String> _liveIngestedIds = <String>{};
+
+  // How much of the current device take actually arrived over the live stream.
+  // The device keeps its own copy, and that copy is only redundant if the live
+  // audio covers it — a stream that dies mid-take leaves the device holding the
+  // only recording of everything said afterwards.
+  final LiveCoverage _liveCoverage = LiveCoverage();
+  DateTime? _takeStartedAt;
+  int _persistedLiveSeconds = -1;
   int _lastFilesListed = 0;
+
+  /// Whether the last sync was an empty no-op that has already been reported.
+  bool _idleSyncReported = false;
   int _lastSynced = 0;
   int _lastFailed = 0;
   bool _batterySubscribed = false;
@@ -116,7 +127,6 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       )).listen(_handleFileChunk),
     );
     await WearableIngestedFiles.hydrate(device.id);
-    _liveIngestedIds.addAll(WearableIngestedFiles.ids(device.id));
     await _subscribeStandardBattery();
     // CCCD writes must finish before the first control write. Android's GATT
     // queue drops overlapping writes as a pigeon channel-error.
@@ -268,6 +278,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     _holdHardwareStart();
     _liveFilename = null;
     _liveEmittedFrames = 0;
+    _takeStartedAt = DateTime.now();
     final started = Completer<String>();
     _started = started;
     try {
@@ -308,18 +319,45 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     }
     final filename = _liveFilename;
     _liveFilename = null;
-    // Only drop the on-device copy when live frames actually reached the
-    // capture pipeline. Deleting after a silent take loses the only backup.
+    // Drop the on-device copy only when the live stream carried the whole take.
+    //
+    // "Any live frame at all" used to be the test, and it cost recordings: a
+    // stream that delivered thirty seconds and then stalled marked a take of
+    // several hours as captured, and this deleted the device's copy of every
+    // minute the phone never received. The device is the backup precisely for
+    // the case where the link fails, so it is only cleared when the phone can
+    // show it holds the same span of audio.
+    final liveSeconds = _liveCoverageSeconds;
+    final int? takeSeconds = _takeSeconds;
     if (filename != null && _liveEmittedFrames > 0) {
-      await _rememberLiveIngested(filename);
-      await _deleteStoredFile(
-        MemoketStoredFile(
-          filename: filename,
-          durationSeconds: 0,
-          byteLength: 0,
-        ),
+      await _rememberLiveIngested(filename, liveSeconds);
+      final covered = WearableIngestedFiles.coversSpan(
+        liveSeconds: liveSeconds,
+        takeSeconds: takeSeconds,
       );
+      if (covered) {
+        await _deleteStoredFile(
+          MemoketStoredFile(
+            filename: filename,
+            durationSeconds: 0,
+            byteLength: 0,
+          ),
+        );
+      } else {
+        ClientDiagnosticLog.instance.record(
+          'bluetooth_audio',
+          'memoket_kept_stored_take',
+          level: 'warn',
+          details: <String, Object?>{
+            'id': filename,
+            'liveSeconds': liveSeconds,
+            'takeSeconds': takeSeconds,
+          },
+        );
+      }
     }
+    _liveCoverage.reset();
+    _takeStartedAt = null;
     _liveEmittedFrames = 0;
   }
 
@@ -345,6 +383,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         if (name != null && name != _liveFilename) {
           _liveEmittedFrames = 0;
           _liveFilename = name;
+          // A take the device started on its own (hardware button) has its own
+          // clock, and it is the one the coverage check has to measure against.
+          _takeStartedAt = DateTime.now();
         } else if (name != null) {
           _liveFilename = name;
         }
@@ -425,16 +466,34 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       audioBytes.add(frame);
     }
     final liveName = _liveFilename;
-    if (liveName != null &&
-        _liveEmittedFrames > 0 &&
-        !_liveIngestedIds.contains(liveName)) {
-      unawaited(_rememberLiveIngested(liveName));
+    if (liveName != null && _liveEmittedFrames > 0) {
+      if (_liveCoverage.fileId != liveName) _persistedLiveSeconds = -1;
+      _liveCoverage.frame(liveName, DateTime.now());
+      final seconds = _liveCoverageSeconds;
+      // Persisted as it grows, not only at the end: a take interrupted by a
+      // crash or a dead battery must still be able to say how much of it the
+      // phone already holds.
+      if (seconds >= _persistedLiveSeconds + 10 || _persistedLiveSeconds < 0) {
+        _persistedLiveSeconds = seconds;
+        unawaited(_rememberLiveIngested(liveName, seconds));
+      }
     }
   }
 
-  Future<void> _rememberLiveIngested(String fileId) async {
-    _liveIngestedIds.add(fileId);
-    await WearableIngestedFiles.remember(device.id, fileId);
+  /// Seconds of live audio actually received for the current device take.
+  int get _liveCoverageSeconds => _liveCoverage.seconds;
+
+  /// How long the take has been running, by the clock, or null when this phone
+  /// did not see it start — joining a take already in progress says nothing
+  /// about the minutes recorded before the phone was listening.
+  int? get _takeSeconds {
+    final started = _takeStartedAt;
+    if (started == null) return null;
+    return DateTime.now().difference(started).inSeconds;
+  }
+
+  Future<void> _rememberLiveIngested(String fileId, int liveSeconds) async {
+    await WearableIngestedFiles.remember(device.id, fileId, liveSeconds);
   }
 
   void _emitDeviceControl(int code) {
@@ -515,10 +574,19 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       );
     }
     await WearableIngestedFiles.hydrate(device.id);
-    _liveIngestedIds.addAll(WearableIngestedFiles.ids(device.id));
     final listed = MemoketProtocol.uniqueStoredFiles(await _listStoredFiles());
+    // Only a file the live stream actually covered is redundant. One that was
+    // live for part of its length is transferred in full: the server drops
+    // audio it has already heard from this device, and no client-side guess is
+    // worth deleting the only copy of the rest.
     final already = listed
-        .where((file) => _liveIngestedIds.contains(file.id))
+        .where(
+          (file) => WearableIngestedFiles.covers(
+            device.id,
+            file.id,
+            file.durationSeconds,
+          ),
+        )
         .toList();
     for (final file in already) {
       ClientDiagnosticLog.instance.record(
@@ -529,26 +597,41 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       await _deleteStoredFile(file);
     }
     final files = listed
-        .where((file) => !_liveIngestedIds.contains(file.id))
+        .where(
+          (file) => !WearableIngestedFiles.covers(
+            device.id,
+            file.id,
+            file.durationSeconds,
+          ),
+        )
         .toList();
     _lastFilesListed = files.length;
-    ClientDiagnosticLog.instance.record(
-      'bluetooth_audio',
-      'memoket_sync_listed',
-      details: <String, Object?>{
-        'files': files.length,
-        'deviceResponded': _sawControl,
-        'entries': files
-            .map(
-              (file) => <String, Object?>{
-                'id': file.id,
-                'durationSeconds': file.durationSeconds,
-                'bytes': file.byteLength,
-              },
-            )
-            .toList(growable: false),
-      },
-    );
+    // An idle poll every few seconds is the healthy steady state, and recording
+    // each one evicted everything else from the diagnostic ring — a report from
+    // a stuck phone held nothing but empty listings. Report the first idle poll,
+    // then stay quiet until something actually changes.
+    final idleSync = files.isEmpty && already.isEmpty && _sawControl;
+    final reportSync = !idleSync || !_idleSyncReported;
+    _idleSyncReported = idleSync;
+    if (reportSync) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'memoket_sync_listed',
+        details: <String, Object?>{
+          'files': files.length,
+          'deviceResponded': _sawControl,
+          'entries': files
+              .map(
+                (file) => <String, Object?>{
+                  'id': file.id,
+                  'durationSeconds': file.durationSeconds,
+                  'bytes': file.byteLength,
+                },
+              )
+              .toList(growable: false),
+        },
+      );
+    }
     var count = 0;
     var failed = 0;
     _syncFileCount = files.length;
@@ -602,7 +685,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
             capturedAt: file.capturedAt,
           ),
         );
-        await _rememberLiveIngested(file.id);
+        // Transferred in full, so the phone now holds every second of it and
+        // the device's copy can go.
+        await _rememberLiveIngested(file.id, file.durationSeconds);
         await _deleteStoredFile(file);
         count += 1;
         _publishProgress(
@@ -639,16 +724,18 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       completeFraction: files.isEmpty ? 1.0 : count / files.length,
       force: true,
     );
-    ClientDiagnosticLog.instance.record(
-      'bluetooth_audio',
-      'memoket_sync_done',
-      details: <String, Object?>{
-        'synced': count,
-        'available': files.length,
-        'failed': failed,
-        'cancelled': _drainCancelled,
-      },
-    );
+    if (reportSync) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'memoket_sync_done',
+        details: <String, Object?>{
+          'synced': count,
+          'available': files.length,
+          'failed': failed,
+          'cancelled': _drainCancelled,
+        },
+      );
+    }
     if (failed > 0) {
       throw StateError(
         count == 0

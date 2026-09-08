@@ -154,6 +154,12 @@ function defaultPreview() {
   return { titleEn: 'Ongoing project discussion', summaryEn: 'The recording so far covers project work.', memoryWorthy: true, topics: ['Project planning'] };
 }
 
+/// A plan that resolves no period, so retrieval runs on the question itself.
+/// The scenarios here ask about a subject, not about a stretch of time.
+function defaultQueryPlan(input) {
+  return { fromLocal: null, toLocal: null, wholePeriod: false, searchQueries: [input.question], kinds: [] };
+}
+
 function defaultAsk(input) {
   return { answer: 'The recalled discussion concerned project work and a follow-up.', citations: input.context.length ? [{ sourceId: input.context[0].sourceId }] : [] };
 }
@@ -206,11 +212,27 @@ function modelEndpointMock(handlers = {}) {
     const payload = JSON.parse(body.toString('utf8'));
     const system = payload.messages[0].content;
     const input = JSON.parse(payload.messages[1].content);
+    // Routed by what the step says it is for. The fallback used to be 'ask',
+    // which quietly handed the answer stub a query plan's payload and crashed
+    // the mock rather than the run — any unrecognised purpose is now named.
     const purpose = system.includes('consolidate personal transcripts') ? 'consolidation'
       : system.includes('running summary of one day') ? 'daily_summary'
-        : system.includes('still being recorded') ? 'preview' : 'ask';
+        : system.includes('still being recorded') ? 'preview'
+          : system.includes('You plan retrieval') ? 'plan_query'
+            : system.includes("Answer the user's question") ? 'ask' : 'unknown';
     requests.push({ purpose, input, payload, system });
-    const handler = handlers[purpose] || { consolidation: defaultConsolidation, daily_summary: defaultDailySummary, preview: defaultPreview, ask: defaultAsk }[purpose];
+    const handler = handlers[purpose] || { consolidation: defaultConsolidation, daily_summary: defaultDailySummary,
+      preview: defaultPreview, ask: defaultAsk, plan_query: defaultQueryPlan }[purpose];
+    if (!handler) {
+      // Answered rather than thrown: an exception here escapes the request and
+      // the scenario waits for a reply that never comes, reporting a timeout
+      // instead of the reason.
+      const message = `The E2E model mock was asked for an unrecognised purpose: ${system.slice(0, 120)}`;
+      console.error(`[e2e-mock] ${message}`);
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: { message } }));
+      return;
+    }
     res.end(JSON.stringify({
       id: `mock-${requests.length}`,
       usage: { prompt_tokens: 20, completion_tokens: 20, cost: 0 },

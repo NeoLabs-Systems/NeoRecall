@@ -15,6 +15,7 @@ import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/capture/capture_defaults.dart';
 import 'src/capture/capture_pipeline.dart';
+import 'src/capture/capture_coverage.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
 import 'src/devices/audio_device_adapter.dart';
@@ -239,6 +240,20 @@ class NeoRecallController extends ChangeNotifier
   Future<bool>? _widgetPhoneRecordingOperation;
   Future<void> _watchImport = Future<void>.value();
   Timer? _mobileCaptureRecoveryTimer;
+
+  // Capture coverage for the running take. A wearable whose live stream dies
+  // keeps the session open while delivering nothing, so the only trustworthy
+  // measure of what was actually recorded is what reached durable storage.
+  DateTime? _lastCapturedAudioAt;
+  int _capturedAudioMs = 0;
+  Timer? _wearableStallTimer;
+  bool _wearableStallRestarted = false;
+
+  /// How long a stalled wearable stream is given to resume before the take is
+  /// restarted. Long enough that a brief BLE hiccup recovers on its own, short
+  /// enough that a dead stream cannot swallow a whole conversation.
+  static const Duration _wearableStallGrace = Duration(seconds: 45);
+
   Timer? _recordingScheduleTimer;
   int _mobileCaptureRecoveryAttempts = 0;
   Map<String, dynamic> _cachedSettings = Map<String, dynamic>.from(
@@ -1280,6 +1295,8 @@ class NeoRecallController extends ChangeNotifier
 
   void _attachRuntimeSubscriptions() {
     _chunkSubscription = recorder.chunks.listen((chunk) {
+      _lastCapturedAudioAt = DateTime.now();
+      _capturedAudioMs += chunk.durationMs - chunk.overlapMs;
       _chunkWrite = _chunkWrite
           .then((_) => _storeRecordedChunk(chunk))
           .catchError(
@@ -1896,6 +1913,7 @@ class NeoRecallController extends ChangeNotifier
         final clientUuid = identity.clientUuid;
         final now = DateTime.now().toUtc();
         recordingStartedAt = now;
+        _resetCaptureCoverage(forgetEscalation: !_switchingMobileSource);
         final sessionId = _uuid.v4();
         final sourceId = _uuid.v4();
         final requestedKind = microphone && systemAudio
@@ -2100,6 +2118,13 @@ class NeoRecallController extends ChangeNotifier
       }
       _activeSession = null;
       deactivateRecordingContext();
+      // Judged before the switch flag is cleared: moving a take between sources
+      // finalizes one take and opens another, and neither half should be
+      // measured as if it were the whole recording.
+      if (!_switchingMobileSource && !interrupted) {
+        _reportCaptureCoverage(recordingStartedAt);
+      }
+      if (!_switchingMobileSource) _resetCaptureCoverage();
       recordingStartedAt = null;
       audioLevel = 0;
       // The background battery warning is only meaningful during active capture.
@@ -2636,6 +2661,104 @@ class NeoRecallController extends ChangeNotifier
     }
   }
 
+  /// Keeps a stalled wearable take honest.
+  ///
+  /// Holding the take is right while the device is still recording to its own
+  /// flash: the audio arrives later as a file. It is wrong when nothing arrives
+  /// at all — the session then stays open for as long as the user believes it
+  /// is recording, and everything said in that time is simply gone. So the
+  /// stall is now said out loud immediately, and if no audio has reached
+  /// storage by the end of the grace period the take is restarted (once), then
+  /// moved to the phone microphone if the user permits it.
+  void _watchWearableStall() {
+    _wearableStallTimer?.cancel();
+    final capturedAtStall = _capturedAudioMs;
+    warning = strings.controllerWearableAudioStalled;
+    notifyListeners();
+    _wearableStallTimer = Timer(_wearableStallGrace, () async {
+      _wearableStallTimer = null;
+      if (!isRecording || _switchingMobileSource || _stoppingRecording) return;
+      if (_capturedAudioMs > capturedAtStall) {
+        // Audio came back on its own; nothing was lost and nothing to say.
+        _wearableStallRestarted = false;
+        if (warning == strings.controllerWearableAudioStalled) warning = null;
+        notifyListeners();
+        return;
+      }
+      final canUseWearable = !_wearableStallRestarted;
+      if (!canUseWearable && !shouldFailoverWearableToPhoneMicrophone) {
+        // The device is unreachable and the user has asked to keep recordings
+        // on the wearable only. Nothing more can be done than to be honest.
+        warning = strings.controllerWearableAudioLost;
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'wearable_stall_unrecovered',
+          level: 'warn',
+          details: <String, Object?>{
+            'device': audioDeviceSessions.preferredDevice?.displayName,
+            'silentSeconds': _wearableStallGrace.inSeconds * 2,
+          },
+        );
+        notifyListeners();
+        return;
+      }
+      _wearableStallRestarted = true;
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'wearable_stall_recovering',
+        level: 'warn',
+        details: <String, Object?>{
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+          'usingBluetooth': canUseWearable,
+        },
+      );
+      await _restartMobileCapture(useBluetooth: canUseWearable);
+      // A restarted wearable take that stays silent has to be caught too.
+      if (canUseWearable && isRecording) _watchWearableStall();
+    });
+  }
+
+  /// Clears what is measured per take. The escalation memory is deliberately
+  /// not part of it: a take restarted *because* the wearable went silent must
+  /// remember that, or a dead device restarts the same doomed take every grace
+  /// period instead of moving capture to the phone.
+  void _resetCaptureCoverage({bool forgetEscalation = true}) {
+    _wearableStallTimer?.cancel();
+    _wearableStallTimer = null;
+    if (forgetEscalation) _wearableStallRestarted = false;
+    _lastCapturedAudioAt = null;
+    _capturedAudioMs = 0;
+  }
+
+  /// Reports a finished take that captured far less audio than it ran for.
+  ///
+  /// A stalled source, a device that stopped handing audio over, a link that
+  /// died mid-conversation: all of them end with a session whose transcript
+  /// covers a fraction of the time the user was recording. Saying so is the
+  /// difference between a short transcript and a silently incomplete one.
+  void _reportCaptureCoverage(DateTime? startedAt) {
+    final start = startedAt;
+    if (start == null) return;
+    final elapsedMs = DateTime.now().toUtc().difference(start).inMilliseconds;
+    final missing = captureShortfall(
+      elapsedMs: elapsedMs,
+      capturedMs: _capturedAudioMs,
+    );
+    if (missing == null) return;
+    warning = strings.controllerCaptureIncomplete(missing.inMinutes);
+    ClientDiagnosticLog.instance.record(
+      'device_capture',
+      'capture_coverage_gap',
+      level: 'warn',
+      details: <String, Object?>{
+        'elapsedMs': elapsedMs,
+        'capturedMs': _capturedAudioMs,
+        'device': audioDeviceSessions.preferredDevice?.displayName,
+        'lastAudioAt': _lastCapturedAudioAt?.toIso8601String(),
+      },
+    );
+  }
+
   Future<void> _restartMobileCapture({required bool useBluetooth}) async {
     if (_switchingMobileSource || !isRecording) return;
     _switchingMobileSource = true;
@@ -2680,6 +2803,7 @@ class NeoRecallController extends ChangeNotifier
           'device': audioDeviceSessions.preferredDevice?.displayName,
         },
       );
+      _watchWearableStall();
       return;
     }
     final useBluetooth = capability?.sourceKind == 'wearable';

@@ -844,5 +844,15 @@
   "watchCopyLabel": "{label} kopieren",
   "backgroundRuntimeFailed": "Der Hintergrunddienst konnte nicht gestartet werden: {error}",
   "backgroundStatusFailed": "Der Hintergrundstatus konnte nicht aktualisiert werden: {error}",
-  "backgroundHostUnavailable": "Der Android-Hintergrunddienst ist vorübergehend nicht verfügbar: {error}"
+  "backgroundHostUnavailable": "Der Android-Hintergrunddienst ist vorübergehend nicht verfügbar: {error}",
+  "controllerWearableAudioStalled": "Ihr Aufnahmegerät sendet keinen Ton mehr. Die Aufnahme läuft weiter und wartet darauf.",
+  "controllerWearableAudioLost": "Von Ihrem Aufnahmegerät kommt kein Ton an. Was jetzt gesprochen wird, wird nicht aufgezeichnet — verbinden Sie es neu oder nehmen Sie mit dem Telefon auf.",
+  "controllerCaptureIncomplete": "Von dieser Aufnahme wurde nur ein Teil erfasst; rund {minutes} Minuten Ton sind nie vom Aufnahmegerät angekommen.",
+  "@controllerCaptureIncomplete": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  }
 }

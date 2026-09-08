@@ -3207,4 +3207,17 @@ class AppL10nEn extends AppL10n {
   String backgroundHostUnavailable(String error) {
     return 'Android background host is temporarily unavailable: $error';
   }
+
+  @override
+  String get controllerWearableAudioStalled =>
+      'Your recording device stopped sending audio. Recording is still open and waiting for it.';
+
+  @override
+  String get controllerWearableAudioLost =>
+      'No audio is arriving from your recording device. Anything said now is not being recorded — reconnect it or record with the phone.';
+
+  @override
+  String controllerCaptureIncomplete(int minutes) {
+    return 'Only part of this recording was captured; about $minutes minutes of audio never arrived from the recording device.';
+  }
 }

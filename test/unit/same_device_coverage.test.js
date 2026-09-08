@@ -54,8 +54,8 @@ test('an import chunk that overlaps a live take on the same device is covered', 
     (id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format)
     VALUES (?,?,?,'import','mono',16000,'pcm_s16le')`).run(importSource, importSession, importSource);
   db.prepare(`INSERT INTO audio_chunks
-    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
-    VALUES (?,?,?,?,0,'live-0','${'a'.repeat(64)}',1,'wav','pcm_s16le','mono',?,0,30000,'transcribed')`)
+    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state,transcript_segment_count)
+    VALUES (?,?,?,?,0,'live-0','${'a'.repeat(64)}',1,'wav','pcm_s16le','mono',?,0,30000,'transcribed',4)`)
     .run(crypto.randomUUID(), userId, liveSession, liveSource, startedAt);
   const importChunk = {
     user_id: userId,
@@ -66,6 +66,48 @@ test('an import chunk that overlaps a live take on the same device is covered', 
   const session = { device_id: deviceId };
   assert.ok(coverage.isCovered(db, importChunk, session));
   assert.ok(coverage.coverageRatio(db, importChunk, session) >= 0.99);
+});
+
+// Skipping deletes the skipped recording on the server and on the device that
+// made it. A copy that produced no transcript therefore cannot stand in for
+// one that might have caught the conversation — otherwise a live stream that
+// heard nothing quietly destroys the wearable's copy of the same minutes.
+test('a copy that produced no transcript never covers another source', () => {
+  const db = getDatabase();
+  const userId = crypto.randomUUID();
+  const deviceId = crypto.randomUUID();
+  const liveSession = crypto.randomUUID();
+  const importSession = crypto.randomUUID();
+  const liveSource = crypto.randomUUID();
+  const importSource = crypto.randomUUID();
+  const startedAt = '2026-09-07T11:00:00.000Z';
+  db.prepare("INSERT INTO users (id,username,password_hash) VALUES (?,?,'x')").run(userId, `cov2-${userId.slice(0, 8)}`);
+  db.prepare("INSERT INTO devices (id,user_id,client_uuid,name,platform,kind) VALUES (?,?,?,'Phone','android','mobile')")
+    .run(deviceId, userId, deviceId);
+  for (const id of [liveSession, importSession]) {
+    db.prepare(`INSERT INTO recording_sessions
+      (id,user_id,device_id,client_uuid,device_started_at,corrected_started_at,timezone,consent_attested_at,status)
+      VALUES (?,?,?,?,?,?,'UTC',?,'ended')`).run(id, userId, deviceId, id, startedAt, startedAt, startedAt);
+  }
+  db.prepare(`INSERT INTO recording_sources
+    (id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format)
+    VALUES (?,?,?,'wearable','mono',16000,'pcm_s16le')`).run(liveSource, liveSession, liveSource);
+  db.prepare(`INSERT INTO recording_sources
+    (id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format)
+    VALUES (?,?,?,'import','mono',16000,'pcm_s16le')`).run(importSource, importSession, importSource);
+  db.prepare(`INSERT INTO audio_chunks
+    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state,transcript_segment_count)
+    VALUES (?,?,?,?,0,'silent-0','${'b'.repeat(64)}',1,'wav','pcm_s16le','mono',?,0,30000,'silent',0)`)
+    .run(crypto.randomUUID(), userId, liveSession, liveSource, startedAt);
+  const importChunk = {
+    user_id: userId,
+    source_id: importSource,
+    device_started_at: startedAt,
+    duration_ms: 30000,
+  };
+  const session = { device_id: deviceId };
+  assert.equal(coverage.coverageRatio(db, importChunk, session), 0);
+  assert.ok(!coverage.isCovered(db, importChunk, session));
 });
 
 test('an overlapping chunk that is still uploading does not cover another source', () => {

@@ -146,15 +146,23 @@ class BackgroundCaptureChannel(private val context: Context) {
           )
           result.success(true)
         }
-        "acknowledgeWatchRecording" -> try {
-          result.success(
-            PhoneWearTransferManager.get(context).acknowledge(
-              requireNotNull(call.argument<String>("recordingId")),
-              requireNotNull(call.argument<Map<String, Any?>>("receipt")),
-            ),
-          )
-        } catch (error: Exception) {
-          result.error("WATCH_ACK_FAILED", error.message, null)
+        "acknowledgeWatchRecording" -> {
+          // Answered off the main thread, then handed back to it: the Data Layer
+          // write blocks, and Flutter may only be replied to on the main thread.
+          PhoneWearTransferManager.get(context).acknowledge(
+            requireNotNull(call.argument<String>("recordingId")),
+            requireNotNull(call.argument<Map<String, Any?>>("receipt")),
+          ) { outcome ->
+            Handler(Looper.getMainLooper()).post {
+              outcome.fold(
+                { acknowledged -> result.success(acknowledged) },
+                { error ->
+                  android.util.Log.w("NeoRecall", "Watch acknowledgement failed: ${error.message}")
+                  result.error("WATCH_ACK_FAILED", error.message, null)
+                },
+              )
+            }
+          }
         }
         else -> result.notImplemented()
       }

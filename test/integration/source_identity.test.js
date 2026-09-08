@@ -100,8 +100,17 @@ test('the same declared person across two recordings is one profile, not two', (
   // Deliberately dissimilar fingerprints: a bad measurement, a different
   // microphone, a cold. The declaration is what makes them one person anyway,
   // and that is the whole reason it beats matching on sound.
+  //
+  // The two takes are given their own stretches of the recording. Identical
+  // words at the identical moment on two streams are one utterance heard twice,
+  // and cross-stream de-duplication is right to keep only one of them — that
+  // rule is covered by test/unit/token_deduper.test.js and would otherwise
+  // silently decide this test.
   transcribeHandler.persistSegments(seedChunk(user, first), [segment(new Float32Array([1, 0, 0]))]);
-  transcribeHandler.persistSegments(seedChunk(user, second, 1), [segment(at(0.05, 2))]);
+  transcribeHandler.persistSegments(
+    seedChunk(user, second, 1),
+    [segment(at(0.05, 2), { startMs: 60_000, endMs: 80_000 })],
+  );
 
   const rows = db.prepare("SELECT * FROM voiceprints WHERE user_id=? AND external_key='chat:2002'").all(user.userId);
   assert.equal(rows.length, 1);

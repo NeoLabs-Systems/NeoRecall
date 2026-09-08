@@ -1830,5 +1830,15 @@
         "type": "String"
       }
     }
+  },
+  "controllerWearableAudioStalled": "Your recording device stopped sending audio. Recording is still open and waiting for it.",
+  "controllerWearableAudioLost": "No audio is arriving from your recording device. Anything said now is not being recorded — reconnect it or record with the phone.",
+  "controllerCaptureIncomplete": "Only part of this recording was captured; about {minutes} minutes of audio never arrived from the recording device.",
+  "@controllerCaptureIncomplete": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
   }
 }

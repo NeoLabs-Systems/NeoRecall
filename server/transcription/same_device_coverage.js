@@ -41,11 +41,19 @@ function otherChunksOnDevice(database, { userId, deviceId, sourceId, startMs, en
   if (!deviceId) return [];
   // Only already-processed copies count. Two in-flight jobs for the same
   // window must both run ASR rather than both skip and drop the transcript.
+  //
+  // And only copies that actually produced words. Skipping is not free: the
+  // skipped chunk is marked silent and its audio is deleted on the server and
+  // on the device that recorded it, so a copy that yielded nothing cannot be
+  // allowed to stand in for one that might have caught the conversation. A
+  // second pass over genuinely silent audio costs one ASR call; getting this
+  // wrong costs the recording.
   return database.prepare(`SELECT c.device_started_at startAt, c.duration_ms durationMs
     FROM audio_chunks c
     JOIN recording_sessions r ON r.id=c.session_id
     WHERE r.user_id=? AND r.device_id=? AND c.source_id<>?
-      AND c.state IN ('transcribed','silent','persisted_cleanup_pending')
+      AND c.state IN ('transcribed','persisted_cleanup_pending')
+      AND COALESCE(c.transcript_segment_count,0) > 0
       AND ${epochMs('c.device_started_at')} < ?
       AND ${epochMs('c.device_started_at')} + c.duration_ms > ?`)
     .all(userId, deviceId, sourceId, endMs, startMs);

@@ -33,6 +33,10 @@ class UploadPump {
   // continues to obey the saved Wi-Fi-only policy.
   static const int _ledgerScanLimit = 10000;
   final Set<String> _meteredOverrideChunkIds = <String>{};
+
+  /// Chunks already reported as held back, so the per-cycle retry stays quiet.
+  /// Cleared when the chunk finally releases, so a later block is heard again.
+  final Set<String> _forwardingBlockedChunkIds = <String>{};
   String? _meteredOverrideAccountId;
 
   bool get meteredUploadOverrideActive =>
@@ -478,6 +482,33 @@ class UploadPump {
     }
   }
 
+  /// Says out loud that a proven recording is being held back.
+  ///
+  /// Refusing to release is correct — the device that recorded it still owns
+  /// the original — but it is indistinguishable from a stall unless it is
+  /// reported, and a wedged handoff can hold audio forever. Logged once per
+  /// chunk so a repeating pump cycle cannot flood the diagnostic ring.
+  void _reportForwardingBlocked(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+    String reason,
+  ) {
+    processingIssue =
+        'A recording is secured on the server but the device that made it has '
+        'not confirmed the handover yet.';
+    if (!_forwardingBlockedChunkIds.add(chunk.id)) return;
+    ClientDiagnosticLog.instance.record(
+      'upload',
+      'terminal_forwarding_blocked',
+      level: 'warn',
+      details: <String, Object?>{
+        'chunkId': chunk.id,
+        'serverChunkId': receipt['chunkId'],
+        'reason': reason,
+      },
+    );
+  }
+
   String _issueMessage(String context, Object error) {
     final detail = error is ApiException ? error.message : error.toString();
     final clean = detail
@@ -499,10 +530,14 @@ class UploadPump {
       final forward = onTerminalReceipt;
       if (forward != null) {
         try {
-          if (!await forward(chunk, receipt)) return;
-        } catch (_) {
+          if (!await forward(chunk, receipt)) {
+            _reportForwardingBlocked(chunk, receipt, 'refused');
+            return;
+          }
+        } catch (error) {
           // The terminal receipt stays durable and is retried next pump. Audio
           // remains in both ownership ledgers until forwarding succeeds.
+          _reportForwardingBlocked(chunk, receipt, error.toString());
           return;
         }
       }
@@ -512,6 +547,7 @@ class UploadPump {
         // Playback copies are a convenience. A retain failure must never keep
         // the upload pump from releasing audio that already has a receipt.
       }
+      _forwardingBlockedChunkIds.remove(id);
       await store.release(id);
       try {
         await api.releaseChunks(<String>[receipt['chunkId'] as String]);

@@ -5166,6 +5166,24 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Android background host is temporarily unavailable: {error}'**
   String backgroundHostUnavailable(String error);
+
+  /// No description provided for @controllerWearableAudioStalled.
+  ///
+  /// In en, this message translates to:
+  /// **'Your recording device stopped sending audio. Recording is still open and waiting for it.'**
+  String get controllerWearableAudioStalled;
+
+  /// No description provided for @controllerWearableAudioLost.
+  ///
+  /// In en, this message translates to:
+  /// **'No audio is arriving from your recording device. Anything said now is not being recorded — reconnect it or record with the phone.'**
+  String get controllerWearableAudioLost;
+
+  /// No description provided for @controllerCaptureIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Only part of this recording was captured; about {minutes} minutes of audio never arrived from the recording device.'**
+  String controllerCaptureIncomplete(int minutes);
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

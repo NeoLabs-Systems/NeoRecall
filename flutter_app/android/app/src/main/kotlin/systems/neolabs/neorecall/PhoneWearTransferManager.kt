@@ -12,6 +12,7 @@ import java.io.FileOutputStream
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class PhoneWearTransferManager private constructor(private val context: Context) {
   private val inbox = WearInboxStore.get(context)
@@ -104,8 +105,24 @@ class PhoneWearTransferManager private constructor(private val context: Context)
 
   fun markImported(recordingId: String) = inbox.markImported(recordingId)
 
-  /** Persists the proof in Data Layer before permitting deletion of the phone copy. */
-  fun acknowledge(recordingId: String, receipt: Map<*, *>): Boolean {
+  /**
+   * Persists the proof in Data Layer before permitting deletion of the phone copy.
+   *
+   * The reply is delivered off the caller's thread because the Data Layer call
+   * below blocks: this is invoked from the Flutter method channel, which runs on
+   * the main thread, and [Tasks.await] refuses to run there. That refusal used to
+   * fail every acknowledgement, so no recording that came from the watch was ever
+   * released — on either device.
+   */
+  fun acknowledge(
+    recordingId: String,
+    receipt: Map<*, *>,
+    onResult: (Result<Boolean>) -> Unit,
+  ) {
+    executor.execute { onResult(runCatching { acknowledgeBlocking(recordingId, receipt) }) }
+  }
+
+  private fun acknowledgeBlocking(recordingId: String, receipt: Map<*, *>): Boolean {
     val inboxState = inbox.state(recordingId)
     // Most chunks originate on this phone or desktop and have no Wear inbox
     // row. Only an existing, not-yet-imported Wear row blocks release.
@@ -131,7 +148,9 @@ class PhoneWearTransferManager private constructor(private val context: Context)
       )
       dataMap.putString(WearTransferProtocol.KEY_TRANSCRIPT_SHA256, transcriptSha256)
     }.asPutDataRequest().setUrgent()
-    Tasks.await(Wearable.getDataClient(context).putDataItem(request))
+    // Bounded so an unreachable watch cannot occupy the executor indefinitely;
+    // the receipt stays durable and the next pump cycle tries again.
+    Tasks.await(Wearable.getDataClient(context).putDataItem(request), 30, TimeUnit.SECONDS)
     inbox.markAcknowledged(recordingId)
     return true
   }
