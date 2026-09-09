@@ -61,6 +61,25 @@ void main() {
     expect(coverage.seconds, 0);
   });
 
+  test(
+    'silence at stop is a stall, even when the miss is within clock slack',
+    () {
+      final coverage = LiveCoverage();
+      for (var second = 0; second <= 30; second++) {
+        coverage.frame('take.opus', start.add(Duration(seconds: second)));
+      }
+
+      expect(
+        coverage.stalledAt(start.add(const Duration(seconds: 34))),
+        isTrue,
+      );
+      expect(
+        coverage.stalledAt(start.add(const Duration(seconds: 32))),
+        isFalse,
+      );
+    },
+  );
+
   test('reset forgets the take', () {
     final coverage = LiveCoverage();
     coverage.frame('take.opus', start);

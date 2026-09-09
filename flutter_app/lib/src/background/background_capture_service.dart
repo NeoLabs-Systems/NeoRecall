@@ -102,6 +102,10 @@ abstract class BackgroundCaptureService {
     Map<String, dynamic> receipt,
   );
 
+  /// Claims a persisted Memoket hardware-probe request started from ADB.
+  /// Payload keys: `liveMs`, `reconnectGapMs`, `idleMs`.
+  Future<Map<String, Object?>?> takePendingMemoketE2eRequest() async => null;
+
   Stream<BackgroundCaptureEvent> get events;
 }
 
@@ -133,6 +137,9 @@ enum BackgroundCaptureEventType {
   /// process the system started after a reboot or a crash). Wearable holds are
   /// unaffected; only phone-microphone capture needs the user to open the app.
   microphoneUnavailable,
+
+  /// ADB asked the running process to probe a nearby Memoket Gem.
+  memoketE2eRequested,
 }
 
 class BackgroundCaptureEvent {
@@ -219,6 +226,9 @@ class PlatformManagedBackgroundCaptureService
 
   @override
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
+
+  @override
+  Future<Map<String, Object?>?> takePendingMemoketE2eRequest() async => null;
 
   @override
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
@@ -378,6 +388,12 @@ class AndroidBackgroundCaptureService
               message: arguments is Map ? arguments['error'] as String? : null,
             ),
           );
+        case 'memoketE2eRequested':
+          _events.add(
+            const BackgroundCaptureEvent(
+              BackgroundCaptureEventType.memoketE2eRequested,
+            ),
+          );
       }
       return null;
     });
@@ -421,6 +437,21 @@ class AndroidBackgroundCaptureService
           false;
     } catch (_) {
       return false;
+    }
+  }
+
+  @override
+  Future<Map<String, Object?>?> takePendingMemoketE2eRequest() async {
+    try {
+      final raw = await _channel.invokeMethod<dynamic>(
+        'takePendingMemoketE2eRequest',
+      );
+      if (raw is Map) {
+        return Map<String, Object?>.from(raw);
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 

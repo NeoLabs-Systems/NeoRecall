@@ -19,7 +19,13 @@ import 'offline_sync.dart';
 /// - Offline files: `03` lists, `04 <name>` downloads on the file-notify
 ///   characteristic, `05 <name>` deletes only after durable ingest.
 class MemoketConnector extends WearableConnector with WearableOfflineSync {
-  MemoketConnector({required super.device, required super.transport});
+  MemoketConnector({
+    required super.device,
+    required super.transport,
+    Duration liveJoinTimeout = const Duration(seconds: 5),
+    Duration idleJoinTimeout = const Duration(milliseconds: 400),
+  }) : _liveJoinTimeout = liveJoinTimeout,
+       _idleJoinTimeout = idleJoinTimeout;
 
   static const Duration _replyTimeout = Duration(milliseconds: 800);
   static const Duration _listTimeout = Duration(seconds: 4);
@@ -30,6 +36,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   static const int _downloadAttempts = 3;
   static const Duration _commandGap = Duration(milliseconds: 80);
   static const Duration _subscribeSettle = Duration(milliseconds: 250);
+  final Duration _liveJoinTimeout;
+  final Duration _idleJoinTimeout;
   static const Duration _writeRetryDelay = Duration(milliseconds: 200);
   static const int _writeAttempts = 3;
   // Long enough that a stop notify plus the follow-up list/delete traffic
@@ -48,7 +56,12 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   String? _firmware;
   int _lastBattery = -1;
   String? _liveFilename;
+  String? _lastTakeFilename;
   int _liveEmittedFrames = 0;
+
+  /// Filename of the most recent on-device take this phone has seen, kept after
+  /// stop so a later drain can target that file without touching others.
+  String? get lastTakeFilename => _lastTakeFilename;
 
   // How much of the current device take actually arrived over the live stream.
   // The device keeps its own copy, and that copy is only redundant if the live
@@ -75,6 +88,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Completer<bool>? _deleteAck;
   Completer<String>? _started;
   Completer<void>? _stopped;
+  Completer<void>? _liveJoined;
   List<MemoketStoredFile>? _listed;
   List<Uint8List>? _downloadBuffer;
   int _syncFileIndex = 0;
@@ -104,6 +118,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     'filesListed': _lastFilesListed,
     'filesSynced': _lastSynced,
     'filesFailed': _lastFailed,
+    'lastTakeFilename': _lastTakeFilename,
   };
 
   @override
@@ -134,6 +149,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     // A Gem that is already recording streams live frames as soon as we
     // subscribe. Handshake writes on that same control characteristic have
     // stopped the take; skip them and join the stream instead.
+    await _waitForLive(
+      resumeLiveOnConnect ? _liveJoinTimeout : _idleJoinTimeout,
+    );
     if (_deviceLive || recording) {
       _ready = true;
       _sawControl = true;
@@ -146,7 +164,40 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       );
       return;
     }
+    if (resumeLiveOnConnect) {
+      // The take is still on flash even when live notifies have not resumed
+      // yet. Handshake writes would stop it.
+      _ready = true;
+      _sawControl = true;
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'handshake_skipped_resume',
+        details: const <String, Object?>{
+          'reason': 'Reconnecting an in-progress take; control writes held.',
+        },
+      );
+      return;
+    }
     await _handshake();
+  }
+
+  void _markDeviceLive() {
+    _deviceLive = true;
+    final joined = _liveJoined;
+    if (joined != null && !joined.isCompleted) joined.complete();
+  }
+
+  Future<void> _waitForLive(Duration window) async {
+    if (_deviceLive || window <= Duration.zero) return;
+    final joined = Completer<void>();
+    _liveJoined = joined;
+    try {
+      await joined.future.timeout(window);
+    } on TimeoutException {
+      // No live frames in the join window; handshake (or resume) continues.
+    } finally {
+      if (identical(_liveJoined, joined)) _liveJoined = null;
+    }
   }
 
   Future<void> _handshake() async {
@@ -333,10 +384,16 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     final int? takeSeconds = _takeSeconds;
     if (filename != null && _liveEmittedFrames > 0) {
       await _rememberLiveIngested(filename, liveSeconds);
-      final covered = WearableIngestedFiles.coversSpan(
-        liveSeconds: liveSeconds,
-        takeSeconds: takeSeconds,
-      );
+      final stalled = _liveCoverage.stalledAt(DateTime.now());
+      if (stalled) {
+        await WearableIngestedFiles.markIncomplete(device.id, filename);
+      }
+      final covered =
+          !stalled &&
+          WearableIngestedFiles.coversSpan(
+            liveSeconds: liveSeconds,
+            takeSeconds: takeSeconds,
+          );
       if (covered) {
         await _deleteStoredFile(
           MemoketStoredFile(
@@ -378,18 +435,20 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       case MemoketProtocol.opFirmware:
         _firmware = MemoketProtocol.firmwareVersion(data);
       case MemoketProtocol.opRecordStart:
-        _deviceLive = true;
+        _markDeviceLive();
         final name = MemoketProtocol.recordingFilename(data);
         // A reconnect start notify for the same take must not zero the frame
         // count — stop uses that to know the live path already ingested it.
         if (name != null && name != _liveFilename) {
           _liveEmittedFrames = 0;
           _liveFilename = name;
+          _lastTakeFilename = name;
           // A take the device started on its own (hardware button) has its own
           // clock, and it is the one the coverage check has to measure against.
           _takeStartedAt = DateTime.now();
         } else if (name != null) {
           _liveFilename = name;
+          _lastTakeFilename = name;
         }
         final started = _started;
         if (started != null && !started.isCompleted) {
@@ -415,7 +474,10 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         _clearPendingHardwareStart();
         _holdHardwareStart();
         final name = MemoketProtocol.recordingFilename(data);
-        if (name != null) _liveFilename = name;
+        if (name != null) {
+          _liveFilename = name;
+          _lastTakeFilename = name;
+        }
         final stopped = _stopped;
         if (stopped != null && !stopped.isCompleted) {
           stopped.complete();
@@ -459,7 +521,6 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     // are proof the Gem is recording — treat it as live so list/battery/handshake
     // writes cannot stop the take.
     if (!_deviceLive && !recording) {
-      _deviceLive = true;
       ClientDiagnosticLog.instance.record(
         'bluetooth_audio',
         'live_audio_inferred',
@@ -468,6 +529,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         },
       );
     }
+    _markDeviceLive();
     if (_pendingHardwareStart && !recording) {
       // Audio is here, so the earlier start notify was a real take.
       _clearPendingHardwareStart();
@@ -601,6 +663,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Future<int> drainStoredAudio(
     Future<void> Function(WearableRecording recording) onRecording, {
     int minBytes = 0,
+    bool Function(String fileId)? shouldTransfer,
   }) async {
     if (recording || _deviceLive) return 0;
     _drainCancelled = false;
@@ -641,6 +704,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         )
         .toList();
     for (final file in already) {
+      if (shouldTransfer != null && !shouldTransfer(file.id)) continue;
       ClientDiagnosticLog.instance.record(
         'bluetooth_audio',
         'memoket_skip_already_ingested',
@@ -699,6 +763,14 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     for (var i = 0; i < files.length; i += 1) {
       if (_drainCancelled) break;
       final file = files[i];
+      if (shouldTransfer != null && !shouldTransfer(file.id)) {
+        ClientDiagnosticLog.instance.record(
+          'bluetooth_audio',
+          'memoket_skip_unselected',
+          details: <String, Object?>{'id': file.id},
+        );
+        continue;
+      }
       _syncFileIndex = i;
       _syncExpectedBytes = MemoketProtocol.expectedAudioBytes(
         durationSeconds: file.durationSeconds,
@@ -1119,6 +1191,9 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     final stopped = _stopped;
     _stopped = null;
     if (stopped != null && !stopped.isCompleted) stopped.complete();
+    final liveJoined = _liveJoined;
+    _liveJoined = null;
+    if (liveJoined != null && !liveJoined.isCompleted) liveJoined.complete();
     await _progress.close();
   }
 }

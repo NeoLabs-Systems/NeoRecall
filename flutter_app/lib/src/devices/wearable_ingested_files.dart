@@ -41,12 +41,18 @@ class WearableIngestedFiles {
 
   static final Map<String, Map<String, int>> _memory =
       <String, Map<String, int>>{};
+  static final Map<String, Set<String>> _incomplete = <String, Set<String>>{};
 
   static String _key(String deviceId) =>
       'wearableLiveIngestedSeconds:$deviceId';
+  static String _incompleteKey(String deviceId) =>
+      'wearableLiveIngestedIncomplete:$deviceId';
 
   static Map<String, int> _forDevice(String deviceId) =>
       _memory.putIfAbsent(deviceId, () => <String, int>{});
+
+  static Set<String> _incompleteFor(String deviceId) =>
+      _incomplete.putIfAbsent(deviceId, () => <String>{});
 
   /// Live seconds recorded for [fileId], or null when this phone never saw it.
   /// Null and zero both mean "do not delete it unread".
@@ -56,27 +62,37 @@ class WearableIngestedFiles {
   /// Whether the live stream covered enough of a device file of
   /// [durationSeconds] that the device's copy adds nothing.
   static bool covers(String deviceId, String fileId, int durationSeconds) {
+    if (_incompleteFor(deviceId).contains(fileId)) return false;
     final live = seconds(deviceId, fileId);
     if (live == null || durationSeconds <= 0) return false;
     return coversSpan(liveSeconds: live, takeSeconds: durationSeconds);
   }
 
-  static void resetForTest() => _memory.clear();
+  static void resetForTest() {
+    _memory.clear();
+    _incomplete.clear();
+  }
 
   static Future<void> hydrate(String deviceId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final stored = prefs.getString(_key(deviceId));
-      if (stored == null) return;
-      final decoded = jsonDecode(stored);
-      if (decoded is! Map) return;
-      final device = _forDevice(deviceId);
-      decoded.forEach((key, value) {
-        final live = value is num ? value.toInt() : null;
-        if (key is! String || live == null) return;
-        final known = device[key];
-        if (known == null || live > known) device[key] = live;
-      });
+      if (stored != null) {
+        final decoded = jsonDecode(stored);
+        if (decoded is Map) {
+          final device = _forDevice(deviceId);
+          decoded.forEach((key, value) {
+            final live = value is num ? value.toInt() : null;
+            if (key is! String || live == null) return;
+            final known = device[key];
+            if (known == null || live > known) device[key] = live;
+          });
+        }
+      }
+      final incompleteStored = prefs.getStringList(_incompleteKey(deviceId));
+      if (incompleteStored != null) {
+        _incompleteFor(deviceId).addAll(incompleteStored);
+      }
     } catch (_) {
       // Tests and a missing plugin still keep the in-memory map for this process.
     }
@@ -98,6 +114,22 @@ class WearableIngestedFiles {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_key(deviceId), jsonEncode(device));
+    } catch (_) {}
+  }
+
+  /// The live stream died before stop, so the device still holds audio this
+  /// phone never received. A later drain must transfer that file even if the
+  /// missing tail is only a few seconds (within [toleranceSeconds]).
+  static Future<void> markIncomplete(String deviceId, String fileId) async {
+    if (fileId.isEmpty) return;
+    final files = _incompleteFor(deviceId);
+    if (!files.add(fileId)) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+        _incompleteKey(deviceId),
+        files.toList(growable: false),
+      );
     } catch (_) {}
   }
 }

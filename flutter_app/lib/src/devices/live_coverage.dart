@@ -21,6 +21,16 @@ class LiveCoverage {
   /// Seconds of live audio received for that file.
   int get seconds => _coveredMs ~/ 1000;
 
+  /// True when the live stream has been silent longer than [maximumFrameGap]
+  /// at [at]. A take that went quiet before stop is not fully on the phone,
+  /// even if the missing tail is only a few seconds — those seconds exist
+  /// only on the device.
+  bool stalledAt(DateTime at) {
+    final last = _lastFrameAt;
+    if (last == null) return _coveredMs == 0;
+    return at.difference(last) > maximumFrameGap;
+  }
+
   /// Records a frame of [fileId] arriving at [at].
   ///
   /// Time is added gap by gap rather than from the first frame to the last: a

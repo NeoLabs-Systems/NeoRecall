@@ -490,6 +490,33 @@ void main() {
   );
 
   test(
+    'Memoket resumeLive skips handshake even when live frames have not resumed',
+    () async {
+      final transport = _FakeWearableTransport();
+      _bindMemoketReplies(transport);
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+        liveJoinTimeout: Duration.zero,
+      );
+      await connector.connect(resumeLive: true);
+      expect(
+        transport.writes.where(
+          (write) =>
+              write.value.first == MemoketProtocol.opPing ||
+              write.value.first == MemoketProtocol.opBattery ||
+              write.value.first == MemoketProtocol.opFirmware ||
+              write.value.first == MemoketProtocol.opSetTime ||
+              write.value.first == MemoketProtocol.opListFiles,
+        ),
+        isEmpty,
+        reason: 'control writes on resume have stopped an in-progress take',
+      );
+      await connector.dispose();
+    },
+  );
+
+  test(
     'Memoket vendor battery is not replaced by a 100% standard reading',
     () async {
       final transport = _FakeWearableTransport();
@@ -748,6 +775,42 @@ void main() {
       );
 
       await audioSub.cancel();
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket drain can target one take and leave the others on the device',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      final chunk = List<int>.filled(480, 0xbc);
+      _bindMemoketReplies(transport, fileChunk: chunk);
+      await connector.connect();
+
+      final recordings = <WearableRecording>[];
+      final count = await connector.drainStoredAudio(
+        (recording) async => recordings.add(recording),
+        shouldTransfer: (id) => id == 'not-the-listed-file.opus',
+      );
+
+      expect(count, 0);
+      expect(recordings, isEmpty);
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDownload,
+        ),
+        isFalse,
+      );
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDelete,
+        ),
+        isFalse,
+      );
       await connector.dispose();
     },
   );
@@ -1094,6 +1157,73 @@ void main() {
     expect(await connector.readBatteryLevel(), 64);
     await connector.dispose();
   });
+
+  test('HeyPocket resumeLive skips post-auth control writes', () async {
+    final transport = _FakeWearableTransport();
+    final connector = HeyPocketConnector(
+      device: _device(WearableDeviceType.heyPocket),
+      transport: transport,
+    );
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+      final cmd = ascii.decode(value);
+      if (cmd.startsWith('APP&SK&')) {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode('MCU&SK&OK'),
+          ),
+        );
+      }
+    };
+
+    await connector.connect(resumeLive: true);
+    final commands = transport.writes
+        .where(
+          (write) =>
+              write.characteristic == WearableDeviceUuids.heyPocketControlWrite,
+        )
+        .map((write) => ascii.decode(write.value));
+    expect(commands.where((cmd) => cmd.startsWith('APP&SK&')), isNotEmpty);
+    expect(
+      commands.where((cmd) => cmd == 'APP&BAT' || cmd.startsWith('APP&T&')),
+      isEmpty,
+    );
+    await connector.dispose();
+  });
+
+  test(
+    'HeyPocket does not query battery while live capture is running',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = HeyPocketConnector(
+        device: _device(WearableDeviceType.heyPocket),
+        transport: transport,
+      );
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+        final cmd = ascii.decode(value);
+        void ctrl(String s) => scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode(s),
+          ),
+        );
+        if (cmd.startsWith('APP&SK&')) ctrl('MCU&SK&OK');
+        if (cmd == 'APP&BAT') ctrl('MCU&BAT&64');
+        if (cmd == 'APP&STA') {}
+      };
+
+      await connector.connect();
+      await connector.startRecording();
+      final before = transport.writes.length;
+      expect(await connector.readBatteryLevel(), 64);
+      expect(transport.writes.length, before);
+      await connector.dispose();
+    },
+  );
 
   test('a time-sync write is never counted as a ring advance', () async {
     // The epoch goes out little-endian, so the first byte of the time-sync

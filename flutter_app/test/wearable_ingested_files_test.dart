@@ -54,6 +54,24 @@ void main() {
     );
   });
 
+  test(
+    'a stalled live stream is never treated as covering the device file',
+    () async {
+      await WearableIngestedFiles.remember('dev', 'take.opus', 30);
+      await WearableIngestedFiles.markIncomplete('dev', 'take.opus');
+
+      expect(
+        WearableIngestedFiles.coversSpan(liveSeconds: 30, takeSeconds: 34),
+        isTrue,
+      );
+      expect(WearableIngestedFiles.covers('dev', 'take.opus', 34), isFalse);
+
+      WearableIngestedFiles.resetForTest();
+      await WearableIngestedFiles.hydrate('dev');
+      expect(WearableIngestedFiles.covers('dev', 'take.opus', 34), isFalse);
+    },
+  );
+
   test('a reconnect that restarts the measurement cannot shrink it', () async {
     await WearableIngestedFiles.remember('dev', 'take.opus', 900);
     await WearableIngestedFiles.remember('dev', 'take.opus', 12);

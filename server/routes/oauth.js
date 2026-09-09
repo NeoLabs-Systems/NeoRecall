@@ -75,10 +75,21 @@ function clearOauthSessionCookie(req, res) {
   res.append('Set-Cookie', `${OAUTH_COOKIE}=; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`);
 }
 
-function page(res, html) {
+function formActionSources(redirectUri) {
+  // Browsers enforce form-action across the redirect chain, so a consent POST that
+  // ends in a 302 to the client's redirect_uri is blocked unless that origin is listed.
+  if (!redirectUri) return "'self'";
+  try {
+    return `'self' ${new URL(redirectUri).origin}`;
+  } catch {
+    return "'self'";
+  }
+}
+
+function page(res, html, redirectUri = '') {
   res.set({
     'Cache-Control': 'no-store, max-age=0',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action ${formActionSources(redirectUri)}; base-uri 'none'; frame-ancestors 'none'`,
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
   });
@@ -186,7 +197,7 @@ router.get('/oauth/authorize', (req, res) => {
   try {
     const authorize = validateAuthorizationRequest(req.query);
     if (!oauthSession(req)) return res.redirect(`/oauth/sign-in?continue=${encodeURIComponent(`/oauth/authorize?${requestParams(req.query)}`)}`);
-    return page(res, renderConsent(authorize));
+    return page(res, renderConsent(authorize), authorize.redirectUri);
   } catch (error) {
     return page(res.status(error.statusCode || 400), shell('Authorization error', 'CONNECTION ERROR', `<h1>Authorization failed</h1><div class="error">${escapeHtml(error.message)}</div>`));
   }
@@ -197,14 +208,15 @@ router.post('/oauth/authorize', (req, res) => {
     const authorize = validateAuthorizationRequest(req.body);
     const loggedIn = oauthSession(req);
     if (!loggedIn) return res.redirect(`/oauth/sign-in?continue=${encodeURIComponent(`/oauth/authorize?${requestParams(req.body)}`)}`);
-    clearOauthSessionCookie(req, res);
     if (String(req.body?.decision || '') !== 'approve') {
+      clearOauthSessionCookie(req, res);
       return res.redirect(appendRedirect(authorize.redirectUri, { error: 'access_denied', state: authorize.state }));
     }
     const code = createAuthorizationCode({
       clientId: authorize.client.id, userId: loggedIn.userId, redirectUri: authorize.redirectUri,
       scopes: authorize.scopes, codeChallenge: authorize.codeChallenge,
     });
+    clearOauthSessionCookie(req, res);
     return res.redirect(appendRedirect(authorize.redirectUri, { code, state: authorize.state }));
   } catch (error) {
     return page(res.status(error.statusCode || 400), shell('Authorization error', 'CONNECTION ERROR', `<h1>Authorization failed</h1><div class="error">${escapeHtml(error.message)}</div>`));

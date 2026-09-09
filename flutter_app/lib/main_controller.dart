@@ -24,6 +24,8 @@ import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
 import 'src/devices/device_storage_sync_scheduler.dart';
 import 'src/devices/plaud/plaud_session.dart';
+import 'src/devices/omi/device_adapter.dart';
+import 'src/devices/omi/memoket_e2e.dart';
 import 'src/devices/omi/offline_sync.dart';
 import 'src/models/ask.dart';
 import 'src/models/chunk.dart';
@@ -60,6 +62,7 @@ part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
 part 'src/controller/context_controller.dart';
 part 'src/controller/integrations_controller.dart';
+part 'src/controller/memoket_e2e_controller.dart';
 
 enum RecallPage { record, library, search, sources, devices, settings }
 
@@ -82,7 +85,8 @@ class NeoRecallController extends ChangeNotifier
         DiagnosticsController,
         LibraryController,
         ContextController,
-        IntegrationsController {
+        IntegrationsController,
+        MemoketE2eController {
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
@@ -1224,6 +1228,8 @@ class NeoRecallController extends ChangeNotifier
                 notifyListeners();
               case BackgroundCaptureEventType.watchRecordingAvailable:
                 _queueWatchImport(mobile.background);
+              case BackgroundCaptureEventType.memoketE2eRequested:
+                unawaited(consumePendingMemoketE2eRequest());
               case BackgroundCaptureEventType.message:
                 break;
             }
@@ -1267,6 +1273,7 @@ class NeoRecallController extends ChangeNotifier
       initialized = true;
       _initializing = false;
       notifyListeners();
+      unawaited(consumePendingMemoketE2eRequest());
     }
   }
 
@@ -2409,6 +2416,7 @@ class NeoRecallController extends ChangeNotifier
   /// reconnect resumes the present and recovers the gap at the same time.
   bool get shouldAutoStartLiveCapture {
     if (!isMobileCapturePlatform) return false;
+    if (_memoketHardwareProbeActive) return false;
     if (!authenticated || !consentAccepted) return false;
     if (!preferBluetoothCapture) return false;
     if (isRecording ||
@@ -2475,6 +2483,7 @@ class NeoRecallController extends ChangeNotifier
     if (ownerAccountId == null ||
         !authenticated ||
         !consentAccepted ||
+        _memoketHardwareProbeActive ||
         isRecording ||
         _stoppingRecording ||
         _startingRecording) {
@@ -2546,6 +2555,7 @@ class NeoRecallController extends ChangeNotifier
         if (!isRecording &&
             !_startingRecording &&
             !_stoppingRecording &&
+            !_memoketHardwareProbeActive &&
             authenticated &&
             consentAccepted) {
           unawaited(_startFromDeviceControl());
@@ -2553,7 +2563,7 @@ class NeoRecallController extends ChangeNotifier
       case DeviceControlEventType.stopRecording:
       case DeviceControlEventType.standby:
       case DeviceControlEventType.powerOff:
-        if (isRecording) {
+        if (isRecording && !_memoketHardwareProbeActive) {
           ClientDiagnosticLog.instance.record(
             'device_capture',
             'hardware_stop_requested',
@@ -2617,7 +2627,7 @@ class NeoRecallController extends ChangeNotifier
           previous == DeviceTransportState.connecting ||
           previous == DeviceTransportState.faulted ||
           previous == DeviceTransportState.unknown;
-      if (becameLinked) {
+      if (becameLinked && !_memoketHardwareProbeActive) {
         // §9: after each (re)connect, pull anything the device recorded
         // offline, then keep sweeping while it stays linked so later
         // recordings arrive on their own — with or without the app open.
@@ -3320,6 +3330,7 @@ class NeoRecallController extends ChangeNotifier
   /// Called when the app returns to the foreground. Proactively resumes sync and
   /// refreshes data instead of waiting for the periodic timer.
   Future<void> onAppResumed() async {
+    unawaited(consumePendingMemoketE2eRequest());
     if (recorder is MobileRecallRecorder) {
       final mobile = recorder as MobileRecallRecorder;
       // Re-arm a runtime the user released from the notification, and retry a

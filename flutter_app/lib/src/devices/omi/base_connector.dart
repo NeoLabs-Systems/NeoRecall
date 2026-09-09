@@ -21,11 +21,22 @@ abstract class WearableConnector {
       <StreamSubscription<dynamic>>[];
   bool recording = false;
 
+  /// True when this connect is resuming capture after a radio drop.
+  ///
+  /// Connectors whose handshake shares a characteristic with live start/stop
+  /// must not write that channel until live audio is joined — those writes have
+  /// stopped an in-progress take.
+  bool resumeLiveOnConnect = false;
+
   WearableDeviceType get type => device.type;
   bool get isRecording => recording;
   WearableAudioCodec get codec;
 
-  Future<void> connect({bool requiresPairing = false}) async {
+  Future<void> connect({
+    bool requiresPairing = false,
+    bool resumeLive = false,
+  }) async {
+    resumeLiveOnConnect = resumeLive;
     await transport.connect(requiresPairing: requiresPairing);
     await onConnected();
   }

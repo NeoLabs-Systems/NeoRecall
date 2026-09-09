@@ -77,6 +77,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
   static const String _batteryResponsePrefix = 'MCU&BAT&';
 
   bool _authenticated = false;
+  int _lastBattery = -1;
 
   /// Set by cancelStoredSync so the sweep stops between files. Aborting only
   /// the in-flight download let the loop continue with the next file, so a
@@ -132,6 +133,16 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
           'hint': 'No MCU&SK&OK for APP&SK; the device will ignore commands.',
         },
       );
+    }
+    if (resumeLiveOnConnect) {
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'handshake_skipped_resume',
+        details: const <String, Object?>{
+          'reason': 'Reconnecting an in-progress take; control writes held.',
+        },
+      );
+      return;
     }
     await _syncTime();
     try {
@@ -190,6 +201,7 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
         text.substring(_batteryResponsePrefix.length).trim(),
       );
       if (level != null) {
+        _lastBattery = level;
         batteryLevels.add(level);
         final request = _batteryRequest;
         if (request != null && !request.isCompleted) request.complete(level);
@@ -262,6 +274,9 @@ class HeyPocketConnector extends WearableConnector with WearableOfflineSync {
 
   @override
   Future<int> readBatteryLevel() async {
+    // APP&BAT shares the control characteristic with start/stop. A query
+    // mid-take has the same risk as Memoket's vendor battery write.
+    if (recording) return _lastBattery;
     if (!await _authenticate()) return -1;
     final existing = _batteryRequest;
     if (existing != null) {

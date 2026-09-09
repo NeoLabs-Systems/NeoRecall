@@ -99,6 +99,22 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
           result.success(pending)
         }
+        "takePendingMemoketE2eRequest" -> {
+          val pending = e2ePreferences().getBoolean(KEY_E2E_PENDING, false)
+          if (!pending) {
+            result.success(null)
+          } else {
+            val payload = mapOf(
+              "liveMs" to e2ePreferences().getInt(KEY_E2E_LIVE_MS, 0),
+              "reconnectGapMs" to e2ePreferences().getInt(KEY_E2E_RECONNECT_GAP_MS, 0),
+              "idleMs" to e2ePreferences().getInt(KEY_E2E_IDLE_MS, 0),
+            )
+            e2ePreferences().edit()
+              .putBoolean(KEY_E2E_PENDING, false)
+              .commit()
+            result.success(payload)
+          }
+        }
         "publishWidgetData" -> {
           val payload = call.argument<String>("payload")
           if (payload == null) {
@@ -186,6 +202,31 @@ class BackgroundCaptureChannel(private val context: Context) {
   }
 
   /**
+   * Persists a Memoket hardware probe request so a cold Flutter engine still
+   * runs it. Invoked from ADB via MainActivity; there is no user-facing entry.
+   */
+  fun requestMemoketE2e(liveMs: Int?, reconnectGapMs: Int?, idleMs: Int?) {
+    e2ePreferences().edit()
+      .putBoolean(KEY_E2E_PENDING, true)
+      .putInt(KEY_E2E_LIVE_MS, liveMs ?: 0)
+      .putInt(KEY_E2E_RECONNECT_GAP_MS, reconnectGapMs ?: 0)
+      .putInt(KEY_E2E_IDLE_MS, idleMs ?: 0)
+      .commit()
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod(
+          "memoketE2eRequested",
+          mapOf(
+            "liveMs" to (liveMs ?: 0),
+            "reconnectGapMs" to (reconnectGapMs ?: 0),
+            "idleMs" to (idleMs ?: 0),
+          ),
+        )
+      }
+    }
+  }
+
+  /**
    * Records a widget tap and tells Dart about it.
    *
    * Same order as [requestWidgetPhoneRecording] and for the same reason: the
@@ -205,6 +246,9 @@ class BackgroundCaptureChannel(private val context: Context) {
 
   private fun widgetPreferences() =
     context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+
+  private fun e2ePreferences() =
+    context.getSharedPreferences(E2E_PREFS, Context.MODE_PRIVATE)
 
   private fun networkRuntimeState(): Map<String, Boolean> {
     val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -273,6 +317,11 @@ class BackgroundCaptureChannel(private val context: Context) {
     private const val WIDGET_PREFS = "neorecall_record_widget"
     private const val KEY_WIDGET_PHONE_RECORDING_PENDING =
       "phoneRecordingPending"
+    private const val E2E_PREFS = "neorecall_memoket_e2e"
+    private const val KEY_E2E_PENDING = "pending"
+    private const val KEY_E2E_LIVE_MS = "liveMs"
+    private const val KEY_E2E_RECONNECT_GAP_MS = "reconnectGapMs"
+    private const val KEY_E2E_IDLE_MS = "idleMs"
 
     fun isWidgetPhoneRecordingPending(context: Context): Boolean =
       context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)

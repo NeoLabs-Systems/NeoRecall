@@ -26,6 +26,17 @@ class MainActivity : FlutterActivity() {
       channel.requestWidgetPhoneRecording()
       return
     }
+    if (intent.action == ACTION_MEMOKET_E2E ||
+      intent.getBooleanExtra(EXTRA_MEMOKET_E2E, false)
+    ) {
+      channel.requestMemoketE2e(
+        liveMs = intent.getIntExtra(EXTRA_E2E_LIVE_MS, 0).takeIf { it > 0 },
+        reconnectGapMs = intent.getIntExtra(EXTRA_E2E_RECONNECT_GAP_MS, 0)
+          .takeIf { it > 0 },
+        idleMs = intent.getIntExtra(EXTRA_E2E_IDLE_MS, 0).takeIf { it > 0 },
+      )
+      return
+    }
     // A widget that opens the app records where it wanted to go, so a cold
     // start lands in the right place instead of on whatever page was last open.
     val page = intent.getStringExtra(EXTRA_WIDGET_PAGE) ?: return
@@ -55,6 +66,13 @@ class MainActivity : FlutterActivity() {
   companion object {
     const val ACTION_START_PHONE_RECORDING =
       "systems.neolabs.neorecall.START_PHONE_RECORDING"
+    const val ACTION_MEMOKET_E2E =
+      "systems.neolabs.neorecall.MEMOKET_E2E"
+    const val EXTRA_MEMOKET_E2E = "systems.neolabs.neorecall.MEMOKET_E2E"
+    const val EXTRA_E2E_LIVE_MS = "systems.neolabs.neorecall.E2E_LIVE_MS"
+    const val EXTRA_E2E_RECONNECT_GAP_MS =
+      "systems.neolabs.neorecall.E2E_RECONNECT_GAP_MS"
+    const val EXTRA_E2E_IDLE_MS = "systems.neolabs.neorecall.E2E_IDLE_MS"
     const val EXTRA_WIDGET_PAGE = "systems.neolabs.neorecall.WIDGET_PAGE"
     const val EXTRA_WIDGET_TARGET_ID = "systems.neolabs.neorecall.WIDGET_TARGET_ID"
 

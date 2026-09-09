@@ -108,6 +108,9 @@ class _RecordingBackgroundService implements BackgroundCaptureService {
   Future<bool> takePendingWidgetPhoneRecordingRequest() async => false;
 
   @override
+  Future<Map<String, Object?>?> takePendingMemoketE2eRequest() async => null;
+
+  @override
   Future<void> publishWidgetSnapshot(HomeWidgetSnapshot snapshot) async {}
 
   @override

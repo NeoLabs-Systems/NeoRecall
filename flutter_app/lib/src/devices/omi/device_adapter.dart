@@ -77,6 +77,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   DeviceTransportState _state = DeviceTransportState.disconnected;
   bool _initialized = false;
   bool _disposed = false;
+
+  /// Current transport state. Broadcast [transportStates] can miss the value
+  /// already in force when a subscriber attaches.
+  DeviceTransportState get currentState => _state;
   bool _resumeRecordingAfterReconnect = false;
   bool _intentionalDisconnect = false;
 
@@ -243,15 +247,18 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   }
 
   void _handlePeripheral(GattPeripheral peripheral) {
-    final name = peripheral.name.trim();
-    if (name.isEmpty) return;
+    final advertised = peripheral.name.trim();
     final services = peripheral.serviceUuids
         .map((value) => value.toLowerCase())
         .toList(growable: false);
     final type = DiscoveredWearable.classify(
-      name: name,
+      name: advertised,
       serviceUuids: services,
     );
+    if (type == WearableDeviceType.custom && advertised.isEmpty) return;
+    final name = advertised.isEmpty
+        ? DiscoveredWearable.protocolLabel(type)
+        : advertised;
     final wearable = DiscoveredWearable(
       id: peripheral.id,
       name: name,
@@ -405,7 +412,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       // record sheet stayed on "—" until the next (rare) change notify.
       _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
       _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
-      await connector.connect(requiresPairing: false);
+      await connector.connect(
+        requiresPairing: false,
+        resumeLive: resumeRecording,
+      );
       _connector = connector;
       final omiFraming =
           wearable.type == WearableDeviceType.omi ||
@@ -422,8 +432,13 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       _audioSub = connector.audioBytes.stream.listen(_handleAudioPacket);
       _setState(DeviceTransportState.connectedStandby);
       _startLinkWatchdog();
-      await _refreshBattery();
-      _startBatteryPoll();
+      if (resumeRecording) {
+        await connector.startRecording();
+        _enterLiveLink();
+      } else {
+        await _refreshBattery();
+        _startBatteryPoll();
+      }
       ClientDiagnosticLog.instance.record(
         'bluetooth',
         'connection_ready',
@@ -431,12 +446,9 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
           'name': wearable.name,
           'type': wearable.type.name,
           'codec': connector.codec.name,
+          'resumeLive': resumeRecording,
         },
       );
-      if (resumeRecording) {
-        await connector.startRecording();
-        _setState(DeviceTransportState.recording);
-      }
     } catch (error) {
       ClientDiagnosticLog.instance.record(
         'bluetooth',
@@ -576,8 +588,9 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   Future<void> _refreshBattery() async {
     final connector = _connector;
     if (connector == null) return;
-    // Vendor battery queries share the control characteristic with start/stop.
-    // A poll mid-take has made the Gem halt live audio and emit a stop.
+    // Vendor battery queries often share the control characteristic with
+    // start/stop. A poll mid-take has halted live audio on Memoket and would
+    // do the same on any protocol that multiplexes those writes.
     if (_state == DeviceTransportState.recording) return;
     try {
       final level = await connector.readBatteryLevel();
@@ -647,7 +660,15 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       );
     }
     await connector.startRecording();
+    _enterLiveLink();
+  }
+
+  /// Capture is running: keep the radio awake and do not poll vendor battery.
+  /// Shared by an explicit start and by reconnect-while-recording.
+  void _enterLiveLink() {
     _resumeRecordingAfterReconnect = true;
+    _batteryPoll?.cancel();
+    _batteryPoll = null;
     _setState(DeviceTransportState.recording);
   }
 
@@ -658,11 +679,25 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     if (connector == null || _state != DeviceTransportState.recording) return;
     await connector.stopRecording();
     _setState(DeviceTransportState.connectedStandby);
+    _startBatteryPoll();
   }
 
   @override
   Future<void> disconnect() async {
     await _disconnectProtocol(clearResumeIntent: true);
+  }
+
+  /// Drop the GATT session without forgetting that capture should resume.
+  ///
+  /// Radio loss and the hardware probe's mid-take drop both use this: the next
+  /// [connect] rejoins live audio instead of treating the user as having
+  /// stopped. Protocols that keep a take on flash (Memoket, HeyPocket) must
+  /// not run a control handshake that would stop it.
+  Future<void> disconnectPreservingCaptureIntent() async {
+    if (_state == DeviceTransportState.recording) {
+      _resumeRecordingAfterReconnect = true;
+    }
+    await _disconnectProtocol(clearResumeIntent: false);
   }
 
   Future<void> _disconnectProtocol({required bool clearResumeIntent}) async {

@@ -59,6 +59,12 @@ test('NeoAgent companion uses consent, PKCE, read-only scopes, and rotating refr
   const consent = await request(app).get(continuePath).set('Cookie', cookie).expect(200);
   assert.match(consent.text, /Connect NeoAgent/);
   assert.match(consent.text, /cannot record audio, modify memories, or trigger NeoRecall/);
+  // The approval POST ends in a redirect to the client's callback, and browsers apply
+  // form-action to the whole redirect chain, so that origin must be allowed.
+  assert.match(
+    consent.headers['content-security-policy'],
+    /form-action 'self' https:\/\/agent\.example\.test;/,
+  );
 
   const approval = await request(app).post('/oauth/authorize').set('Cookie', cookie)
     .type('form').send({ ...authorization, decision: 'approve' }).expect(302);

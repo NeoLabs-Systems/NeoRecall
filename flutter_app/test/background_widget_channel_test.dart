@@ -83,6 +83,42 @@ void main() {
     await service.dispose();
   });
 
+  test('a persisted Memoket E2E request is claimed exactly once', () async {
+    Map<String, Object?>? pending = <String, Object?>{
+      'liveMs': 90000,
+      'reconnectGapMs': 0,
+      'idleMs': 0,
+    };
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'backgroundRuntimeState':
+          return <String, Object?>{
+            'running': false,
+            'holds': <String>[],
+            'foreground': true,
+            'microphoneUnavailable': false,
+          };
+        case 'takePendingMemoketE2eRequest':
+          final result = pending;
+          pending = null;
+          return result;
+        case 'stopBackgroundCapture':
+          return true;
+      }
+      return null;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+
+    expect(await service.takePendingMemoketE2eRequest(), <String, Object?>{
+      'liveMs': 90000,
+      'reconnectGapMs': 0,
+      'idleMs': 0,
+    });
+    expect(await service.takePendingMemoketE2eRequest(), isNull);
+    await service.dispose();
+  });
+
   test('a warm widget tap reaches the background event stream', () async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'backgroundRuntimeState') {
