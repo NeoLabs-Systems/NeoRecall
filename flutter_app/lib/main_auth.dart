@@ -187,6 +187,12 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 ],
                 TextField(
                   controller: awaitingTwoFactor ? _twoFactor : _username,
+                  keyboardType: awaitingTwoFactor
+                      ? TextInputType.visiblePassword
+                      : TextInputType.text,
+                  autofillHints: awaitingTwoFactor
+                      ? const <String>[AutofillHints.oneTimeCode]
+                      : const <String>[AutofillHints.username],
                   decoration: InputDecoration(
                     labelText: awaitingTwoFactor
                         ? strings.authTwoFactorFieldLabel

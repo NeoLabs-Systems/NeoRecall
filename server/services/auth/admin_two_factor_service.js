@@ -1,10 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { authenticator } = require('otplib');
 const { getDatabase } = require('../../db/database');
 const { HttpError } = require('../../middleware/error_handler');
 const { encryptString, decryptString, randomToken, sha256 } = require('../../utils/crypto');
+const { generateSecret, otpauthUri, verifyTotp } = require('../../utils/totp');
 
 function getRow(adminId) {
   return getDatabase().prepare('SELECT * FROM admin_two_factor WHERE admin_id = ?').get(adminId) || null;
@@ -22,16 +22,19 @@ function getStatus(adminId) {
 }
 
 function beginSetup(adminId, username) {
-  const secret = authenticator.generateSecret();
+  const secret = generateSecret();
   getDatabase().prepare(`
     INSERT INTO admin_two_factor (admin_id, secret_encrypted, pending, failed_attempts, locked_until)
     VALUES (?, ?, 1, 0, NULL)
     ON CONFLICT(admin_id) DO UPDATE SET secret_encrypted = excluded.secret_encrypted, pending = 1, failed_attempts = 0, locked_until = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
   `).run(adminId, encryptString(secret));
-  
+
+  const uri = otpauthUri(username, 'NeoRecall Admin', secret);
   return {
+    secret,
     manualKey: secret,
-    otpauthUrl: authenticator.keyuri(username, 'NeoRecall Admin', secret),
+    otpauthUrl: uri,
+    otpauthUri: uri,
   };
 }
 
@@ -50,7 +53,7 @@ function verifySecondFactor(adminId, value) {
   if (!value) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
   if (factor.locked_until && Date.parse(factor.locked_until) > Date.now()) throw new HttpError(429, 'TWO_FACTOR_LOCKED', 'Two-factor authentication is temporarily locked.');
   
-  const valid = authenticator.check(String(value).replace(/\\s+/g, ''), decryptString(factor.secret_encrypted)) || consumeRecoveryCode(adminId, value);
+  const valid = verifyTotp(value, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(adminId, value);
   if (valid) {
     db.prepare('UPDATE admin_two_factor SET failed_attempts = 0, locked_until = NULL WHERE admin_id = ?').run(adminId);
     return true;
@@ -64,7 +67,7 @@ function verifySecondFactor(adminId, value) {
 function activateTwoFactor(adminId, code) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM admin_two_factor WHERE admin_id = ? AND pending = 1').get(adminId);
-  if (!factor || !authenticator.check(String(code || '').replace(/\\s+/g, ''), decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
+  if (!factor || !verifyTotp(code, decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
   
   const codes = Array.from({ length: 10 }, () => {
     let raw = randomToken(8).slice(0, 10).toUpperCase(); // crypto.randomToken gives hex, wait. I should generate alphanumeric.

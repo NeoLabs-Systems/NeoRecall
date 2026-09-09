@@ -33,7 +33,6 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
       controller: ctrl,
       children: <Widget>[
         NextcloudSectionCard(controller: ctrl),
-        const SizedBox(height: 14),
         SectionCard(
           eyebrow: AppL10n.of(context).integrationsMcpEyebrow,
           child: Column(

@@ -1,11 +1,11 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { authenticator } = require('otplib');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { randomToken, sha256, hashPassword, verifyPassword, encryptString, decryptString } = require('../../utils/crypto');
+const { generateSecret, otpauthUri, verifyTotp, normalizeTotpCode } = require('../../utils/totp');
 const audit = require('../audit/audit_service');
 
 function publicUser(user) {
@@ -45,9 +45,7 @@ async function register({ username, email, password }, context = {}) {
 }
 
 function normalizeTwoFactorCode(value) {
-  // Users (and authenticator UIs) often insert spaces or dashes; recovery codes
-  // may be pasted with separators. Strip them before verifying.
-  return String(value || '').replace(/[\s-]+/g, '').trim();
+  return normalizeTotpCode(value);
 }
 
 function recoveryCodeHash(code) {
@@ -73,7 +71,7 @@ function verifySecondFactor(userId, value) {
   const code = normalizeTwoFactorCode(value);
   if (!code) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
   if (factor.locked_until && Date.parse(factor.locked_until) > Date.now()) throw new HttpError(429, 'TWO_FACTOR_LOCKED', 'Two-factor authentication is temporarily locked.');
-  const valid = authenticator.check(code, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(userId, code);
+  const valid = verifyTotp(code, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(userId, code);
   if (valid) {
     db.prepare('UPDATE user_two_factor SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?').run(userId);
     return true;
@@ -144,17 +142,21 @@ function getTwoFactorStatus(userId) {
 }
 
 function beginTwoFactor(userId, username) {
-  const secret = authenticator.generateSecret();
+  const secret = generateSecret();
   getDatabase().prepare(`INSERT INTO user_two_factor (user_id, secret_encrypted, pending)
     VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET secret_encrypted=excluded.secret_encrypted, pending=1, failed_attempts=0, locked_until=NULL,
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`).run(userId, encryptString(secret));
-  return { secret, otpauthUri: authenticator.keyuri(username, 'NeoRecall', secret) };
+  return {
+    secret,
+    manualKey: secret,
+    otpauthUri: otpauthUri(username, 'NeoRecall', secret),
+  };
 }
 
 function activateTwoFactor(userId, code) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM user_two_factor WHERE user_id = ? AND pending = 1').get(userId);
-  if (!factor || !authenticator.check(normalizeTwoFactorCode(code), decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
+  if (!factor || !verifyTotp(code, decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
   const codes = Array.from({ length: 10 }, () => randomToken(8).slice(0, 10).toUpperCase());
   db.transaction(() => {
     db.prepare("UPDATE user_two_factor SET pending=0, enabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?").run(userId);

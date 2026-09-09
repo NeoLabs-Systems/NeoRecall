@@ -157,7 +157,6 @@ class _WatchSectionState extends State<WatchSection> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
         _InstallGuide(releasesUrl: _releasesUrl),
       ],
     );

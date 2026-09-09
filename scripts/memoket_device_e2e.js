@@ -71,7 +71,8 @@ function main() {
     // First run has no previous report.
   }
 
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
+  // Keep the NeoRecall process: force-stop + cold start re-validates the
+  // session and can drop the user at sign-in.
   const startArgs = [
     'shell', 'am', 'start',
     '-n', ACTIVITY,

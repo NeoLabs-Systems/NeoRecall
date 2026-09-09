@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main_controller.dart';
 import '../../main_shared.dart';
@@ -27,7 +28,10 @@ class SecuritySection extends StatefulWidget {
 
 class _SecuritySectionState extends State<SecuritySection> {
   @override
-  Widget build(BuildContext context) => _securitySettings();
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) => _securitySettings(),
+  );
 
   Widget _securitySettings() {
     final palette = neoRecallPaletteOf(context);
@@ -351,8 +355,13 @@ class _SecuritySectionState extends State<SecuritySection> {
       AppL10n.of(context).securityPasswordForDisable,
       obscure: true,
     );
-    if (password == null || password.isEmpty) return;
-    await ctrl.disableTwoFactor(password: password);
+    if (password == null || password.isEmpty || !mounted) return;
+    final code = await _promptDialog(
+      AppL10n.of(context).securityEnterTwoFactorCode,
+      AppL10n.of(context).securityEnterAuthenticatorCode,
+    );
+    if (code == null || code.isEmpty) return;
+    await ctrl.disableTwoFactor(password: password, code: code);
     if (ctrl.error != null && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -393,48 +402,10 @@ class _SecuritySectionState extends State<SecuritySection> {
     final code = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) {
-        final codeController = TextEditingController();
-        return AlertDialog(
-          title: Text(AppL10n.of(context).securityEnableTwoFactor),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(AppL10n.of(context).securityScanQr),
-              const SizedBox(height: 16),
-              if (setup['qrDataUrl'] != null)
-                Image.memory(
-                  base64Decode((setup['qrDataUrl'] as String).split(',').last),
-                  width: 200,
-                  height: 200,
-                ),
-              const SizedBox(height: 8),
-              SelectableText(setup['manualKey'] as String? ?? ''),
-              const SizedBox(height: 16),
-              TextField(
-                controller: codeController,
-                decoration: InputDecoration(
-                  labelText: AppL10n.of(context).securityAuthenticatorCodeLabel,
-                ),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(AppL10n.of(context).actionCancel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, codeController.text),
-              child: Text(AppL10n.of(context).actionVerify),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _TwoFactorSetupDialog(setup: setup),
     );
     if (code == null || code.isEmpty) return;
-    final codes = await ctrl.enableTwoFactor(code);
+    final codes = await ctrl.enableTwoFactor(code.trim());
     if (ctrl.error != null && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -520,6 +491,95 @@ class _SecuritySectionState extends State<SecuritySection> {
           ),
         ],
       ),
+    );
+  }
+}
+
+String groupedTotpSecret(String secret) {
+  final compact = secret.replaceAll(RegExp(r'[\s-]+'), '').toUpperCase();
+  if (compact.isEmpty) return '';
+  final chunks = <String>[];
+  for (var i = 0; i < compact.length; i += 4) {
+    final end = i + 4 > compact.length ? compact.length : i + 4;
+    chunks.add(compact.substring(i, end));
+  }
+  return chunks.join(' ');
+}
+
+class _TwoFactorSetupDialog extends StatefulWidget {
+  const _TwoFactorSetupDialog({required this.setup});
+
+  final Map<String, dynamic> setup;
+
+  @override
+  State<_TwoFactorSetupDialog> createState() => _TwoFactorSetupDialogState();
+}
+
+class _TwoFactorSetupDialogState extends State<_TwoFactorSetupDialog> {
+  final _code = TextEditingController();
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final setup = widget.setup;
+    final qr = setup['qrDataUrl'] as String?;
+    final secret = groupedTotpSecret(
+      setup['manualKey'] as String? ?? setup['secret'] as String? ?? '',
+    );
+    return AlertDialog(
+      title: Text(AppL10n.of(context).securityEnableTwoFactor),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(AppL10n.of(context).securityScanQr),
+          const SizedBox(height: 16),
+          if (qr != null)
+            Image.memory(
+              base64Decode(qr.split(',').last),
+              width: 200,
+              height: 200,
+            ),
+          const SizedBox(height: 8),
+          SelectableText(
+            secret,
+            style: const TextStyle(
+              fontFamily: 'IBM Plex Mono',
+              fontSize: 13,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _code,
+            decoration: InputDecoration(
+              labelText: AppL10n.of(context).securityAuthenticatorCodeLabel,
+            ),
+            keyboardType: TextInputType.number,
+            autofillHints: const <String>[AutofillHints.oneTimeCode],
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(6),
+            ],
+            autofocus: true,
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(AppL10n.of(context).actionCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _code.text),
+          child: Text(AppL10n.of(context).actionVerify),
+        ),
+      ],
     );
   }
 }
