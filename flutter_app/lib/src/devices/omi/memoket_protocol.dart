@@ -146,7 +146,12 @@ class MemoketProtocol {
     if (frame.length < 10 || frame.first != opListFiles || frame[1] == 0xff) {
       return null;
     }
-    final duration = frame[4];
+    // Duration is not one byte. A 10 s take listed as `03 01 00 00 0a …`, so
+    // the field spans frame[2..4] big-endian; read as frame[4] alone anything
+    // past 255 s wrapped, and a half-hour take came back as a handful of
+    // seconds. That number decides whether the device's only copy of a file may
+    // be deleted, so it is never allowed to read short.
+    final duration = (frame[2] << 16) | (frame[3] << 8) | frame[4];
     final nameLen = frame[5];
     if (nameLen <= 0 || frame.length < 6 + nameLen + 4) return null;
     final name = ascii.decode(
@@ -492,14 +497,33 @@ class MemoketBattery {
 class MemoketStoredFile {
   const MemoketStoredFile({
     required this.filename,
-    required this.durationSeconds,
+    required int durationSeconds,
     required this.byteLength,
-  });
+  }) : listedDurationSeconds = durationSeconds;
 
   /// Device filename, e.g. `20260905_222817_2.opus`.
   final String filename;
-  final int durationSeconds;
+
+  /// Duration exactly as the Gem listed it.
+  final int listedDurationSeconds;
   final int byteLength;
+
+  /// Payload rate of packed Gem Opus: 480 bytes per 120 ms notify.
+  static const int _bytesPerSecond = 4000;
+
+  /// How long the take is, never reading shorter than its own byte count.
+  ///
+  /// Only a duration decides whether live audio covered a take well enough to
+  /// drop the device's copy, so an under-reading duration deletes recordings.
+  /// The announced size is the independent witness — it is already the number
+  /// the download itself is sized against — and rounding up keeps the answer on
+  /// the side that re-transfers audio rather than losing it. The server
+  /// discards what it has already heard from this device.
+  int get durationSeconds {
+    if (byteLength <= 0) return listedDurationSeconds;
+    final fromBytes = (byteLength / _bytesPerSecond).ceil();
+    return fromBytes > listedDurationSeconds ? fromBytes : listedDurationSeconds;
+  }
 
   String get id => filename;
   String get contentType => 'audio/ogg';

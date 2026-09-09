@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/omi/memoket_protocol.dart';
+import 'package:neorecall/src/devices/wearable_ingested_files.dart';
 
 /// Ground-truth frames from a Memoket Gem HCI snoop (firmware 01.42.01.10)
 /// while the official app remotely started/stopped recording and later drained
@@ -40,7 +41,9 @@ void main() {
     );
     expect(file, isNotNull);
     expect(file!.filename, '20260905_222817_2.opus');
-    expect(file.durationSeconds, 10);
+    expect(file.listedDurationSeconds, 10);
+    // Rounded up from the announced size, never below what the bytes hold.
+    expect(file.durationSeconds, 11);
     expect(file.byteLength, 41760);
     expect(file.capturedAt, DateTime.utc(2026, 9, 5, 22, 28, 17));
     expect(file.capturedAt!.isUtc, isTrue);
@@ -210,6 +213,35 @@ void main() {
     expect(ogg.length, greaterThan(payload));
     expect(_lastOggGranule(ogg), 200 * 960);
     expect(ogg, containsAllInOrder(<int>[0xbc, ...List<int>.filled(79, 0)]));
+  });
+
+  test('a take longer than 255 s keeps its real length', () {
+    // 30 minutes (1800 s) of packed Opus: 0x000708 seconds, 7 200 000 bytes.
+    // Read as a single byte the duration wrapped to 8 s, and a take the live
+    // stream had barely touched then looked fully covered — and was deleted.
+    final file = MemoketProtocol.parseListEntry(<int>[
+      0x03,
+      0x01,
+      0x00,
+      0x07,
+      0x08,
+      0x16,
+      ...'20260908_121500_2.opus'.codeUnits,
+      0x00,
+      0x6d,
+      0xdd,
+      0x00,
+    ]);
+    expect(file, isNotNull);
+    expect(file!.listedDurationSeconds, 1800);
+    expect(file.durationSeconds, 1800);
+    expect(
+      WearableIngestedFiles.coversSpan(
+        liveSeconds: 20,
+        takeSeconds: file.durationSeconds,
+      ),
+      isFalse,
+    );
   });
 }
 

@@ -275,6 +275,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
       return;
     }
     recording = true;
+    _clearPendingHardwareStart();
     _holdHardwareStart();
     _liveFilename = null;
     _liveEmittedFrames = 0;
@@ -302,6 +303,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   Future<void> stopRecording() async {
     if (!recording && !_deviceLive) return;
     recording = false;
+    _clearPendingHardwareStart();
     _holdHardwareStart();
     final needRemoteStop = _deviceLive;
     _deviceLive = false;
@@ -393,7 +395,11 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         if (started != null && !started.isCompleted) {
           started.complete(name ?? '');
         } else if (!recording && !_holdingHardwareStart) {
-          _emitDeviceControl(WearableControlCodes.startRecording);
+          // Armed, not emitted. A start notify on its own is not proof the Gem
+          // is recording — it also answers control traffic with one — and
+          // acting on it opened takes the user never began. Live frames are the
+          // proof, and they follow a real start within about 120 ms.
+          _armPendingHardwareStart();
         } else if (!recording && _holdingHardwareStart) {
           ClientDiagnosticLog.instance.record(
             'bluetooth_audio',
@@ -406,6 +412,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         }
       case MemoketProtocol.opRecordStop:
         _deviceLive = false;
+        _clearPendingHardwareStart();
         _holdHardwareStart();
         final name = MemoketProtocol.recordingFilename(data);
         if (name != null) _liveFilename = name;
@@ -461,6 +468,11 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         },
       );
     }
+    if (_pendingHardwareStart && !recording) {
+      // Audio is here, so the earlier start notify was a real take.
+      _clearPendingHardwareStart();
+      _emitDeviceControl(WearableControlCodes.startRecording);
+    }
     for (final frame in MemoketProtocol.splitPackedOpusFrames(payload)) {
       _liveEmittedFrames += 1;
       audioBytes.add(frame);
@@ -514,8 +526,48 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     buttonEvents.add(<int>[code]);
   }
 
-  void _holdHardwareStart() {
-    _holdHardwareStartUntil = DateTime.now().add(_hardwareStartHoldoff);
+  void _holdHardwareStart([Duration window = _hardwareStartHoldoff]) {
+    final until = DateTime.now().add(window);
+    final current = _holdHardwareStartUntil;
+    // Never shorten a holdoff that is already running: the stop window has to
+    // outlive the short one every control write arms.
+    if (current != null && current.isAfter(until)) return;
+    _holdHardwareStartUntil = until;
+  }
+
+  /// A start notify arrived unprompted and is waiting for live audio to
+  /// confirm the Gem really is recording.
+  bool _pendingHardwareStart = false;
+  Timer? _pendingHardwareStartTimer;
+
+  /// How long an unconfirmed start notify may hold the device "live".
+  static const Duration _hardwareStartConfirm = Duration(seconds: 5);
+
+  void _armPendingHardwareStart() {
+    _pendingHardwareStart = true;
+    _pendingHardwareStartTimer?.cancel();
+    _pendingHardwareStartTimer = Timer(_hardwareStartConfirm, () {
+      _pendingHardwareStartTimer = null;
+      if (!_pendingHardwareStart) return;
+      // No audio ever followed, so nothing was recording. Releasing the live
+      // flag matters as much as never reporting the start: while it is set,
+      // every automatic sweep skips the device and its files stay there.
+      _pendingHardwareStart = false;
+      if (!recording) _deviceLive = false;
+      ClientDiagnosticLog.instance.record(
+        'bluetooth_audio',
+        'hardware_start_unconfirmed',
+        details: <String, Object?>{
+          'hint': 'Start notify carried no audio; treated as a control echo.',
+        },
+      );
+    });
+  }
+
+  void _clearPendingHardwareStart() {
+    _pendingHardwareStart = false;
+    _pendingHardwareStartTimer?.cancel();
+    _pendingHardwareStartTimer = null;
   }
 
   bool get _holdingHardwareStart =>
@@ -1039,6 +1091,7 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   @override
   Future<void> dispose() async {
     await super.dispose();
+    _clearPendingHardwareStart();
     final reply = _reply;
     _reply = null;
     if (reply != null && !reply.isCompleted) {

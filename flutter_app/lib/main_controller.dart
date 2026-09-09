@@ -2460,6 +2460,12 @@ class NeoRecallController extends ChangeNotifier
         level: 'warning',
         details: <String, Object?>{'error': error.toString()},
       );
+    } finally {
+      // The flag guards the window until the recorder reports isRecording, and
+      // that window is now closed. Leaving it set latched auto-start off for
+      // the rest of the process: every later reconnect returned here and did
+      // nothing, so a device that dropped once never resumed on its own again.
+      _autoStartingLiveCapture = false;
     }
   }
 

@@ -531,6 +531,60 @@ void main() {
   );
 
   test(
+    'a Memoket start notify with no audio behind it never opens a recording',
+    () async {
+      // The failure this guards: after a take ended, the 15 s storage sweep
+      // wrote `03` on the control characteristic, the Gem answered with a start
+      // notify, and the app opened a recording the user never began — over and
+      // over, chopping one long conversation into seconds-long takes. Live
+      // audio is what separates a real take from that echo.
+      fakeAsync((async) {
+        final transport = _FakeWearableTransport();
+        final connector = MemoketConnector(
+          device: _device(WearableDeviceType.memoket),
+          transport: transport,
+        );
+        _bindMemoketReplies(transport);
+        unawaited(connector.connect());
+        async.elapse(const Duration(seconds: 2));
+
+        final buttons = <List<int>>[];
+        connector.buttonEvents.stream.listen(buttons.add);
+
+        // The take ends, then the sweep writes and the Gem echoes a start.
+        transport.emit(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlNotify,
+          <int>[MemoketProtocol.opRecordStop, 0x00],
+        );
+        async.elapse(const Duration(seconds: 20));
+        transport.emit(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlNotify,
+          <int>[
+            MemoketProtocol.opRecordStart,
+            0x01,
+            0x01,
+            ...ascii.encode('20260908_121500_2.opus'),
+          ],
+        );
+        async.elapse(const Duration(seconds: 10));
+
+        expect(buttons, isEmpty);
+        // And the echo must not leave the device "live" either: that state
+        // makes every automatic sweep skip it, so its files never come off.
+        expect(
+          connector.syncDiagnostics['ready'],
+          isTrue,
+          reason: 'the connector is still usable after an unconfirmed start',
+        );
+        unawaited(connector.dispose());
+        async.flushTimers();
+      });
+    },
+  );
+
+  test(
     'Memoket hardware start/stop raises control events without a phone command',
     () async {
       final transport = _FakeWearableTransport();
@@ -558,9 +612,9 @@ void main() {
         ],
       );
       await Future<void>.delayed(Duration.zero);
-      expect(buttons, <List<int>>[
-        <int>[WearableControlCodes.startRecording],
-      ]);
+      // The notify alone proves nothing: the Gem answers control traffic with
+      // one too, and acting on that reopened takes nobody started.
+      expect(buttons, isEmpty);
 
       transport.emit(
         WearableDeviceUuids.memoketService,
@@ -570,6 +624,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(frames, <List<int>>[
         <int>[0xbc, 0x62, 0x11],
+      ]);
+      // Audio followed, so the take is real and the start is reported now.
+      expect(buttons, <List<int>>[
+        <int>[WearableControlCodes.startRecording],
       ]);
 
       final writesBeforeAttach = List<_GattWrite>.from(transport.writes);
