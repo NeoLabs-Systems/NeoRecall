@@ -200,6 +200,7 @@ function storedFilePaths(db, userId) {
     ...db.prepare('SELECT temporary_path FROM imports WHERE user_id=? AND temporary_path IS NOT NULL').all(userId),
     ...db.prepare('SELECT p.temporary_path FROM import_parts p JOIN imports i ON i.id=p.import_id WHERE i.user_id=?').all(userId),
     ...db.prepare('SELECT original_path temporary_path FROM recording_context_items WHERE user_id=? AND original_path IS NOT NULL').all(userId),
+    ...db.prepare('SELECT local_path temporary_path FROM cloud_archive_items WHERE user_id=? AND local_path IS NOT NULL').all(userId),
   ];
 }
 
@@ -224,6 +225,7 @@ const CONTENT_TABLES = Object.freeze([
   'processing_metrics',
   'ask_quota_events',
   'diagnostic_request_events',
+  'cloud_archive_items',
 ]);
 
 async function verifyIdentity(db, userId, password, code) {

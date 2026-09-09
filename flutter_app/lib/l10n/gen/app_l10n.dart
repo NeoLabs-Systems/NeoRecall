@@ -2617,6 +2617,126 @@ abstract class AppL10n {
   /// **'{name} will lose read-only access to this account until you connect it again.'**
   String integrationsRevokeBody(String name);
 
+  /// No description provided for @cloudNextcloudEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'NEXTCLOUD'**
+  String get cloudNextcloudEyebrow;
+
+  /// No description provided for @cloudNextcloudTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up to your Nextcloud'**
+  String get cloudNextcloudTitle;
+
+  /// No description provided for @cloudNextcloudDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.'**
+  String get cloudNextcloudDescription;
+
+  /// No description provided for @cloudInstanceUrlLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Nextcloud URL'**
+  String get cloudInstanceUrlLabel;
+
+  /// No description provided for @cloudInstanceUrlHint.
+  ///
+  /// In en, this message translates to:
+  /// **'https://cloud.example.com'**
+  String get cloudInstanceUrlHint;
+
+  /// No description provided for @cloudSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in with Nextcloud'**
+  String get cloudSignIn;
+
+  /// No description provided for @cloudWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish signing in in the browser. This screen updates when Nextcloud issues an app password.'**
+  String get cloudWaiting;
+
+  /// No description provided for @cloudOpenLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Open login page'**
+  String get cloudOpenLogin;
+
+  /// No description provided for @cloudAudioTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy recordings'**
+  String get cloudAudioTitle;
+
+  /// No description provided for @cloudAudioDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.'**
+  String get cloudAudioDescription;
+
+  /// No description provided for @cloudDataTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up this account'**
+  String get cloudDataTitle;
+
+  /// No description provided for @cloudDataDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Periodically upload transcripts, memories, summaries and settings for this account only.'**
+  String get cloudDataDescription;
+
+  /// No description provided for @cloudBackupNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up now'**
+  String get cloudBackupNow;
+
+  /// No description provided for @cloudBackupQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup queued'**
+  String get cloudBackupQueued;
+
+  /// No description provided for @cloudDisconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect'**
+  String get cloudDisconnect;
+
+  /// No description provided for @cloudDisconnectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect Nextcloud?'**
+  String get cloudDisconnectTitle;
+
+  /// No description provided for @cloudDisconnectBody.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.'**
+  String get cloudDisconnectBody;
+
+  /// No description provided for @cloudLastAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Last audio copy: {when}'**
+  String cloudLastAudio(String when);
+
+  /// No description provided for @cloudLastData.
+  ///
+  /// In en, this message translates to:
+  /// **'Last data backup: {when}'**
+  String cloudLastData(String when);
+
+  /// No description provided for @cloudNever.
+  ///
+  /// In en, this message translates to:
+  /// **'never'**
+  String get cloudNever;
+
   /// No description provided for @memoriesSearchHint.
   ///
   /// In en, this message translates to:

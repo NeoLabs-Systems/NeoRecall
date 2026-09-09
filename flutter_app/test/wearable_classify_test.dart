@@ -69,6 +69,28 @@ void main() {
       ),
       WearableDeviceType.memoket,
     );
+    expect(
+      DiscoveredWearable.classify(
+        name: '',
+        serviceUuids: <String>[WearableDeviceUuids.memoketService],
+      ),
+      WearableDeviceType.memoket,
+    );
+    expect(
+      DiscoveredWearable.classify(
+        name: '',
+        serviceUuids: <String>[WearableDeviceUuids.heyPocketService],
+      ),
+      WearableDeviceType.heyPocket,
+    );
+    expect(
+      DiscoveredWearable.classify(name: '', serviceUuids: const <String>[]),
+      WearableDeviceType.custom,
+    );
+    expect(
+      DiscoveredWearable.protocolLabel(WearableDeviceType.memoket),
+      'Memoket',
+    );
   });
 
   test(

@@ -143,12 +143,49 @@ void main() {
       ),
       hasLength(6),
     );
+    // Seq is one byte and wraps. The decoder must keep the packed payload.
+    for (final seq in <int>[0, 1, 255]) {
+      final wrapped = Uint8List.fromList(<int>[0, 0, 0, 0, seq, ...chunk]);
+      expect(
+        MemoketProtocol.liveOpusFrame(wrapped),
+        chunk,
+        reason: 'seq $seq is skipped, not a gate',
+      );
+      expect(
+        MemoketProtocol.splitPackedOpusFrames(
+          MemoketProtocol.liveOpusFrame(wrapped)!,
+        ),
+        hasLength(6),
+      );
+    }
     expect(
       MemoketProtocol.opusFramesDurationMs(
         MemoketProtocol.splitPackedOpusFrames(_hex('bc6a59d892db3aac')),
       ),
       20,
     );
+    // After 255 the Gem may increment a wider header. That still carries the
+    // same 480-byte packed payload; requiring `00 00 00 00` would look like
+    // the live stream died at 30.72 s.
+    for (final header in <List<int>>[
+      <int>[0, 0, 0, 1, 0],
+      <int>[1, 0, 0, 0, 0],
+      <int>[0, 0, 0, 0, 1, 0],
+    ]) {
+      final rolled = Uint8List.fromList(<int>[...header, ...chunk]);
+      expect(
+        MemoketProtocol.liveOpusFrame(rolled),
+        chunk,
+        reason: 'header $header still yields the packed payload',
+      );
+      expect(MemoketProtocol.liveSeq(rolled), header.last);
+      expect(
+        MemoketProtocol.splitPackedOpusFrames(
+          MemoketProtocol.liveOpusFrame(rolled)!,
+        ),
+        hasLength(6),
+      );
+    }
   });
 
   test('start/stop notifies expose the on-device filename', () {

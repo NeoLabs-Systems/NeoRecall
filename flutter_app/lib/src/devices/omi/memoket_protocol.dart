@@ -73,16 +73,35 @@ class MemoketProtocol {
     return Uint8List.fromList(<int>[opcode, name.length, ...name]);
   }
 
-  /// Live notify packets are `00 00 00 00 <seq> <opus…>` (HCI: 485 bytes
-  /// every 120 ms). Stored-file notifies are the same 480-byte Opus payload
-  /// without that header. Both pack six 20 ms CELT frames, not one.
+  /// Live notify packets are `<header> <opus…>` (HCI: 485 bytes every 120 ms).
+  /// The captured header is `00 00 00 00 <seq8>`. That seq is not ACKed and
+  /// wraps. IRL a 120 s soak continued past wrap when we did not write START
+  /// mid-stream. A second START at wrap stopped live notifies. Decode any
+  /// header whose trailing 480 bytes are packed Opus. Stored-file notifies
+  /// are that payload without a header. Both pack six 20 ms CELT frames.
   static const int packedNotifyBytes = 480;
   static const int packedFrameBytes = 80;
   static const int packedFramesPerNotify = 6;
 
-  /// Live notify packets are `00 00 00 00 <seq> <opus-payload>`; stored-file
-  /// chunks are the 480-byte payload alone (they start with TOC `0xbc`).
+  /// Live notify packets are `<header><opus-payload>`; stored-file chunks
+  /// are the 480-byte payload alone (they start with TOC `0xbc`).
   static Uint8List? liveOpusFrame(List<int> packet) {
+    final framed = _livePayloadAfterHeader(packet);
+    if (framed != null) return framed;
+    if (packet.isNotEmpty && packet.first == 0xbc) {
+      return Uint8List.fromList(packet);
+    }
+    return null;
+  }
+
+  static Uint8List? _livePayloadAfterHeader(List<int> packet) {
+    if (packet.length >= packedNotifyBytes + 1) {
+      final headerLen = packet.length - packedNotifyBytes;
+      final body = packet.sublist(headerLen);
+      if (body.isNotEmpty && body.first == 0xbc) {
+        return Uint8List.fromList(body);
+      }
+    }
     if (packet.length >= 6 &&
         packet[0] == 0 &&
         packet[1] == 0 &&
@@ -90,8 +109,20 @@ class MemoketProtocol {
         packet[3] == 0) {
       return Uint8List.fromList(packet.sublist(5));
     }
-    if (packet.isNotEmpty && packet.first == 0xbc) {
-      return Uint8List.fromList(packet);
+    return null;
+  }
+
+  /// Sequence byte immediately before a packed live payload, when present.
+  static int? liveSeq(List<int> packet) {
+    if (packet.length >= packedNotifyBytes + 1) {
+      return packet[packet.length - packedNotifyBytes - 1];
+    }
+    if (packet.length >= 5 &&
+        packet[0] == 0 &&
+        packet[1] == 0 &&
+        packet[2] == 0 &&
+        packet[3] == 0) {
+      return packet[4];
     }
     return null;
   }
@@ -522,7 +553,9 @@ class MemoketStoredFile {
   int get durationSeconds {
     if (byteLength <= 0) return listedDurationSeconds;
     final fromBytes = (byteLength / _bytesPerSecond).ceil();
-    return fromBytes > listedDurationSeconds ? fromBytes : listedDurationSeconds;
+    return fromBytes > listedDurationSeconds
+        ? fromBytes
+        : listedDurationSeconds;
   }
 
   String get id => filename;

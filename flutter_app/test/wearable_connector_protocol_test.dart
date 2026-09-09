@@ -516,6 +516,62 @@ void main() {
     },
   );
 
+  List<int> _memoketLiveNotify(int seq, {List<int>? headerPrefix}) => <int>[
+    ...?headerPrefix,
+    if (headerPrefix == null) ...<int>[0, 0, 0, 0],
+    seq,
+    for (var i = 0; i < 6; i += 1) ...<int>[
+      0xbc,
+      i,
+      ...List<int>.filled(78, 0),
+    ],
+  ];
+
+  test(
+    'Memoket live wrap headers keep emitting audio without a second start',
+    () async {
+      final transport = _FakeWearableTransport();
+      _bindMemoketReplies(transport);
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      await connector.connect();
+      await connector.startRecording();
+      final startsBefore = transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opRecordStart)
+          .length;
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        _memoketLiveNotify(255),
+      );
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        _memoketLiveNotify(0, headerPrefix: <int>[0, 0, 0, 1]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(connector.syncDiagnostics['liveNotifies'], 2);
+      expect(connector.syncDiagnostics['skippedLive'], 0);
+      expect(
+        transport.writes
+            .where(
+              (write) => write.value.first == MemoketProtocol.opRecordStart,
+            )
+            .length,
+        startsBefore,
+      );
+      expect(
+        transport.writes.where(
+          (write) => write.value.first == MemoketProtocol.opRecordStop,
+        ),
+        isEmpty,
+      );
+      await connector.dispose();
+    },
+  );
+
   test(
     'Memoket vendor battery is not replaced by a 100% standard reading',
     () async {

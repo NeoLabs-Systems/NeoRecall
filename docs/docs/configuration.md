@@ -41,6 +41,8 @@ NeoRecall takes a scheduled snapshot of its database using SQLite's online backu
 
 The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
 
+Each account can also copy *its own* data to a self-hosted Nextcloud instance under **Settings → Integrations**. That path is write-only (MKCOL and PUT): it is not a restore source and it is not the admin database backup. `NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS` (default 24) is how often an account with the data-backup toggle on is offered a dump. Pending audio copies older than `NEORECALL_CLOUD_PENDING_MAX_AGE_MS` are dropped.
+
 From the command line:
 
 ```bash

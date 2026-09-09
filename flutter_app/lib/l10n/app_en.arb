@@ -873,6 +873,40 @@
       }
     }
   },
+  "cloudNextcloudEyebrow": "NEXTCLOUD",
+  "cloudNextcloudTitle": "Back up to your Nextcloud",
+  "cloudNextcloudDescription": "Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.",
+  "cloudInstanceUrlLabel": "Nextcloud URL",
+  "cloudInstanceUrlHint": "https://cloud.example.com",
+  "cloudSignIn": "Sign in with Nextcloud",
+  "cloudWaiting": "Finish signing in in the browser. This screen updates when Nextcloud issues an app password.",
+  "cloudOpenLogin": "Open login page",
+  "cloudAudioTitle": "Copy recordings",
+  "cloudAudioDescription": "After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.",
+  "cloudDataTitle": "Back up this account",
+  "cloudDataDescription": "Periodically upload transcripts, memories, summaries and settings for this account only.",
+  "cloudBackupNow": "Back up now",
+  "cloudBackupQueued": "Backup queued",
+  "cloudDisconnect": "Disconnect",
+  "cloudDisconnectTitle": "Disconnect Nextcloud?",
+  "cloudDisconnectBody": "NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.",
+  "cloudLastAudio": "Last audio copy: {when}",
+  "@cloudLastAudio": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudLastData": "Last data backup: {when}",
+  "@cloudLastData": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudNever": "never",
   "memoriesSearchHint": "Search memories…",
   "memoriesFilterAll": "All",
   "memoriesFilterPinned": "Pinned",

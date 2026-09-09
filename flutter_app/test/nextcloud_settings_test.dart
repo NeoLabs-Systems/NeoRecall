@@ -6,13 +6,11 @@ import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
-  testWidgets('integrations settings show the MCP URL and connected apps', (
-    tester,
-  ) async {
+  testWidgets('connected Nextcloud card shows backup toggles', (tester) async {
     tester.view.physicalSize = const Size(1400, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final controller = _IntegrationsController();
+    final controller = _CloudController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
@@ -29,24 +27,28 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('https://recall.example.test/mcp'), findsOneWidget);
-    expect(find.text('Copy MCP URL'), findsOneWidget);
     expect(find.text('Back up to your Nextcloud'), findsOneWidget);
-    expect(find.text('Claude'), findsOneWidget);
-    expect(find.text('MCP client'), findsOneWidget);
+    expect(find.text('Copy recordings'), findsOneWidget);
+    expect(find.text('Back up this account'), findsOneWidget);
+    expect(find.text('Back up now'), findsOneWidget);
+    expect(find.text('Disconnect'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
 
-class _IntegrationsController extends NeoRecallController {
-  _IntegrationsController() {
-    integrations = <Map<String, dynamic>>[
-      <String, dynamic>{
-        'id': 'nrc_claude',
-        'name': 'Claude',
-        'description': 'mcp:dcr',
-      },
-    ];
+class _CloudController extends NeoRecallController {
+  _CloudController() {
+    cloudStatus = <String, dynamic>{
+      'connected': true,
+      'status': 'connected',
+      'type': 'nextcloud',
+      'baseUrl': 'https://cloud.example.test',
+      'username': 'ada',
+      'audioEnabled': true,
+      'dataBackupEnabled': false,
+      'lastAudioUploadAt': '2026-09-09T12:00:00.000Z',
+      'lastDataBackupAt': null,
+    };
   }
 
   @override

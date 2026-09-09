@@ -5,7 +5,11 @@ const tempAudio = require('../../services/ingest/temp_audio_service');
 const transcribe = require('./transcribe_handler');
 
 async function handle(job) {
-  if (job.type === 'sweep_temp_audio') return { removed: tempAudio.sweep() };
+  if (job.type === 'sweep_temp_audio') {
+    const removed = tempAudio.sweep();
+    const cloud = require('../../services/cloud/archive_service').sweepPending();
+    return { removed: removed + (cloud.removed || 0) };
+  }
   const database = getDatabase();
   const chunk = database.prepare("SELECT * FROM audio_chunks WHERE id=? AND state IN ('persisted_cleanup_pending','retryable_failed')").get(job.resource_id);
   if (!chunk) return { skipped: true };

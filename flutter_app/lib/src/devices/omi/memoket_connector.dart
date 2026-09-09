@@ -58,6 +58,10 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   String? _liveFilename;
   String? _lastTakeFilename;
   int _liveEmittedFrames = 0;
+  int _liveNotifyCount = 0;
+  int? _lastLiveSeq;
+  int _skippedLive = 0;
+  List<int>? _lastSkippedLiveHeader;
 
   /// Filename of the most recent on-device take this phone has seen, kept after
   /// stop so a later drain can target that file without touching others.
@@ -119,6 +123,10 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     'filesSynced': _lastSynced,
     'filesFailed': _lastFailed,
     'lastTakeFilename': _lastTakeFilename,
+    'liveNotifies': _liveNotifyCount,
+    'lastLiveSeq': _lastLiveSeq,
+    'skippedLive': _skippedLive,
+    'lastSkippedLiveHeader': _lastSkippedLiveHeader,
   };
 
   @override
@@ -330,6 +338,10 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
     _holdHardwareStart();
     _liveFilename = null;
     _liveEmittedFrames = 0;
+    _liveNotifyCount = 0;
+    _lastLiveSeq = null;
+    _skippedLive = 0;
+    _lastSkippedLiveHeader = null;
     _takeStartedAt = DateTime.now();
     final started = Completer<String>();
     _started = started;
@@ -411,6 +423,8 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
             'id': filename,
             'liveSeconds': liveSeconds,
             'takeSeconds': takeSeconds,
+            'liveNotifies': _liveNotifyCount,
+            'lastLiveSeq': _lastLiveSeq,
           },
         );
       }
@@ -441,6 +455,10 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         // count — stop uses that to know the live path already ingested it.
         if (name != null && name != _liveFilename) {
           _liveEmittedFrames = 0;
+          _liveNotifyCount = 0;
+          _lastLiveSeq = null;
+          _skippedLive = 0;
+          _lastSkippedLiveHeader = null;
           _liveFilename = name;
           _lastTakeFilename = name;
           // A take the device started on its own (hardware button) has its own
@@ -516,7 +534,18 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
   void _handleLiveAudio(List<int> data) {
     if (_downloadBuffer != null) return;
     final payload = MemoketProtocol.liveOpusFrame(data);
-    if (payload == null) return;
+    if (payload == null) {
+      if (data.isNotEmpty) {
+        _skippedLive += 1;
+        _lastSkippedLiveHeader = data.take(8).toList(growable: false);
+      }
+      return;
+    }
+    _liveNotifyCount += 1;
+    final seq = MemoketProtocol.liveSeq(data);
+    if (seq != null) {
+      _lastLiveSeq = seq;
+    }
     // The start opcode can be missed after a background reconnect. Live frames
     // are proof the Gem is recording — treat it as live so list/battery/handshake
     // writes cannot stop the take.

@@ -1634,6 +1634,75 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
+  String get cloudNextcloudEyebrow => 'NEXTCLOUD';
+
+  @override
+  String get cloudNextcloudTitle => 'Back up to your Nextcloud';
+
+  @override
+  String get cloudNextcloudDescription =>
+      'Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.';
+
+  @override
+  String get cloudInstanceUrlLabel => 'Nextcloud URL';
+
+  @override
+  String get cloudInstanceUrlHint => 'https://cloud.example.com';
+
+  @override
+  String get cloudSignIn => 'Sign in with Nextcloud';
+
+  @override
+  String get cloudWaiting =>
+      'Finish signing in in the browser. This screen updates when Nextcloud issues an app password.';
+
+  @override
+  String get cloudOpenLogin => 'Open login page';
+
+  @override
+  String get cloudAudioTitle => 'Copy recordings';
+
+  @override
+  String get cloudAudioDescription =>
+      'After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.';
+
+  @override
+  String get cloudDataTitle => 'Back up this account';
+
+  @override
+  String get cloudDataDescription =>
+      'Periodically upload transcripts, memories, summaries and settings for this account only.';
+
+  @override
+  String get cloudBackupNow => 'Back up now';
+
+  @override
+  String get cloudBackupQueued => 'Backup queued';
+
+  @override
+  String get cloudDisconnect => 'Disconnect';
+
+  @override
+  String get cloudDisconnectTitle => 'Disconnect Nextcloud?';
+
+  @override
+  String get cloudDisconnectBody =>
+      'NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.';
+
+  @override
+  String cloudLastAudio(String when) {
+    return 'Last audio copy: $when';
+  }
+
+  @override
+  String cloudLastData(String when) {
+    return 'Last data backup: $when';
+  }
+
+  @override
+  String get cloudNever => 'never';
+
+  @override
   String get memoriesSearchHint => 'Search memories…';
 
   @override

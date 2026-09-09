@@ -32,6 +32,10 @@ function paths(env = process.env) {
     context: path.join(home, 'context'),
     logs: path.join(home, 'logs'),
     backups: path.join(home, 'backups'),
+    // Copies waiting to be PUT to a user's Nextcloud. Not an audio library:
+    // nothing serves these files, and they are unlinked as soon as the PUT
+    // succeeds (or after the pending-age limit).
+    cloudPending: path.join(home, 'cloud_pending'),
     database: env.NEORECALL_DATABASE_PATH || path.join(home, 'data', 'neorecall.sqlite3'),
     envFile: path.join(home, '.env'),
     secretKey: path.join(home, 'data', 'secret.key'),
@@ -61,7 +65,7 @@ function ensurePrivateDirectory(dir) {
 
 function ensureRuntimeDirs(env = process.env) {
   const result = paths(env);
-  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.audioWork, result.importTmp, result.context, result.logs, result.backups]) {
+  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.audioWork, result.importTmp, result.context, result.logs, result.backups, result.cloudPending]) {
     ensurePrivateDirectory(directory);
   }
   return result;

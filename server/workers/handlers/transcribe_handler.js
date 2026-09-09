@@ -230,6 +230,9 @@ function persistSegments(chunk, inferred) {
 }
 
 function finishCleanup(chunk, segmentCount) {
+  try { require('../../services/cloud/archive_service').stageAudio(chunk); } catch (error) {
+    logger.warn('Cloud audio staging failed', { chunkId: chunk.id, error });
+  }
   const db = getDatabase();
   try { tempAudio.unlinkStrict(chunk.temporary_path); } catch (error) {
     jobs.enqueue({ userId: chunk.user_id, resourceType: 'audio_chunk', resourceId: chunk.id, type: 'cleanup_chunk_audio', priority: 110 });

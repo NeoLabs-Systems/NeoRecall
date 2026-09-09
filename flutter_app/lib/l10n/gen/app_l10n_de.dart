@@ -1648,6 +1648,75 @@ class AppL10nDe extends AppL10n {
   }
 
   @override
+  String get cloudNextcloudEyebrow => 'NEXTCLOUD';
+
+  @override
+  String get cloudNextcloudTitle => 'Auf Ihre Nextcloud sichern';
+
+  @override
+  String get cloudNextcloudDescription =>
+      'Verbinden Sie eine selbst gehostete Nextcloud. NeoRecall kann Ihre Aufnahmen und eine Sicherung dieses Kontos dorthin kopieren. Es wird nur geschrieben — nichts wird zurückgelesen oder wiederhergestellt.';
+
+  @override
+  String get cloudInstanceUrlLabel => 'Nextcloud-Adresse';
+
+  @override
+  String get cloudInstanceUrlHint => 'https://cloud.example.com';
+
+  @override
+  String get cloudSignIn => 'Mit Nextcloud anmelden';
+
+  @override
+  String get cloudWaiting =>
+      'Schließen Sie die Anmeldung im Browser ab. Diese Ansicht aktualisiert sich, sobald Nextcloud ein App-Passwort ausstellt.';
+
+  @override
+  String get cloudOpenLogin => 'Anmeldeseite öffnen';
+
+  @override
+  String get cloudAudioTitle => 'Aufnahmen kopieren';
+
+  @override
+  String get cloudAudioDescription =>
+      'Nach der Transkription eines Abschnitts wird eine Kopie nach Nextcloud hochgeladen. NeoRecall löscht die eigene Datei weiterhin.';
+
+  @override
+  String get cloudDataTitle => 'Dieses Konto sichern';
+
+  @override
+  String get cloudDataDescription =>
+      'Lädt in Abständen Transkripte, Erinnerungen, Zusammenfassungen und Einstellungen nur für dieses Konto hoch.';
+
+  @override
+  String get cloudBackupNow => 'Jetzt sichern';
+
+  @override
+  String get cloudBackupQueued => 'Sicherung eingeplant';
+
+  @override
+  String get cloudDisconnect => 'Trennen';
+
+  @override
+  String get cloudDisconnectTitle => 'Nextcloud trennen?';
+
+  @override
+  String get cloudDisconnectBody =>
+      'NeoRecall vergisst diese Instanz und lädt nichts mehr hoch. Dateien, die schon in Nextcloud liegen, bleiben dort.';
+
+  @override
+  String cloudLastAudio(String when) {
+    return 'Letzte Audiokopie: $when';
+  }
+
+  @override
+  String cloudLastData(String when) {
+    return 'Letzte Datensicherung: $when';
+  }
+
+  @override
+  String get cloudNever => 'noch nie';
+
+  @override
   String get memoriesSearchHint => 'Erinnerungen durchsuchen …';
 
   @override

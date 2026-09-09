@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import 'l10n/gen/app_l10n.dart';
@@ -62,6 +63,7 @@ part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
 part 'src/controller/context_controller.dart';
 part 'src/controller/integrations_controller.dart';
+part 'src/controller/cloud_controller.dart';
 part 'src/controller/memoket_e2e_controller.dart';
 
 enum RecallPage { record, library, search, sources, devices, settings }
@@ -86,6 +88,7 @@ class NeoRecallController extends ChangeNotifier
         LibraryController,
         ContextController,
         IntegrationsController,
+        CloudController,
         MemoketE2eController {
   NeoRecallController({
     NeoRecallApiClient? api,
@@ -3776,6 +3779,7 @@ class NeoRecallController extends ChangeNotifier
     deviceStorageSync.dispose();
     sync.close();
     disposeRecordingContext();
+    disposeCloud();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {
       unawaited(_disposeExternalDeviceRuntime());

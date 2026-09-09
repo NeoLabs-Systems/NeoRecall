@@ -379,6 +379,7 @@ class MemoketE2eHarness {
       'lastTakeFilename': filename,
       'probeTakeIds': _probeTakeIds.toList(growable: false),
       'liveLink': await adapter.hasLiveLink(),
+      ...?_memoket?.syncDiagnostics,
     };
   }
 

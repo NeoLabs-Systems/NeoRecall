@@ -162,6 +162,13 @@ function buildConfig() {
     backupDestination: process.env.NEORECALL_BACKUP_DESTINATION || 'local',
     backupIntervalHours: integer('NEORECALL_BACKUP_INTERVAL_HOURS', 24, { min: 1, max: 24 * 30 }),
     backupRetain: integer('NEORECALL_BACKUP_RETAIN', 3, { min: 1, max: 365 }),
+    // Per-user Nextcloud copies. Interval and age are host-wide; whether a
+    // given account actually uploads is the user's own toggle.
+    cloudUserBackupIntervalHours: integer('NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS', 24, { min: 1, max: 24 * 30 }),
+    cloudPendingMaxAgeMs: integer('NEORECALL_CLOUD_PENDING_MAX_AGE_MS', 7 * 24 * 60 * 60_000, { min: 60_000 }),
+    cloudLoginTimeoutMs: integer('NEORECALL_CLOUD_LOGIN_TIMEOUT_MS', 20 * 60_000, { min: 30_000, max: 60 * 60_000 }),
+    cloudHttpTimeoutMs: integer('NEORECALL_CLOUD_HTTP_TIMEOUT_MS', 120_000, { min: 5_000, max: 1_800_000 }),
+    cloudPutMaxAttempts: integer('NEORECALL_CLOUD_PUT_MAX_ATTEMPTS', 8, { min: 1, max: 50 }),
     // VAD and diarization run locally; see docs/docs/configuration.md.
     diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
     // Native threads for the audio models.
