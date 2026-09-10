@@ -1767,9 +1767,15 @@ class NeoRecallController extends ChangeNotifier
   List<AudioDeviceDescriptor> discoveredWearables = <AudioDeviceDescriptor>[];
   bool scanningWearables = false;
 
+  /// Last empty-scan explanation, kept until the next scan. The shell [notice]
+  /// expires after a few seconds, which is too short if the sheet that started
+  /// the scan is still open.
+  String? wearableScanNotice;
+
   Future<void> scanForWearables({
     Duration timeout = const Duration(seconds: 10),
   }) async {
+    if (scanningWearables) return;
     if (audioDeviceRegistry.adapters.isEmpty) {
       throw StateError(
         'No validated Bluetooth device protocol is installed yet.',
@@ -1779,6 +1785,7 @@ class NeoRecallController extends ChangeNotifier
     discoveredWearables = <AudioDeviceDescriptor>[];
     // Each scan reports its own outcome; a leftover notice from the previous one
     // would otherwise stay on screen and contradict this run.
+    wearableScanNotice = null;
     notice = null;
     notifyListeners();
     final subs = <StreamSubscription<dynamic>>[];
@@ -1830,10 +1837,11 @@ class NeoRecallController extends ChangeNotifier
       // it was instead of leaving an empty list on screen. Every cause here is
       // actionable by the user.
       if (discoveredWearables.isEmpty) {
-        notice = kIsWeb
-            ? 'No device was selected in the browser chooser.'
-            : 'No supported device found. Check that the wearable is switched '
-                  'on, close by, and not already connected to another app or phone.';
+        final message = kIsWeb
+            ? strings.controllerWearableScanChooserEmpty
+            : strings.controllerWearableScanEmpty;
+        wearableScanNotice = message;
+        notice = message;
       }
       notifyListeners();
     }

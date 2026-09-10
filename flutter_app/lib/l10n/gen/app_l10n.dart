@@ -2674,7 +2674,7 @@ abstract class AppL10n {
   /// No description provided for @cloudAudioDescription.
   ///
   /// In en, this message translates to:
-  /// **'After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.'**
+  /// **'When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.'**
   String get cloudAudioDescription;
 
   /// No description provided for @cloudDataTitle.
@@ -4134,6 +4134,18 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Import uploaded. Local transcription has been queued.'**
   String get controllerImportQueued;
+
+  /// No description provided for @controllerWearableScanEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No supported device found. Check that the wearable is switched on, close by, and not already connected to another app or phone.'**
+  String get controllerWearableScanEmpty;
+
+  /// No description provided for @controllerWearableScanChooserEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No device was selected in the browser chooser.'**
+  String get controllerWearableScanChooserEmpty;
 
   /// No description provided for @controllerNoteEmpty.
   ///

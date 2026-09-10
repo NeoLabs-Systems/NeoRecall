@@ -7,6 +7,7 @@ const processingSettings = require('../settings/processing_settings_service');
 const vectors = require('../../transcription/speaker_embeddings');
 const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
+const resolutionState = require('../../speakers/resolution_state');
 
 // The people worth showing.
 //
@@ -195,10 +196,20 @@ const RESOLUTION_BATCH = 200;
 // Left alone, those conversations keep the split labels they were written with
 // forever, because nothing else ever revisits a closed conversation.
 //
-// "Never looked at" is read from the evidence rather than from a flag: speech
-// that resolved to no durable person is exactly the state the pass exists to
-// correct, and it stays true until it has run — which makes the sweep naturally
-// idempotent and needs no schema to remember what it has done.
+// Speech attached to no durable person is the state the pass exists to correct,
+// so it is the first thing asked. It is not on its own an answer to "has the
+// pass run", though: a fingerprint pooled from too little speech enrolls nobody,
+// and a voice resembling an enrolled one without clearing the bar is left alone
+// rather than guessed at. Both are finished answers that leave the turn
+// unattached, and reading them as "never looked at" is what made this sweep
+// queue the same conversation on every tick forever while each job completed
+// without changing anything.
+//
+// So the recorded answer is consulted too, and a conversation is skipped while
+// its answer still applies. It stops applying — and the conversation is picked
+// up again — as soon as something that could change the answer has: a voice
+// enrolled, deleted, merged, renamed or re-enabled, a threshold moved, a new
+// version of the pass, or more speech in the conversation itself.
 function sweepUnresolvedConversations(userId) {
   const db = getDatabase();
   const since = new Date(Date.now() - getConfig().speakerRedetectDays * 24 * 60 * 60_000).toISOString();
@@ -209,7 +220,12 @@ function sweepUnresolvedConversations(userId) {
         WHERE t.conversation_id=c.id AND st.voiceprint_id IS NULL)
       AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type='resolve_speakers' AND j.resource_id=c.id
         AND j.status IN ('queued','leased'))
-    ORDER BY c.ended_at DESC LIMIT ?`).all(userId, since, RESOLUTION_BATCH);
+      AND NOT EXISTS (SELECT 1 FROM conversation_speaker_resolutions r
+        WHERE r.conversation_id=c.id AND r.world_signature=?
+          AND r.evidence_turns=(${resolutionState.evidenceTurnsSql('c.id')})
+          AND r.unresolved_turns=(${resolutionState.unresolvedTurnsSql('c.id')}))
+    ORDER BY c.ended_at DESC LIMIT ?`)
+    .all(userId, since, resolutionState.worldSignature(db, userId), RESOLUTION_BATCH);
   return queueResolution(db, userId, conversations.map((row) => row.id));
 }
 

@@ -204,12 +204,14 @@ test('a long conversation refreshes from its own summary instead of its whole hi
 test('one sitting broken by pauses becomes one consolidation run, not one per fragment', async () => {
   const recording = await recordingUser('occasion-user');
   const db = getDatabase();
-  // One meeting with two ordinary pauses in it. Each pause clears the hard
-  // boundary gap, so speech grouping cuts the sitting into three conversations —
-  // which is what used to produce three memory cards minutes apart.
-  appendChunk(recording, 0, [{ startedAt: iso(-1_200_000), endedAt: iso(-1_140_000), text: 'Wir fangen mit dem Zeitplan an und gehen die offenen Punkte durch.' }]);
-  appendChunk(recording, 1, [{ startedAt: iso(-900_000), endedAt: iso(-840_000), text: 'Weiter beim Zeitplan, der Termin im September bleibt bestehen.' }]);
-  appendChunk(recording, 2, [{ startedAt: iso(-360_000), endedAt: iso(-60_000), text: 'Zum Schluss noch die Verteilung der Aufgaben im Team.' }]);
+  // One meeting with two long breaks in it. Each break clears the hard boundary
+  // gap, so speech grouping cuts the sitting into three conversations — which is
+  // what used to produce three memory cards minutes apart. The breaks still fit
+  // inside the occasion gap, which is what lets the three be read as one sitting
+  // again further down.
+  appendChunk(recording, 0, [{ startedAt: iso(-2_100_000), endedAt: iso(-2_040_000), text: 'Wir fangen mit dem Zeitplan an und gehen die offenen Punkte durch.' }]);
+  appendChunk(recording, 1, [{ startedAt: iso(-1_380_000), endedAt: iso(-1_320_000), text: 'Weiter beim Zeitplan, der Termin im September bleibt bestehen.' }]);
+  appendChunk(recording, 2, [{ startedAt: iso(-660_000), endedAt: iso(-60_000), text: 'Zum Schluss noch die Verteilung der Aufgaben im Team.' }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
   await settleSpeakerResolution(recording.userId);
@@ -247,24 +249,27 @@ test('a separate occasion later the same day stays its own run', async () => {
   const recording = await recordingUser('two-occasion-user');
   const db = getDatabase();
   // Two sittings an hour apart on one recording. The gap is far beyond the
-  // occasion gap, so nothing joins them and each keeps its own card.
+  // occasion gap, so nothing joins them and each keeps its own card — and
+  // neither is folded into the other by the short-group merge, because the gap
+  // that separated them is not a boundary that merge may dissolve.
   appendChunk(recording, 0, [{ startedAt: iso(-7_200_000), endedAt: iso(-7_140_000), text: 'Das Morgenmeeting zum Zeitplan mit dem ganzen Team.' }]);
   appendChunk(recording, 1, [{ startedAt: iso(-3_600_000), endedAt: iso(-3_540_000), text: 'Später ein eigenes Gespräch über den Zeitplan mit der Werkstatt.' }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
   await settleSpeakerResolution(recording.userId);
-  const [morning] = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
-  assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [morning]);
+  const sittings = db.prepare('SELECT id FROM conversations WHERE user_id=? ORDER BY started_at').all(recording.userId).map((row) => row.id);
+  assert.equal(sittings.length, 2, 'Neither short sitting was absorbed into the other.');
+  assert.deepEqual(consolidation.buildCandidates(recording.userId).conversations.map((item) => item.id), [sittings[0]]);
 });
 
 test('a conversation the model cannot partition is isolated and then quarantined', async () => {
   const recording = await recordingUser('quarantine-user');
   const db = getDatabase();
   // Two conversations of one sitting: the pause between them clears the hard
-  // boundary gap, so speech grouping cuts them apart, but it stays well inside
-  // the occasion gap, so consolidation reads them as one occasion.
+  // boundary gap, so speech grouping cuts them apart, but it stays inside the
+  // occasion gap, so consolidation reads them as one occasion.
   appendChunk(recording, 0, [{ startedAt: iso(-7_200_000), endedAt: iso(-7_100_000), text: 'Erste abgeschlossene Konversation mit genug Inhalt.' }]);
-  appendChunk(recording, 1, [{ startedAt: iso(-6_900_000), endedAt: iso(-6_800_000), text: 'Zweite abgeschlossene Konversation mit genug Inhalt.' }]);
+  appendChunk(recording, 1, [{ startedAt: iso(-6_440_000), endedAt: iso(-6_340_000), text: 'Zweite abgeschlossene Konversation mit genug Inhalt.' }]);
   await boundaryHandler.handle({ user_id: recording.userId });
   db.prepare("UPDATE conversations SET state='closed' WHERE user_id=?").run(recording.userId);
   await settleSpeakerResolution(recording.userId);

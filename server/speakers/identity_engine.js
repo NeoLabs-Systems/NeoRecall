@@ -2,6 +2,7 @@
 
 const clustering = require('./clustering');
 const evidence = require('./evidence');
+const resolutionState = require('./resolution_state');
 const vectors = require('../transcription/speaker_embeddings');
 const matching = require('../transcription/speaker_matching');
 const membership = require('../services/conversations/conversation_membership_service');
@@ -198,9 +199,16 @@ function resolveConversation(database, userId, conversationId) {
     logger.warn('Skipped speaker resolution for an implausibly crowded conversation', {
       userId, conversationId, voices: items.length, limit: MAXIMUM_VOICES,
     });
+    // Recorded like any other conclusion. A refusal reached from this evidence
+    // is reached again from the same evidence, so re-queueing it hourly buys
+    // nothing but the log line.
+    resolutionState.record(database, userId, conversationId, 'too_many_voices');
     return { skipped: 'too_many_voices', voices: items.length };
   }
-  if (!items.length) return { voices: 0, groups: 0, mergedClusters: 0, assignedTurns: 0 };
+  if (!items.length) {
+    resolutionState.record(database, userId, conversationId, 'no_voices');
+    return { voices: 0, groups: 0, mergedClusters: 0, assignedTurns: 0 };
+  }
 
   const byId = new Map(items.map((item) => [item.id, item]));
   const blocked = forbiddenPairs(database, items, limits.speakerMinimumTurnMs);
@@ -261,6 +269,11 @@ function apply({ database, userId, conversationId, items, byId, groups, forbidde
   }
 
   membership.rebuildConversationSpeakers(database, userId, conversationId);
+  // Inside the same transaction, and after the writes above, so the recorded
+  // answer describes the state the pass left behind — including any voice it
+  // just enrolled. A speaker that resolved to nobody is a finished answer here,
+  // and the sweep reads it as one until something that could change it does.
+  resolutionState.record(database, userId, conversationId, 'resolved');
   return { voices: items.length, groups: groups.length, mergedClusters, assignedTurns };
 }
 

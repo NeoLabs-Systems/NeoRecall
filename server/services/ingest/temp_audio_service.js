@@ -20,7 +20,14 @@ function chunkPath(chunkId, extension = 'bin') {
 
 function unlinkStrict(file) {
   if (!file) return;
-  try { fs.unlinkSync(file); } catch (error) {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isDirectory()) {
+      fs.rmSync(file, { recursive: true, force: true });
+      return;
+    }
+    fs.unlinkSync(file);
+  } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
 }

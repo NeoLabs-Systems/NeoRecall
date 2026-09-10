@@ -99,6 +99,12 @@ function update(input) {
   if (next.conversationSoftGapMs >= next.conversationHardGapMs) {
     throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The soft conversation gap must be shorter than the hard boundary gap.');
   }
+  // A closed conversation is never reconsidered, so closing before the hard gap
+  // has elapsed splits a recording at a pause the hard gap just declared too
+  // short to split on.
+  if (next.conversationQuietCloseMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The quiet-close delay must be at least as long as the hard boundary gap, or a conversation closes while a pause could still continue it.');
+  }
   if (next.conversationMaximumMs <= next.conversationMinimumMs) {
     throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The maximum conversation duration must be longer than the minimum duration.');
   }

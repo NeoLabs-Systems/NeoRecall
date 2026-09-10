@@ -41,7 +41,7 @@ NeoRecall takes a scheduled snapshot of its database using SQLite's online backu
 
 The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
 
-Each account can also copy *its own* data to a self-hosted Nextcloud instance under **Settings → Integrations**. That path is write-only (MKCOL and PUT): it is not a restore source and it is not the admin database backup. `NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS` (default 24) is how often an account with the data-backup toggle on is offered a dump. Pending audio copies older than `NEORECALL_CLOUD_PENDING_MAX_AGE_MS` are dropped.
+Each account can also copy *its own* data to a self-hosted Nextcloud instance under **Settings → Integrations**. That path is write-only (MKCOL and PUT): it is not a restore source and it is not the admin database backup. Audio copies wait until a recording ends, then upload one joined file rather than each ingest chunk. `NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS` (default 24) is how often an account with the data-backup toggle on is offered a dump. Pending audio copies older than `NEORECALL_CLOUD_PENDING_MAX_AGE_MS` are dropped.
 
 From the command line:
 
@@ -65,11 +65,11 @@ Processing gates are off by default and remain available when an external deploy
 
 ### One occasion, one card
 
-A conversation boundary is a provisional grouping of speech, not an occasion. `NEORECALL_CONVERSATION_HARD_GAP_MS` cuts the stream after three minutes of quiet, which is an ordinary pause in a meeting, a lesson or a meal — so one sitting routinely arrives as several conversations. A run therefore carries one *occasion*: the oldest conversation still waiting, plus every conversation that follows it on the same recording without a longer break.
+A conversation boundary is a provisional grouping of speech, not an occasion. `NEORECALL_CONVERSATION_HARD_GAP_MS` cuts the stream after ten minutes of quiet — long enough that a pause reaching it really was the end of the sitting, where the earlier three minutes cut a meeting at every coffee. Shorter pauses only cut where the speech after them is also about something else, so a sitting still arrives as more than one conversation when the subject genuinely moved on. A run therefore carries one *occasion*: the oldest conversation still waiting, plus every conversation that follows it on the same recording without a longer break.
 
 `NEORECALL_MEMORY_OCCASION_GAP_MS` defaults to fifteen minutes and is what "without a longer break" means. Below it, two consecutive conversations of one recording are read as one sitting and consolidated together; above it, the later one starts its own occasion. It is never an arbitrary batch: the chain stops at the first conversation from another recording or beyond this gap, so the model is not asked to hold two unrelated occasions in mind at once.
 
-`NEORECALL_MEMORY_SETTLE_MS` defaults to eight minutes and decides when a sitting is over. While the recording is still running, an occasion is written up only once it has been quiet this long — writing up the first fragment immediately is what produced several cards, minutes apart, for one meeting. Once the recording has stopped nothing waits at all: a stopped recording is proof the occasion ended, and a conversation that just finished is the one you are about to look for. Asking by hand also skips the wait. Both this and the occasion gap must be at least `NEORECALL_CONVERSATION_HARD_GAP_MS`; the server refuses to start otherwise.
+`NEORECALL_MEMORY_SETTLE_MS` defaults to ten minutes and decides when a sitting is over. While the recording is still running, an occasion is written up only once it has been quiet this long — writing up the first fragment immediately is what produced several cards, minutes apart, for one meeting. Once the recording has stopped nothing waits at all: a stopped recording is proof the occasion ended, and a conversation that just finished is the one you are about to look for. Asking by hand also skips the wait. Both this and the occasion gap must be at least `NEORECALL_CONVERSATION_HARD_GAP_MS`, as must `NEORECALL_CONVERSATION_QUIET_CLOSE_MS`; the server refuses to start otherwise.
 
 `NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS` defaults to one hour and bounds the wait. An always-on recording never stops, so at this age an occasion is written up with what it has, and later fragments reach the continuation mechanism below.
 
@@ -504,7 +504,20 @@ to correct — and queues those. That covers a worker that was down at the wrong
 moment, a job that ran out of attempts, and conversations recorded before any of
 this existed. Both the sweep and re-detect are capped per run so an upgrade turns
 into a steady backlog rather than a stall; whatever is not queued this hour is
-queued the next, since the condition stays true until the pass has actually run.
+queued the next.
+
+Speech belonging to nobody is not on its own proof that the pass has not run.
+Speech far too short to found a person enrolls nobody, and a voice that resembles
+an enrolled one without clearing the bar is left alone rather than guessed at —
+both are finished answers that leave the speech unattached. The pass therefore
+records what it concluded about each conversation, and the sweep skips a
+conversation while that answer still applies; without it the sweep would queue
+the same unresolvable conversation on every maintenance tick forever, each job
+completing without changing anything. The answer stops applying, and the
+conversation is looked at again, as soon as something that could change it has:
+a voice enrolled, deleted, merged, renamed or re-enabled, one of the thresholds
+above moved, a new version of the pass shipped, or more speech landing in the
+conversation itself.
 
 `npm run speakers:report` prints what this actually looks like on an
 installation — how many profiles are duplicates of each other, how much speech

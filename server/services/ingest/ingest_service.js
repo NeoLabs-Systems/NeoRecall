@@ -83,6 +83,7 @@ function closeSession(userId, sessionId, input) {
     getDatabase().prepare(`UPDATE recording_sessions SET device_ended_at=?,corrected_ended_at=?,status=?,
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(input.endedAt, correctedTime(input.endedAt, offset), status, sessionId);
   })();
+  try { require('../cloud/archive_service').finalizeSession(sessionId); } catch { /* a missed enqueue retries on the scheduler */ }
   return ownedSession(userId, sessionId);
 }
 

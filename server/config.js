@@ -169,6 +169,7 @@ function buildConfig() {
     cloudLoginTimeoutMs: integer('NEORECALL_CLOUD_LOGIN_TIMEOUT_MS', 20 * 60_000, { min: 30_000, max: 60 * 60_000 }),
     cloudHttpTimeoutMs: integer('NEORECALL_CLOUD_HTTP_TIMEOUT_MS', 120_000, { min: 5_000, max: 1_800_000 }),
     cloudPutMaxAttempts: integer('NEORECALL_CLOUD_PUT_MAX_ATTEMPTS', 8, { min: 1, max: 50 }),
+    cloudConcatTimeoutMs: integer('NEORECALL_CLOUD_CONCAT_TIMEOUT_MS', 10 * 60_000, { min: 10_000, max: 60 * 60_000 }),
     // VAD and diarization run locally; see docs/docs/configuration.md.
     diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
     // Native threads for the audio models.
@@ -256,10 +257,32 @@ function buildConfig() {
     transcriptRepetitionMaximumPatternWords: integer('NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS', 8, { min: 1, max: 32 }),
     transcriptRepetitionMinimumCoverage: number('NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE', 0.8, { min: 0.5, max: 1 }),
     transcriptMaximumWordsPerSecond: number('NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND', 5, { min: 1, max: 50 }),
-    conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
-    conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
-    conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),
-    conversationQuietCloseMs: integer('NEORECALL_CONVERSATION_QUIET_CLOSE_MS', 300_000, { min: 1_000 }),
+    // The pause that separates two sittings. Time is allowed to decide nothing
+    // finer than this: below it a boundary needs evidence that the subject
+    // actually changed.
+    //
+    // At three minutes this was the wrong instrument for the job. Three minutes
+    // of quiet is a coffee, a phone call, a walk between rooms — ordinary inside
+    // one occasion — so an hour of continuous recording arrived as a handful of
+    // conversations minutes apart, each its own memory card, none of them cut
+    // where the subject had moved on. Ten minutes is long enough that a pause
+    // that reaches it really was the end of the sitting, and it stays under the
+    // occasion gap, so two fragments either side of it are still consolidated
+    // into one memory.
+    conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 600_000, { min: 1_000 }),
+    // A pause that only splits when the speech after it is also about something
+    // else. Neither half is a boundary on its own.
+    conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 300_000, { min: 1_000 }),
+    // Below this, a conversation is folded back into the neighbour it resembles
+    // most rather than surviving as its own card. It is the deliberate bias
+    // towards under-splitting: several subjects in one memory read far better
+    // than one subject scattered over several.
+    conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 300_000, { min: 1_000 }),
+    // How long a conversation stays open with nothing added to it. It must not
+    // be shorter than the hard gap: a conversation that closes while a pause is
+    // still short enough to continue it forces the next word into a new
+    // conversation, which is the very split the hard gap says not to make.
+    conversationQuietCloseMs: integer('NEORECALL_CONVERSATION_QUIET_CLOSE_MS', 600_000, { min: 1_000 }),
     conversationValleyQuantile: number('NEORECALL_CONVERSATION_VALLEY_QUANTILE', 0.25, { min: 0, max: 1 }),
     conversationSemanticSimilarityThreshold: number('NEORECALL_CONVERSATION_SEMANTIC_SIMILARITY_THRESHOLD', 0.58, { min: -1, max: 1 }),
     conversationSemanticValleyProminence: number('NEORECALL_CONVERSATION_SEMANTIC_VALLEY_PROMINENCE', 0.1, { min: 0, max: 2 }),
@@ -438,9 +461,12 @@ function buildConfig() {
     // for, so nothing waits once the recording has stopped — a stopped recording
     // is proof the occasion is over. While it is still running there is no such
     // proof, and writing up the first fragment immediately is what produced three
-    // cards for one meeting. Sized above the hard gap so an ordinary pause cannot
-    // beat it.
-    memorySettleMs: integer('NEORECALL_MEMORY_SETTLE_MS', 8 * 60_000, { min: 0 }),
+    // cards for one meeting. Sized at the hard gap, so a pause short enough to
+    // continue the conversation can never beat it to the write-up. It also sets
+    // the window `receivingAudio` reads: no chunk uploaded in this long is what
+    // "the recording stopped" means, so raising it delays the last memory of a
+    // finished recording by the same amount.
+    memorySettleMs: integer('NEORECALL_MEMORY_SETTLE_MS', 10 * 60_000, { min: 0 }),
     // The longest a fragment may be held back waiting for its occasion to end.
     //
     // An always-on recording never stops, and a chain that keeps growing would

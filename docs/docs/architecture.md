@@ -166,20 +166,35 @@ after transcript persistence: a failed provider request cannot produce a
 terminal receipt, and a client must retain its local audio until that receipt
 also proves server-side unlink.
 
-Provisional boundary detection is time-driven: hard and soft silence gaps split a
-stream into conversations, and configurable duration and character ceilings
-prevent an uninterrupted 24/7 stream from creating an unbounded model input.
-Short fragments join their semantically closest neighbor.
+Provisional boundary detection is evidence-driven. Time alone separates two
+*sittings* and nothing finer — that is the hard gap — and configurable duration
+and character ceilings prevent an uninterrupted 24/7 stream from creating an
+unbounded model input. Every boundary below the hard gap needs evidence that the
+subject changed: a soft gap cuts only where the speech after the pause is also
+about something else, and an embedding valley cuts only where a full context
+window exists on both sides of it, so one aside inside a meeting cannot start a
+conversation of its own.
 
-An embedding-valley path exists alongside the gaps but is conservative by
-design, and on real continuous speech it effectively never fires: measured over
-three hours of a real meeting, no adjacent-segment similarity came within 0.2 of
-the shipping threshold, and the deepest valleys sat mid-sentence — the signal
-tracks VAD fragmentation, not topic shifts. Do not tune the threshold up to
-"activate" it; that splits sentences, not topics. Topic-level splitting is the
-refinement model's job: consolidation may split or merge provisional
-conversations with full transcript context, which is where within-stream topic
-boundaries actually come from.
+Absent evidence never cuts. A segment whose embedding has not been written yet
+produces no opinion rather than a boundary, so detection groups a recording the
+same way whether or not the search index has caught up with the transcript —
+which matters because transcription outranks indexing, and a run that lacks
+evidence simply leaves the conversation whole and open for the next run to judge
+again. Erring towards one conversation is deliberate: over-splitting is
+irreversible, since a closed group is never reconsidered and each fragment
+becomes its own memory card, while under-splitting is corrected downstream.
+
+Short fragments join their semantically closest neighbour, but only across a
+boundary that evidence set. A fragment is never folded across the hard gap or a
+ceiling, because those say something about the recording rather than about what
+was said, and dissolving them would put two unrelated sittings in one
+conversation.
+
+Topic-level splitting remains the refinement model's job: consolidation may split
+or merge provisional conversations with full transcript context, which is where
+fine within-stream topic boundaries actually come from. Detection's earlier
+three-minute hard gap tried to do that work with a clock and cut one meeting at
+every coffee break; the gaps are now sized as occasion boundaries instead.
 
 ## Conversation lifecycle
 

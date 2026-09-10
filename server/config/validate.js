@@ -13,6 +13,13 @@ function validateConfig(config, { promptReserveTokens }) {
   if (config.conversationMinimumMs >= config.conversationHardGapMs) {
     throw new Error('NEORECALL_CONVERSATION_MINIMUM_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
   }
+  // Closing is what makes a boundary permanent: a closed conversation is never
+  // reconsidered, so speech arriving after it starts a new one. Closing sooner
+  // than the hard gap therefore splits a recording at a pause the hard gap has
+  // just declared too short to split on.
+  if (config.conversationQuietCloseMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_CONVERSATION_QUIET_CLOSE_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
   if (config.conversationMaximumMs <= config.conversationMinimumMs) {
     throw new Error('NEORECALL_CONVERSATION_MAXIMUM_MS must be longer than NEORECALL_CONVERSATION_MINIMUM_MS.');
   }

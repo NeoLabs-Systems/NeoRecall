@@ -1664,7 +1664,7 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get cloudAudioDescription =>
-      'After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.';
+      'When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.';
 
   @override
   String get cloudDataTitle => 'Back up this account';
@@ -2573,6 +2573,14 @@ class AppL10nEn extends AppL10n {
   @override
   String get controllerImportQueued =>
       'Import uploaded. Local transcription has been queued.';
+
+  @override
+  String get controllerWearableScanEmpty =>
+      'No supported device found. Check that the wearable is switched on, close by, and not already connected to another app or phone.';
+
+  @override
+  String get controllerWearableScanChooserEmpty =>
+      'No device was selected in the browser chooser.';
 
   @override
   String get controllerNoteEmpty => 'Write a note before saving it.';

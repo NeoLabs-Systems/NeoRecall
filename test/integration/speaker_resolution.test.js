@@ -326,3 +326,107 @@ test('a still-recording conversation is never swept', () => {
   // definition. Closing is what makes the whole conversation available.
   assert.equal(speakers.sweepUnresolvedConversations(user.userId), 0);
 });
+
+// --- A conversation nobody can be resolved in -----------------------------------
+//
+// Not every conversation has an answer. Speech far too short to found a person
+// enrolls nobody, and the pass deliberately declines to guess — so its turns stay
+// attached to nobody however often it runs. Read as "never looked at", that is
+// indistinguishable from a conversation the pass has not reached, and the sweep
+// re-queued it on every maintenance tick forever: the job completed, changed
+// nothing, and left the condition that selected it standing.
+
+// Speech shorter than the enrollment floor, which is what makes this
+// conversation unresolvable rather than merely unresolved.
+function seedUnresolvableConversation(user, session) {
+  const conversationId = seedConversation(user.userId);
+  seedVoice({ ...user, ...session }, conversationId, {
+    ordinal: 1, embedding: new Float32Array([1, 0, 0]), startMs: 0, endMs: Math.floor(limits().voiceEnrollMinimumMs / 10),
+  });
+  return conversationId;
+}
+
+// One maintenance tick: the sweep queues, the worker runs what it queued.
+async function maintenanceTick(user) {
+  const db = getDatabase();
+  const queued = speakers.sweepUnresolvedConversations(user.userId);
+  for (const resourceId of pendingJobs(user.userId)) {
+    await handler.handle({ user_id: user.userId, resource_id: resourceId, type: 'resolve_speakers' });
+  }
+  db.prepare("UPDATE jobs SET status='completed' WHERE user_id=? AND type='resolve_speakers'").run(user.userId);
+  return queued;
+}
+
+test('a conversation nobody can be resolved in is queued once, not every tick', async () => {
+  const db = getDatabase();
+  const user = seedUser();
+  const session = seedSession(user);
+  const conversationId = seedUnresolvableConversation(user, session);
+
+  assert.equal(await maintenanceTick(user), 1, 'the first tick has a question to ask');
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM speaker_turns WHERE user_id=? AND voiceprint_id IS NULL').get(user.userId).count, 1,
+    'and the pass genuinely could not attach that speech to anyone');
+  assert.equal(await maintenanceTick(user), 0,
+    'the second tick asks nothing: the answer is settled, even though it is "nobody"');
+  assert.equal(await maintenanceTick(user), 0, 'and it stays settled');
+  assert.equal(db.prepare(`SELECT outcome FROM conversation_speaker_resolutions WHERE conversation_id=?`).get(conversationId).outcome,
+    'resolved');
+});
+
+test('a speaker enrolled later reopens the question', async () => {
+  const db = getDatabase();
+  const user = seedUser();
+  const session = seedSession(user);
+  seedUnresolvableConversation(user, session);
+  assert.equal(await maintenanceTick(user), 1);
+  assert.equal(await maintenanceTick(user), 0);
+
+  // A second conversation with enough speech enrolls the person. The first
+  // conversation now has somebody to be matched against, which it did not before.
+  const other = seedSession(user, { startedAt: START });
+  const secondId = seedConversation(user.userId);
+  seedVoice({ ...user, ...other }, secondId, {
+    ordinal: 1, embedding: new Float32Array([1, 0, 0]), startMs: 0, endMs: limits().voiceEnrollMinimumMs * 2,
+  });
+  await maintenanceTick(user);
+  assert.ok(voiceprintCount(user.userId) > 0, 'somebody is enrolled now');
+
+  assert.equal(await maintenanceTick(user), 1,
+    'the settled answer no longer applies, so the conversation is looked at again');
+  assert.equal(await maintenanceTick(user), 0, 'and settles again once it has been');
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM speaker_turns WHERE user_id=? AND voiceprint_id IS NULL').get(user.userId).count, 0,
+    'the second look is what finally attaches the short speech to the person');
+});
+
+test('a changed threshold reopens the question', async () => {
+  const user = seedUser();
+  const session = seedSession(user);
+  seedUnresolvableConversation(user, session);
+  assert.equal(await maintenanceTick(user), 1);
+  assert.equal(await maintenanceTick(user), 0);
+
+  const processing = require('../../server/services/settings/processing_settings_service');
+  const original = limits().voiceEnrollMinimumMs;
+  try {
+    processing.update({ voiceEnrollMinimumMs: Math.floor(original / 20) });
+    assert.equal(await maintenanceTick(user), 1,
+      'the bar that refused this speech has moved, so the refusal no longer stands');
+  } finally {
+    processing.update({ voiceEnrollMinimumMs: original });
+  }
+});
+
+test('more speech in a conversation reopens the question', async () => {
+  const user = seedUser();
+  const session = seedSession(user);
+  const conversationId = seedUnresolvableConversation(user, session);
+  assert.equal(await maintenanceTick(user), 1);
+  assert.equal(await maintenanceTick(user), 0);
+
+  // A late chunk lands in a conversation already settled — the answer was given
+  // about evidence that has since grown.
+  seedVoice({ ...user, ...session }, conversationId, {
+    ordinal: 2, embedding: at(0.98), startMs: 30_000, endMs: 30_000 + limits().voiceEnrollMinimumMs * 2,
+  });
+  assert.equal(await maintenanceTick(user), 1);
+});

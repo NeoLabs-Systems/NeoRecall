@@ -1,14 +1,25 @@
 'use strict';
 
-// Provisional conversation boundaries. The reliable signals are time gaps and
-// the safety ceilings; the embedding-valley path below is deliberately
-// conservative and, measured on hours of real continuous speech, effectively
-// never fires (no adjacent similarity within 0.2 of the shipping threshold).
-// That is by intent, not neglect: its deepest valleys sit mid-sentence, because
-// segment embeddings track VAD fragmentation more than topic. Raising the
-// threshold to make it fire splits sentences, not topics — topic-level
-// splitting belongs to the consolidation model, which sees full transcript
-// context and may split or merge provisional conversations.
+// Provisional conversation boundaries.
+//
+// A pause is not a topic change. Time on its own may therefore separate two
+// *sittings* and nothing finer: that is the hard gap, sized so anything shorter
+// is still one occasion. Every boundary below it needs semantic evidence that
+// the subject actually moved on, and a shift has to persist — a single aside
+// inside a meeting is not a new conversation.
+//
+// Evidence that is missing is not evidence of a change. An absent embedding
+// never cuts, so detection groups a recording the same way whether or not the
+// embedding job has caught up with the transcript; a run that lacks evidence
+// leaves the conversation whole and open, and the next run decides again with
+// the evidence it has by then. Splitting on absent evidence is what made the
+// same recording group differently depending on queue timing.
+//
+// Erring towards one conversation is deliberate. Over-splitting is the
+// irreversible mistake here — a closed group is never reconsidered, and each
+// fragment becomes its own memory card — while under-splitting is corrected
+// downstream by the consolidation model, which reads the full transcript and
+// may still split or merge what this produced.
 
 const crypto = require('node:crypto');
 
@@ -47,12 +58,49 @@ function surroundingBaseline(similarities, index, radius) {
   return nearby[Math.floor(nearby.length / 2)];
 }
 
+// Which boundaries a group shorter than the minimum duration may be folded back
+// across. Only the two evidence-bearing ones: they are a judgement about what
+// was said, and the bias here is towards one conversation carrying several
+// subjects. The other two are statements about the recording itself — a ceiling
+// that must hold, and a pause long enough to be a separate sitting — and
+// dissolving those would put two unrelated recordings in one conversation.
+const MERGEABLE_BOUNDARIES = new Set([null, 'soft-gap', 'semantic']);
+
 function groupDuration(group) {
   return Date.parse(group.blocks.at(-1).endedAt) - Date.parse(group.blocks[0].startedAt);
 }
 
 function groupCharacters(group) {
   return group.blocks.reduce((sum, block) => sum + (block.characterCount || 0), 0);
+}
+
+// Why the block at a candidate position begins a new conversation, or null when
+// it continues the current one. Pure, so the rules can be read and tested on
+// their own rather than inferred from the loop that applies them.
+//
+// Order is the policy: a ceiling that must not be exceeded, then the gap that
+// separates two sittings, and only then the two evidence-bearing rules. A gap
+// shorter than the hard gap never decides anything by itself.
+function boundaryReason({
+  gapMs, similarity, prominence, fullContext, projectedDurationMs, projectedCharacters,
+}, options) {
+  if (projectedDurationMs > options.maximumDurationMs || projectedCharacters > options.maximumCharacters) return 'safety';
+  if (gapMs >= options.hardGapMs) return 'hard-gap';
+  // No embedding, no opinion. The conversation stays whole and this position is
+  // judged again on the next run, once the embedding job has caught up.
+  if (!Number.isFinite(similarity)) return null;
+  // A long pause the subject did not survive. Both halves are required: the
+  // pause alone is a break in a meeting, the dissimilarity alone is ordinary
+  // between two consecutive utterances.
+  if (gapMs >= options.softGapMs && similarity <= options.semanticSimilarityThreshold) return 'soft-gap';
+  // A valley in the running similarity, and only where a full context window
+  // exists on both sides. Without that, one aside — or the newest utterance of
+  // a recording that is still going — would cut a conversation that the speech
+  // after it shows was never interrupted.
+  if (fullContext && Number.isFinite(prominence)
+    && similarity <= options.valleyThreshold
+    && prominence >= options.semanticValleyProminence) return 'semantic';
+  return null;
 }
 
 function detectBoundaries(blocks, options = {}) {
@@ -65,7 +113,6 @@ function detectBoundaries(blocks, options = {}) {
   if (required.some((key) => !Number.isFinite(options[key]))) {
     throw new Error('Boundary thresholds must be supplied by validated configuration.');
   }
-  const hardGapMs = options.hardGapMs;
   const minimumDurationMs = options.minimumDurationMs;
   const contextSegments = options.semanticContextSegments;
   const similarities = blocks.slice(1).map((_, index) => contextualSimilarity(blocks, index + 1, contextSegments));
@@ -85,28 +132,21 @@ function detectBoundaries(blocks, options = {}) {
     const similarity = similarities[index - 1];
     const baseline = surroundingBaseline(similarities, index - 1, contextSegments);
     const prominence = baseline === null ? null : baseline - similarity;
-    const strongSemanticShift = Number.isFinite(similarity)
-      && similarity <= valleyThreshold
-      && (
-        prominence === null
-          ? similarity <= valleyThreshold - options.semanticValleyProminence
-          : prominence >= options.semanticValleyProminence
-      );
-    const softGapShift = gapMs >= options.softGapMs
-      && (!Number.isFinite(similarity) || similarity <= options.semanticSimilarityThreshold);
-    const projectedDuration = Date.parse(block.endedAt) - Date.parse(current.blocks[0].startedAt);
     const projectedCharacters = currentCharacters + (block.characterCount || 0);
-    const safetyBoundary = projectedDuration > options.maximumDurationMs
-      || projectedCharacters > options.maximumCharacters;
-    if (gapMs >= hardGapMs || softGapShift || strongSemanticShift || safetyBoundary) {
+    const reason = boundaryReason({
+      gapMs,
+      similarity,
+      prominence,
+      fullContext: index - contextSegments >= 0 && index + contextSegments <= blocks.length,
+      projectedDurationMs: Date.parse(block.endedAt) - Date.parse(current.blocks[0].startedAt),
+      projectedCharacters,
+    }, { ...options, valleyThreshold });
+    if (reason) {
       conversations.push(current);
-      const boundaryReason = safetyBoundary ? 'safety'
-        : gapMs >= hardGapMs ? 'hard-gap'
-          : softGapShift ? 'soft-gap' : 'semantic';
       current = {
         blocks: [block],
         boundaryScore: Number.isFinite(similarity) ? similarity : null,
-        boundaryReason,
+        boundaryReason: reason,
       };
       currentCharacters = block.characterCount || 0;
     } else {
@@ -129,8 +169,8 @@ function detectBoundaries(blocks, options = {}) {
       return groupDuration(combined) <= options.maximumDurationMs
         && groupCharacters(combined) <= options.maximumCharacters;
     };
-    const canMergeLeft = canMerge(left) && group.boundaryReason !== 'safety';
-    const canMergeRight = canMerge(right, true) && right?.boundaryReason !== 'safety';
+    const canMergeLeft = canMerge(left) && MERGEABLE_BOUNDARIES.has(group.boundaryReason);
+    const canMergeRight = canMerge(right, true) && MERGEABLE_BOUNDARIES.has(right?.boundaryReason);
     if (!canMergeLeft && canMergeRight) {
       right.blocks.unshift(...group.blocks);
       right.boundaryScore = group.boundaryScore;
@@ -164,4 +204,4 @@ function detectBoundaries(blocks, options = {}) {
   }));
 }
 
-module.exports = { cosine, averageEmbeddings, contextualSimilarity, detectBoundaries };
+module.exports = { cosine, averageEmbeddings, contextualSimilarity, boundaryReason, detectBoundaries };

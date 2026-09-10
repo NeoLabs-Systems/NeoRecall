@@ -360,10 +360,7 @@ class _DeviceSheet extends StatelessWidget {
               FilledButton.icon(
                 onPressed: controller.scanningWearables
                     ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        unawaited(actions.onScan());
-                      },
+                    : () => unawaited(actions.onScan()),
                 icon: controller.scanningWearables
                     ? const ButtonSpinner()
                     : const Icon(Icons.bluetooth_searching_rounded, size: 18),
@@ -372,6 +369,10 @@ class _DeviceSheet extends StatelessWidget {
                       ? AppL10n.of(context).deviceScanning
                       : AppL10n.of(context).deviceScanForWearables,
                 ),
+              ),
+              _WearableDiscoveries(
+                controller: controller,
+                onConnect: actions.onConnectDevice,
               ),
               const SizedBox(height: AppSpacing.xs),
               HairlineRow(
@@ -538,14 +539,19 @@ class _DeviceSheet extends StatelessWidget {
                 size: 18,
                 color: palette.textMuted,
               ),
-              title: AppL10n.of(context).deviceScanAnother,
-              trailing: const RowChevron(),
+              title: controller.scanningWearables
+                  ? AppL10n.of(context).deviceScanning
+                  : AppL10n.of(context).deviceScanAnother,
+              trailing: controller.scanningWearables
+                  ? const ButtonSpinner()
+                  : const RowChevron(),
               onTap: controller.scanningWearables
                   ? null
-                  : () {
-                      Navigator.of(context).pop();
-                      unawaited(actions.onScan());
-                    },
+                  : () => unawaited(actions.onScan()),
+            ),
+            _WearableDiscoveries(
+              controller: controller,
+              onConnect: actions.onConnectDevice,
             ),
             HairlineRow(
               minHeight: 48,
@@ -796,18 +802,22 @@ class _SourceSheetState extends State<_SourceSheet> {
                   : AppL10n.of(context).deviceRemembered,
               selected: _selected == CaptureSource.wearable,
               enabled: deviceLabel != null,
-              trailingAction: deviceLabel == null
-                  ? (
-                      label: AppL10n.of(context).sourceScan,
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        unawaited(actions.onScan());
-                      },
-                    )
-                  : null,
+              trailingAction: (
+                label: controller.scanningWearables
+                    ? AppL10n.of(context).deviceScanning
+                    : AppL10n.of(context).sourceScan,
+                onTap: controller.scanningWearables || locked
+                    ? null
+                    : () => unawaited(actions.onScan()),
+              ),
               onTap: locked || deviceLabel == null
                   ? null
                   : () => _select(CaptureSource.wearable),
+            ),
+            _WearableDiscoveries(
+              controller: controller,
+              onConnect: actions.onConnectDevice,
+              locked: locked,
             ),
             const SizedBox(height: 8),
 
@@ -847,31 +857,6 @@ class _SourceSheetState extends State<_SourceSheet> {
                         },
                 ),
               ],
-
-            // Discovered wearables only appear while a scan has actually found
-            // something; an empty list is not a section.
-            if (controller.discoveredWearables.isNotEmpty) ...<Widget>[
-              const SizedBox(height: AppSpacing.md + 2),
-              SectionLabel(label: AppL10n.of(context).sourceFoundNearby),
-              for (final device in controller.discoveredWearables)
-                HairlineRow(
-                  minHeight: 52,
-                  title: device.displayName,
-                  subtitle: AppL10n.of(context).sourceReadyForAudio(
-                    '${device.metadata['type'] ?? AppL10n.of(context).sourceWearableFallback}',
-                  ),
-                  trailing: TextButton(
-                    onPressed: locked
-                        ? null
-                        : () => unawaited(actions.onConnectDevice(device)),
-                    child: Text(
-                      controller.preferredDeviceLabel == device.displayName
-                          ? AppL10n.of(context).sourceReconnect
-                          : AppL10n.of(context).sourceConnect,
-                    ),
-                  ),
-                ),
-            ],
 
             const SizedBox(height: AppSpacing.md),
             Container(height: 1, color: palette.border),
@@ -919,6 +904,61 @@ class _SourceSheetState extends State<_SourceSheet> {
   }
 }
 
+/// Devices found by a scan that is still on this sheet.
+///
+/// Scan used to pop the sheet first, so the list that results belong on was
+/// already gone. Both the source sheet and the device sheet keep the scan in
+/// place and render through this, including the empty-scan explanation.
+class _WearableDiscoveries extends StatelessWidget {
+  const _WearableDiscoveries({
+    required this.controller,
+    required this.onConnect,
+    this.locked = false,
+  });
+
+  final NeoRecallController controller;
+  final Future<void> Function(AudioDeviceDescriptor device) onConnect;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    final found = controller.discoveredWearables;
+    final notice = controller.wearableScanNotice;
+    if (found.isEmpty && notice == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (found.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpacing.md + 2),
+          SectionLabel(label: AppL10n.of(context).sourceFoundNearby),
+          for (final device in found)
+            HairlineRow(
+              minHeight: 52,
+              title: device.displayName,
+              subtitle: AppL10n.of(context).sourceReadyForAudio(
+                '${device.metadata['type'] ?? AppL10n.of(context).sourceWearableFallback}',
+              ),
+              trailing: TextButton(
+                onPressed: locked ? null : () => unawaited(onConnect(device)),
+                child: Text(
+                  controller.preferredDeviceLabel == device.displayName
+                      ? AppL10n.of(context).sourceReconnect
+                      : AppL10n.of(context).sourceConnect,
+                ),
+              ),
+            ),
+        ],
+        if (found.isEmpty && notice != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.md),
+          InlineMessage(message: notice),
+        ],
+      ],
+    );
+  }
+}
+
 /// One radio row in the source sheet. An unavailable source stays visible and
 /// dimmed with the action that would enable it, rather than disappearing.
 class _SourceOptionTile extends StatelessWidget {
@@ -938,11 +978,16 @@ class _SourceOptionTile extends StatelessWidget {
   final bool selected;
   final VoidCallback? onTap;
   final bool enabled;
-  final ({String label, VoidCallback onTap})? trailingAction;
+  final ({String label, VoidCallback? onTap})? trailingAction;
 
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final action = trailingAction;
+    // A source that can be chosen keeps its radio even when it also carries an
+    // action (Scan on a paired wearable). An unavailable source shows only the
+    // action that would make it available.
+    final showSelector = action == null || onTap != null;
     return Opacity(
       opacity: enabled ? 1 : 0.55,
       child: Material(
@@ -994,12 +1039,13 @@ class _SourceOptionTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                if (trailingAction != null)
+                if (action != null)
                   TextButton(
-                    onPressed: trailingAction!.onTap,
-                    child: Text(trailingAction!.label),
-                  )
-                else
+                    onPressed: action.onTap,
+                    child: Text(action.label),
+                  ),
+                if (action != null && showSelector) const SizedBox(width: 4),
+                if (showSelector)
                   Icon(
                     selected
                         ? Icons.radio_button_checked_rounded

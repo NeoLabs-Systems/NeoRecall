@@ -54,8 +54,10 @@ Each account can connect its own self-hosted Nextcloud instance under
 **Settings → Integrations**. After signing in on that instance, the owner can
 opt in to two write-only copies:
 
-- **recordings** — after a chunk is transcribed, NeoRecall copies the temporary
-  file to Nextcloud and then deletes it on this host as usual;
+- **recordings** — while a recording is still open, transcribed chunks are
+  copied aside locally. When that recording ends, NeoRecall joins them into
+  one audio file, PUTs that file to Nextcloud, and deletes the local copies
+  as usual;
 - **this account's data** — a periodic (and manual) zip of that user's
   transcripts, memories, summaries, settings, speaker names and device
   metadata. It is not a snapshot of the server and it does not include other

@@ -882,7 +882,7 @@
   "cloudWaiting": "Finish signing in in the browser. This screen updates when Nextcloud issues an app password.",
   "cloudOpenLogin": "Open login page",
   "cloudAudioTitle": "Copy recordings",
-  "cloudAudioDescription": "After a chunk is transcribed, upload a copy to Nextcloud. NeoRecall still deletes its own file.",
+  "cloudAudioDescription": "When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.",
   "cloudDataTitle": "Back up this account",
   "cloudDataDescription": "Periodically upload transcripts, memories, summaries and settings for this account only.",
   "cloudBackupNow": "Back up now",
@@ -1487,6 +1487,8 @@
   "controllerMomentLoadFailed": "The rest of this moment could not be loaded just now.",
   "controllerRewriteQueued": "Writing this moment up again. It will update here when ready.",
   "controllerImportQueued": "Import uploaded. Local transcription has been queued.",
+  "controllerWearableScanEmpty": "No supported device found. Check that the wearable is switched on, close by, and not already connected to another app or phone.",
+  "controllerWearableScanChooserEmpty": "No device was selected in the browser chooser.",
   "controllerNoteEmpty": "Write a note before saving it.",
   "controllerNoteTooLong": "Notes may contain at most {maximum} characters.",
   "@controllerNoteTooLong": {

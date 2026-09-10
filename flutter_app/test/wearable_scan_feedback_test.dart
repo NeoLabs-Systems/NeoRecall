@@ -40,6 +40,7 @@ void main() {
       expect(controller.scanningWearables, isFalse);
       expect(controller.notice, isNotNull);
       expect(controller.notice, contains('No supported device found'));
+      expect(controller.wearableScanNotice, controller.notice);
     },
   );
 

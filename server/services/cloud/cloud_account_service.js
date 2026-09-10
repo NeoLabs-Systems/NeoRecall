@@ -61,6 +61,12 @@ function pendingCounts(userId) {
   return row?.count || 0;
 }
 
+function assemblingCount(userId) {
+  const row = getDatabase().prepare(`SELECT COUNT(*) AS count FROM cloud_recording_assemblies
+    WHERE user_id=? AND state='assembling'`).get(userId);
+  return row?.count || 0;
+}
+
 function publicAccount(userId) {
   const account = get(userId);
   if (!account) {
@@ -85,7 +91,7 @@ function publicAccount(userId) {
     lastError: account.lastError,
     lastAudioUploadAt: account.lastAudioUploadAt,
     lastDataBackupAt: account.lastDataBackupAt,
-    pendingCount: pendingCounts(userId),
+    pendingCount: pendingCounts(userId) + assemblingCount(userId),
   };
 }
 
@@ -133,11 +139,9 @@ function recordError(userId, message) {
 }
 
 function disconnect(userId) {
-  const db = getDatabase();
-  const items = db.prepare('SELECT local_path FROM cloud_archive_items WHERE user_id=? AND local_path IS NOT NULL').all(userId);
-  const unlink = require('../ingest/temp_audio_service').unlinkStrict;
-  for (const item of items) unlink(item.local_path);
-  db.prepare('DELETE FROM cloud_accounts WHERE user_id=?').run(userId);
+  const archive = require('./archive_service');
+  archive.discardPending(userId);
+  getDatabase().prepare('DELETE FROM cloud_accounts WHERE user_id=?').run(userId);
 }
 
 function listDueDataBackups(intervalMs, now = Date.now()) {
