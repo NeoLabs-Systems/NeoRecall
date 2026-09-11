@@ -170,6 +170,7 @@ function create(userId, target, id, input, file) {
     if (file) {
       storedPath = destination(id, file.originalname);
       fs.renameSync(file.path, storedPath);
+      require('../../utils/sealed_fs').sealInPlace(storedPath);
     }
     const analysisState = file ? 'pending' : 'ready';
     db.prepare(`INSERT INTO recording_context_items

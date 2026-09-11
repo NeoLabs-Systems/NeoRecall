@@ -4,6 +4,7 @@ const { getDatabase } = require('../../db/database');
 const aiProviders = require('../../ai/provider_registry');
 const transcriptionProviders = require('../../transcription/provider_registry');
 const consolidation = require('../memories/consolidation_service');
+const usageLimits = require('../usage/usage_limit_service');
 
 // Answers "I recorded all day — where did it go?" for the person who did the
 // recording, not the operator: no HTTP statuses, no setting names, no
@@ -86,7 +87,33 @@ function memoryIssues(eligibility, data) {
   return issues;
 }
 
-function issuesFor(data, eligibility, providers, alive) {
+function usageIssues(userId, data, eligibility) {
+  const snapshot = usageLimits.getUsageSnapshot(userId);
+  const issues = [];
+  if (snapshot.transcription.reached.any && data.inFlight) {
+    issues.push({
+      severity: 'attention',
+      code: 'USAGE_LIMIT_TRANSCRIPTION',
+      title: 'Turning recordings into text is paused for a while',
+      detail: 'Your audio is still on this device and on the server. Nothing is being deleted. Speech will be written up again once more of your allowance is free.',
+      action: 'Keep recording. The originals stay available, and processing resumes on its own.',
+      retryAt: usageLimits.retryAtForMeter(snapshot.transcription),
+    });
+  }
+  if (snapshot.ai.reached.any || eligibility.reason === 'usage_limit') {
+    issues.push({
+      severity: 'attention',
+      code: 'USAGE_LIMIT_AI',
+      title: 'Writing up and answering questions is paused for a while',
+      detail: 'Your recordings and transcripts are still saved. Asking questions and turning them into memories will continue once more of your allowance is free.',
+      action: 'Nothing is lost. Try again later, or keep recording in the meantime.',
+      retryAt: usageLimits.retryAtForMeter(snapshot.ai),
+    });
+  }
+  return issues;
+}
+
+function issuesFor(data, eligibility, providers, alive, userId = null) {
   const issues = [];
 
   if (!providers.transcription) {
@@ -137,6 +164,7 @@ function issuesFor(data, eligibility, providers, alive) {
   }
 
   issues.push(...memoryIssues(eligibility, data));
+  if (userId) issues.push(...usageIssues(userId, data, eligibility));
   return issues;
 }
 
@@ -167,7 +195,7 @@ async function forUser(userId) {
     languageModel: aiProviders.ready(),
   };
   const alive = workerAlive();
-  const issues = issuesFor(data, eligibility, providers, alive);
+  const issues = issuesFor(data, eligibility, providers, alive, userId);
   return {
     summary: summarize(data, issues),
     healthy: issues.length === 0,

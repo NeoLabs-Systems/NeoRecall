@@ -42,6 +42,12 @@ class SettingsNavigation extends StatelessWidget {
       description: (l10n) => l10n.settingsNavSecurityDescription,
     ),
     _SettingsNavigationItem(
+      section: SettingsSection.usage,
+      icon: Icons.data_usage_outlined,
+      label: (l10n) => l10n.settingsNavUsage,
+      description: (l10n) => l10n.settingsNavUsageDescription,
+    ),
+    _SettingsNavigationItem(
       section: SettingsSection.recording,
       icon: Icons.graphic_eq_outlined,
       label: (l10n) => l10n.settingsNavRecording,

@@ -400,6 +400,57 @@ class AppL10nEn extends AppL10n {
   String get settingsNavSecurityDescription => 'Passwords and 2FA';
 
   @override
+  String get settingsNavUsage => 'Usage';
+
+  @override
+  String get settingsNavUsageDescription => 'AI and transcription limits';
+
+  @override
+  String get usageSectionEyebrow => 'Usage & limits';
+
+  @override
+  String get usageSectionTitle => 'How much this account has used';
+
+  @override
+  String get usageSectionDescription =>
+      'These are rolling 4-hour and 7-day allowances. Usage drops on its own as older work ages out. Recording keeps going if a limit is reached; the original audio stays available until it can be written up.';
+
+  @override
+  String get usageAiTitle => 'Language-model use';
+
+  @override
+  String get usageTranscriptionTitle => 'Transcription';
+
+  @override
+  String get usageWindowFourHour => 'Last 4 hours';
+
+  @override
+  String get usageWindowWeekly => 'Last 7 days';
+
+  @override
+  String get usageUnlimited => 'Unlimited';
+
+  @override
+  String get usageCustomBadge => 'Custom';
+
+  @override
+  String usageUsedOfLimit(String used, String limit) {
+    return '$used of $limit';
+  }
+
+  @override
+  String usageNextDrop(String when) {
+    return 'Next drop $when';
+  }
+
+  @override
+  String get usageUnavailable => 'Usage could not be loaded just now.';
+
+  @override
+  String get usageAskLimited =>
+      'You have reached the language-model allowance for now. Try again later.';
+
+  @override
   String get settingsNavRecording => 'Recording';
 
   @override
@@ -1438,6 +1489,24 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get securityYourUsername => 'your username';
+
+  @override
+  String get securityExportEyebrow => 'YOUR DATA';
+
+  @override
+  String get securityExportTitle => 'Download a copy of your data';
+
+  @override
+  String get securityExportDescription =>
+      'A zip of this account: transcripts, conversations, memories, summaries, notes, named speakers and settings. It does not include audio, voiceprints, other people, or server secrets.';
+
+  @override
+  String get securityExportAction => 'Download my data';
+
+  @override
+  String securityExportSaved(String name) {
+    return 'Saved $name';
+  }
 
   @override
   String get securityEraseTitle => 'Erase everything you have recorded';

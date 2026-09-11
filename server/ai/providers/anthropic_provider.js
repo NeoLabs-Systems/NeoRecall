@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
+const usageLimits = require('../../services/usage/usage_limit_service');
 
 function ready() {
   const settings = providerSettings.getRuntime().llm;
@@ -51,6 +52,7 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
   if (!settings.baseUrl || !settings.model || !settings.apiKey) {
     throw Object.assign(new Error('Anthropic requires a base URL, model, and API key.'), { code: 'AI_NOT_CONFIGURED' });
   }
+  const admission = userId ? usageLimits.enforce(userId, 'ai') : { releaseReservation: () => {} };
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const db = getDatabase();
@@ -100,6 +102,7 @@ async function chatJSON({ userId, purpose, messages, responseFormat = null, maxT
     throw error;
   } finally {
     clearTimeout(timer);
+    admission.releaseReservation();
   }
 }
 

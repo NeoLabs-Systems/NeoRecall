@@ -139,6 +139,10 @@ test('a user export contains only that user and no secrets', () => {
   const manifest = JSON.parse(zipEntry(packed, 'manifest.json').toString());
   assert.equal(data.account.username, 'alice-export');
   assert.equal(manifest.username, 'alice-export');
+  assert.ok(Array.isArray(data.entities));
+  assert.ok(Array.isArray(data.context));
+  assert.equal(manifest.counts.entities, 0);
+  assert.equal(manifest.counts.context, 0);
   const dumped = JSON.stringify(data);
   assert.ok(!dumped.includes('bob-export'));
   assert.ok(!dumped.includes('hidden-app-password'));
@@ -214,4 +218,40 @@ test('one recording becomes one Nextcloud file after the session ends', async ()
   assert.equal(methods.at(-1), 'PUT');
   const expectedPcm = (16000 * 2) + Math.floor(16000 * 2 * 0.8);
   assert.equal(items[0].bytes, 44 + expectedPcm);
+});
+
+test('Nextcloud receives a playable WAV, not a sealed local copy', async () => {
+  const userId = insertUser('cloud-plain');
+  accounts.upsertConnected(userId, { baseUrl: 'https://cloud.example.test', username: 'ada', appPassword: 'secret' });
+  accounts.update(userId, { audioEnabled: true });
+  const seeded = seedSession(userId);
+  const file = path.join(process.env.NEORECALL_HOME, 'plain-part.wav');
+  fs.writeFileSync(file, silentWav(1000));
+  const { chunk } = seedChunk(userId, file, { ...seeded, sequence: 0, durationMs: 1000 });
+  transcribe.finishCleanup(getDatabase().prepare('SELECT * FROM audio_chunks WHERE id=?').get(chunk), 0);
+  getDatabase().prepare("UPDATE recording_sessions SET status='ended' WHERE id=?").run(seeded.session);
+
+  const bodies = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (_url, opts) => {
+    if (opts.method === 'PUT' && opts.body) {
+      const reader = opts.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(Buffer.from(value));
+      }
+      bodies.push(Buffer.concat(chunks));
+    }
+    return { status: 201, text: async () => '' };
+  };
+  try {
+    await archive.drain(userId);
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].subarray(0, 4).toString('ascii'), 'RIFF');
+  assert.ok(!bodies[0].subarray(0, 4).equals(Buffer.from('NRF1')));
 });

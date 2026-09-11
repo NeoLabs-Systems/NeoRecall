@@ -177,6 +177,7 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
       if (existing.state !== 'reupload_required') return { ...receipts.receipt(existing), duplicate: true };
       const destination = tempAudio.chunkPath(existing.id, input.container);
       fs.renameSync(uploadedFile.path, destination);
+      require('../../utils/sealed_fs').sealInPlace(destination);
       try {
         db.transaction(() => {
           db.prepare(`UPDATE audio_chunks SET temporary_path=?,state='uploaded',error_code=NULL,error_message=NULL,
@@ -194,6 +195,7 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
     const id = crypto.randomUUID();
     const destination = tempAudio.chunkPath(id, input.container);
     fs.renameSync(uploadedFile.path, destination);
+    require('../../utils/sealed_fs').sealInPlace(destination);
     try {
       db.transaction(() => {
         db.prepare(`INSERT INTO audio_chunks

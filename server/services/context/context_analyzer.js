@@ -32,18 +32,20 @@ async function extract(row) {
   const type = normalizeType(row.content_type);
   if (IMAGE_TYPES.has(type)) return { mode: 'vision', extractedText: null };
   if (TEXT_TYPES.has(type)) {
-    return { mode: 'text', extractedText: bounded(await fs.promises.readFile(row.original_path, 'utf8')) };
+    return { mode: 'text', extractedText: bounded(require('../../utils/sealed_fs').readFileSync(row.original_path, 'utf8')) };
   }
   if (type === PDF) {
     const pdf = require('pdf-parse');
-    const result = await pdf(await fs.promises.readFile(row.original_path));
+    const result = await pdf(require('../../utils/sealed_fs').readFileSync(row.original_path));
     const text = bounded(result.text);
     if (!text) return { mode: 'skipped', code: 'NO_EXTRACTABLE_TEXT', message: 'This PDF has no extractable text.' };
     return { mode: 'text', extractedText: text };
   }
   if (type === DOCX) {
     const mammoth = require('mammoth');
-    const result = await mammoth.extractRawText({ path: path.resolve(row.original_path) });
+    const result = await require('../../utils/sealed_fs').withPlainAsync(row.original_path, async (plain) => (
+      mammoth.extractRawText({ path: path.resolve(plain) })
+    ));
     const text = bounded(result.value);
     if (!text) return { mode: 'skipped', code: 'NO_EXTRACTABLE_TEXT', message: 'This document has no extractable text.' };
     return { mode: 'text', extractedText: text };

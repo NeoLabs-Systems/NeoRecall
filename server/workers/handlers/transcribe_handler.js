@@ -278,7 +278,8 @@ async function handle(job, inference) {
   const vocabulary = settings.transcriptionVocabulary(chunk.user_id);
   let preprocess = null;
   const inferredSegments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
-    durationMs: chunk.duration_ms, vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled },
+    durationMs: chunk.duration_ms, vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled,
+    userId: chunk.user_id, chunkId: chunk.id },
   { onDiagnostics: (message) => { preprocess = message.preprocess; } });
   const quality = transcriptQuality.compactSegments(inferredSegments, processingSettings.get());
   const segments = quality.segments;

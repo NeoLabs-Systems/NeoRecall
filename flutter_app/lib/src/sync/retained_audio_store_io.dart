@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'ledger_seal.dart';
 import 'retained_audio_store.dart';
 
 RetainedAudioStore createRetainedAudioStore({String? rootPath}) =>
@@ -117,7 +118,10 @@ class IoRetainedAudioStore implements RetainedAudioStore {
       duration: duration,
     );
     final audio = _audioFile(accountId, id, mimeType, filename);
-    audio.writeAsBytesSync(bytes, flush: true);
+    audio.writeAsBytesSync(
+      await (await LedgerSeal.instance()).seal(bytes),
+      flush: true,
+    );
     _metaFile(accountId, id).writeAsStringSync(jsonEncode(clip.toJson()));
   }
 
@@ -179,7 +183,7 @@ class IoRetainedAudioStore implements RetainedAudioStore {
     if (!file.existsSync()) {
       throw StateError('This recording is no longer kept on this device.');
     }
-    return file.readAsBytes();
+    return (await LedgerSeal.instance()).unseal(await file.readAsBytes());
   }
 
   Future<void> _deleteClip(String accountId, RetainedAudioClip clip) async {

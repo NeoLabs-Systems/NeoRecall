@@ -10,6 +10,7 @@ const aiProviders = require('../../ai/provider_registry');
 const { inputBudgetCharacters } = require('../../ai/context_budget');
 const material = require('./conversation_material_service');
 const contextMaterial = require('../context/context_material_service');
+const usageLimits = require('../usage/usage_limit_service');
 
 // Live insight for a conversation consolidation will not describe.
 //
@@ -97,6 +98,7 @@ function hasContextSince(userId, conversation, since, database = getDatabase()) 
 }
 
 function due(userId, database = getDatabase()) {
+  if (usageLimits.getUsageSnapshot(userId).ai.reached.any) return [];
   const limits = thresholds();
   if (!limits.enabled) return [];
   const now = Date.now();
@@ -143,6 +145,7 @@ function request(userId, database = getDatabase()) {
 // that session so the title and summary can fold the new evidence in.
 function enqueueForSession(userId, sessionId, database = getDatabase()) {
   if (!sessionId) return [];
+  if (usageLimits.getUsageSnapshot(userId).ai.reached.any) return [];
   const queued = [];
   for (const conversation of material.listForSession(userId, sessionId, database)) {
     if (!previewOwns(conversation) || conversation.insight_state === FINAL) continue;

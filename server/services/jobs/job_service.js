@@ -78,6 +78,23 @@ function fail(id, workerId, error, retryable = true) {
   })();
 }
 
+function defer(id, workerId, nextAttemptAt) {
+  const db = getDatabase();
+  const when = nextAttemptAt && !Number.isNaN(Date.parse(nextAttemptAt))
+    ? new Date(nextAttemptAt).toISOString()
+    : new Date(Date.now() + 60_000).toISOString();
+  const now = new Date().toISOString();
+  return db.transaction(() => {
+    const job = db.prepare("SELECT * FROM jobs WHERE id=? AND status='leased' AND lease_owner=?").get(id, workerId);
+    if (!job) return false;
+    db.prepare(`UPDATE jobs SET status='queued',lease_owner=NULL,lease_expires_at=NULL,
+      attempts=MAX(0, attempts-1),next_attempt_at=?,last_error_code='USAGE_LIMIT_EXCEEDED',
+      last_error_message=?,completed_at=NULL,updated_at=? WHERE id=?`)
+      .run(when, 'Waiting for the account usage window to open.', now, id);
+    return true;
+  })();
+}
+
 function retry(id) {
   return getDatabase().prepare(`UPDATE jobs SET status='queued',attempts=0,next_attempt_at=?,lease_owner=NULL,
     lease_expires_at=NULL,last_error_code=NULL,last_error_message=NULL,completed_at=NULL,updated_at=?
@@ -89,4 +106,4 @@ function cancel(id) {
     .run(new Date().toISOString(), new Date().toISOString(), id).changes === 1;
 }
 
-module.exports = { enqueue, claimNext, renewLease, complete, fail, retry, cancel };
+module.exports = { enqueue, claimNext, renewLease, complete, fail, defer, retry, cancel };

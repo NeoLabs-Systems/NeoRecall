@@ -110,8 +110,14 @@ async function handle(job) {
   const workDirectory = path.join(ensureRuntimeDirs().audioTmp, `import-${record.id}`);
   fs.mkdirSync(workDirectory, { mode: 0o700 });
   const pattern = path.join(workDirectory, 'chunk-%08d.wav');
-  const result = spawnSync(ffmpegPath, ['-v', 'error', '-i', record.temporary_path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
-    '-f', 'segment', '-segment_time', String(getConfig().chunkTargetMs / 1000), '-reset_timestamps', '1', pattern], { encoding: 'utf8' });
+  const source = require('../../utils/sealed_fs').materialize(record.temporary_path);
+  let result;
+  try {
+    result = spawnSync(ffmpegPath, ['-v', 'error', '-i', source.path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+      '-f', 'segment', '-segment_time', String(getConfig().chunkTargetMs / 1000), '-reset_timestamps', '1', pattern], { encoding: 'utf8' });
+  } finally {
+    source.cleanup();
+  }
   if (result.status !== 0) throw Object.assign(new Error(`Import decode failed: ${result.stderr.slice(0, 500)}`), { code: 'IMPORT_DECODE_FAILED' });
   const files = fs.readdirSync(workDirectory).filter((name) => name.endsWith('.wav')).sort().map((name) => path.join(workDirectory, name));
   if (!files.length) throw Object.assign(new Error('Import contained no decodable audio.'), { code: 'IMPORT_EMPTY' });
@@ -151,11 +157,14 @@ async function handle(job) {
         const durationMs = durations[sequence]; const chunkId = crypto.randomUUID();
         const destination = path.join(ensureRuntimeDirs().audioTmp, `${chunkId}.wav`); fs.renameSync(file, destination);
         createdFiles.push(destination);
+        const digest = sha256File(destination);
+        const byteSize = fs.statSync(destination).size;
+        require('../../utils/sealed_fs').sealInPlace(destination);
         db.prepare(`INSERT INTO audio_chunks
           (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,
            monotonic_offset_ms,duration_ms,overlap_ms,state,temporary_path)
           VALUES (?,?,?,?,?,?,?,?,?,'pcm_s16le','mono',?,?,?,0,'uploaded',?)`).run(chunkId, record.user_id, sessionId, sourceId, sequence,
-          `import:${record.id}:${sequence}`, sha256File(destination), fs.statSync(destination).size, 'wav',
+          `import:${record.id}:${sequence}`, digest, byteSize, 'wav',
           new Date(sessionStartMs + offsetMs).toISOString(), offsetMs, Math.max(1, durationMs), destination);
         jobs.enqueue({ userId: record.user_id, resourceType: 'audio_chunk', resourceId: chunkId, type: 'transcribe_chunk', priority: 70 }, db);
         offsetMs += durationMs;

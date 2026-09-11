@@ -44,7 +44,22 @@ function sweepStaging() {
 // concurrent write produces an artifact that restores to a corrupt or
 // half-committed state.
 async function snapshot(destinationPath) {
-  await getDatabase().backup(destinationPath);
+  // Page-encrypted databases cannot use SQLite's backup API against a
+  // plaintext destination. VACUUM INTO writes a consistent encrypted copy;
+  // rekeying that copy to an empty key yields the plaintext snapshot the
+  // outer NRB1 wrap expects.
+  const live = getDatabase();
+  live.exec(`VACUUM INTO '${String(destinationPath).replace(/'/g, "''")}'`);
+  const { Database } = require('../../db/sqlite');
+  const { masterKey } = require('../../utils/crypto');
+  const copy = new Database(destinationPath);
+  try {
+    copy.key(masterKey());
+    copy.pragma('journal_mode = DELETE');
+    copy.rekey(Buffer.alloc(0));
+  } finally {
+    copy.close();
+  }
   await fs.promises.chmod(destinationPath, 0o600);
 }
 

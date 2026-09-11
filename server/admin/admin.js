@@ -251,7 +251,7 @@ function renderEmpty(columns, message) {
 
 async function load({ announce = false } = {}) {
   document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus, backupData] = await Promise.all([
+  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus, backupData, usageDefaults] = await Promise.all([
     api('/stats'),
     api('/users'),
     api('/jobs?limit=50'),
@@ -261,6 +261,7 @@ async function load({ announce = false } = {}) {
     api('/provider-settings'),
     api('/settings/2fa'),
     api('/backups?limit=50'),
+    api('/config/usage-limits'),
   ]);
   const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
   const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
@@ -282,7 +283,8 @@ async function load({ announce = false } = {}) {
   document.querySelector('#processing').innerHTML = stats.processing.length
     ? stats.processing.map((metric) => `<span>${escapeHtml(metric.metric)} · ${Number(metric.average).toFixed(3)} ${escapeHtml(metric.unit)} avg</span>`).join('')
     : '<span>No processing samples yet</span>';
-  document.querySelector('#users').innerHTML = userData.users.length ? userData.users.map((user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`).join('') : renderEmpty(6, 'No accounts found.');
+  document.querySelector('#users').innerHTML = userData.users.length ? userData.users.map((user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-limits-user="${user.id}" class="btn btn-ghost btn-sm">Limits</button> <button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`).join('') : renderEmpty(6, 'No accounts found.');
+  renderUsageDefaults(usageDefaults.limits);
   document.querySelector('#jobs').innerHTML = jobData.jobs.length ? jobData.jobs.map((job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td class="reason" title="${escapeHtml(job.last_error_message || '')}">${escapeHtml(job.last_error_code || job.last_error_message || '')}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`).join('') : renderEmpty(6, 'No jobs found.');
   document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td class="reason">${escapeHtml(entry.error_code || '')}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(6, 'No AI requests found.');
   document.querySelector('#audit').innerHTML = auditData.entries.length ? auditData.entries.map((entry) => `<tr><td>${escapeHtml(entry.actor_type)}${entry.actor_id ? `<small>${escapeHtml(entry.actor_id.slice(0, 8))}</small>` : ''}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml([entry.resource_type, entry.resource_id].filter(Boolean).join(' · '))}</td><td>${dateLabel(entry.created_at)}</td></tr>`).join('') : renderEmpty(4, 'No audit entries found.');
@@ -394,12 +396,53 @@ async function handleTwoFactorRecovery() {
   await load();
 }
 
+function renderUsageDefaults(limits) {
+  const form = document.querySelector('#usage-limits-form');
+  if (!form || !limits) return;
+  for (const field of ['aiTokens4h', 'aiTokensWeekly', 'transcriptionSeconds4h', 'transcriptionSecondsWeekly']) {
+    form.elements[field].value = limits[field] ?? 0;
+  }
+}
+
+function describeUsageWindow(meter) {
+  const limitLabel = (value) => (value == null ? 'unlimited' : String(value));
+  return `4h ${meter.usage.fourHour}/${limitLabel(meter.limits.fourHour)} · 7d ${meter.usage.weekly}/${limitLabel(meter.limits.weekly)}`;
+}
+
+function promptOverride(label, current) {
+  const raw = prompt(`${label}\nEmpty = inherit install default. 0 = unlimited.`, current == null ? '' : String(current));
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${label} must be empty, 0, or a positive whole number.`);
+  return parsed;
+}
+
+async function handleUserLimits(userId) {
+  const current = await api(`/users/${userId}/usage-limits`);
+  const usage = current.usage || {};
+  alert(`${current.username}\nAI: ${describeUsageWindow(usage.ai || { usage: {}, limits: {} })}\nTranscription seconds: ${describeUsageWindow(usage.transcription || { usage: {}, limits: {} })}`);
+  const body = {
+    aiLimit4h: promptOverride('AI tokens / 4 hours', current.aiLimit4h),
+    aiLimitWeekly: promptOverride('AI tokens / 7 days', current.aiLimitWeekly),
+    transcriptionLimit4h: promptOverride('Transcription seconds / 4 hours', current.transcriptionLimit4h),
+    transcriptionLimitWeekly: promptOverride('Transcription seconds / 7 days', current.transcriptionLimitWeekly),
+  };
+  if (Object.values(body).every((value) => value === undefined)) return;
+  await api(`/users/${userId}/usage-limits`, { method: 'PUT', body: JSON.stringify(body) });
+  await load();
+  showToast('User limits updated');
+}
+
 document.addEventListener('click', async (event) => {
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) return showPage(pageButton.dataset.page);
   const button = event.target.closest('button');
   try {
-    if (button?.dataset.user) {
+    if (button?.dataset.limitsUser) {
+      await handleUserLimits(button.dataset.limitsUser);
+    } else if (button?.dataset.user) {
       await api(`/users/${button.dataset.user}`, { method: 'PATCH', body: JSON.stringify({ disabled: button.dataset.disabled === 'true' }) });
       await load();
       showToast('Account updated');
@@ -489,6 +532,20 @@ document.querySelector('#save-settings').addEventListener('click', async () => {
     await api('/processing-settings', { method: 'PUT', body: JSON.stringify(settings) });
     await load();
     showToast('Processing settings saved');
+  } catch (error) {
+    showError(error);
+  }
+});
+
+document.querySelector('#usage-limits-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const form = event.currentTarget;
+    const body = Object.fromEntries(['aiTokens4h', 'aiTokensWeekly', 'transcriptionSeconds4h', 'transcriptionSecondsWeekly']
+      .map((key) => [key, Number(form.elements[key].value)]));
+    const result = await api('/config/usage-limits', { method: 'PUT', body: JSON.stringify(body) });
+    renderUsageDefaults(result.limits);
+    showToast('Install usage limits saved');
   } catch (error) {
     showError(error);
   }

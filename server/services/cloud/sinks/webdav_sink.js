@@ -71,6 +71,12 @@ function createWebDavSink({ baseUrl, username, password, folder = 'NeoRecall', f
   }
 
   async function put(localPath, remotePath) {
+    // The bytes on the wire are the user's file as they would play or unzip
+    // it. Sealing is a local-at-rest concern and must already have been
+    // stripped by the caller.
+    if (require('../../../utils/sealed_fs').isSealed(localPath)) {
+      throw new Error('Refusing to upload a sealed file to Nextcloud.');
+    }
     const relative = [folder, ...String(remotePath).split('/').filter(Boolean)];
     await ensureDirectories(relative);
     const url = davFileUrl(baseUrl, username, relative);

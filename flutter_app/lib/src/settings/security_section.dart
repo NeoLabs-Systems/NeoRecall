@@ -10,8 +10,8 @@ import 'destructive_confirm_dialog.dart';
 import 'settings_section_list.dart';
 import '../../l10n/gen/app_l10n.dart';
 
-/// The security area of settings: password, two-factor, security keys, and
-/// account deletion.
+/// The security area of settings: password, two-factor, security keys,
+/// a copy of the account's data, and account deletion.
 ///
 /// Its own widget rather than ten more methods on the settings screen — it owns
 /// a self-contained set of flows (enrol a key, enable 2FA, regenerate recovery
@@ -125,6 +125,10 @@ class _SecuritySectionState extends State<SecuritySection> {
           eyebrow: strings.securityKeysEyebrow,
           child: _securityKeysCard(palette, ctrl),
         ),
+        SectionCard(
+          eyebrow: strings.securityExportEyebrow,
+          child: _exportCard(palette, ctrl),
+        ),
         _dangerZone(ctrl),
       ],
     );
@@ -228,6 +232,50 @@ class _SecuritySectionState extends State<SecuritySection> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _exportCard(NeoRecallPalette palette, NeoRecallController ctrl) {
+    final strings = AppL10n.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          strings.securityExportTitle,
+          style: TextStyle(
+            color: palette.textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          strings.securityExportDescription,
+          style: TextStyle(color: palette.textSecondary, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: ctrl.loading ? null : () => _downloadExport(ctrl),
+          icon: const Icon(Icons.download_outlined),
+          label: Text(strings.securityExportAction),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _downloadExport(NeoRecallController ctrl) async {
+    final strings = AppL10n.of(context);
+    final saved = await ctrl.downloadAccountExport();
+    if (!mounted) return;
+    if (ctrl.error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      return;
+    }
+    if (saved == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(strings.securityExportSaved(saved))),
     );
   }
 

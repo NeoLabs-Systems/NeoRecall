@@ -31,7 +31,7 @@ async function handle(job) {
         return { skipped: true };
       }
       result = await ai.analyzeContextImage(row.user_id, {
-        name: row.original_name, mediaType: row.content_type, data: fs.readFileSync(row.original_path).toString('base64'),
+        name: row.original_name, mediaType: row.content_type, data: require('../../utils/sealed_fs').readFileSync(row.original_path).toString('base64'),
       });
     } else {
       result = await ai.analyzeContextText(row.user_id, { name: row.original_name, content: extracted.extractedText });

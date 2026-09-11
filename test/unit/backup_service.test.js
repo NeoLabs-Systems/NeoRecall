@@ -35,7 +35,7 @@ test('a backup produces an encrypted artifact that restores to the same database
   const outcome = await backups.restore(result.key, restored);
   assert.equal(outcome.checksum, result.checksum, 'the restored file matches the snapshot checksum');
 
-  const reopened = require('better-sqlite3')(restored, { readonly: true });
+  const reopened = require('better-sqlite3-multiple-ciphers')(restored, { readonly: true });
   assert.equal(reopened.prepare('SELECT username FROM users WHERE id=?').get('u1').username, 'backup-user');
   reopened.close();
 

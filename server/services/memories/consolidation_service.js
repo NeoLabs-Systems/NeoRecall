@@ -17,6 +17,7 @@ const material = require('../conversations/conversation_material_service');
 const contextMaterial = require('../context/context_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
 const { createLogger } = require('../../utils/logger');
+const usageLimits = require('../usage/usage_limit_service');
 
 const logger = createLogger('memories');
 
@@ -158,6 +159,10 @@ function eligibility(userId, { ignoreBackoff = false, manual = false } = {}) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
   if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
+  const usage = usageLimits.getUsageSnapshot(userId).ai;
+  if (usage.reached.any) {
+    return { eligible: false, reason: 'usage_limit', retryAt: usageLimits.retryAtForMeter(usage) };
+  }
   const active = getDatabase().prepare("SELECT id FROM consolidation_runs WHERE user_id=? AND state IN ('reserved','running')").get(userId);
   if (active) return { eligible: false, reason: 'already_running', runId: active.id };
   const interval = Math.max(settings.get(userId).consolidationIntervalMs, config.minConsolidationIntervalMs);
@@ -251,6 +256,7 @@ function request(userId, { manual = false } = {}) {
       throw new HttpError(429, 'CONSOLIDATION_INTERVAL', 'The consolidation interval has not elapsed.', { retryAfterSeconds, nextEligibleAt: state.nextEligibleAt });
     }
     if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The external language-model provider is not configured. Choose a provider and model in the admin dashboard or `.env`.');
+    if (manual && state.reason === 'usage_limit') usageLimits.rejectIfReached(userId, 'ai');
     return state;
   }
   const id = crypto.randomUUID();

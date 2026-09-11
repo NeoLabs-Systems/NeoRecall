@@ -1,6 +1,6 @@
 'use strict';
 
-const Database = require('better-sqlite3');
+const { openKeyedDatabase } = require('./sqlite');
 const sqliteVec = require('sqlite-vec');
 const expectedVecVersion = require('../../package.json').dependencies['sqlite-vec'];
 const { ensureRuntimeDirs } = require('../../runtime/paths');
@@ -20,9 +20,20 @@ function openDatabase(filename) {
   for (;;) {
     let database;
     try {
-      database = new Database(filename, { timeout: 10_000 });
-      database.pragma('busy_timeout = 10000');
-      database.pragma('journal_mode = WAL');
+      database = openKeyedDatabase(filename, { timeout: 10_000 });
+      try {
+        database.pragma('busy_timeout = 10000');
+        database.pragma('journal_mode = WAL');
+      } catch (error) {
+        if (database.open) database.close();
+        if (error && /not a database|file is not a database|SQLITE_NOTADB|malformed/i.test(String(error.message))) {
+          throw new Error(
+            'NeoRecall could not unlock the database. The file is encrypted with the '
+            + 'installation secret.key; restore that key or restore a backup.',
+          );
+        }
+        throw error;
+      }
       database.pragma('foreign_keys = ON');
       database.pragma('synchronous = FULL');
       database.pragma('trusted_schema = OFF');

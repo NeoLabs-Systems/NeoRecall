@@ -63,6 +63,7 @@ async function acceptPart(userId, id, partNumber, metadata, uploaded) {
     }
     const destination = path.join(ensureRuntimeDirs().importTmp, `${id}.${partNumber}.part`);
     fs.renameSync(uploaded.path, destination);
+    require('../../utils/sealed_fs').sealInPlace(destination);
     db.transaction(() => {
       db.prepare(`INSERT INTO import_parts (import_id,part_number,range_start,range_end,byte_size,sha256,temporary_path)
         VALUES (?,?,?,?,?,?,?)`).run(id, partNumber, metadata.rangeStart, metadata.rangeEnd, uploaded.size, digest, destination);
@@ -81,13 +82,14 @@ async function complete(userId, id) {
   const output = fs.openSync(destination, 'w', 0o600);
   try {
     for (const part of getDatabase().prepare('SELECT * FROM import_parts WHERE import_id=? ORDER BY part_number').all(id)) {
-      const bytes = fs.readFileSync(part.temporary_path);
+      const bytes = require('../../utils/sealed_fs').readFileSync(part.temporary_path);
       fs.writeSync(output, bytes);
     }
     fs.fsyncSync(output);
   } finally { fs.closeSync(output); }
   const digest = await shaFile(destination);
   if (digest !== record.sha256) { fs.unlinkSync(destination); throw new HttpError(422, 'HASH_MISMATCH', 'The assembled import hash does not match.'); }
+  require('../../utils/sealed_fs').sealInPlace(destination);
   const db = getDatabase();
   const partFiles = db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id).map((part) => part.temporary_path);
   db.transaction(() => {

@@ -10,6 +10,7 @@ import '../models/chunk.dart';
 import '../models/recording.dart';
 import '../models/recording_context.dart';
 import 'chunk_store.dart';
+import 'ledger_seal.dart';
 
 ChunkStore createChunkStore() => WebChunkStore();
 
@@ -35,6 +36,7 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
     );
     final capture = js.context['NeoRecallCapture'];
     if (capture != null) capture.callMethod('requestPersistence');
+    await LedgerSeal.instance();
     await _recoverCapturePartial();
     await _closeInterruptedSessions();
   }
@@ -238,8 +240,9 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
   @override
   Future<void> put(AudioChunk chunk, Uint8List bytes) =>
       _withStore('readwrite', (store) async {
+        final sealed = await (await LedgerSeal.instance()).seal(bytes);
         await store.put(
-          chunk.copyWith(state: LocalChunkState.ready, bytes: bytes).toMap(),
+          chunk.copyWith(state: LocalChunkState.ready, bytes: sealed).toMap(),
         );
       });
   @override
@@ -355,8 +358,11 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
   }
 
   @override
-  Future<Uint8List> readBytes(AudioChunk chunk) async =>
-      chunk.bytes ?? (throw StateError('Chunk has no browser audio bytes.'));
+  Future<Uint8List> readBytes(AudioChunk chunk) async {
+    final bytes = chunk.bytes;
+    if (bytes == null) throw StateError('Chunk has no browser audio bytes.');
+    return (await LedgerSeal.instance()).unseal(bytes);
+  }
   @override
   Future<int> storedBytes(AudioChunk chunk) async => chunk.bytes?.length ?? 0;
   @override
@@ -421,7 +427,9 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
   Future<void> putContext(RecordingContextItem item, Uint8List? bytes) async {
     final transaction = db.transaction('contexts', 'readwrite');
     final value = <String, dynamic>{...item.toMap(includeBytes: false)};
-    if (bytes != null) value['bytes'] = bytes;
+    if (bytes != null) {
+      value['bytes'] = await (await LedgerSeal.instance()).seal(bytes);
+    }
     await transaction.objectStore('contexts').put(value);
     await transaction.completed;
   }
@@ -462,8 +470,11 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
     final value = await transaction.objectStore('contexts').getObject(item.id);
     await transaction.completed;
     final bytes = value is Map ? value['bytes'] : null;
-    if (bytes is Uint8List) return bytes;
-    if (bytes is List) return Uint8List.fromList(bytes.cast<int>());
+    Uint8List? stored;
+    if (bytes is Uint8List) stored = bytes;
+    if (bytes is List) stored = Uint8List.fromList(bytes.cast<int>());
+    if (stored == null) return null;
+    return (await LedgerSeal.instance()).unseal(stored);
     return null;
   }
 

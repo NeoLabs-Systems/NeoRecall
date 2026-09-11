@@ -10,6 +10,7 @@ import 'l10n/gen/app_l10n.dart';
 import 'src/l10n/app_language.dart';
 import 'src/settings/integrations_section.dart';
 import 'src/settings/security_section.dart';
+import 'src/settings/usage_section.dart';
 import 'src/settings/watch_section.dart';
 import 'src/settings/settings_navigation.dart';
 import 'src/install/admin_key_store.dart';
@@ -18,6 +19,7 @@ import 'src/install/admin_provider_client.dart';
 enum SettingsSection {
   general,
   security,
+  usage,
   recording,
   memory,
   instructions,
@@ -294,7 +296,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       selectedSection == SettingsSection.watch ||
                       selectedSection == SettingsSection.devices ||
                       selectedSection == SettingsSection.services ||
-                      selectedSection == SettingsSection.integrations
+                      selectedSection == SettingsSection.integrations ||
+                      selectedSection == SettingsSection.usage
                   ? null
                   : save,
               icon: const Icon(Icons.save_outlined, size: 18),
@@ -358,7 +361,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         selectedSection != SettingsSection.watch &&
         selectedSection != SettingsSection.devices &&
         selectedSection != SettingsSection.services &&
-        selectedSection != SettingsSection.integrations) {
+        selectedSection != SettingsSection.integrations &&
+        selectedSection != SettingsSection.usage) {
       return const Center(child: CircularProgressIndicator());
     }
     return switch (selectedSection) {
@@ -366,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSection.security => SecuritySection(
         controller: widget.controller,
       ),
+      SettingsSection.usage => UsageSection(controller: widget.controller),
       SettingsSection.recording => _recordingSettings(),
       SettingsSection.memory => _memorySettings(),
       SettingsSection.instructions => _instructionSettings(),

@@ -91,9 +91,20 @@ async function run({ inference, isInferenceReady = () => true, signal }) {
         await handler.handle(currentJob, inference);
         jobs.complete(currentJob.id, workerId);
       } catch (error) {
-        logger.error('Job failed', { jobId: currentJob.id, type: currentJob.type, error });
-        const willRetry = jobs.fail(currentJob.id, workerId, error, error.retryable !== false);
-        markChunkFailure(currentJob, error, willRetry);
+        if (error.code === 'USAGE_LIMIT_EXCEEDED') {
+          // A usage pause is not a failure. Burning attempts would eventually
+          // delete the server audio copy and ask the client to reupload, which
+          // is the opposite of keeping the original available until the window
+          // opens. The job goes back to queued at nextDecreaseAt.
+          jobs.defer(currentJob.id, workerId, error.retryAt);
+          logger.info('Deferred a job until the usage window opens', {
+            jobId: currentJob.id, type: currentJob.type, retryAt: error.retryAt || null,
+          });
+        } else {
+          logger.error('Job failed', { jobId: currentJob.id, type: currentJob.type, error });
+          const willRetry = jobs.fail(currentJob.id, workerId, error, error.retryable !== false);
+          markChunkFailure(currentJob, error, willRetry);
+        }
       } finally { clearInterval(leaseTimer); currentJob = null; }
     }
   } finally { clearInterval(heartbeatTimer); getDatabase().prepare('DELETE FROM worker_heartbeats WHERE worker_id=?').run(workerId); }

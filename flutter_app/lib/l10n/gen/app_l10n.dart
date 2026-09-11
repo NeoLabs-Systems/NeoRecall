@@ -673,6 +673,96 @@ abstract class AppL10n {
   /// **'Passwords and 2FA'**
   String get settingsNavSecurityDescription;
 
+  /// No description provided for @settingsNavUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage'**
+  String get settingsNavUsage;
+
+  /// No description provided for @settingsNavUsageDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'AI and transcription limits'**
+  String get settingsNavUsageDescription;
+
+  /// No description provided for @usageSectionEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage & limits'**
+  String get usageSectionEyebrow;
+
+  /// No description provided for @usageSectionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How much this account has used'**
+  String get usageSectionTitle;
+
+  /// No description provided for @usageSectionDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'These are rolling 4-hour and 7-day allowances. Usage drops on its own as older work ages out. Recording keeps going if a limit is reached; the original audio stays available until it can be written up.'**
+  String get usageSectionDescription;
+
+  /// No description provided for @usageAiTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Language-model use'**
+  String get usageAiTitle;
+
+  /// No description provided for @usageTranscriptionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription'**
+  String get usageTranscriptionTitle;
+
+  /// No description provided for @usageWindowFourHour.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 4 hours'**
+  String get usageWindowFourHour;
+
+  /// No description provided for @usageWindowWeekly.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 7 days'**
+  String get usageWindowWeekly;
+
+  /// No description provided for @usageUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited'**
+  String get usageUnlimited;
+
+  /// No description provided for @usageCustomBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get usageCustomBadge;
+
+  /// No description provided for @usageUsedOfLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} of {limit}'**
+  String usageUsedOfLimit(String used, String limit);
+
+  /// No description provided for @usageNextDrop.
+  ///
+  /// In en, this message translates to:
+  /// **'Next drop {when}'**
+  String usageNextDrop(String when);
+
+  /// No description provided for @usageUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage could not be loaded just now.'**
+  String get usageUnavailable;
+
+  /// No description provided for @usageAskLimited.
+  ///
+  /// In en, this message translates to:
+  /// **'You have reached the language-model allowance for now. Try again later.'**
+  String get usageAskLimited;
+
   /// No description provided for @settingsNavRecording.
   ///
   /// In en, this message translates to:
@@ -2280,6 +2370,36 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'your username'**
   String get securityYourUsername;
+
+  /// No description provided for @securityExportEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'YOUR DATA'**
+  String get securityExportEyebrow;
+
+  /// No description provided for @securityExportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download a copy of your data'**
+  String get securityExportTitle;
+
+  /// No description provided for @securityExportDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'A zip of this account: transcripts, conversations, memories, summaries, notes, named speakers and settings. It does not include audio, voiceprints, other people, or server secrets.'**
+  String get securityExportDescription;
+
+  /// No description provided for @securityExportAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Download my data'**
+  String get securityExportAction;
+
+  /// No description provided for @securityExportSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {name}'**
+  String securityExportSaved(String name);
 
   /// No description provided for @securityEraseTitle.
   ///

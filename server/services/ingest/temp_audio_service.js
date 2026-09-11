@@ -54,7 +54,11 @@ function sweepDerived(audioWork) {
 function sweep() {
   const db = getDatabase();
   const { audioTmp, audioWork } = ensureRuntimeDirs();
+  const sealedFs = require('../../utils/sealed_fs');
   const referenced = new Set(db.prepare('SELECT temporary_path FROM audio_chunks WHERE temporary_path IS NOT NULL').all().map((row) => path.resolve(row.temporary_path)));
+  for (const file of referenced) {
+    try { if (fs.existsSync(file)) sealedFs.sealInPlace(file); } catch (_) { /* next sweep retries */ }
+  }
   let removed = 0;
   for (const entry of fs.readdirSync(audioTmp, { withFileTypes: true })) {
     if (!entry.isFile()) continue;

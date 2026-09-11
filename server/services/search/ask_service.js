@@ -8,6 +8,7 @@ const { createLogger } = require('../../utils/logger');
 const searchService = require('./search_service');
 const settings = require('../settings/settings_service');
 const aiEngine = require('../../ai/ai_engine');
+const usageLimits = require('../usage/usage_limit_service');
 
 const logger = createLogger('ask');
 
@@ -113,6 +114,7 @@ async function retrieve(userId, plan, window) {
 }
 
 async function ask(userId, question) {
+  usageLimits.rejectIfReached(userId, 'ai');
   const timezone = settings.get(userId).timezone;
   const nowLocal = localDateTimeNow(timezone);
   const plan = await planFor(userId, question, nowLocal, timezone);

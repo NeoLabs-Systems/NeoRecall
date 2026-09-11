@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const Database = require('better-sqlite3');
+const Database = require('better-sqlite3-multiple-ciphers');
 const migration = require('../../server/db/migrations/017_live_conversation_insights');
 const { previewDue, previewOwns, PROVISIONAL, FINAL } = require('../../server/services/conversations/conversation_insight_service');
 

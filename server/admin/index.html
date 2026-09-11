@@ -89,6 +89,16 @@
       </section>
 
       <section class="page" data-page-content="users">
+        <div class="card">
+          <div class="card-header"><div><div class="card-title">Install usage limits</div><p>Rolling 4-hour and 7-day caps. 0 means unlimited. Per-user Limits overrides these.</p></div></div>
+          <form id="usage-limits-form" class="settings-grid">
+            <label>AI tokens / 4 hours<input type="number" min="0" step="1" name="aiTokens4h"></label>
+            <label>AI tokens / 7 days<input type="number" min="0" step="1" name="aiTokensWeekly"></label>
+            <label>Transcription seconds / 4 hours<input type="number" min="0" step="1" name="transcriptionSeconds4h"></label>
+            <label>Transcription seconds / 7 days<input type="number" min="0" step="1" name="transcriptionSecondsWeekly"></label>
+            <button type="submit" class="btn btn-primary">Save install limits</button>
+          </form>
+        </div>
         <div class="card table-card">
           <div class="card-header"><div><div class="card-title">Accounts</div><p>Account separation, device count and recording activity.</p></div></div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>User</th><th>Role</th><th>Devices</th><th>Recordings</th><th>Status</th><th></th></tr></thead><tbody id="users"></tbody></table></div>

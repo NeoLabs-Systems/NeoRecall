@@ -96,6 +96,32 @@
   "settingsNavGeneralDescription": "Zeit und Region",
   "settingsNavSecurity": "Sicherheit",
   "settingsNavSecurityDescription": "Passwörter und 2FA",
+  "settingsNavUsage": "Nutzung",
+  "settingsNavUsageDescription": "KI- und Transkriptionslimits",
+  "usageSectionEyebrow": "Nutzung und Limits",
+  "usageSectionTitle": "Was dieses Konto bereits verbraucht hat",
+  "usageSectionDescription": "Das sind rollierende 4-Stunden- und 7-Tage-Kontingente. Der Verbrauch sinkt von selbst, sobald ältere Arbeit aus dem Fenster fällt. Die Aufnahme läuft weiter, wenn ein Limit erreicht ist; das Originalaudio bleibt verfügbar, bis es geschrieben werden kann.",
+  "usageAiTitle": "Sprachmodell",
+  "usageTranscriptionTitle": "Transkription",
+  "usageWindowFourHour": "Letzte 4 Stunden",
+  "usageWindowWeekly": "Letzte 7 Tage",
+  "usageUnlimited": "Unbegrenzt",
+  "usageCustomBadge": "Eigene Grenze",
+  "usageUsedOfLimit": "{used} von {limit}",
+  "@usageUsedOfLimit": {
+    "placeholders": {
+      "used": {"type": "String"},
+      "limit": {"type": "String"}
+    }
+  },
+  "usageNextDrop": "Nächster Rückgang {when}",
+  "@usageNextDrop": {
+    "placeholders": {
+      "when": {"type": "String"}
+    }
+  },
+  "usageUnavailable": "Die Nutzung konnte gerade nicht geladen werden.",
+  "usageAskLimited": "Das Sprachmodell-Kontingent ist vorerst aufgebraucht. Versuchen Sie es später erneut.",
   "settingsNavRecording": "Aufnahme",
   "settingsNavRecordingDescription": "Zeitplan, Netzwerk, Abschnitte",
   "settingsNavMemory": "Erinnerungen",
@@ -388,6 +414,11 @@
   "actionRename": "Umbenennen",
   "actionRemove": "Entfernen",
   "securityYourUsername": "Ihr Benutzername",
+  "securityExportEyebrow": "IHRE DATEN",
+  "securityExportTitle": "Eine Kopie Ihrer Daten herunterladen",
+  "securityExportDescription": "Ein Zip dieses Kontos: Transkripte, Gespräche, Erinnerungen, Zusammenfassungen, Notizen, benannte Sprecher und Einstellungen. Ohne Audio, Stimmprofile, andere Personen oder Servergeheimnisse.",
+  "securityExportAction": "Meine Daten herunterladen",
+  "securityExportSaved": "Gespeichert: {name}",
   "securityEraseTitle": "Alles Aufgezeichnete löschen",
   "securityEraseIntro": "Damit wird Ihre Bibliothek geleert, Ihr Konto bleibt aber bestehen. Es gibt kein Rückgängig und keine Sicherung, aus der wiederhergestellt werden könnte.",
   "securityEraseItem1": "Jede Aufnahme, jedes Transkript und jedes Gespräch",

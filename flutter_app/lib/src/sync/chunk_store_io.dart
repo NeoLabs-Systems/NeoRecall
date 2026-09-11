@@ -14,6 +14,7 @@ import '../models/chunk.dart';
 import '../models/recording.dart';
 import '../models/recording_context.dart';
 import 'chunk_store.dart';
+import 'ledger_seal.dart';
 
 ChunkStore createChunkStore() => IoChunkStore();
 
@@ -60,6 +61,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   @override
   Future<void> initialize() async {
     if (_database != null) return;
+    await LedgerSeal.instance();
     final support = await getApplicationSupportDirectory();
     final root = Directory(p.join(support.path, 'NeoRecall'))
       ..createSync(recursive: true);
@@ -149,16 +151,9 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
             : null;
         final recovered = file == null
             ? null
-            : _recoverWavBytes(await file.readAsBytes());
+            : _recoverWavBytes(await _readPlain(file));
         if (file != null && recovered != null) {
-          final handle = await file.open(mode: FileMode.writeOnly);
-          try {
-            await handle.writeFrom(recovered.bytes);
-            await handle.truncate(recovered.bytes.length);
-            await handle.flush();
-          } finally {
-            await handle.close();
-          }
+          await _writePlain(file, recovered.bytes);
           if (file.path != finalFile.path) await file.rename(finalFile.path);
           await _database!.update(
             'chunks',
@@ -190,20 +185,13 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
       final capturePartials = await _database!.query('capture_partials');
       for (final row in capturePartials) {
         final file = File(row['filePath'] as String);
-        if (!file.existsSync() || file.lengthSync() < 44) continue;
+        if (!file.existsSync()) continue;
         final map = Map<String, dynamic>.from(
           jsonDecode(row['chunkJson'] as String) as Map,
         );
-        final recovered = _recoverWavBytes(await file.readAsBytes());
+        final recovered = _recoverWavBytes(await _readPlain(file));
         if (recovered == null) continue;
-        final handle = await file.open(mode: FileMode.writeOnly);
-        try {
-          await handle.writeFrom(recovered.bytes);
-          await handle.truncate(recovered.bytes.length);
-          await handle.flush();
-        } finally {
-          await handle.close();
-        }
+        await _writePlain(file, recovered.bytes);
         map.addAll(<String, Object?>{
           'state': LocalChunkState.ready.name,
           'filePath': file.path,
@@ -255,6 +243,24 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
 
   Database get db =>
       _database ?? (throw StateError('ChunkStore is not initialized.'));
+
+  Future<Uint8List> _readPlain(File file) async {
+    final seal = await LedgerSeal.instance();
+    return seal.unseal(await file.readAsBytes());
+  }
+
+  Future<void> _writePlain(File file, Uint8List bytes) async {
+    final seal = await LedgerSeal.instance();
+    final sealed = await seal.seal(bytes);
+    final handle = await file.open(mode: FileMode.writeOnly);
+    try {
+      await handle.writeFrom(sealed);
+      await handle.truncate(sealed.length);
+      await handle.flush();
+    } finally {
+      await handle.close();
+    }
+  }
   @override
   Future<void> put(AudioChunk chunk, Uint8List bytes) async {
     final partial = File(p.join(_audioDirectory.path, '${chunk.id}.partial'));
@@ -265,13 +271,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
         .copyWith(state: LocalChunkState.capturing, filePath: partial.path)
         .toMap(includeBytes: false);
     await db.insert('chunks', map, conflictAlgorithm: ConflictAlgorithm.abort);
-    final handle = await partial.open(mode: FileMode.writeOnly);
-    try {
-      await handle.writeFrom(bytes);
-      await handle.flush();
-    } finally {
-      await handle.close();
-    }
+    await _writePlain(partial, bytes);
     await partial.rename(finalFile.path);
     await db.update(
       'chunks',
@@ -299,13 +299,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   @override
   Future<void> putPartial(AudioChunk chunk, Uint8List bytes) async {
     final file = File(p.join(_audioDirectory.path, '${chunk.id}.recovery.wav'));
-    final handle = await file.open(mode: FileMode.writeOnly);
-    try {
-      await handle.writeFrom(bytes);
-      await handle.flush();
-    } finally {
-      await handle.close();
-    }
+    await _writePlain(file, bytes);
     final previous = await db.query(
       'capture_partials',
       columns: <String>['filePath'],
@@ -419,7 +413,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   )).map((row) => AudioChunk.fromMap(_map(row))).toList();
   @override
   Future<Uint8List> readBytes(AudioChunk chunk) =>
-      File(chunk.filePath!).readAsBytes();
+      _readPlain(File(chunk.filePath!));
   @override
   Future<int> storedBytes(AudioChunk chunk) async {
     final path = chunk.filePath;
@@ -518,13 +512,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
         p.join(_contextDirectory.path, '${item.id}.partial'),
       );
       final file = File(p.join(_contextDirectory.path, item.id));
-      final handle = await partial.open(mode: FileMode.writeOnly);
-      try {
-        await handle.writeFrom(bytes);
-        await handle.flush();
-      } finally {
-        await handle.close();
-      }
+      await _writePlain(partial, bytes);
       await partial.rename(file.path);
       filePath = file.path;
     }
@@ -566,7 +554,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   Future<Uint8List?> readContextBytes(RecordingContextItem item) async {
     if (item.filePath == null) return null;
     final file = File(item.filePath!);
-    return await file.exists() ? file.readAsBytes() : null;
+    return await file.exists() ? _readPlain(file) : null;
   }
 
   @override

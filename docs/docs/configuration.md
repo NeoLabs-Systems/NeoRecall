@@ -35,7 +35,7 @@ For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`
 
 ## Backups
 
-NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts it with the installation key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
+The live database file is page-encrypted with the installation key (`data/secret.key`). A first start on an older plaintext file encrypts that file in place. NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts that snapshot again with the same key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
 
 `NEORECALL_BACKUP_DESTINATION` selects where artifacts land. `local` (the default) writes to `~/.neorecall/backups`. Artifacts are encrypted before they leave the process, so a destination never handles plaintext.
 
@@ -92,6 +92,13 @@ Consolidating a whole occasion at once handles the ordinary case, but it can onl
 `NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are unchanged and are what keeps short speech off the timeline as a memory *card* (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary, but it is not memory-worthy. Mini-memories under a larger worthy occasion are reserved for concrete, still-open action items with an identifiable owner; facts, observations, suggestions and unaccepted requests stay in the memory summary instead. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
 
 A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter so one client cannot overwhelm the configured provider while recordings are still arriving.
+
+Rolling per-user provider budgets sit beside those Ask counters. They are off by default (`0` = unlimited) so a self-hosted install does not suddenly stop processing:
+
+- `NEORECALL_AI_TOKENS_4H` / `NEORECALL_AI_TOKENS_WEEKLY` — language-model tokens over a rolling 4-hour and 7-day window
+- `NEORECALL_TRANSCRIPTION_SECONDS_4H` / `NEORECALL_TRANSCRIPTION_SECONDS_WEEKLY` — audio seconds that actually went to the transcription service (local silence detection does not count)
+
+Admin › Users can set the same four install defaults without writing `.env`, and a Limits control on each account can inherit them, replace them, or set `0` for unlimited. When a cap is reached, Ask returns `429 USAGE_LIMIT_EXCEEDED`, memory writing and previews wait, and transcription of speech is deferred. The job is not failed: attempts are not burned, the server keeps its temporary audio, and no terminal receipt is issued, so the recording device keeps the original until the window opens.
 
 ### The day's summary
 

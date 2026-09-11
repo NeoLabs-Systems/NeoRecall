@@ -47,6 +47,10 @@ function selectTurns(turns) {
 }
 
 function extractPreview(filename, channelLayout, selection) {
+  return require('../../utils/sealed_fs').withPlain(filename, (plain) => extractPreviewFromPlain(plain, channelLayout, selection));
+}
+
+function extractPreviewFromPlain(filename, channelLayout, selection) {
   const filters = selection.turns.map((turn, index) => {
     const start = (turn.start_ms / 1000).toFixed(3);
     const end = (turn.end_ms / 1000).toFixed(3);

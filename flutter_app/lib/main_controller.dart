@@ -51,6 +51,8 @@ import 'src/sync/pending_audio_preview.dart';
 import 'src/background/home_widget_publisher.dart';
 import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
+import 'src/settings/account_export_save.dart';
+import 'src/settings/usage_section.dart';
 import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
 import 'src/watch/paired_watch.dart';
@@ -652,6 +654,8 @@ class NeoRecallController extends ChangeNotifier
   /// session; the trailing one is still being answered while [askBusy] is true.
   List<AskTurn> askTurns = <AskTurn>[];
   bool askBusy = false;
+  AccountUsageSnapshot? accountUsage;
+  bool accountUsageLoading = false;
   @override
   int pendingAudioBytes = 0;
   // Recording sessions containing a chunk parked after repeated server-side
@@ -1574,6 +1578,7 @@ class NeoRecallController extends ChangeNotifier
     needsAttentionCount = 0;
     failedUploadCount = 0;
     processingLedgerStatus = const ProcessingStatusSnapshot();
+    accountUsage = null;
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
@@ -1621,6 +1626,38 @@ class NeoRecallController extends ChangeNotifier
     await ClientDiagnosticLog.instance.clear();
     await logout();
     return null;
+  }
+
+  /// Downloads a zip of this account's readable data and offers a save location.
+  ///
+  /// Returns the chosen path or file name, or null when the person cancelled
+  /// or the request failed. Failures set [error] the usual way.
+  Future<String?> downloadAccountExport() async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      final bytes = await api.downloadAccountExport();
+      final stamp = DateTime.now().toUtc().toIso8601String().substring(0, 10);
+      final safeName = (username ?? 'account').replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
+      final saved = await saveAccountExport(
+        bytes,
+        'neorecall-$safeName-$stamp.zip',
+      );
+      return saved;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return null;
+    } catch (exception) {
+      error = exception.toString();
+      return null;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
   }
 
   /// Erases everything this account has recorded, keeping the account itself.
@@ -2971,6 +3008,7 @@ class NeoRecallController extends ChangeNotifier
       needsAttentionCount = 0;
       failedUploadCount = 0;
       processingLedgerStatus = const ProcessingStatusSnapshot();
+      accountUsage = null;
       notifyListeners();
       return;
     }
@@ -3483,6 +3521,7 @@ class NeoRecallController extends ChangeNotifier
                 ?.toInt() ??
             0;
       }
+      unawaited(refreshAccountUsage(silent: true));
       cachedData = failures.isNotEmpty;
       // Only worth interrupting for when nothing at all came back. A partial
       // refresh has already shown what it could, and the status card explains
@@ -3674,13 +3713,36 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
   }
 
+  Future<void> refreshAccountUsage({bool silent = false}) async {
+    if (api.token == null) return;
+    if (!silent) {
+      accountUsageLoading = true;
+      notifyListeners();
+    }
+    try {
+      accountUsage = AccountUsageSnapshot.fromJson(await api.fetchAccountUsage());
+    } catch (_) {
+      if (!silent) accountUsage = null;
+    } finally {
+      accountUsageLoading = false;
+      notifyListeners();
+    }
+  }
+
   String _describeAskFailure(Object exception) {
+    final code = exception is ApiException ? exception.code : '';
     final detail = exception.toString();
-    if (detail.contains('ASK_RATE_LIMITED') ||
+    if (code == 'USAGE_LIMIT_EXCEEDED' || detail.contains('USAGE_LIMIT_EXCEEDED')) {
+      unawaited(refreshAccountUsage(silent: true));
+      return appStrings.usageAskLimited;
+    }
+    if (code == 'ASK_RATE_LIMITED' ||
+        code == 'ASK_BURST_LIMITED' ||
+        detail.contains('ASK_RATE_LIMITED') ||
         detail.contains('ASK_BURST_LIMITED')) {
       return 'You have asked a lot in a short time. Try again in a few minutes.';
     }
-    if (detail.contains('AI_NOT_CONFIGURED')) {
+    if (code == 'AI_NOT_CONFIGURED' || detail.contains('AI_NOT_CONFIGURED')) {
       return 'No answering model is configured yet, so this question cannot be answered.';
     }
     return 'That question could not be answered just now.';

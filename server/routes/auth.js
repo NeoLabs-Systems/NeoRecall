@@ -50,6 +50,17 @@ router.delete('/account', validate(z.object({ password: z.string(), twoFactorCod
 // a DELETE of it. Same identity bar as deletion: both are irreversible.
 router.post('/account/erase-content', validate(z.object({ password: z.string(), twoFactorCode: z.string().optional() })),
   asyncRoute(async (req, res) => { res.json(await auth.eraseContent(req.auth.userId, req.body.password, req.body.twoFactorCode)); }));
+router.get('/account/usage', (req, res) => {
+  res.json(require('../services/usage/usage_limit_service').getUsageSnapshot(req.auth.userId));
+});
+router.get('/account/export', slidingWindow({ windowMs: 15 * 60_000, limit: 5 }), asyncRoute(async (req, res) => {
+  const bytes = require('../services/cloud/user_export_service').build(req.auth.userId);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const username = String(req.user?.username || 'account').replace(/[^A-Za-z0-9._-]/g, '_');
+  res.set('Content-Type', 'application/zip');
+  res.set('Content-Disposition', `attachment; filename="neorecall-${username}-${stamp}.zip"`);
+  res.send(bytes);
+}));
 router.post('/2fa/setup', (req, res) => res.json(auth.beginTwoFactor(req.auth.userId, req.user.username)));
 router.post('/2fa/verify', validate(z.object({ code: z.string().min(6).max(64) })), (req, res) => {
   res.json({ recoveryCodes: auth.activateTwoFactor(req.auth.userId, req.body.code) });

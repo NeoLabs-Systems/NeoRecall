@@ -200,13 +200,37 @@ class NeoRecallApiClient {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> fetchAccountUsage() async {
+    return Map<String, dynamic>.from(
+      await request('GET', '/api/v1/auth/account/usage') as Map,
+    );
+  }
+
+  Future<Uint8List> downloadAccountExport() async {
+    const path = '/api/v1/auth/account/export';
+    final response = await _waitForResponse(
+      _client.get(
+        _resolve(path),
+        headers: <String, String>{..._headers, 'Accept': 'application/zip'},
+      ),
+      method: 'GET',
+      path: path,
+      timeout: uploadTimeout,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      _decode(response);
+    }
+    return response.bodyBytes;
+  }
+
   Future<http.Response> _waitForResponse(
     Future<http.Response> responseFuture, {
     required String method,
     required String path,
+    Duration? timeout,
   }) async {
     try {
-      return await responseFuture.timeout(requestTimeout);
+      return await responseFuture.timeout(timeout ?? requestTimeout);
     } catch (error) {
       ClientDiagnosticLog.instance.record(
         'network',

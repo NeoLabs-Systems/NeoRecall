@@ -64,7 +64,8 @@ function routerFor(target) {
       const item = service.original(req.auth.userId, req.params.itemId, routeTarget(req));
       res.type(item.content_type || 'application/octet-stream');
       res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(item.original_name)}`);
-      res.sendFile(item.original_path);
+      const opened = require('../utils/sealed_fs').materialize(item.original_path);
+      res.sendFile(opened.path, () => opened.cleanup());
     } catch (error) { next(error); }
   });
   return router;

@@ -39,7 +39,11 @@ async function verifyPassword(password, hash) { return bcrypt.compare(password, 
 function masterKey() {
   const { secretKey } = ensureRuntimeDirs();
   if (!fs.existsSync(secretKey)) {
-    fs.writeFileSync(secretKey, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' });
+    try {
+      fs.writeFileSync(secretKey, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
   }
   const key = fs.readFileSync(secretKey);
   if (key.length !== 32) throw new Error('NeoRecall secret.key must contain exactly 32 bytes.');
@@ -146,7 +150,96 @@ async function decryptFileStream(source, destination) {
   }
 }
 
+const FILE_MAGIC = Buffer.from('NRF1', 'ascii');
+
+function headerLooksLike(filename, magic) {
+  if (!fs.existsSync(filename)) return false;
+  const handle = fs.openSync(filename, 'r');
+  try {
+    const header = Buffer.alloc(magic.length);
+    if (fs.readSync(handle, header, 0, magic.length, 0) !== magic.length) return false;
+    return header.equals(magic);
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
+function isEncryptedFileSync(filename, magic = FILE_MAGIC) {
+  return headerLooksLike(filename, magic);
+}
+
+function encryptFileSync(source, destination, magic = FILE_MAGIC) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', masterKey(), iv);
+  const output = fs.openSync(destination, 'w', 0o600);
+  const input = fs.openSync(source, 'r');
+  const block = Buffer.alloc(1024 * 1024);
+  try {
+    fs.writeSync(output, Buffer.concat([magic, iv]));
+    let read = fs.readSync(input, block, 0, block.length, null);
+    while (read > 0) {
+      const chunk = cipher.update(block.subarray(0, read));
+      if (chunk.length) fs.writeSync(output, chunk);
+      read = fs.readSync(input, block, 0, block.length, null);
+    }
+    const last = cipher.final();
+    if (last.length) fs.writeSync(output, last);
+    fs.writeSync(output, cipher.getAuthTag());
+  } finally {
+    fs.closeSync(input);
+    fs.closeSync(output);
+  }
+}
+
+function decryptFileSync(source, destination, magic = FILE_MAGIC) {
+  const { size } = fs.statSync(source);
+  if (size < magic.length + 12 + 16) throw new Error('Sealed file is truncated.');
+  const input = fs.openSync(source, 'r');
+  try {
+    const header = Buffer.alloc(magic.length + 12);
+    fs.readSync(input, header, 0, header.length, 0);
+    if (!header.subarray(0, magic.length).equals(magic)) throw new Error('Sealed file has an unrecognized format.');
+    const tag = Buffer.alloc(16);
+    fs.readSync(input, tag, 0, 16, size - 16);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey(), header.subarray(magic.length));
+    decipher.setAuthTag(tag);
+    const output = fs.openSync(destination, 'w', 0o600);
+    const block = Buffer.alloc(1024 * 1024);
+    let position = header.length;
+    const ciphertextEnd = size - 16;
+    try {
+      while (position < ciphertextEnd) {
+        const want = Math.min(block.length, ciphertextEnd - position);
+        const read = fs.readSync(input, block, 0, want, position);
+        if (!read) break;
+        const chunk = decipher.update(block.subarray(0, read));
+        if (chunk.length) fs.writeSync(output, chunk);
+        position += read;
+      }
+      const last = decipher.final();
+      if (last.length) fs.writeSync(output, last);
+    } finally {
+      fs.closeSync(output);
+    }
+  } finally {
+    fs.closeSync(input);
+  }
+}
+
+function decryptFileToBuffer(source, magic = FILE_MAGIC) {
+  const bytes = fs.readFileSync(source);
+  if (bytes.length < magic.length + 12 + 16) throw new Error('Sealed file is truncated.');
+  if (!bytes.subarray(0, magic.length).equals(magic)) throw new Error('Sealed file has an unrecognized format.');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey(), bytes.subarray(magic.length, magic.length + 12));
+  decipher.setAuthTag(bytes.subarray(bytes.length - 16));
+  return Buffer.concat([
+    decipher.update(bytes.subarray(magic.length + 12, bytes.length - 16)),
+    decipher.final(),
+  ]);
+}
+
 module.exports = {
   randomToken, sha256, sha256File, timingSafeStringEqual, hashPassword, verifyPassword, encryptString, decryptString,
   sealBuffer, unsealBuffer, isSealed, encryptFileStream, decryptFileStream,
+  masterKey, FILE_MAGIC, BACKUP_MAGIC, isEncryptedFileSync, encryptFileSync, decryptFileSync, decryptFileToBuffer,
 };

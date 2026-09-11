@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const Database = require('better-sqlite3');
+const Database = require('better-sqlite3-multiple-ciphers');
 const migration = require('../../server/db/migrations/016_speaker_previews_duration');
 
 const MIGRATIONS_DIR = path.join(__dirname, '../../server/db/migrations');

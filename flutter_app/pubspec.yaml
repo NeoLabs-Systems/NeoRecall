@@ -15,6 +15,7 @@ dependencies:
   audioplayers: 6.7.1
   connectivity_plus: 7.0.0
   crypto: ^3.0.6
+  cryptography: ^2.7.0
   cupertino_icons: ^1.0.8
   desktop_audio_capture:
     path: third_party/desktop_audio_capture

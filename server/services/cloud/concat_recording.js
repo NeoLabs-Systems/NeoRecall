@@ -7,7 +7,7 @@ const ffmpegPath = require('ffmpeg-static');
 const { getConfig } = require('../../config');
 
 function parseWav(file) {
-  const bytes = fs.readFileSync(file);
+  const bytes = require('../../utils/sealed_fs').readFileSync(file);
   if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WAVE') {
     return null;
   }
@@ -101,12 +101,14 @@ function concatListPath(file) {
 
 function concatWithFfmpeg(parts, dest) {
   if (!ffmpegPath) throw new Error('ffmpeg is not available to join a recording.');
+  const sealedFs = require('../../utils/sealed_fs');
+  const opened = parts.map((part) => ({ part, file: sealedFs.materialize(part.file) }));
   const listFile = `${dest}.concat.txt`;
   const lines = [];
-  for (let index = 0; index < parts.length; index += 1) {
-    lines.push(`file ${concatListPath(parts[index].file)}`);
-    if (index > 0 && parts[index].overlapMs > 0) {
-      lines.push(`inpoint ${(parts[index].overlapMs / 1000).toFixed(3)}`);
+  for (let index = 0; index < opened.length; index += 1) {
+    lines.push(`file ${concatListPath(opened[index].file.path)}`);
+    if (index > 0 && opened[index].part.overlapMs > 0) {
+      lines.push(`inpoint ${(opened[index].part.overlapMs / 1000).toFixed(3)}`);
     }
   }
   fs.writeFileSync(listFile, `${lines.join('\n')}\n`, { mode: 0o600 });
@@ -121,6 +123,7 @@ function concatWithFfmpeg(parts, dest) {
     fs.chmodSync(dest, 0o600);
   } finally {
     try { fs.unlinkSync(listFile); } catch { /* the joined file is what matters */ }
+    for (const item of opened) item.file.cleanup();
   }
 }
 

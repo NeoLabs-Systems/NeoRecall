@@ -403,6 +403,58 @@ class AppL10nDe extends AppL10n {
   String get settingsNavSecurityDescription => 'Passwörter und 2FA';
 
   @override
+  String get settingsNavUsage => 'Nutzung';
+
+  @override
+  String get settingsNavUsageDescription => 'KI- und Transkriptionslimits';
+
+  @override
+  String get usageSectionEyebrow => 'Nutzung und Limits';
+
+  @override
+  String get usageSectionTitle => 'Was dieses Konto bereits verbraucht hat';
+
+  @override
+  String get usageSectionDescription =>
+      'Das sind rollierende 4-Stunden- und 7-Tage-Kontingente. Der Verbrauch sinkt von selbst, sobald ältere Arbeit aus dem Fenster fällt. Die Aufnahme läuft weiter, wenn ein Limit erreicht ist; das Originalaudio bleibt verfügbar, bis es geschrieben werden kann.';
+
+  @override
+  String get usageAiTitle => 'Sprachmodell';
+
+  @override
+  String get usageTranscriptionTitle => 'Transkription';
+
+  @override
+  String get usageWindowFourHour => 'Letzte 4 Stunden';
+
+  @override
+  String get usageWindowWeekly => 'Letzte 7 Tage';
+
+  @override
+  String get usageUnlimited => 'Unbegrenzt';
+
+  @override
+  String get usageCustomBadge => 'Eigene Grenze';
+
+  @override
+  String usageUsedOfLimit(String used, String limit) {
+    return '$used von $limit';
+  }
+
+  @override
+  String usageNextDrop(String when) {
+    return 'Nächster Rückgang $when';
+  }
+
+  @override
+  String get usageUnavailable =>
+      'Die Nutzung konnte gerade nicht geladen werden.';
+
+  @override
+  String get usageAskLimited =>
+      'Das Sprachmodell-Kontingent ist vorerst aufgebraucht. Versuchen Sie es später erneut.';
+
+  @override
   String get settingsNavRecording => 'Aufnahme';
 
   @override
@@ -1448,6 +1500,24 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get securityYourUsername => 'Ihr Benutzername';
+
+  @override
+  String get securityExportEyebrow => 'IHRE DATEN';
+
+  @override
+  String get securityExportTitle => 'Eine Kopie Ihrer Daten herunterladen';
+
+  @override
+  String get securityExportDescription =>
+      'Ein Zip dieses Kontos: Transkripte, Gespräche, Erinnerungen, Zusammenfassungen, Notizen, benannte Sprecher und Einstellungen. Ohne Audio, Stimmprofile, andere Personen oder Servergeheimnisse.';
+
+  @override
+  String get securityExportAction => 'Meine Daten herunterladen';
+
+  @override
+  String securityExportSaved(String name) {
+    return 'Gespeichert: $name';
+  }
 
   @override
   String get securityEraseTitle => 'Alles Aufgezeichnete löschen';

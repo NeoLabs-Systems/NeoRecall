@@ -522,6 +522,13 @@ function buildConfig() {
     // while recordings are still arriving.
     askMaxPerHour: integer('NEORECALL_ASK_MAX_PER_HOUR', 240, { min: 0 }),
     askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 20, { min: 0 }),
+    // Rolling per-user provider budgets. 0 means unlimited so a self-hosted
+    // install is unchanged until the operator sets a positive cap. Admin
+    // app_settings and per-user columns can override these later.
+    aiTokens4h: integer('NEORECALL_AI_TOKENS_4H', 0, { min: 0 }),
+    aiTokensWeekly: integer('NEORECALL_AI_TOKENS_WEEKLY', 0, { min: 0 }),
+    transcriptionSeconds4h: integer('NEORECALL_TRANSCRIPTION_SECONDS_4H', 0, { min: 0 }),
+    transcriptionSecondsWeekly: integer('NEORECALL_TRANSCRIPTION_SECONDS_WEEKLY', 0, { min: 0 }),
     // How often the worker looks for conversations to preview, boundaries to
     // redetect and material to consolidate. It bounds how long after crossing a
     // threshold a result appears, so it is the coarsest term in the latency a

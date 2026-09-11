@@ -6,6 +6,7 @@ const localAnalysis = require('../transcription/local_analysis');
 const { alignSegments } = require('../transcription/speaker_alignment');
 const { getConfig } = require('../config');
 const { createLogger } = require('../utils/logger');
+const usageLimits = require('../services/usage/usage_limit_service');
 
 const logger = createLogger('inference-host');
 
@@ -20,9 +21,16 @@ const logger = createLogger('inference-host');
 // speaker turns measured here still describe the original recording — the
 // speaker previews cut later read that original file.
 async function transcribe(input, report = () => {}) {
-  const prepared = audioPreprocess.prepare(input.filename, {
-    channelLayout: input.channelLayout, durationMs: input.durationMs,
-  });
+  const opened = require('../utils/sealed_fs').materialize(input.filename);
+  let prepared;
+  try {
+    prepared = audioPreprocess.prepare(opened.path, {
+      channelLayout: input.channelLayout, durationMs: input.durationMs,
+    });
+  } catch (error) {
+    opened.cleanup();
+    throw error;
+  }
   report({ seconds: prepared.seconds, applied: prepared.applied, fellBack: prepared.fellBack });
   try {
     // Speaker detection reads the original recording by default. Conditioning
@@ -30,25 +38,40 @@ async function transcribe(input, report = () => {}) {
     // were trained on unprocessed speech and read the low frequencies a
     // high-pass removes as part of who is talking. See
     // docs/docs/configuration.md.
-    const analysisFile = getConfig().audioPreprocessTarget === 'stt+analysis' ? prepared.filename : input.filename;
+    const analysisFile = getConfig().audioPreprocessTarget === 'stt+analysis' ? prepared.filename : opened.path;
     const analysis = localAnalysis.analyze(analysisFile);
     if (!analysis.hasSpeech) return [];
+    let releaseReservation = () => {};
+    if (input.userId) {
+      const admitted = usageLimits.enforce(input.userId, 'transcription', {
+        reserve: usageLimits.transcriptionSecondsFor(input.durationMs),
+      });
+      releaseReservation = admitted.releaseReservation;
+    }
     if (prepared.applied.length) {
       logger.info('Conditioned audio before transcription', {
         applied: prepared.applied, seconds: Number(prepared.seconds.toFixed(3)),
         inputLufs: prepared.inputLufs, outputLufs: prepared.outputLufs,
       });
     }
-    const segments = await getProvider().transcribe({
-      filename: prepared.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
-      vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
-    });
-    if (!analysis.analyzed || !analysis.turns.length) return segments;
-    return alignSegments(segments, analysis.turns);
+    try {
+      const segments = await getProvider().transcribe({
+        filename: prepared.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
+        vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
+      });
+      if (input.userId && input.chunkId) {
+        usageLimits.recordTranscription(input.userId, input.chunkId, input.durationMs);
+      }
+      if (!analysis.analyzed || !analysis.turns.length) return segments;
+      return alignSegments(segments, analysis.turns);
+    } finally {
+      releaseReservation();
+    }
   } finally {
     // The single deletion point, and it has to stay one: derived audio must not
     // outlive the request that needed it.
     prepared.cleanup();
+    opened.cleanup();
   }
 }
 
@@ -62,7 +85,14 @@ if (require.main === module) {
       process.send?.({ type: 'result', requestId: message.requestId, segments });
     } catch (error) {
       logger.error('Inference request failed', { error });
-      process.send?.({ type: 'error', requestId: message.requestId, error: { code: error.code || 'INFERENCE_FAILED', message: error.message, stack: error.stack } });
+      process.send?.({ type: 'error', requestId: message.requestId, error: {
+        code: error.code || 'INFERENCE_FAILED',
+        message: error.message,
+        stack: error.stack,
+        retryAt: error.retryAt || null,
+        details: error.details || null,
+        status: error.status || null,
+      } });
     }
   });
   let readinessPending = false;

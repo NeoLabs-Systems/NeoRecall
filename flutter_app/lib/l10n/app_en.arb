@@ -235,6 +235,32 @@
   "settingsNavGeneralDescription": "Time and locale",
   "settingsNavSecurity": "Security",
   "settingsNavSecurityDescription": "Passwords and 2FA",
+  "settingsNavUsage": "Usage",
+  "settingsNavUsageDescription": "AI and transcription limits",
+  "usageSectionEyebrow": "Usage & limits",
+  "usageSectionTitle": "How much this account has used",
+  "usageSectionDescription": "These are rolling 4-hour and 7-day allowances. Usage drops on its own as older work ages out. Recording keeps going if a limit is reached; the original audio stays available until it can be written up.",
+  "usageAiTitle": "Language-model use",
+  "usageTranscriptionTitle": "Transcription",
+  "usageWindowFourHour": "Last 4 hours",
+  "usageWindowWeekly": "Last 7 days",
+  "usageUnlimited": "Unlimited",
+  "usageCustomBadge": "Custom",
+  "usageUsedOfLimit": "{used} of {limit}",
+  "@usageUsedOfLimit": {
+    "placeholders": {
+      "used": {"type": "String"},
+      "limit": {"type": "String"}
+    }
+  },
+  "usageNextDrop": "Next drop {when}",
+  "@usageNextDrop": {
+    "placeholders": {
+      "when": {"type": "String"}
+    }
+  },
+  "usageUnavailable": "Usage could not be loaded just now.",
+  "usageAskLimited": "You have reached the language-model allowance for now. Try again later.",
   "settingsNavRecording": "Recording",
   "settingsNavRecordingDescription": "Schedule, network, chunks",
   "settingsNavMemory": "Memory",
@@ -789,6 +815,18 @@
   "actionRename": "Rename",
   "actionRemove": "Remove",
   "securityYourUsername": "your username",
+  "securityExportEyebrow": "YOUR DATA",
+  "securityExportTitle": "Download a copy of your data",
+  "securityExportDescription": "A zip of this account: transcripts, conversations, memories, summaries, notes, named speakers and settings. It does not include audio, voiceprints, other people, or server secrets.",
+  "securityExportAction": "Download my data",
+  "securityExportSaved": "Saved {name}",
+  "@securityExportSaved": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "securityEraseTitle": "Erase everything you have recorded",
   "securityEraseIntro": "This empties your library but keeps your account. There is no undo and no backup you can ask to restore from.",
   "securityEraseItem1": "Every recording, transcript and conversation",

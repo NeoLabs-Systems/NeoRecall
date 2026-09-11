@@ -227,6 +227,7 @@ const CONTENT_TABLES = Object.freeze([
   'event_outbox',
   'processing_metrics',
   'ask_quota_events',
+  'transcription_usage',
   'diagnostic_request_events',
   'cloud_archive_items',
   'cloud_recording_assemblies',
@@ -267,8 +268,12 @@ async function deleteAccount(userId, password, code) {
     // The audit trail is kept for its own legitimate reasons, but it must not
     // keep naming somebody who asked to be erased. `affected_user_id` is nulled
     // by its foreign key; `actor_id` is a bare string and would otherwise carry
-    // the deleted account's identifier forward.
-    db.prepare("UPDATE audit_log SET actor_id=NULL WHERE actor_type='user' AND actor_id=?").run(userId);
+    // the deleted account's identifier forward. IP and metadata go the same
+    // way: they are not needed once the person is gone.
+    db.prepare(`UPDATE audit_log SET actor_id=NULL, ip_address=NULL, metadata_json=NULL, resource_id=NULL
+      WHERE actor_type='user' AND actor_id=?`).run(userId);
+    db.prepare(`UPDATE audit_log SET ip_address=NULL, metadata_json=NULL
+      WHERE affected_user_id=?`).run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   })();
 }

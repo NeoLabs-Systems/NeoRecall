@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const Database = require('better-sqlite3');
+const Database = require('better-sqlite3-multiple-ciphers');
 const migration = require('../../server/db/migrations/009_oauth_companion');
 
 test('OAuth companion migration preserves existing scaffold credentials including nullable access links', () => {

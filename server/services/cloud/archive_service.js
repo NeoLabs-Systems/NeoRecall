@@ -179,14 +179,17 @@ function finalizeAssembly(assembly) {
   const dest = path.join(pendingDir(), `${assembly.id}.wav`);
   try {
     concatRecording(parts, dest);
+    const bytes = fs.statSync(dest).size;
+    const checksum = sha256File(dest);
+    require('../../utils/sealed_fs').sealInPlace(dest);
     insertItem({
       userId: assembly.user_id,
       accountId: assembly.account_id,
       kind: 'audio',
       localPath: dest,
       remotePath: assembly.remote_path,
-      bytes: fs.statSync(dest).size,
-      checksum: sha256File(dest),
+      bytes,
+      checksum,
     });
     tempAudio.unlinkStrict(assembly.local_dir);
     getDatabase().prepare('DELETE FROM cloud_recording_assemblies WHERE id=?').run(assembly.id);
@@ -230,8 +233,8 @@ function stageAudio(chunk) {
     const assembly = ensureAssembly(chunk, account);
     if (!assembly) return { skipped: true, reason: 'no_session' };
     const dest = path.join(assembly.local_dir, partName(chunk));
-    fs.copyFileSync(chunk.temporary_path, dest);
-    fs.chmodSync(dest, 0o600);
+    require('../../utils/sealed_fs').copyPlain(chunk.temporary_path, dest);
+    require('../../utils/sealed_fs').sealInPlace(dest);
     maybeEnqueueAfterStage(chunk);
     return { staged: true };
   } catch (error) {
@@ -261,7 +264,14 @@ async function putOne(item) {
   db.prepare(`UPDATE cloud_archive_items SET state='uploading', attempts=attempts+1 WHERE id=?`).run(item.id);
   try {
     const sink = sinkFor(item.user_id);
-    await sink.put(item.local_path, item.remote_path);
+    // Nextcloud is the owner's ordinary library: a playable WAV or a readable
+    // zip, never a sealed NeoRecall blob. Local pending copies stay sealed.
+    await require('../../utils/sealed_fs').withPlainAsync(item.local_path, async (plain) => {
+      if (require('../../utils/sealed_fs').isSealed(plain)) {
+        throw new Error('Refusing to upload a sealed file to Nextcloud.');
+      }
+      return sink.put(plain, item.remote_path);
+    });
     tempAudio.unlinkStrict(item.local_path);
     db.prepare(`UPDATE cloud_archive_items SET state='uploaded', local_path=NULL, uploaded_at=?, last_error=NULL
       WHERE id=?`).run(new Date().toISOString(), item.id);
@@ -312,6 +322,8 @@ async function backupUserData(userId, { force = false } = {}) {
   const id = crypto.randomUUID();
   const dest = path.join(pendingDir(), `${id}.zip`);
   fs.writeFileSync(dest, bytes, { mode: 0o600 });
+  const checksum = sha256File(dest);
+  require('../../utils/sealed_fs').sealInPlace(dest);
   const remotePath = `backups/neorecall-user-${artifactStamp()}.zip`;
   insertItem({
     userId,
@@ -320,7 +332,7 @@ async function backupUserData(userId, { force = false } = {}) {
     localPath: dest,
     remotePath,
     bytes: bytes.length,
-    checksum: sha256File(dest),
+    checksum,
   });
   enqueuePut(userId);
   return drain(userId);
