@@ -8,6 +8,7 @@ import 'base_connector.dart';
 import 'device_models.dart';
 import 'memoket_protocol.dart';
 import 'offline_sync.dart';
+import 'wearable_capture_time.dart';
 
 /// Memoket Gem BLE recorder.
 ///
@@ -461,9 +462,21 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
           _lastSkippedLiveHeader = null;
           _liveFilename = name;
           _lastTakeFilename = name;
-          // A take the device started on its own (hardware button) has its own
-          // clock, and it is the one the coverage check has to measure against.
-          _takeStartedAt = DateTime.now();
+          // A take the device started on its own has its own clock, and it
+          // is the one the coverage check has to measure against. Read it off
+          // the filename rather than from `now`: this notify also arrives when
+          // the phone joins a take already running, and measuring from the
+          // moment we joined made a few seconds of live audio look like the
+          // entire take — which deleted the device's copy of everything
+          // recorded before the app came back. An unparseable name leaves this
+          // null, and a null span keeps the device copy.
+          //
+          // A start this phone asked for is already stamped by startRecording,
+          // and that clock is the better one: it does not depend on the Gem's
+          // own time being set.
+          if (_started == null) {
+            _takeStartedAt = WearableCaptureTime.parseUtcStamp(name);
+          }
         } else if (name != null) {
           _liveFilename = name;
           _lastTakeFilename = name;
@@ -471,21 +484,27 @@ class MemoketConnector extends WearableConnector with WearableOfflineSync {
         final started = _started;
         if (started != null && !started.isCompleted) {
           started.complete(name ?? '');
-        } else if (!recording && !_holdingHardwareStart) {
+        } else if (!recording) {
           // Armed, not emitted. A start notify on its own is not proof the Gem
           // is recording — it also answers control traffic with one — and
           // acting on it opened takes the user never began. Live frames are the
           // proof, and they follow a real start within about 120 ms.
+          //
+          // Arming is also the only thing that lets `_deviceLive` fall back
+          // down, so it has to happen on every unprompted start — inside the
+          // holdoff as much as outside it. An echo that latched the flag made
+          // every later drain return early, and the Gem kept its files.
           _armPendingHardwareStart();
-        } else if (!recording && _holdingHardwareStart) {
-          ClientDiagnosticLog.instance.record(
-            'bluetooth_audio',
-            'hardware_start_held',
-            details: <String, Object?>{
-              'filename': name,
-              'holdoffSeconds': _hardwareStartHoldoff.inSeconds,
-            },
-          );
+          if (_holdingHardwareStart) {
+            ClientDiagnosticLog.instance.record(
+              'bluetooth_audio',
+              'hardware_start_held',
+              details: <String, Object?>{
+                'filename': name,
+                'holdoffSeconds': _hardwareStartHoldoff.inSeconds,
+              },
+            );
+          }
         }
       case MemoketProtocol.opRecordStop:
         _deviceLive = false;

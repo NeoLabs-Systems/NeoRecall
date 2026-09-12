@@ -54,10 +54,13 @@ void main() {
     expect(armed().shouldAutoStartLiveCapture, isTrue);
   });
 
-  test('never before consent is given', () {
-    // The app has no covert mode: without an accepted consent there is no
-    // recording, least of all one the user did not ask for.
-    expect(armed(consent: false).shouldAutoStartLiveCapture, isFalse);
+  test('the stored consent flag does not gate it', () {
+    // Consent is attested per session and the in-app notice is informational,
+    // so it cannot block a start with no UI behind it: a wearable press, the
+    // widget, or this reconnect. Blocking those was silent — the recorder ran
+    // while the phone refused every press. What keeps the app honest is that a
+    // recording is always visibly indicated, not a stored flag.
+    expect(armed(consent: false).shouldAutoStartLiveCapture, isTrue);
   });
 
   test('never when the user did not choose Bluetooth capture', () {

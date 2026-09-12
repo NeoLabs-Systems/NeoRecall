@@ -667,6 +667,169 @@ void main() {
     },
   );
 
+
+  // The failure this guards: the Gem answers ordinary control traffic with a
+  // start notify. When that echo lands inside the holdoff a stop just armed,
+  // the connector marked the device live and then had nothing left to clear
+  // the flag — no pending-start timer is armed on that path and no stop notify
+  // follows an echo. The device stayed "live" forever, so every drain returned
+  // early and its files never came off the Gem.
+  test('a Memoket start echo inside the stop holdoff still drains', () {
+    fakeAsync((async) {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+      unawaited(connector.connect());
+      async.elapse(const Duration(seconds: 2));
+
+      // A take ends: the stop notify arms the hardware-start holdoff.
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[MemoketProtocol.opRecordStop, 0x00],
+      );
+      // Well inside the 10 s holdoff, the Gem echoes a start.
+      async.elapse(const Duration(seconds: 2));
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode('20260908_121500_2.opus'),
+        ],
+      );
+      // No live audio ever follows, so nothing is recording.
+      async.elapse(const Duration(minutes: 5));
+
+      var count = 0;
+      Object? error;
+      unawaited(
+        connector.drainStoredAudio((_) async {}).then(
+          (value) => count = value,
+          onError: (Object e, StackTrace _) => error = e,
+        ),
+      );
+      async.elapse(const Duration(seconds: 30));
+      expect(error, isNull, reason: error?.toString());
+      expect(
+        count,
+        1,
+        reason: 'the echo must not leave the Gem permanently "live"',
+      );
+      unawaited(connector.dispose());
+      async.flushTimers();
+    });
+  });
+
+
+  // The holdoff's original job: the Gem answers the post-stop list/delete
+  // traffic with start notifies. Audio confirmation must not let trailing
+  // frames from the take that just ended re-open a recording.
+  test('a Memoket start echo after a stop does not re-open the take', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    final buttons = <List<int>>[];
+    connector.buttonEvents.stream.listen(buttons.add);
+
+    await connector.startRecording();
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketAudioNotify,
+      <int>[0x00, 0x00, 0x01, ...List<int>.filled(480, 0x11)],
+    );
+    await Future<void>.delayed(Duration.zero);
+    await connector.stopRecording();
+
+    // The Gem echoes a start for the post-stop control traffic, and a late
+    // audio notify from the finished take arrives behind it.
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketControlNotify,
+      <int>[
+        MemoketProtocol.opRecordStart,
+        0x01,
+        0x01,
+        ...ascii.encode('20260905_222343_2.opus'),
+      ],
+    );
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketAudioNotify,
+      <int>[0x00, 0x00, 0x02, ...List<int>.filled(480, 0x11)],
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(
+      buttons.where((e) => e.first == WearableControlCodes.startRecording),
+      isEmpty,
+      reason: 'trailing audio behind a stop must not open a new take',
+    );
+    await connector.dispose();
+  });
+
+
+  // The failure this guards, seen on a real Gem: the app was force-stopped
+  // while the device kept recording. On reopen it joined the take already in
+  // progress, caught the last few seconds live, and on stop deleted the
+  // device's copy — the only copy of everything recorded while the app was
+  // gone. The take's clock is the filename's, not the moment we joined it.
+  test('a Memoket take joined in progress keeps its on-device copy', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+
+    // The Gem has been recording for ten minutes already; the phone only now
+    // sees the start notify for that in-progress take.
+    final started = DateTime.now().toUtc().subtract(
+      const Duration(minutes: 10),
+    );
+    String two(int v) => v.toString().padLeft(2, '0');
+    final name =
+        '${started.year}${two(started.month)}${two(started.day)}_'
+        '${two(started.hour)}${two(started.minute)}${two(started.second)}'
+        '_2.opus';
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketControlNotify,
+      <int>[MemoketProtocol.opRecordStart, 0x01, 0x01, ...ascii.encode(name)],
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    // A couple of seconds of live audio arrive before the take ends.
+    for (var i = 0; i < 3; i += 1) {
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        <int>[0x00, 0x00, i, ...List<int>.filled(480, 0x11)],
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    }
+    await connector.stopRecording();
+
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDelete,
+      ),
+      isFalse,
+      reason: 'seconds of live audio do not cover a ten-minute take',
+    );
+    await connector.dispose();
+  });
+
   test(
     'Memoket hardware start/stop raises control events without a phone command',
     () async {
@@ -678,6 +841,16 @@ void main() {
       _bindMemoketReplies(transport);
 
       await connector.connect();
+
+      // A take the phone watches start carries the clock it started on. The
+      // coverage check measures the take against that stamp, so a fixture
+      // dated in the past would read as a week-long take.
+      final startedAt = DateTime.now().toUtc();
+      String two(int v) => v.toString().padLeft(2, '0');
+      final takeName =
+          '${startedAt.year}${two(startedAt.month)}${two(startedAt.day)}_'
+          '${two(startedAt.hour)}${two(startedAt.minute)}'
+          '${two(startedAt.second)}_2.opus';
 
       final buttons = <List<int>>[];
       final frames = <List<int>>[];
@@ -691,7 +864,7 @@ void main() {
           MemoketProtocol.opRecordStart,
           0x01,
           0x01,
-          ...ascii.encode('20260905_223000_2.opus'),
+          ...ascii.encode(takeName),
         ],
       );
       await Future<void>.delayed(Duration.zero);
@@ -734,7 +907,7 @@ void main() {
           0x00,
           0x01,
           0x00,
-          ...ascii.encode('20260905_223000_2.opus'),
+          ...ascii.encode(takeName),
         ],
       );
       await Future<void>.delayed(Duration.zero);
@@ -760,7 +933,7 @@ void main() {
                   write.value.first == MemoketProtocol.opDelete &&
                   ascii
                       .decode(write.value.sublist(2), allowInvalid: true)
-                      .contains('20260905_223000_2.opus'),
+                      .contains(takeName),
             ),
         isTrue,
       );

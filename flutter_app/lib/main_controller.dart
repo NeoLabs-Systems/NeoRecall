@@ -1889,9 +1889,13 @@ class NeoRecallController extends ChangeNotifier
     required bool systemAudio,
     bool? bluetooth,
   }) async {
-    if (!consentAccepted) {
-      throw StateError('Recording consent must be acknowledged first.');
-    }
+    // Consent is attested per session (`consentAttestedAt`), not gated on a
+    // stored flag. Starting a take is itself the user's direct attestation —
+    // the same reading the watch already applies to its Start button — and a
+    // device, widget, or reconnect start has no UI to raise a notice on. A
+    // blocker there is silent: the recorder looks like it is running while the
+    // phone refuses every press. The in-app notice still shows on a manual
+    // start, and a recording stays visibly indicated wherever it began.
     // Stop must win: a late hardware-start or durable-resume must not reopen
     // a take the user just finalized. A second start while one is running is
     // the "Recorder is already active" loop.
@@ -2411,13 +2415,6 @@ class NeoRecallController extends ChangeNotifier
         notifyListeners();
         return true;
       }
-      if (!consentAccepted) {
-        warning =
-            'Accept the recording consent notice before using the home-screen widget.';
-        notifyListeners();
-        return true;
-      }
-
       await setPreferBluetoothCapture(false);
       if (isRecording) {
         if (capability?.sourceKind != 'microphone') {
@@ -2456,8 +2453,8 @@ class NeoRecallController extends ChangeNotifier
   ///
   /// Deliberately narrow, because starting a recording unprompted is not a
   /// neutral act: only on mobile (the always-on host), only when the user
-  /// already chose Bluetooth as their capture source, only once consent has been
-  /// given, and only for devices that actually stream live — an offline-first
+  /// already chose Bluetooth as their capture source, and only for devices that
+  /// actually stream live — an offline-first
   /// recorder has nothing to stream, and its sync is the whole point. Recording
   /// stays visibly indicated exactly as a manual start does. The offline drain
   /// is unaffected and keeps running alongside on devices that support it, so a
@@ -2465,7 +2462,7 @@ class NeoRecallController extends ChangeNotifier
   bool get shouldAutoStartLiveCapture {
     if (!isMobileCapturePlatform) return false;
     if (_memoketHardwareProbeActive) return false;
-    if (!authenticated || !consentAccepted) return false;
+    if (!authenticated) return false;
     if (!preferBluetoothCapture) return false;
     if (isRecording ||
         _stoppingRecording ||
@@ -2530,7 +2527,6 @@ class NeoRecallController extends ChangeNotifier
     final ownerAccountId = accountId;
     if (ownerAccountId == null ||
         !authenticated ||
-        !consentAccepted ||
         _memoketHardwareProbeActive ||
         isRecording ||
         _stoppingRecording ||
@@ -2604,8 +2600,7 @@ class NeoRecallController extends ChangeNotifier
             !_startingRecording &&
             !_stoppingRecording &&
             !_memoketHardwareProbeActive &&
-            authenticated &&
-            consentAccepted) {
+            authenticated) {
           unawaited(_startFromDeviceControl());
         }
       case DeviceControlEventType.stopRecording:
@@ -2904,7 +2899,6 @@ class NeoRecallController extends ChangeNotifier
         ? recorder as MobileRecallRecorder
         : null;
     if (!authenticated ||
-        !consentAccepted ||
         mobile == null ||
         mobile.backgroundPaused) {
       _switchingMobileSource = false;

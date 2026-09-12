@@ -8,8 +8,7 @@ const { ensureRuntimeDirs } = require('../runtime/paths');
 async function main() {
   const failures = await models.verifyAll();
   if (failures.length) throw new Error(`Model verification failed: ${JSON.stringify(failures)}`);
-  const database = require('../server/db/database').getDatabase();
-  const vectorVersion = database.prepare('SELECT vec_version() version').get().version;
+  const vectorVersion = require('../server/db/database').probeVectorExtension();
   process.env.NEORECALL_TRANSFORMERS_CACHE = path.join(ensureRuntimeDirs().models, 'embeddings');
   const embedding = await require('../server/embeddings/embedding_service').embed('NeoRecall verification', 'passage');
   if (embedding.length !== 384) throw new Error(`Embedding model returned ${embedding.length} dimensions instead of 384.`);
