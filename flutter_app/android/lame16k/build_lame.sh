@@ -2,6 +2,10 @@
 # Rebuild 16 KB-aligned liblame.so for 64-bit ABIs. The Plaud AAR ships a 4 KB
 # page liblame; Android 15+ devices reject that at install.
 set -eu
+# `CDPATH= cd` clears CDPATH for this one command so a directory of the same
+# name elsewhere cannot be entered instead. ShellCheck reads the empty
+# assignment as a typo; it is the intended idiom.
+# shellcheck disable=SC1007
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}"
 if [ -z "$NDK" ]; then
