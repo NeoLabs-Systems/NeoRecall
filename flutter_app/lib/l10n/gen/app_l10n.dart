@@ -2071,6 +2071,12 @@ abstract class AppL10n {
   /// **'Microphone'**
   String get recordSourceMicrophone;
 
+  /// No description provided for @recordChangeSource.
+  ///
+  /// In en, this message translates to:
+  /// **'change'**
+  String get recordChangeSource;
+
   /// No description provided for @recordNoteTitle.
   ///
   /// In en, this message translates to:

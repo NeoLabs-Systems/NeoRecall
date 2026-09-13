@@ -340,6 +340,7 @@
   "recordSourceMicrophoneAndDevice": "Mikrofon und Geräteton",
   "recordSourceDeviceAudio": "Geräteton",
   "recordSourceMicrophone": "Mikrofon",
+  "recordChangeSource": "ändern",
   "recordNoteTitle": "Notiz hinzufügen",
   "recordNoteHint": "Namen, Zusammenhänge, Entscheidungen – alles, was das Transkript übersehen könnte …",
   "recordNoteSave": "Notiz speichern",

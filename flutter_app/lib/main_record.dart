@@ -900,7 +900,7 @@ class _IdleWorkspace extends StatelessWidget {
                               vertical: 2,
                             ),
                             child: Text(
-                              'change',
+                              AppL10n.of(context).recordChangeSource,
                               style: TextStyle(
                                 color: palette.accentHover,
                                 fontSize: 12.5,

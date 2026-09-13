@@ -1304,6 +1304,9 @@ class AppL10nDe extends AppL10n {
   String get recordSourceMicrophone => 'Mikrofon';
 
   @override
+  String get recordChangeSource => 'ändern';
+
+  @override
   String get recordNoteTitle => 'Notiz hinzufügen';
 
   @override

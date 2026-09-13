@@ -706,6 +706,7 @@
   "recordSourceMicrophoneAndDevice": "Microphone and device audio",
   "recordSourceDeviceAudio": "Device audio",
   "recordSourceMicrophone": "Microphone",
+  "recordChangeSource": "change",
   "recordNoteTitle": "Add a note",
   "recordNoteHint": "Names, context, decisions, or anything the transcript may miss…",
   "recordNoteSave": "Save note",
