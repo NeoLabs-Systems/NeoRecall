@@ -75,6 +75,10 @@ jobs:
 
   desktop-compile:
     name: ${{ matrix.platform }} compile gate
+    # macOS and Windows runners bill at 10x and 2x, so these two stay on pull
+    # requests. The Android gate below runs on every push instead, because it
+    # is an ordinary Linux runner and native code that does not compile is
+    # exactly what a push to a release branch must not carry.
     if: github.event_name != 'push'
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -110,7 +114,10 @@ jobs:
 
   android-compile:
     name: Android compile gate
-    if: github.event_name != 'push'
+    # Runs on pushes as well. Work on this project lands straight on main and
+    # beta rather than through pull requests, so a gate that only runs on a
+    # pull request does not run at all: a Kotlin file that did not compile
+    # reached the branch and was found by building it locally, not here.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
