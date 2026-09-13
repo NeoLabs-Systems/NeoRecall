@@ -126,7 +126,7 @@ class _BrowserFileDropSurface implements FileDropSurface {
   Future<Uint8List> _read(html.File file) async {
     final html.FileReader reader = html.FileReader();
     final Completer<Uint8List> completer = Completer<Uint8List>();
-    reader.onLoadEnd.first.then((html.Event _) {
+    unawaited(reader.onLoadEnd.first.then((html.Event _) {
       if (completer.isCompleted) return;
       final Object? result = reader.result;
       if (result is Uint8List) {
@@ -138,10 +138,10 @@ class _BrowserFileDropSurface implements FileDropSurface {
       } else {
         completer.completeError(_unreadable(file));
       }
-    });
-    reader.onError.first.then((html.Event _) {
+    }));
+    unawaited(reader.onError.first.then((html.Event _) {
       if (!completer.isCompleted) completer.completeError(_unreadable(file));
-    });
+    }));
     reader.readAsArrayBuffer(file);
     return completer.future;
   }

@@ -63,7 +63,7 @@ void main() {
       const packets = 30249;
       const measuredSeconds = 131012 * 0.02;
       const perPacket = 0.0866; // mirrors OmiConnector._secondsPerPacket
-      expect((packets * perPacket), closeTo(measuredSeconds, 30));
+      expect(packets * perPacket, closeTo(measuredSeconds, 30));
       expect(
         DeviceSyncStatusView.formatDuration((packets * perPacket).round()),
         '44 min of audio',

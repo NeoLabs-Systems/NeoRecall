@@ -418,8 +418,13 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   Future<int> storedBytes(AudioChunk chunk) async {
     final path = chunk.filePath;
     if (path == null) return chunk.bytes?.length ?? 0;
-    final file = File(path);
-    return await file.exists() ? file.length() : 0;
+    // Asking the filesystem twice is both slower and a race: the file can go
+    // between the check and the read. One call answers both questions.
+    try {
+      return await File(path).length();
+    } on FileSystemException {
+      return 0;
+    }
   }
 
   @override
@@ -553,8 +558,11 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
   @override
   Future<Uint8List?> readContextBytes(RecordingContextItem item) async {
     if (item.filePath == null) return null;
-    final file = File(item.filePath!);
-    return await file.exists() ? _readPlain(file) : null;
+    try {
+      return await _readPlain(File(item.filePath!));
+    } on FileSystemException {
+      return null;
+    }
   }
 
   @override
@@ -582,8 +590,11 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
     );
     final filePath = rows.isEmpty ? null : rows.first['filePath'] as String?;
     if (filePath != null) {
-      final file = File(filePath);
-      if (await file.exists()) await file.delete();
+      try {
+        await File(filePath).delete();
+      } on FileSystemException {
+        // Already gone is the outcome this wanted.
+      }
     }
     await db.update(
       'contexts',

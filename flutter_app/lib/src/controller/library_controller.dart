@@ -131,7 +131,7 @@ mixin LibraryController on ChangeNotifier {
     // Status is derived from the cached policy, so refresh it before returning
     // to a settings screen that may have just changed the network rule.
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
     _applyRecordingSchedule();
     notice = strings.settingsSaved;
     notifyListeners();

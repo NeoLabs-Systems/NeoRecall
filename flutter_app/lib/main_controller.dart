@@ -1271,11 +1271,11 @@ class NeoRecallController extends ChangeNotifier
       // Automatic device-storage sync needs no user action and no open UI.
       deviceStorageSync.start();
       // Recover interrupted offline sessions/chunks before new capture starts.
-      sync.pump.pump();
+      unawaited(sync.pump.pump());
       await _refreshPending();
       if (authenticated) {
         await _settings();
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         await refreshAll(silent: true);
       }
       if (_supportsDurableMobileResume) {
@@ -1456,7 +1456,7 @@ class NeoRecallController extends ChangeNotifier
           notifyListeners();
         }
         await _refreshPending();
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         if (recordings.length < 20) break;
       }
     } finally {
@@ -2057,7 +2057,7 @@ class NeoRecallController extends ChangeNotifier
             capability!.sourceKind == 'wearable' ? 'bluetooth' : 'microphone',
           );
         }
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         _armRecordingSchedule();
       } catch (exception) {
         error = exception is StateError ? exception.message : exception.toString();
@@ -2078,7 +2078,7 @@ class NeoRecallController extends ChangeNotifier
                 synced: false,
               ),
             );
-            sync.pump.pump();
+            unawaited(sync.pump.pump());
           } catch (_) {
             // Preserve the original capture failure. Startup recovery will close
             // the already-durable session on the next application launch.
@@ -2132,7 +2132,7 @@ class NeoRecallController extends ChangeNotifier
     if (!recorded.isFinal) _mobileCaptureRecoveryAttempts = 0;
     await store.clearPartial(session.sourceId);
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
   }
 
   Future<void> _storeCapturePartial(RecordedAudioChunk recorded) async {
@@ -2204,7 +2204,7 @@ class NeoRecallController extends ChangeNotifier
       audioLevel = 0;
       // The background battery warning is only meaningful during active capture.
       backgroundCaptureAtRisk = false;
-      sync.pump.pump();
+      unawaited(sync.pump.pump());
       if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
         await (recorder as MobileRecallRecorder).finishBackgroundHost();
       }
@@ -3074,7 +3074,7 @@ class NeoRecallController extends ChangeNotifier
       await sync.pump.retry(chunk);
     }
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
   }
 
   /// Drains only the uploadable audio that is queued at the moment of the
@@ -3388,7 +3388,7 @@ class NeoRecallController extends ChangeNotifier
       }
     }
     if (!authenticated) return;
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
     await _refreshPending();
     await refreshAll(silent: true);
     // Pull anything the wearable recorded while the app was backgrounded.
