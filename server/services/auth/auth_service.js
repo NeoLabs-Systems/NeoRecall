@@ -6,6 +6,7 @@ const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { randomToken, sha256, hashPassword, verifyPassword, encryptString, decryptString } = require('../../utils/crypto');
 const { generateSecret, otpauthUri, verifyTotp, normalizeTotpCode } = require('../../utils/totp');
+const { generateRecoveryCodes, lockAfterInvalidAttempt } = require('./two_factor_policy');
 const audit = require('../audit/audit_service');
 
 function publicUser(user) {
@@ -69,16 +70,19 @@ function verifySecondFactor(userId, value) {
   const factor = db.prepare('SELECT * FROM user_two_factor WHERE user_id = ? AND pending = 0').get(userId);
   if (!factor) return true;
   const code = normalizeTwoFactorCode(value);
-  if (!code) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
+  if (!code) {
+    const error = new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
+    error.userId = userId;
+    throw error;
+  }
   if (factor.locked_until && Date.parse(factor.locked_until) > Date.now()) throw new HttpError(429, 'TWO_FACTOR_LOCKED', 'Two-factor authentication is temporarily locked.');
   const valid = verifyTotp(code, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(userId, code);
   if (valid) {
     db.prepare('UPDATE user_two_factor SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?').run(userId);
     return true;
   }
-  const attempts = factor.failed_attempts + 1;
-  const lockedUntil = attempts >= 5 ? new Date(Date.now() + 5 * 60_000).toISOString() : null;
-  db.prepare('UPDATE user_two_factor SET failed_attempts = ?, locked_until = ? WHERE user_id = ?').run(attempts, lockedUntil, userId);
+  const attempts = lockAfterInvalidAttempt(factor.failed_attempts);
+  db.prepare('UPDATE user_two_factor SET failed_attempts = ?, locked_until = ? WHERE user_id = ?').run(attempts.attempts, attempts.lockedUntil, userId);
   throw new HttpError(401, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
 }
 
@@ -87,6 +91,20 @@ async function authenticateCredentials({ account, password, twoFactorCode }, con
   const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE').get(String(account || '').trim(), String(account || '').trim());
   const valid = user ? await verifyPassword(String(password || ''), user.password_hash) : false;
   if (!valid) {
+    audit.record({ actorType: 'system', action: 'login_failed', ipAddress: context.ipAddress });
+    throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  }
+  if (user.disabled_at) throw new HttpError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
+  verifySecondFactor(user.id, twoFactorCode);
+  db.prepare("UPDATE users SET last_login_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(user.id);
+  audit.record({ actorType: 'user', actorId: user.id, affectedUserId: user.id, action: 'login_succeeded', ipAddress: context.ipAddress });
+  return publicUser(user);
+}
+
+async function completeTwoFactor(userId, twoFactorCode, context = {}) {
+  const db = getDatabase();
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(String(userId || ''));
+  if (!user) {
     audit.record({ actorType: 'system', action: 'login_failed', ipAddress: context.ipAddress });
     throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
   }
@@ -157,7 +175,7 @@ function activateTwoFactor(userId, code) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM user_two_factor WHERE user_id = ? AND pending = 1').get(userId);
   if (!factor || !verifyTotp(code, decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
-  const codes = Array.from({ length: 10 }, () => randomToken(8).slice(0, 10).toUpperCase());
+  const codes = generateRecoveryCodes();
   db.transaction(() => {
     db.prepare("UPDATE user_two_factor SET pending=0, enabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?").run(userId);
     db.prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
@@ -181,10 +199,7 @@ async function regenerateRecoveryCodes(userId, password, code) {
   const user = getDatabase().prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user || !(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'INVALID_PASSWORD', 'The password is incorrect.');
   verifySecondFactor(userId, code);
-  const codes = Array.from({ length: 10 }, () => {
-    let raw = randomToken(8).slice(0, 10).toUpperCase();
-    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-  });
+  const codes = generateRecoveryCodes();
   getDatabase().transaction(() => {
     getDatabase().prepare('DELETE FROM user_recovery_codes WHERE user_id = ?').run(userId);
     const insert = getDatabase().prepare('INSERT INTO user_recovery_codes (id, user_id, code_hash) VALUES (?, ?, ?)');
@@ -279,6 +294,6 @@ async function deleteAccount(userId, password, code) {
 }
 
 module.exports = {
-  publicUser, register, login, createSession, authenticateCredentials, authenticateToken, logout, logoutAll, changePassword,
+  publicUser, register, login, createSession, authenticateCredentials, completeTwoFactor, authenticateToken, logout, logoutAll, changePassword,
   beginTwoFactor, activateTwoFactor, disableTwoFactor, deleteAccount, eraseContent, verifySecondFactor, getTwoFactorStatus, regenerateRecoveryCodes,
 };

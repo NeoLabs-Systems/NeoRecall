@@ -7,6 +7,7 @@ const { pageLimit, encodeCursor, decodeCursor } = require('../../utils/paginatio
 const searchIndex = require('../../embeddings/search_index_service');
 const { createLogger } = require('../../utils/logger');
 const { SPEAKER_NAME_COLUMNS, SPEAKER_NAME_JOINS } = require('../../db/speaker_resolution_sql');
+const { placeholders } = require('../../utils/query');
 
 const logger = createLogger('recordings');
 
@@ -46,10 +47,10 @@ function removeDerivedData(database, userId, session) {
   const memoryIds = memories.map((row) => row.id);
   const contextOriginals = memoryIds.length
     ? database.prepare(`SELECT original_path FROM recording_context_items WHERE user_id=?
-      AND memory_id IN (${memoryIds.map(() => '?').join(',')}) AND original_path IS NOT NULL`).all(userId, ...memoryIds)
+      AND memory_id IN (${placeholders(memoryIds.length)}) AND original_path IS NOT NULL`).all(userId, ...memoryIds)
     : [];
   const miniIds = memoryIds.length
-    ? database.prepare(`SELECT id FROM mini_memories WHERE user_id=? AND memory_id IN (${memoryIds.map(() => '?').join(',')})`).all(userId, ...memoryIds).map((row) => row.id)
+    ? database.prepare(`SELECT id FROM mini_memories WHERE user_id=? AND memory_id IN (${placeholders(memoryIds.length)})`).all(userId, ...memoryIds).map((row) => row.id)
     : [];
   const coverageEnd = session.corrected_ended_at || database.prepare(`SELECT MAX(t.ended_at) ended_at FROM transcript_segments t
     JOIN audio_chunks c ON c.id=t.chunk_id WHERE c.session_id=? AND t.user_id=?`).get(session.id, userId).ended_at || session.corrected_started_at;
@@ -66,7 +67,7 @@ function removeDerivedData(database, userId, session) {
     ...miniIds.map((sourceId) => ({ kind: 'mini_memory', sourceId })),
     ...summaries.map((row) => ({ kind: 'daily_summary', sourceId: row.id })),
   ]);
-  if (memoryIds.length) database.prepare(`DELETE FROM memories WHERE user_id=? AND id IN (${memoryIds.map(() => '?').join(',')})`).run(userId, ...memoryIds);
+  if (memoryIds.length) database.prepare(`DELETE FROM memories WHERE user_id=? AND id IN (${placeholders(memoryIds.length)})`).run(userId, ...memoryIds);
   for (const summary of summaries) database.prepare('DELETE FROM daily_summaries WHERE id=? AND user_id=?').run(summary.id, userId);
   for (const conversationId of conversationIds) database.prepare('DELETE FROM conversations WHERE id=? AND user_id=?').run(conversationId, userId);
   database.prepare(`DELETE FROM entities WHERE user_id=? AND id NOT IN (SELECT entity_id FROM memory_entities)

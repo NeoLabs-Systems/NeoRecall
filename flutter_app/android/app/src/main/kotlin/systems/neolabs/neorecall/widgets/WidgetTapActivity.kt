@@ -31,6 +31,12 @@ class WidgetTapActivity : Activity() {
         queue(ACTION_STOP_RECORDING, null, now)
         WidgetUpdater.refreshAll(this)
       }
+      WidgetIntents.TAP_START -> {
+        (application as? NeoRecallApplication)
+          ?.backgroundCaptureChannel
+          ?.requestWidgetPhoneRecording()
+        startActivity(MainActivity.widgetIntent(this, WidgetIntents.PAGE_RECORD, null))
+      }
       WidgetIntents.TAP_COMPLETE -> if (!targetId.isNullOrEmpty()) {
         // The row disappears before the server has been told, because a tick
         // that leaves the row sitting there reads as a missed tap.

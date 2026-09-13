@@ -370,18 +370,78 @@ function renderSecurity(tfStatus) {
   }
 }
 
+function closeDialog(value) {
+  const dialog = document.querySelector('#dialog');
+  const resolve = dialog._resolve;
+  dialog.hidden = true;
+  dialog._resolve = null;
+  document.querySelector('#dialog-input').value = '';
+  document.querySelector('#dialog-qr').hidden = true;
+  document.querySelector('#dialog-codes').hidden = true;
+  document.querySelector('#dialog-input-wrap').hidden = true;
+  if (resolve) resolve(value);
+}
+
+function showDialog({ title, body, qr, codes, input, inputLabel, value = '', confirm = 'Continue', danger = false }) {
+  const dialog = document.querySelector('#dialog');
+  document.querySelector('#dialog-title').textContent = title;
+  document.querySelector('#dialog-body').textContent = body || '';
+  const qrEl = document.querySelector('#dialog-qr');
+  qrEl.hidden = !qr;
+  if (qr) qrEl.src = qr;
+  const codesEl = document.querySelector('#dialog-codes');
+  codesEl.hidden = !codes;
+  codesEl.textContent = codes ? codes.join('\n') : '';
+  document.querySelector('#dialog-input-wrap').hidden = !input;
+  if (input) {
+    const label = document.querySelector('#dialog-input-label');
+    if (label) label.textContent = inputLabel || 'Authenticator or recovery code';
+    document.querySelector('#dialog-input').value = value;
+  }
+  const confirmBtn = document.querySelector('#dialog-confirm');
+  confirmBtn.textContent = confirm;
+  confirmBtn.classList.toggle('btn-danger', Boolean(danger));
+  confirmBtn.classList.toggle('btn-primary', !danger);
+  dialog.hidden = false;
+  if (input) document.querySelector('#dialog-input').focus();
+  return new Promise((resolve) => { dialog._resolve = resolve; });
+}
+
+document.querySelector('#dialog-cancel').addEventListener('click', () => closeDialog(null));
+document.querySelector('#dialog-confirm').addEventListener('click', () => {
+  const inputWrap = document.querySelector('#dialog-input-wrap');
+  closeDialog(inputWrap.hidden ? true : document.querySelector('#dialog-input').value.trim());
+});
+
 async function handleTwoFactorSetup() {
   const setup = await api('/settings/2fa/setup', { method: 'POST' });
-  const code = prompt(`Scan the QR code or use manual key: ${setup.manualKey}\n\nEnter the 6-digit code:`);
+  const code = await showDialog({
+    title: 'Enable 2FA',
+    body: `Scan the QR code or enter this key in your authenticator app: ${setup.manualKey}`,
+    qr: setup.qrDataUrl,
+    input: true,
+    confirm: 'Enable',
+  });
   if (!code) return;
   const res = await api('/settings/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) });
-  alert('2FA enabled! Save these recovery codes:\\n' + res.recoveryCodes.join('\\n'));
+  await showDialog({
+    title: 'Save these recovery codes',
+    body: 'Store them somewhere safe. Each code can be used once if you lose the authenticator.',
+    codes: res.recoveryCodes,
+    confirm: 'Done',
+  });
   await load();
   showToast('2FA enabled');
 }
 
 async function handleTwoFactorDisable() {
-  const code = prompt('Enter your 2FA code or a recovery code to disable 2FA:');
+  const code = await showDialog({
+    title: 'Disable 2FA',
+    body: 'Enter your authenticator code or a recovery code.',
+    input: true,
+    confirm: 'Disable',
+    danger: true,
+  });
   if (!code) return;
   await api('/settings/2fa', { method: 'DELETE', body: JSON.stringify({ code }) });
   await load();
@@ -389,10 +449,20 @@ async function handleTwoFactorDisable() {
 }
 
 async function handleTwoFactorRecovery() {
-  const code = prompt('Enter your current 2FA code to regenerate recovery codes:');
+  const code = await showDialog({
+    title: 'Regenerate recovery codes',
+    body: 'Enter your current authenticator code. Existing unused recovery codes will stop working.',
+    input: true,
+    confirm: 'Regenerate',
+  });
   if (!code) return;
   const res = await api('/settings/2fa/recovery-codes', { method: 'POST', body: JSON.stringify({ code }) });
-  alert('New recovery codes generated! Save these:\\n' + res.recoveryCodes.join('\\n'));
+  await showDialog({
+    title: 'New recovery codes',
+    body: 'Save these codes now. The previous set no longer works.',
+    codes: res.recoveryCodes,
+    confirm: 'Done',
+  });
   await load();
 }
 
@@ -409,10 +479,17 @@ function describeUsageWindow(meter) {
   return `4h ${meter.usage.fourHour}/${limitLabel(meter.limits.fourHour)} · 7d ${meter.usage.weekly}/${limitLabel(meter.limits.weekly)}`;
 }
 
-function promptOverride(label, current) {
-  const raw = prompt(`${label}\nEmpty = inherit install default. 0 = unlimited.`, current == null ? '' : String(current));
-  if (raw === null) return undefined;
-  const trimmed = raw.trim();
+async function promptOverride(label, current) {
+  const raw = await showDialog({
+    title: label,
+    body: 'Empty = inherit install default. 0 = unlimited.',
+    input: true,
+    inputLabel: label,
+    value: current == null ? '' : String(current),
+    confirm: 'Set',
+  });
+  if (raw === null || raw === false) return undefined;
+  const trimmed = String(raw).trim();
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${label} must be empty, 0, or a positive whole number.`);
@@ -422,12 +499,17 @@ function promptOverride(label, current) {
 async function handleUserLimits(userId) {
   const current = await api(`/users/${userId}/usage-limits`);
   const usage = current.usage || {};
-  alert(`${current.username}\nAI: ${describeUsageWindow(usage.ai || { usage: {}, limits: {} })}\nTranscription seconds: ${describeUsageWindow(usage.transcription || { usage: {}, limits: {} })}`);
+  const proceed = await showDialog({
+    title: current.username,
+    body: `AI: ${describeUsageWindow(usage.ai || { usage: {}, limits: {} })}\nTranscription seconds: ${describeUsageWindow(usage.transcription || { usage: {}, limits: {} })}`,
+    confirm: 'Edit limits',
+  });
+  if (!proceed) return;
   const body = {
-    aiLimit4h: promptOverride('AI tokens / 4 hours', current.aiLimit4h),
-    aiLimitWeekly: promptOverride('AI tokens / 7 days', current.aiLimitWeekly),
-    transcriptionLimit4h: promptOverride('Transcription seconds / 4 hours', current.transcriptionLimit4h),
-    transcriptionLimitWeekly: promptOverride('Transcription seconds / 7 days', current.transcriptionLimitWeekly),
+    aiLimit4h: await promptOverride('AI tokens / 4 hours', current.aiLimit4h),
+    aiLimitWeekly: await promptOverride('AI tokens / 7 days', current.aiLimitWeekly),
+    transcriptionLimit4h: await promptOverride('Transcription seconds / 4 hours', current.transcriptionLimit4h),
+    transcriptionLimitWeekly: await promptOverride('Transcription seconds / 7 days', current.transcriptionLimitWeekly),
   };
   if (Object.values(body).every((value) => value === undefined)) return;
   await api(`/users/${userId}/usage-limits`, { method: 'PUT', body: JSON.stringify(body) });

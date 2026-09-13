@@ -69,7 +69,8 @@ function fail(id, workerId, error, retryable = true) {
     const job = db.prepare("SELECT * FROM jobs WHERE id=? AND status='leased' AND lease_owner=?").get(id, workerId);
     if (!job) return false;
     const shouldRetry = retryable && job.attempts < job.max_attempts;
-    const delayMs = Math.min(15 * 60_000, 2 ** Math.max(0, job.attempts - 1) * 5_000);
+    const { jobRetryBaseMs, jobRetryMaxMs } = getConfig();
+    const delayMs = Math.min(jobRetryMaxMs, 2 ** Math.max(0, job.attempts - 1) * jobRetryBaseMs);
     db.prepare(`UPDATE jobs SET status=?,lease_owner=NULL,lease_expires_at=NULL,next_attempt_at=?,
       last_error_code=?,last_error_message=?,completed_at=?,updated_at=? WHERE id=?`)
       .run(shouldRetry ? 'queued' : 'failed', new Date(Date.now() + delayMs).toISOString(), error.code || 'JOB_FAILED',

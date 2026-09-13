@@ -184,19 +184,19 @@ static void apply_scan(void *unused)
     (void) unused;
     if (!s_dd_ssid) return;
     nr_config_t c; nr_config_get(&c);
-    char opts[20 * 34 + 64];
+    char opts[NR_CFG_STR_MAX + 20 * 34 + 8];
     opts[0] = '\0';
     int sel = 0, idx = 0;
     bool listed = false;
     for (int i = 0; i < s_scan_n; i++) if (strcmp(s_scan[i], c.wifi_ssid) == 0) listed = true;
-    if (c.wifi_ssid[0] && !listed) { strcat(opts, c.wifi_ssid); idx = 1; }
+    if (c.wifi_ssid[0] && !listed) { nr_strlcat(opts, c.wifi_ssid, sizeof(opts)); idx = 1; }
     for (int i = 0; i < s_scan_n; i++) {
-        if (opts[0]) strcat(opts, "\n");
+        if (opts[0]) nr_strlcat(opts, "\n", sizeof(opts));
         if (strcmp(s_scan[i], c.wifi_ssid) == 0) sel = idx;
-        strcat(opts, s_scan[i]);
+        nr_strlcat(opts, s_scan[i], sizeof(opts));
         idx++;
     }
-    if (opts[0] == '\0') strcpy(opts, "(keine Netzwerke gefunden)");
+    if (opts[0] == '\0') nr_strlcpy(opts, "(keine Netzwerke gefunden)", sizeof(opts));
     lv_dropdown_set_options(s_dd_ssid, opts);
     lv_dropdown_set_selected(s_dd_ssid, sel);
 }
@@ -417,8 +417,9 @@ static void open_ap_cb(lv_event_t *e)
     (void) e;
     nr_wifi_start_ap();
     char ssid[33]; nr_wifi_ap_ssid(ssid);
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Verbinde dein Handy mit dem WLAN\n\n%s\n\nund öffne http://192.168.4.1", ssid);
+    char ap_ip[16]; nr_wifi_ap_ip(ap_ip);
+    char msg[160];
+    snprintf(msg, sizeof(msg), "Verbinde dein Handy mit dem WLAN\n\n%s\n\nund öffne http://%s", ssid, ap_ip);
     lv_obj_t *mb = lv_msgbox_create(NULL);
     lv_msgbox_add_title(mb, "Einrichtung per Handy");
     lv_msgbox_add_text(mb, msg);

@@ -25,6 +25,10 @@ struct NeoRecallLiveStatusAttributes: ActivityAttributes {
 }
 #endif
 
+enum NeoRecallLiveDefaults {
+  static let stopPendingKey = "neorecall.live.stop.pending"
+}
+
 #if canImport(AppIntents)
 @available(iOS 17.0, *)
 struct StopNeoRecallIntent: LiveActivityIntent {
@@ -34,15 +38,15 @@ struct StopNeoRecallIntent: LiveActivityIntent {
   )
 
   func perform() async throws -> some IntentResult {
-    UserDefaults.standard.set(true, forKey: "neorecall.live.stop.pending")
+    UserDefaults.standard.set(true, forKey: NeoRecallLiveDefaults.stopPendingKey)
     NotificationCenter.default.post(name: .neoRecallLiveStopRequested, object: nil)
     return .result()
   }
 }
+#endif
 
 extension Notification.Name {
   static let neoRecallLiveStopRequested = Notification.Name(
     "systems.neolabs.neorecall.liveStopRequested"
   )
 }
-#endif

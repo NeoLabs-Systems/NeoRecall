@@ -39,6 +39,9 @@ test('enabling authenticator 2FA returns a manual key and accepts the current co
   const enabled = await request(app).post('/api/v1/settings/2fa/enable').set(user.headers)
     .send({ code: generateTotp(setup.body.secret) }).expect(200);
   assert.equal(enabled.body.recoveryCodes.length, 10);
+  for (const code of enabled.body.recoveryCodes) {
+    assert.match(code, /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/);
+  }
 
   const status = await request(app).get('/api/v1/settings/2fa').set(user.headers).expect(200);
   assert.equal(status.body.enabled, true);

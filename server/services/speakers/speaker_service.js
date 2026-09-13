@@ -8,6 +8,7 @@ const vectors = require('../../transcription/speaker_embeddings');
 const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
 const resolutionState = require('../../speakers/resolution_state');
+const { placeholders } = require('../../utils/query');
 
 // The people worth showing.
 //
@@ -297,7 +298,7 @@ function reevaluate(userId, { repair = false } = {}) {
 function bulkRemove(userId, ids) {
   const uniqueIds = [...new Set(ids)];
   const db = getDatabase();
-  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${uniqueIds.map(() => '?').join(',')})`)
+  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${placeholders(uniqueIds.length)})`)
     .all(userId, ...uniqueIds);
   if (rows.length !== uniqueIds.length) throw new HttpError(404, 'NOT_FOUND', 'One or more speakers were not found.');
   db.transaction(() => {

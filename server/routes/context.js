@@ -1,6 +1,6 @@
 'use strict';
 
-const fs = require('node:fs');
+const crypto = require('node:crypto');
 const multer = require('multer');
 const express = require('express');
 const { z } = require('zod');
@@ -9,11 +9,12 @@ const { ensureRuntimeDirs } = require('../../runtime/paths');
 const { requireAuth, requireScope } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const service = require('../services/context/context_service');
+const tempAudio = require('../services/ingest/temp_audio_service');
 
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_request, _file, done) => done(null, ensureRuntimeDirs().context),
-    filename: (_request, _file, done) => done(null, `incoming-${Date.now()}-${Math.random().toString(16).slice(2)}.part`),
+    filename: (_request, _file, done) => done(null, `incoming-${crypto.randomUUID()}.part`),
   }),
   limits: { fileSize: getConfig().contextMaxFileBytes, files: 1 },
 });
@@ -46,7 +47,7 @@ function routerFor(target) {
         : { memoryId: req.params.memoryId }, req.params.itemId, input(req), req.file);
       res.status(201).json({ item });
     } catch (error) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      tempAudio.unlinkBestEffort(req.file?.path, { itemId: req.params.itemId, userId: req.auth.userId });
       next(error);
     }
   });

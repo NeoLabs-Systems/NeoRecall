@@ -64,8 +64,8 @@ function lastOutbound(userId) {
 // then two, four, eight, up to half an hour — so an outage costs a handful of
 // attempts instead of hundreds, and recovery still happens on its own within
 // half an hour of the cause being fixed. Asking by hand ignores it entirely.
-const FAILURE_BACKOFF_BASE_MS = 60_000;
-const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
+const FAILURE_BACKOFF_BASE_MS = () => getConfig().consolidationFailureBackoffBaseMs;
+const FAILURE_BACKOFF_MAX_MS = () => getConfig().consolidationFailureBackoffMaxMs;
 
 function failureBackoff(userId) {
   const rows = getDatabase().prepare(`SELECT state,error_code,error_message,completed_at
@@ -78,7 +78,7 @@ function failureBackoff(userId) {
     consecutive += 1;
   }
   if (!consecutive || !latest?.completed_at) return null;
-  const delay = Math.min(FAILURE_BACKOFF_MAX_MS, FAILURE_BACKOFF_BASE_MS * 2 ** (consecutive - 1));
+  const delay = Math.min(FAILURE_BACKOFF_MAX_MS(), FAILURE_BACKOFF_BASE_MS() * 2 ** (consecutive - 1));
   const retryAt = Date.parse(latest.completed_at) + delay;
   if (Date.now() >= retryAt) return null;
   return {

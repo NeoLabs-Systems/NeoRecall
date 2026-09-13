@@ -1,23 +1,13 @@
 'use strict';
 
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const aiProviders = require('../../ai/provider_registry');
 const transcriptionProviders = require('../../transcription/provider_registry');
 const consolidation = require('../memories/consolidation_service');
 const usageLimits = require('../usage/usage_limit_service');
 
-// Answers "I recorded all day — where did it go?" for the person who did the
-// recording, not the operator: no HTTP statuses, no setting names, no
-// instructions they cannot act on. The technical cause goes to the logs and the
-// admin dashboard instead.
-//
-// Severities: `blocked`, nothing progresses until someone with server access
-// acts; `attention`, worth knowing while the rest keeps moving.
-
-// Generous, because transcribing a backlog is legitimately slow: this is meant
-// to catch a worker that is not running at all.
-const STALLED_QUEUE_MS = 30 * 60_000;
-const WORKER_SILENT_MS = 5 * 60_000;
+// Owner-facing processing status: no HTTP codes or setting names.
 
 function counts(userId) {
   const db = getDatabase();
@@ -42,7 +32,7 @@ function counts(userId) {
 
 function workerAlive() {
   const row = getDatabase().prepare('SELECT MAX(heartbeat_at) value FROM worker_heartbeats').get();
-  return Boolean(row?.value) && Date.now() - Date.parse(row.value) < WORKER_SILENT_MS;
+  return Boolean(row?.value) && Date.now() - Date.parse(row.value) < getConfig().processingWorkerSilentMs;
 }
 
 function plural(count, singular, many) {
@@ -153,7 +143,7 @@ function issuesFor(data, eligibility, providers, alive, userId = null) {
       detail: 'Recordings are still being received and kept, but nothing is being worked on. Your audio is safe in the meantime.',
       action: 'Someone with access to this server needs to look at it. Keep recording — nothing is being lost.',
     });
-  } else if (data.oldestQueuedAt && Date.now() - Date.parse(data.oldestQueuedAt) > STALLED_QUEUE_MS) {
+  } else if (data.oldestQueuedAt && Date.now() - Date.parse(data.oldestQueuedAt) > getConfig().processingStalledQueueMs) {
     issues.push({
       severity: 'attention',
       code: 'PROCESSING_BEHIND',
@@ -222,4 +212,8 @@ async function forUser(userId) {
   };
 }
 
-module.exports = { forUser, issuesFor, summarize, counts, transcriptionReady, STALLED_QUEUE_MS, WORKER_SILENT_MS };
+module.exports = {
+  forUser, issuesFor, summarize, counts, transcriptionReady,
+  get STALLED_QUEUE_MS() { return getConfig().processingStalledQueueMs; },
+  get WORKER_SILENT_MS() { return getConfig().processingWorkerSilentMs; },
+};

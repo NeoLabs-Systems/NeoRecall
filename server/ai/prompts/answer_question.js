@@ -1,8 +1,6 @@
 'use strict';
 
-// The answer step. Everything it may say comes from `context`; everything it
-// needs in order to read that context in time — the user's clock, and the period
-// the question was resolved to — comes from `frame`.
+// Ask answer messages. `frame` carries the owner's clock and the resolved period.
 function answerMessages(question, context, frame = {}) {
   return [
     {

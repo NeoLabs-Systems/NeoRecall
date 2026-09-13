@@ -8,11 +8,6 @@ import 'src/models/ask.dart';
 import 'l10n/gen/app_l10n.dart';
 
 /// Ask: one conversation with your own recall.
-///
-/// This replaced a results list. A query over a life is almost never a lookup —
-/// it is a question with a time in it, a name, a half-remembered promise — so
-/// the answer leads and the evidence it was written from sits under it, ranked,
-/// rather than the other way round.
 class AskScreen extends StatefulWidget {
   const AskScreen({super.key, required this.controller});
   final NeoRecallController controller;
@@ -455,15 +450,16 @@ class _SourceRow extends StatelessWidget {
 
   String _when(BuildContext context) {
     final at = source.occurredAt;
-    if (at == null) return source.kindLabel.toUpperCase();
+    final l10n = AppL10n.of(context)!;
+    if (at == null) return source.kindLabel(l10n).toUpperCase();
     final time =
         '${at.hour.toString().padLeft(2, '0')}:'
         '${at.minute.toString().padLeft(2, '0')}';
     final today = DateUtils.isSameDay(at, DateTime.now());
     final date = today
-        ? 'today'
+        ? l10n.recordTodayLabel
         : MaterialLocalizations.of(context).formatShortDate(at);
-    return '${source.kindLabel} · $date $time'.toUpperCase();
+    return '${source.kindLabel(l10n)} · $date $time'.toUpperCase();
   }
 
   @override

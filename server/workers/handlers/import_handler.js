@@ -10,6 +10,7 @@ const { getConfig } = require('../../config');
 const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const { sha256File } = require('../../utils/crypto');
 const jobs = require('../../services/jobs/job_service');
+const tempAudio = require('../../services/ingest/temp_audio_service');
 
 // A whole day of audio decodes to thousands of segments, so nothing here may
 // read a segment's samples: only the RIFF header is needed, and the header lives
@@ -174,7 +175,7 @@ async function handle(job) {
     fs.rmSync(workDirectory, { recursive: true, force: true });
     return { sessionId, sourceId, chunks: files.length };
   } catch (error) {
-    for (const filename of createdFiles) { try { fs.unlinkSync(filename); } catch (_) {} }
+    for (const filename of createdFiles) tempAudio.unlinkBestEffort(filename, { importId: record.id, userId: record.user_id });
     fs.rmSync(workDirectory, { recursive: true, force: true });
     db.prepare("UPDATE imports SET state='failed',error_code=?,expires_at=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?")
       .run(error.code || 'IMPORT_PROCESSING_FAILED', new Date(Date.now() + getConfig().importFailedTtlHours * 60 * 60_000).toISOString(), record.id);

@@ -1,8 +1,6 @@
+import '../../l10n/gen/app_l10n.dart';
+
 /// One piece of evidence the answer was written from.
-///
-/// `relevance` is the server's fused retrieval score for the document, kept so
-/// the app can show how strong a match was rather than presenting every source
-/// as equally certain.
 class AskSource {
   const AskSource({
     required this.kind,
@@ -34,13 +32,13 @@ class AskSource {
   final double relevance;
   final String? link;
 
-  /// Human label for a source kind (not snake_case).
-  String get kindLabel => switch (kind) {
-    'segment' => 'Transcript',
-    'memory' => 'Memory',
-    'mini_memory' => 'Detail',
-    'daily_summary' => 'Day',
-    _ => 'Source',
+  /// Human label for a source kind.
+  String kindLabel(AppL10n l10n) => switch (kind) {
+    'segment' => l10n.askSourceKindTranscript,
+    'memory' => l10n.askSourceKindMemory,
+    'mini_memory' => l10n.askSourceKindDetail,
+    'daily_summary' => l10n.askSourceKindDay,
+    _ => l10n.askSourceKindSource,
   };
 }
 
@@ -58,10 +56,7 @@ class AskTurn {
   int considered = 0;
   int weakCount = 0;
 
-  /// The stretch of time the question was read as, as local wall-clock strings,
-  /// and the account timezone they were resolved in. Shown because an account
-  /// still set to UTC while its owner lives elsewhere answers "today" with
-  /// somebody else's day, and there is no way to see that from the answer.
+  /// Local wall-clock bounds the question was read as, in the account timezone.
   DateTime? periodFrom;
   DateTime? periodTo;
   String? timezone;

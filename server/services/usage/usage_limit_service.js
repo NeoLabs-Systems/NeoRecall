@@ -10,7 +10,6 @@ const WINDOWS = Object.freeze({
   fourHour: { durationMs: 4 * 60 * 60 * 1000 },
   weekly: { durationMs: 7 * 24 * 60 * 60 * 1000 },
 });
-const MAX_AI_RESERVATION_TOKENS = 100_000;
 const INSTALL_KEYS = Object.freeze({
   aiTokens4h: 'aiTokens4h',
   aiTokensWeekly: 'aiTokensWeekly',
@@ -22,9 +21,38 @@ const USER_COLUMNS = Object.freeze({
   transcription: { fourHour: 'transcription_limit_4h', weekly: 'transcription_limit_weekly' },
 });
 
-// In-process reservation: `${userId}:${meter}` -> reserved amount. Concurrent
-// Ask + consolidation (or two speech chunks) must see each other as in flight.
-const _reservations = new Map();
+// Durable reservations so the HTTP process and the worker process see each
+// other's in-flight usage instead of both admitting work that together exceeds
+// the cap.
+function pruneExpiredReservations(database = getDatabase()) {
+  database.prepare('DELETE FROM usage_reservations WHERE expires_at<=?').run(new Date().toISOString());
+}
+
+function reservedAmount(userId, meter) {
+  const database = getDatabase();
+  pruneExpiredReservations(database);
+  return database.prepare(`SELECT COALESCE(SUM(amount),0) total FROM usage_reservations
+    WHERE user_id=? AND meter=? AND expires_at>?`).get(userId, meter, new Date().toISOString()).total || 0;
+}
+
+function addReservation(userId, meter, amount) {
+  const database = getDatabase();
+  pruneExpiredReservations(database);
+  const id = crypto.randomUUID();
+  database.prepare(`INSERT INTO usage_reservations (id,user_id,meter,amount,expires_at)
+    VALUES (?,?,?,?,?)`).run(id, userId, meter, amount, new Date(Date.now() + getConfig().usageReservationTtlMs).toISOString());
+  return id;
+}
+
+function releaseReservation(userId, meter, amount) {
+  const row = getDatabase().prepare(`SELECT id FROM usage_reservations
+    WHERE user_id=? AND meter=? AND amount=? ORDER BY created_at DESC LIMIT 1`).get(userId, meter, amount);
+  if (row) getDatabase().prepare('DELETE FROM usage_reservations WHERE id=?').run(row.id);
+}
+
+function clearReservations() {
+  getDatabase().prepare('DELETE FROM usage_reservations').run();
+}
 
 class UsageLimitExceededError extends HttpError {
   constructor(meter, windowKey, snapshot) {
@@ -44,30 +72,6 @@ class UsageLimitExceededError extends HttpError {
 }
 
 function noopReleaseReservation() {}
-
-function reservationKey(userId, meter) {
-  return `${userId}:${meter}`;
-}
-
-function reservedAmount(userId, meter) {
-  return _reservations.get(reservationKey(userId, meter)) || 0;
-}
-
-function addReservation(userId, meter, amount) {
-  const key = reservationKey(userId, meter);
-  _reservations.set(key, reservedAmount(userId, meter) + amount);
-}
-
-function releaseReservation(userId, meter, amount) {
-  const key = reservationKey(userId, meter);
-  const next = reservedAmount(userId, meter) - amount;
-  if (next <= 0) _reservations.delete(key);
-  else _reservations.set(key, next);
-}
-
-function clearReservations() {
-  _reservations.clear();
-}
 
 function asNonNegativeInteger(value) {
   if (value == null || value === '') return null;
@@ -234,7 +238,7 @@ function getUsageSnapshot(userId, options = {}) {
 function calculateReservation(limits) {
   const finite = [limits.fourHour, limits.weekly].filter((limit) => Number.isFinite(limit) && limit > 0);
   if (!finite.length) return 1;
-  return Math.min(MAX_AI_RESERVATION_TOKENS, Math.max(1, Math.floor(Math.min(...finite) * 0.1)));
+  return Math.min(getConfig().usageMaxReservationTokens, Math.max(1, Math.floor(Math.min(...finite) * 0.1)));
 }
 
 function windowExceededBy(meterSnapshot, reserve) {
@@ -247,20 +251,22 @@ function windowExceededBy(meterSnapshot, reserve) {
 
 function enforce(userId, meter, options = {}) {
   if (!METERS.includes(meter)) throw new Error(`Unknown usage meter: ${meter}`);
-  const snapshot = getUsageSnapshot(userId, { includeReservations: true });
-  const meterSnapshot = snapshot[meter];
-  if (meterSnapshot.reached.fourHour) throw new UsageLimitExceededError(meter, 'fourHour', snapshot);
-  if (meterSnapshot.reached.weekly) throw new UsageLimitExceededError(meter, 'weekly', snapshot);
-  if (meterSnapshot.limits.fourHour == null && meterSnapshot.limits.weekly == null) {
-    return { snapshot, releaseReservation: noopReleaseReservation };
-  }
-  const reserve = options.reserve != null
-    ? Math.max(1, Math.floor(Number(options.reserve) || 0))
-    : calculateReservation(meterSnapshot.limits);
-  const exceeded = windowExceededBy(meterSnapshot, reserve);
-  if (exceeded) throw new UsageLimitExceededError(meter, exceeded, snapshot);
-  addReservation(userId, meter, reserve);
-  return { snapshot, releaseReservation: () => releaseReservation(userId, meter, reserve) };
+  return getDatabase().transaction(() => {
+    const snapshot = getUsageSnapshot(userId, { includeReservations: true });
+    const meterSnapshot = snapshot[meter];
+    if (meterSnapshot.reached.fourHour) throw new UsageLimitExceededError(meter, 'fourHour', snapshot);
+    if (meterSnapshot.reached.weekly) throw new UsageLimitExceededError(meter, 'weekly', snapshot);
+    if (meterSnapshot.limits.fourHour == null && meterSnapshot.limits.weekly == null) {
+      return { snapshot, releaseReservation: noopReleaseReservation };
+    }
+    const reserve = options.reserve != null
+      ? Math.max(1, Math.floor(Number(options.reserve) || 0))
+      : calculateReservation(meterSnapshot.limits);
+    const exceeded = windowExceededBy(meterSnapshot, reserve);
+    if (exceeded) throw new UsageLimitExceededError(meter, exceeded, snapshot);
+    addReservation(userId, meter, reserve);
+    return { snapshot, releaseReservation: () => releaseReservation(userId, meter, reserve) };
+  })();
 }
 
 function rejectIfReached(userId, meter) {
@@ -325,7 +331,6 @@ function transcriptionSecondsFor(durationMs) {
 module.exports = {
   METERS,
   WINDOWS,
-  MAX_AI_RESERVATION_TOKENS,
   UsageLimitExceededError,
   configuredDefaultLimits,
   getInstallDefaults,

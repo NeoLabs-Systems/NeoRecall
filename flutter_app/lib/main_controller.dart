@@ -55,11 +55,12 @@ import 'src/settings/account_export_save.dart';
 import 'src/settings/usage_section.dart';
 import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
-import 'src/watch/paired_watch.dart';
+import 'src/watch/watch_inbox_audio.dart';
 import 'src/watch/watch_digest.dart';
 import 'src/watch/watch_digest_publisher.dart';
 
 part 'src/controller/auth_controller.dart';
+part 'src/controller/ask_controller.dart';
 part 'src/controller/diagnostics_controller.dart';
 part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
@@ -85,6 +86,7 @@ bool canRestoreSessionForBackend({
 class NeoRecallController extends ChangeNotifier
     with
         AuthController,
+        AskController,
         DeviceSyncController,
         DiagnosticsController,
         LibraryController,
@@ -177,6 +179,22 @@ class NeoRecallController extends ChangeNotifier
       host: base.host,
       port: base.hasPort ? base.port : null,
     ).toString().replaceFirst(RegExp(r'/$'), '');
+  }
+
+  static bool _isPrivateOrLocalHost(String host) {
+    if (_isLoopbackHost(host)) return true;
+    final normalized = host.trim().toLowerCase();
+    if (normalized.endsWith('.local')) return true;
+    final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
+    final match = ipv4.firstMatch(normalized);
+    if (match == null) return false;
+    final parts = List<int>.generate(4, (i) => int.parse(match.group(i + 1)!));
+    if (parts.any((octet) => octet > 255)) return false;
+    if (parts[0] == 10) return true;
+    if (parts[0] == 192 && parts[1] == 168) return true;
+    if (parts[0] == 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] == 169 && parts[1] == 254) return true;
+    return false;
   }
 
   static bool _isLoopbackHost(String host) {
@@ -649,11 +667,6 @@ class NeoRecallController extends ChangeNotifier
   String processingSummary = '';
   int audioStillOnDevice = 0;
   List<Map<String, dynamic>> dailySummaries = <Map<String, dynamic>>[];
-
-  /// The Ask conversation, oldest first. One entry per question asked in this
-  /// session; the trailing one is still being answered while [askBusy] is true.
-  List<AskTurn> askTurns = <AskTurn>[];
-  bool askBusy = false;
   AccountUsageSnapshot? accountUsage;
   bool accountUsageLoading = false;
   @override
@@ -1272,8 +1285,7 @@ class NeoRecallController extends ChangeNotifier
         _queueWatchImport((recorder as MobileRecallRecorder).background);
       }
     } catch (exception) {
-      initializationError =
-          'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.';
+      initializationError = strings.controllerStartupFailed;
       error = initializationError;
       debugPrint('NeoRecall initialization failed: $exception');
     } finally {
@@ -1296,7 +1308,7 @@ class NeoRecallController extends ChangeNotifier
       error = exception.toString();
       _storageExhausted = isStorageCapacityError(exception);
       warning = _storageExhausted
-          ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
+          ? strings.controllerStorageWriteFailed
           : genericWarning;
       if (recorder.isRecording) {
         unawaited(
@@ -1314,18 +1326,14 @@ class NeoRecallController extends ChangeNotifier
       _chunkWrite = _chunkWrite
           .then((_) => _storeRecordedChunk(chunk))
           .catchError(
-            _onDurableWriteFailed(
-              'Local audio could not be stored. Recording is stopping without deleting queued audio.',
-            ),
+            _onDurableWriteFailed(strings.controllerAudioStoreFailed),
           );
     });
     _partialSubscription = recorder.partials.listen((partial) {
       _partialWrite = _partialWrite
           .then((_) => _storeCapturePartial(partial))
           .catchError(
-            _onDurableWriteFailed(
-              'The active audio block could not be written to durable storage.',
-            ),
+            _onDurableWriteFailed(strings.controllerPartialStoreFailed),
           );
     });
     _warningSubscription = recorder.warnings.listen((value) {
@@ -1389,10 +1397,7 @@ class NeoRecallController extends ChangeNotifier
           final durationMs = (row['durationMs'] as num).toInt();
           final isFinal = row['isFinal'] as bool;
           final digest = row['sha256'] as String;
-          final bytes = row['bytes'];
-          if (bytes is! Uint8List) {
-            throw const FormatException('Wear OS audio payload is not binary.');
-          }
+          final bytes = await readWatchInboxAudio(row);
           await store.putSession(
             LocalRecordingDeclaration(
               id: sessionId,
@@ -1490,6 +1495,9 @@ class NeoRecallController extends ChangeNotifier
       notifyListeners();
       return false;
     }
+    if (uri.scheme == 'http' && !_isPrivateOrLocalHost(uri.host)) {
+      notice = strings.controllerPublicHttpWarning;
+    }
     final previous = api.baseUrl;
     loading = true;
     error = null;
@@ -1511,8 +1519,7 @@ class NeoRecallController extends ChangeNotifier
       return false;
     } catch (_) {
       api.baseUrl = previous;
-      error =
-          'NeoRecall could not reach that server. Check the address and that the server is running.';
+      error = strings.controllerUnreachableServer;
       return false;
     } finally {
       loading = false;
@@ -1710,10 +1717,15 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
     try {
       await operation();
+      needsTwoFactor = false;
       return true;
     } on ApiException catch (exception) {
-      if (exception.code == 'TWO_FACTOR_REQUIRED') onTwoFactor?.call();
-      error = exception.message;
+      if (exception.code == 'TWO_FACTOR_REQUIRED') {
+        onTwoFactor?.call();
+        error = strings.controllerTwoFactorRequired;
+      } else {
+        error = exception.message;
+      }
       return false;
     } on WebAuthnException catch (exception) {
       _securityKeyDismissed = exception.cancelled;
@@ -1913,9 +1925,9 @@ class NeoRecallController extends ChangeNotifier
                 ? null
                 : audioDeviceRegistry[descriptor.adapterId]);
         if (descriptor == null || adapter == null) {
-          throw StateError(
-            'Connect a supported Bluetooth device before starting capture.',
-          );
+          error = strings.controllerBluetoothRequired;
+          notifyListeners();
+          return;
         }
         final transportReady =
             audioDeviceSessions.state ==
@@ -1923,9 +1935,9 @@ class NeoRecallController extends ChangeNotifier
             audioDeviceSessions.state == DeviceTransportState.recording ||
             await audioDeviceSessions.connectPreferred();
         if (!transportReady) {
-          throw StateError(
-            'The Bluetooth device could not be connected. Keep it nearby and try again.',
-          );
+          error = strings.controllerBluetoothConnectFailed;
+          notifyListeners();
+          return;
         }
         // A live capture and an offline drain must never run together (they share
         // the BLE channel/buffer on several wearables). If a device-storage sync
@@ -1944,7 +1956,9 @@ class NeoRecallController extends ChangeNotifier
         if (!useBluetooth) microphone = true;
       }
       if (!microphone && !systemAudio && externalDevice == null) {
-        throw StateError('Select at least one capture source.');
+        error = strings.controllerSelectCaptureSource;
+        notifyListeners();
+        return;
       }
       error = null;
       warning = null;
@@ -1959,13 +1973,11 @@ class NeoRecallController extends ChangeNotifier
         );
         if (!schedule.allows(DateTime.now())) {
           _armRecordingSchedule();
-          throw StateError(
-            'Recording is outside the configured daily recording window.',
-          );
+          throw StateError(strings.controllerOutsideRecordingWindow);
         }
         final recordingAccountId = accountId;
         if (recordingAccountId == null) {
-          throw StateError('Sign in before starting a recording.');
+          throw StateError(strings.controllerSignInToRecord);
         }
         final identity = await _deviceIdentity(recordingAccountId);
         final deviceId = identity.id;
@@ -2045,7 +2057,7 @@ class NeoRecallController extends ChangeNotifier
         sync.pump.pump();
         _armRecordingSchedule();
       } catch (exception) {
-        error = exception.toString();
+        error = exception is StateError ? exception.message : exception.toString();
         // Capture never took the device, so release the claim — otherwise a failed
         // start would silently disable automatic sync for the rest of the session.
         _deviceClaimedForCapture = false;
@@ -2235,9 +2247,7 @@ class NeoRecallController extends ChangeNotifier
       return;
     }
     await stopRecording(preserveMobileIntent: _supportsDurableMobileResume);
-    warning =
-        'Recording paused at the end of its daily window. Android may require '
-        'NeoRecall to be opened before phone-microphone recording resumes.';
+    warning = strings.controllerSchedulePaused;
     notifyListeners();
   }
 
@@ -2294,8 +2304,7 @@ class NeoRecallController extends ChangeNotifier
       try {
         changed = await _applyWidgetAction(action) || changed;
       } catch (exception) {
-        warning =
-            'A home-screen widget action could not be completed: $exception';
+        warning = strings.controllerWidgetActionFailed('$exception');
         ClientDiagnosticLog.instance.record(
           'widget_capture',
           'action_failed',
@@ -2410,8 +2419,7 @@ class NeoRecallController extends ChangeNotifier
     final wasAlreadyRecording = isRecording;
     try {
       if (!authenticated) {
-        warning =
-            'Sign in before starting recording from the home-screen widget.';
+        warning = strings.controllerWidgetRecordSignIn;
         notifyListeners();
         return true;
       }
@@ -2546,8 +2554,7 @@ class NeoRecallController extends ChangeNotifier
     _resumingMobileCapture = true;
     try {
       if (mode == 'bluetooth' && !hasPreferredBluetoothDevice) {
-        warning =
-            'Background capture could not resume because its Bluetooth device is not configured.';
+        warning = strings.controllerBluetoothNotConfigured;
         notifyListeners();
         return;
       }
@@ -2558,9 +2565,7 @@ class NeoRecallController extends ChangeNotifier
         // restart) and denies microphone access to a process with no UI.
         // Keep the durable intent and resume when the app is opened, rather
         // than starting a capture that would record silence.
-        warning =
-            'Phone-microphone recording is waiting for NeoRecall to be opened. '
-            'Bluetooth capture and device sync continue in the background.';
+        warning = strings.controllerMicrophoneNeedsOpen;
         notifyListeners();
         return;
       }
@@ -2569,8 +2574,7 @@ class NeoRecallController extends ChangeNotifier
         systemAudio: false,
         bluetooth: mode == 'bluetooth',
       );
-      notice =
-          'Background recording recovered after the app process restarted.';
+      notice = strings.controllerBackgroundRecovered;
       if (recorder is MobileRecallRecorder) {
         _handleDeviceTransportState(
           (recorder as MobileRecallRecorder).devices.state,
@@ -2697,8 +2701,7 @@ class NeoRecallController extends ChangeNotifier
       if ((state == DeviceTransportState.disconnected ||
               state == DeviceTransportState.faulted) &&
           capability?.sourceKind == 'wearable') {
-        warning =
-            'The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.';
+        warning = strings.controllerBluetoothDisconnected;
         notifyListeners();
       }
       return;
@@ -2835,8 +2838,8 @@ class NeoRecallController extends ChangeNotifier
         bluetooth: useBluetooth,
       );
       notice = useBluetooth
-          ? 'Recording moved back to the reconnected Bluetooth device.'
-          : 'Bluetooth disconnected; recording continues with the phone microphone.';
+          ? strings.controllerCaptureMovedToBluetooth
+          : strings.controllerCaptureMovedToPhone;
       notifyListeners();
     } catch (exception) {
       warning = strings.controllerSourceRecoveryFailed('$exception');
@@ -2884,8 +2887,7 @@ class NeoRecallController extends ChangeNotifier
       );
     } catch (exception) {
       _switchingMobileSource = false;
-      warning =
-          'Interrupted recording could not be finalized safely: $exception';
+      warning = strings.controllerInterruptedFinalizeFailed('$exception');
       notifyListeners();
     }
   }
@@ -2927,9 +2929,7 @@ class NeoRecallController extends ChangeNotifier
     }
     _mobileCaptureRecoveryAttempts += 1;
     final delay = Duration(milliseconds: delayMs);
-    warning =
-        'Audio capture was interrupted ($reason). The durable tail was saved; '
-        'capture will retry in ${delay.inSeconds} seconds.';
+    warning = strings.controllerCaptureRetrying(reason, delay.inSeconds);
     notifyListeners();
     _mobileCaptureRecoveryTimer = Timer(delay, () async {
       _mobileCaptureRecoveryTimer = null;
@@ -2973,8 +2973,7 @@ class NeoRecallController extends ChangeNotifier
         bluetooth: true,
       );
     } catch (exception) {
-      warning =
-          'The device requested recording, but capture could not start: $exception';
+      warning = strings.controllerDeviceRecordFailed('$exception');
       notifyListeners();
     }
   }
@@ -3094,8 +3093,8 @@ class NeoRecallController extends ChangeNotifier
               .length;
     final chunkCount = await sync.pump.uploadQueuedAudioOnMeteredOnce();
     notice = chunkCount == 0
-        ? 'There is no queued audio ready to upload.'
-        : 'Uploading $recordingCount queued recording${recordingCount == 1 ? '' : 's'} using mobile data.';
+        ? strings.controllerNoQueuedAudio
+        : strings.controllerUploadingQueuedAudio(recordingCount);
     await _refreshPending();
     notifyListeners();
   }
@@ -3347,8 +3346,7 @@ class NeoRecallController extends ChangeNotifier
       }
       await _refreshBatteryOptimizationRisk(mobile);
     } catch (error) {
-      warning =
-          'Android could not open the battery-optimization request: $error';
+      warning = strings.controllerBatteryOptimizationFailed('$error');
       notifyListeners();
     }
   }
@@ -3398,8 +3396,7 @@ class NeoRecallController extends ChangeNotifier
     _cancelMobileCaptureRecovery();
     if (isRecording) await stopRecording();
     await mobile.pauseBackgroundRuntime();
-    notice =
-        'Background recording and device sync are paused. Open NeoRecall to resume them.';
+    notice = strings.controllerBackgroundPaused;
     notifyListeners();
   }
 
@@ -3521,7 +3518,7 @@ class NeoRecallController extends ChangeNotifier
       // refresh has already shown what it could, and the status card explains
       // anything genuinely wrong far better than a failed request URL would.
       error = (!silent && failures.length == results.length)
-          ? 'Could not reach NeoRecall. Showing what was loaded last.'
+          ? strings.controllerRefreshFailed
           : null;
     } catch (exception) {
       cachedData = true;
@@ -3650,61 +3647,12 @@ class NeoRecallController extends ChangeNotifier
   String _describeReprocessFailure(Object exception) {
     final detail = exception.toString();
     if (detail.contains('AI_NOT_CONFIGURED')) {
-      return 'Summaries are not available right now, so this moment was left as it is.';
+      return strings.controllerReprocessAiUnavailable;
     }
     if (detail.contains('CONVERSATION_OPEN')) {
-      return 'This conversation is still being recorded.';
+      return strings.controllerReprocessStillRecording;
     }
-    return 'This moment could not be written up again just now.';
-  }
-
-  /// Asks one question and appends the exchange to [askTurns].
-  ///
-  /// The turn is added before the request goes out, so the question the user
-  /// typed is on screen while the answer is being written — and a failure lands
-  /// on that turn rather than replacing the conversation with an error banner.
-  Future<void> ask(String question) async {
-    final trimmed = question.trim();
-    if (trimmed.isEmpty || askBusy) return;
-    final turn = AskTurn(question: trimmed);
-    askTurns = <AskTurn>[...askTurns, turn];
-    askBusy = true;
-    notifyListeners();
-    try {
-      final payload =
-          await api.request(
-                'POST',
-                '/api/v1/search/ask',
-                body: <String, dynamic>{'question': trimmed},
-              )
-              as Map;
-      turn.answer = payload['answer'] as String?;
-      turn.sources = (payload['citations'] as List? ?? <dynamic>[])
-          .cast<Map>()
-          .map(
-            (Map citation) =>
-                AskSource.fromJson(Map<String, dynamic>.from(citation)),
-          )
-          .toList();
-      final retrieval = payload['retrieval'];
-      if (retrieval is Map) {
-        turn.readRetrieval(Map<String, dynamic>.from(retrieval));
-      }
-    } catch (exception) {
-      turn.error = _describeAskFailure(exception);
-    } finally {
-      askBusy = false;
-      notifyListeners();
-    }
-  }
-
-  /// Starts a fresh conversation. Nothing is kept between app runs, so this is
-  /// the whole of forgetting.
-  void clearAsk() {
-    if (askTurns.isEmpty) return;
-    askTurns = <AskTurn>[];
-    askBusy = false;
-    notifyListeners();
+    return strings.controllerReprocessFailed;
   }
 
   Future<void> refreshAccountUsage({bool silent = false}) async {
@@ -3721,25 +3669,6 @@ class NeoRecallController extends ChangeNotifier
       accountUsageLoading = false;
       notifyListeners();
     }
-  }
-
-  String _describeAskFailure(Object exception) {
-    final code = exception is ApiException ? exception.code : '';
-    final detail = exception.toString();
-    if (code == 'USAGE_LIMIT_EXCEEDED' || detail.contains('USAGE_LIMIT_EXCEEDED')) {
-      unawaited(refreshAccountUsage(silent: true));
-      return appStrings.usageAskLimited;
-    }
-    if (code == 'ASK_RATE_LIMITED' ||
-        code == 'ASK_BURST_LIMITED' ||
-        detail.contains('ASK_RATE_LIMITED') ||
-        detail.contains('ASK_BURST_LIMITED')) {
-      return 'You have asked a lot in a short time. Try again in a few minutes.';
-    }
-    if (code == 'AI_NOT_CONFIGURED' || detail.contains('AI_NOT_CONFIGURED')) {
-      return 'No answering model is configured yet, so this question cannot be answered.';
-    }
-    return 'That question could not be answered just now.';
   }
 
   Future<void> importAudio(

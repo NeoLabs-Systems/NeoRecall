@@ -22,12 +22,10 @@ class MainActivity : FlutterActivity() {
   private fun handleLaunchIntent(intent: Intent?) {
     if (intent == null) return
     val channel = (application as NeoRecallApplication).backgroundCaptureChannel
-    if (intent.action == ACTION_START_PHONE_RECORDING) {
-      channel.requestWidgetPhoneRecording()
-      return
-    }
-    if (intent.action == ACTION_MEMOKET_E2E ||
-      intent.getBooleanExtra(EXTRA_MEMOKET_E2E, false)
+    if (BuildConfig.DEBUG && (
+        intent.action == ACTION_MEMOKET_E2E ||
+          intent.getBooleanExtra(EXTRA_MEMOKET_E2E, false)
+        )
     ) {
       channel.requestMemoketE2e(
         liveMs = intent.getIntExtra(EXTRA_E2E_LIVE_MS, 0).takeIf { it > 0 },

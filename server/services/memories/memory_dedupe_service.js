@@ -6,6 +6,7 @@ const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const memoryService = require('./memory_service');
 const { createLogger } = require('../../utils/logger');
+const { placeholders } = require('../../utils/query');
 
 const logger = createLogger('memories');
 
@@ -105,7 +106,7 @@ function minutesApart(left, right) {
 function markChecked(ids, database) {
   if (!ids.length) return;
   database.prepare(`UPDATE memories SET dedupe_checked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-    WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+    WHERE id IN (${placeholders(ids.length)})`).run(...ids);
 }
 
 // One pass over the cards this user has gained since the last pass.

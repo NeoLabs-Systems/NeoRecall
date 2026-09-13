@@ -157,17 +157,26 @@ class BackgroundCaptureChannel(private val context: Context) {
           result.error("WATCH_INBOX_FAILED", error.message, null)
         }
         "markWatchRecordingImported" -> {
-          PhoneWearTransferManager.get(context).markImported(
-            requireNotNull(call.argument<String>("recordingId")),
-          )
-          result.success(true)
+          val recordingId = call.argument<String>("recordingId")
+          if (recordingId.isNullOrBlank()) {
+            result.error("INVALID_WATCH_RECORDING", "recordingId is required.", null)
+          } else {
+            PhoneWearTransferManager.get(context).markImported(recordingId)
+            result.success(true)
+          }
         }
         "acknowledgeWatchRecording" -> {
+          val recordingId = call.argument<String>("recordingId")
+          val receipt = call.argument<Map<String, Any?>>("receipt")
+          if (recordingId.isNullOrBlank() || receipt == null) {
+            result.error("INVALID_WATCH_ACK", "recordingId and receipt are required.", null)
+            return@setMethodCallHandler
+          }
           // Answered off the main thread, then handed back to it: the Data Layer
           // write blocks, and Flutter may only be replied to on the main thread.
           PhoneWearTransferManager.get(context).acknowledge(
-            requireNotNull(call.argument<String>("recordingId")),
-            requireNotNull(call.argument<Map<String, Any?>>("receipt")),
+            recordingId,
+            receipt,
           ) { outcome ->
             Handler(Looper.getMainLooper()).post {
               outcome.fold(

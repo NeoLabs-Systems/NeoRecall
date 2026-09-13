@@ -82,6 +82,12 @@ function buildConfig() {
     // stream, so erring long is the safe direction.
     importSessionContinuityMs: integer('NEORECALL_IMPORT_SESSION_CONTINUITY_MS', 600_000, { min: 0 }),
     importFailedTtlHours: integer('NEORECALL_IMPORT_FAILED_TTL_HOURS', 24, { min: 1 }),
+    // How long a file in a work directory may go unreferenced before a sweep
+    // treats it as leaked rather than mid-write. Every orphan sweep — temporary
+    // audio, import parts, cloud staging — shares this one grace period, because
+    // they are all answering the same question about the same kind of file.
+    // Raise it on a filesystem slow enough that a large write outlives it.
+    orphanFileGraceMs: integer('NEORECALL_ORPHAN_FILE_GRACE_MS', 60_000, { min: 1_000 }),
     transcriptionProvider: process.env.TRANSCRIPTION_PROVIDER || 'openai-compatible',
     transcriptionApiBaseUrl: (process.env.TRANSCRIPTION_API_BASE_URL || '').replace(/\/+$/, '') || null,
     transcriptionApiKey: process.env.TRANSCRIPTION_API_KEY || null,
@@ -334,12 +340,36 @@ function buildConfig() {
     // summaries are what consolidation already sorted, dated and titled;
     // transcript segments are the raw speech behind them, worth a few slots for
     // exact wording but not worth crowding out the layer written from them.
+    askMemoryContextLimit: integer('NEORECALL_ASK_MEMORY_CONTEXT_LIMIT', 12, { min: 1, max: 100 }),
+    askTranscriptContextLimit: integer('NEORECALL_ASK_TRANSCRIPT_CONTEXT_LIMIT', 4, { min: 0, max: 100 }),
+    askQuotaWindowMs: integer('NEORECALL_ASK_QUOTA_WINDOW_MS', 60 * 60_000, { min: 60_000 }),
+    askCitationExcerptChars: integer('NEORECALL_ASK_CITATION_EXCERPT_CHARS', 240, { min: 40, max: 4_000 }),
+    askPromptReserveCharacters: integer('NEORECALL_ASK_PROMPT_RESERVE_CHARACTERS', 1_000, { min: 100 }),
+    eventOutboxPollLimit: integer('NEORECALL_EVENT_OUTBOX_POLL_LIMIT', 100, { min: 1, max: 1_000 }),
+    eventOutboxKeepaliveMs: integer('NEORECALL_EVENT_OUTBOX_KEEPALIVE_MS', 15_000, { min: 1_000 }),
+    oauthPendingTwoFactorTtlMs: integer('NEORECALL_OAUTH_PENDING_2FA_TTL_MS', 5 * 60_000, { min: 30_000 }),
+    oauthBrowserGrantTtlMs: integer('NEORECALL_OAUTH_BROWSER_GRANT_TTL_MS', 15 * 60_000, { min: 30_000 }),
+    twoFactorLockAfterFailures: integer('NEORECALL_TWO_FACTOR_LOCK_AFTER_FAILURES', 5, { min: 1, max: 50 }),
+    twoFactorLockMs: integer('NEORECALL_TWO_FACTOR_LOCK_MS', 5 * 60_000, { min: 1_000 }),
+    twoFactorRecoveryCodeCount: integer('NEORECALL_TWO_FACTOR_RECOVERY_CODE_COUNT', 10, { min: 1, max: 50 }),
+    ftsMaxTerms: integer('NEORECALL_FTS_MAX_TERMS', 30, { min: 1, max: 200 }),
+    jobRetryBaseMs: integer('NEORECALL_JOB_RETRY_BASE_MS', 5_000, { min: 100 }),
+    jobRetryMaxMs: integer('NEORECALL_JOB_RETRY_MAX_MS', 15 * 60_000, { min: 1_000 }),
+    workerHeartbeatMs: integer('NEORECALL_WORKER_HEARTBEAT_MS', 5_000, { min: 500 }),
+    workerLeaseRenewMs: integer('NEORECALL_WORKER_LEASE_RENEW_MS', 30_000, { min: 1_000 }),
+    workerIdlePollMs: integer('NEORECALL_WORKER_IDLE_POLL_MS', 500, { min: 50 }),
+    askQuotaRetentionMs: integer('NEORECALL_ASK_QUOTA_RETENTION_MS', 2 * 60 * 60_000, { min: 60_000 }),
+    consolidationInterruptMs: integer('NEORECALL_CONSOLIDATION_INTERRUPT_MS', 30 * 60_000, { min: 1_000 }),
+    processingStalledQueueMs: integer('NEORECALL_PROCESSING_STALLED_QUEUE_MS', 30 * 60_000, { min: 1_000 }),
+    processingWorkerSilentMs: integer('NEORECALL_PROCESSING_WORKER_SILENT_MS', 5 * 60_000, { min: 1_000 }),
+    usageReservationTtlMs: integer('NEORECALL_USAGE_RESERVATION_TTL_MS', 15 * 60_000, { min: 5_000 }),
+    usageMaxReservationTokens: integer('NEORECALL_USAGE_MAX_RESERVATION_TOKENS', 100_000, { min: 1 }),
+    consolidationFailureBackoffBaseMs: integer('NEORECALL_CONSOLIDATION_FAILURE_BACKOFF_BASE_MS', 60_000, { min: 1_000 }),
+    consolidationFailureBackoffMaxMs: integer('NEORECALL_CONSOLIDATION_FAILURE_BACKOFF_MAX_MS', 30 * 60_000, { min: 1_000 }),
     // Standing instructions an account owner may give the model, per area. Long
     // enough for a paragraph of preferences on each; short enough that four of
     // them plus the global one cannot crowd the evidence out of a request.
     customInstructionsMaxCharacters: integer('NEORECALL_CUSTOM_INSTRUCTIONS_MAX_CHARACTERS', 2_000, { min: 0, max: 20_000 }),
-    askMemoryContextLimit: integer('NEORECALL_ASK_MEMORY_CONTEXT_LIMIT', 12, { min: 1, max: 100 }),
-    askTranscriptContextLimit: integer('NEORECALL_ASK_TRANSCRIPT_CONTEXT_LIMIT', 4, { min: 0, max: 100 }),
     searchWeights: {
       relevance: relevanceWeight / searchWeightTotal,
       recency: recencyWeight / searchWeightTotal,

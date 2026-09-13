@@ -7,6 +7,7 @@ const { pageLimit } = require('../../utils/pagination');
 const searchIndex = require('../../embeddings/search_index_service');
 const { PENDING_ID } = require('./timeline_service');
 const { createLogger } = require('../../utils/logger');
+const { placeholders } = require('../../utils/query');
 
 const logger = createLogger('conversations');
 const BULK_MAX = 100;
@@ -55,10 +56,6 @@ function get(userId, id) {
     segments: getDatabase().prepare('SELECT * FROM transcript_segments WHERE conversation_id=? AND user_id=? ORDER BY started_at').all(id, userId),
     speakers: getDatabase().prepare('SELECT * FROM conversation_speakers WHERE conversation_id=?').all(id),
   };
-}
-
-function placeholders(count) {
-  return new Array(count).fill('?').join(',');
 }
 
 function unlinkContextOriginals(paths) {

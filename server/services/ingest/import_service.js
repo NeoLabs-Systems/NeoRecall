@@ -8,6 +8,7 @@ const { getConfig } = require('../../config');
 const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const { HttpError } = require('../../middleware/error_handler');
 const jobs = require('../jobs/job_service');
+const tempAudio = require('./temp_audio_service');
 
 function get(userId, id) {
   const row = getDatabase().prepare('SELECT * FROM imports WHERE id=? AND user_id=?').get(id, userId);
@@ -154,8 +155,10 @@ async function importLocalFile(userId, filename, input) {
 function cancel(userId, id) {
   const record = get(userId, id);
   const db = getDatabase();
-  for (const part of db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id)) { try { fs.unlinkSync(part.temporary_path); } catch (_) {} }
-  if (record.temporary_path) { try { fs.unlinkSync(record.temporary_path); } catch (_) {} }
+  for (const part of db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id)) {
+    tempAudio.unlinkBestEffort(part.temporary_path, { importId: id, userId });
+  }
+  tempAudio.unlinkBestEffort(record.temporary_path, { importId: id, userId });
   db.prepare("UPDATE imports SET state='cancelled',temporary_path=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?").run(id, userId);
 }
 
@@ -186,16 +189,7 @@ function sweepOrphans() {
     ...db.prepare('SELECT temporary_path FROM imports WHERE temporary_path IS NOT NULL').all(),
     ...db.prepare('SELECT temporary_path FROM import_parts WHERE temporary_path IS NOT NULL').all(),
   ].map((row) => path.resolve(row.temporary_path)));
-  let removed = 0;
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const filename = path.resolve(directory, entry.name);
-    if (!referenced.has(filename) && Date.now() - fs.statSync(filename).mtimeMs > 60_000) {
-      fs.unlinkSync(filename);
-      removed += 1;
-    }
-  }
-  return removed;
+  return tempAudio.sweepOrphans({ directory, referenced, context: { sweep: 'import-temp' } });
 }
 
 module.exports = { declare, get, acceptPart, complete, cancel, shaFile, importLocalFile, reconcileProcessing, sweepOrphans };

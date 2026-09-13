@@ -7,17 +7,20 @@ import systems.neolabs.neorecall.wear.protocol.WearTransferProtocol
 
 class PhoneWearDataListenerService : WearableListenerService() {
   override fun onDataChanged(events: DataEventBuffer) {
-    events.forEach { event ->
-      if (event.type != DataEvent.TYPE_CHANGED) return@forEach
-      if (!event.dataItem.uri.path.orEmpty().startsWith(WearTransferProtocol.RECORDING_PATH_PREFIX)) return@forEach
-      val channel = (application as NeoRecallApplication).backgroundCaptureChannel
-      channel.notifyWatchTransferStarted()
-      val transfer = runCatching { PhoneWearTransferManager.get(this).receive(event.dataItem) }
-      transfer
-        .onSuccess { inserted ->
-          if (inserted) channel.notifyWatchRecordingAvailable()
-        }
-      channel.notifyWatchTransferFinished(transfer.exceptionOrNull()?.message)
+    val items = events.mapNotNull { event ->
+      if (event.type != DataEvent.TYPE_CHANGED) return@mapNotNull null
+      if (!event.dataItem.uri.path.orEmpty().startsWith(WearTransferProtocol.RECORDING_PATH_PREFIX)) {
+        return@mapNotNull null
+      }
+      event.dataItem.freeze()
     }
+    if (items.isEmpty()) return
+    val channel = (application as NeoRecallApplication).backgroundCaptureChannel
+    PhoneWearTransferManager.get(this).receiveAll(
+      items,
+      onStarted = { channel.notifyWatchTransferStarted() },
+      onInserted = { channel.notifyWatchRecordingAvailable() },
+      onFinished = { error -> channel.notifyWatchTransferFinished(error) },
+    )
   }
 }

@@ -3,8 +3,9 @@
 const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
 const { HttpError } = require('../../middleware/error_handler');
-const { encryptString, decryptString, randomToken, sha256 } = require('../../utils/crypto');
+const { encryptString, decryptString, sha256 } = require('../../utils/crypto');
 const { generateSecret, otpauthUri, verifyTotp } = require('../../utils/totp');
+const { generateRecoveryCodes, lockAfterInvalidAttempt } = require('./two_factor_policy');
 
 function getRow(adminId) {
   return getDatabase().prepare('SELECT * FROM admin_two_factor WHERE admin_id = ?').get(adminId) || null;
@@ -58,9 +59,8 @@ function verifySecondFactor(adminId, value) {
     db.prepare('UPDATE admin_two_factor SET failed_attempts = 0, locked_until = NULL WHERE admin_id = ?').run(adminId);
     return true;
   }
-  const attempts = factor.failed_attempts + 1;
-  const lockedUntil = attempts >= 5 ? new Date(Date.now() + 5 * 60_000).toISOString() : null;
-  db.prepare('UPDATE admin_two_factor SET failed_attempts = ?, locked_until = ? WHERE admin_id = ?').run(attempts, lockedUntil, adminId);
+  const attempts = lockAfterInvalidAttempt(factor.failed_attempts);
+  db.prepare('UPDATE admin_two_factor SET failed_attempts = ?, locked_until = ? WHERE admin_id = ?').run(attempts.attempts, attempts.lockedUntil, adminId);
   throw new HttpError(401, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
 }
 
@@ -69,10 +69,7 @@ function activateTwoFactor(adminId, code) {
   const factor = db.prepare('SELECT * FROM admin_two_factor WHERE admin_id = ? AND pending = 1').get(adminId);
   if (!factor || !verifyTotp(code, decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
   
-  const codes = Array.from({ length: 10 }, () => {
-    let raw = randomToken(8).slice(0, 10).toUpperCase(); // crypto.randomToken gives hex, wait. I should generate alphanumeric.
-    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-  });
+  const codes = generateRecoveryCodes();
 
   db.transaction(() => {
     db.prepare("UPDATE admin_two_factor SET pending = 0, enabled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE admin_id = ?").run(adminId);
@@ -93,10 +90,7 @@ function disableTwoFactor(adminId, code) {
 
 function regenerateRecoveryCodes(adminId, code) {
   verifySecondFactor(adminId, code);
-  const codes = Array.from({ length: 10 }, () => {
-    let raw = randomToken(8).slice(0, 10).toUpperCase();
-    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-  });
+  const codes = generateRecoveryCodes();
   getDatabase().transaction(() => {
     getDatabase().prepare('DELETE FROM admin_recovery_codes WHERE admin_id = ?').run(adminId);
     const insert = getDatabase().prepare('INSERT INTO admin_recovery_codes (id, admin_id, code_hash) VALUES (?, ?, ?)');

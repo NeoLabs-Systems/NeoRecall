@@ -380,6 +380,14 @@
   "askNothingRecorded": "nothing recorded",
   "askSubmitTooltip": "Ask",
   "askSearching": "Searching your recall",
+  "askRateLimited": "You have asked a lot in a short time. Try again in a few minutes.",
+  "askAiNotConfigured": "No answering model is configured yet, so this question cannot be answered.",
+  "askFailed": "That question could not be answered just now.",
+  "askSourceKindTranscript": "Transcript",
+  "askSourceKindMemory": "Memory",
+  "askSourceKindDetail": "Detail",
+  "askSourceKindDay": "Day",
+  "askSourceKindSource": "Source",
   "memoriesBulkDeleted": "{count, plural, =1{1 memory deleted} other{{count} memories deleted}}",
   "@memoriesBulkDeleted": {
     "placeholders": {
@@ -1492,6 +1500,8 @@
     }
   },
   "controllerIncompleteUrl": "Enter a complete server URL including http:// or https://.",
+  "controllerUnreachableServer": "NeoRecall could not reach that server. Check the address and that the server is running.",
+  "controllerPublicHttpWarning": "This address uses unencrypted HTTP on a public host. Prefer HTTPS unless you trust the network.",
   "controllerWidgetStopped": "Recording stopped from the home-screen widget.",
   "controllerWidgetSignIn": "Sign in to complete highlights from the home screen.",
   "controllerWidgetStarted": "Phone recording started from the home-screen widget.",
@@ -1550,6 +1560,80 @@
     }
   },
   "controllerStorageFull": "Storage full — recording stopped",
+  "controllerStartupFailed": "NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.",
+  "controllerStorageWriteFailed": "Device storage is full. Recording stopped; all previously queued audio remains protected.",
+  "controllerAudioStoreFailed": "Local audio could not be stored. Recording is stopping without deleting queued audio.",
+  "controllerPartialStoreFailed": "The active audio block could not be written to durable storage.",
+  "controllerBluetoothRequired": "Connect a supported Bluetooth device before starting capture.",
+  "controllerBluetoothConnectFailed": "The Bluetooth device could not be connected. Keep it nearby and try again.",
+  "controllerSelectCaptureSource": "Select at least one capture source.",
+  "controllerOutsideRecordingWindow": "Recording is outside the configured daily recording window.",
+  "controllerSignInToRecord": "Sign in before starting a recording.",
+  "controllerSchedulePaused": "Recording paused at the end of its daily window. Android may require NeoRecall to be opened before phone-microphone recording resumes.",
+  "controllerBluetoothNotConfigured": "Background capture could not resume because its Bluetooth device is not configured.",
+  "controllerMicrophoneNeedsOpen": "Phone-microphone recording is waiting for NeoRecall to be opened. Bluetooth capture and device sync continue in the background.",
+  "controllerBackgroundRecovered": "Background recording recovered after the app process restarted.",
+  "controllerBluetoothDisconnected": "The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.",
+  "controllerNoQueuedAudio": "There is no queued audio ready to upload.",
+  "controllerUploadingQueuedAudio": "{count, plural, =1{Uploading 1 queued recording using mobile data.} other{Uploading {count} queued recordings using mobile data.}}",
+  "@controllerUploadingQueuedAudio": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "controllerBackgroundPaused": "Background recording and device sync are paused. Open NeoRecall to resume them.",
+  "controllerRefreshFailed": "Could not reach NeoRecall. Showing what was loaded last.",
+  "controllerReprocessAiUnavailable": "Summaries are not available right now, so this moment was left as it is.",
+  "controllerReprocessStillRecording": "This conversation is still being recorded.",
+  "controllerReprocessFailed": "This moment could not be written up again just now.",
+  "controllerWidgetRecordSignIn": "Sign in before starting recording from the home-screen widget.",
+  "controllerWidgetActionFailed": "A home-screen widget action could not be completed: {error}",
+  "@controllerWidgetActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerCaptureMovedToBluetooth": "Recording moved back to the reconnected Bluetooth device.",
+  "controllerCaptureMovedToPhone": "Bluetooth disconnected; recording continues with the phone microphone.",
+  "controllerInterruptedFinalizeFailed": "Interrupted recording could not be finalized safely: {error}",
+  "@controllerInterruptedFinalizeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerCaptureRetrying": "Audio capture was interrupted ({reason}). The durable tail was saved; capture will retry in {seconds} seconds.",
+  "@controllerCaptureRetrying": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      },
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "controllerDeviceRecordFailed": "The device requested recording, but capture could not start: {error}",
+  "@controllerDeviceRecordFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "controllerBatteryOptimizationFailed": "Android could not open the battery-optimization request: {error}",
+  "@controllerBatteryOptimizationFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "liveEtaLeft": "about {duration} left",
   "@liveEtaLeft": {
     "placeholders": {
@@ -1905,6 +1989,14 @@
   "actionOk": "OK",
   "watchCopyLabel": "Copy {label}",
   "@watchCopyLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "watchCopied": "{label} copied",
+  "@watchCopied": {
     "placeholders": {
       "label": {
         "type": "String"

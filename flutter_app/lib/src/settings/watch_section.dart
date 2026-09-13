@@ -396,7 +396,7 @@ class _CopyLine extends StatelessWidget {
               Clipboard.setData(ClipboardData(text: value));
               ScaffoldMessenger.maybeOf(
                 context,
-              )?.showSnackBar(SnackBar(content: Text('$label copied')));
+              )?.showSnackBar(SnackBar(content: Text(AppL10n.of(context).watchCopied(label))));
             },
           ),
         ],

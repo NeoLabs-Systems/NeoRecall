@@ -40,6 +40,27 @@ class PhoneWearTransferManager private constructor(private val context: Context)
     }
   }
 
+  /**
+   * Accepts recordings off the Wearable listener thread so a large asset cannot
+   * stall later events. Callers must freeze DataItems before the buffer is released.
+   */
+  fun receiveAll(
+    items: List<com.google.android.gms.wearable.DataItem>,
+    onStarted: () -> Unit,
+    onInserted: () -> Unit,
+    onFinished: (String?) -> Unit,
+  ) {
+    if (items.isEmpty()) return
+    executor.execute {
+      for (item in items) {
+        onStarted()
+        val transfer = runCatching { receive(item) }
+        transfer.onSuccess { if (it) onInserted() }
+        onFinished(transfer.exceptionOrNull()?.message)
+      }
+    }
+  }
+
   fun receive(item: com.google.android.gms.wearable.DataItem): Boolean {
     val map = DataMapItem.fromDataItem(item).dataMap
     require(map.getInt(WearTransferProtocol.KEY_VERSION) == WearTransferProtocol.VERSION)
@@ -99,7 +120,7 @@ class PhoneWearTransferManager private constructor(private val context: Context)
       "container" to recording.container,
       "codec" to recording.codec,
       "contentType" to recording.contentType,
-      "bytes" to recording.file.readBytes(),
+      "path" to recording.file.absolutePath,
     )
   }
 

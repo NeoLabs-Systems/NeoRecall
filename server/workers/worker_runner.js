@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const { getDatabase } = require('../db/database');
 const jobs = require('../services/jobs/job_service');
 const tempAudio = require('../services/ingest/temp_audio_service');
+const { getConfig } = require('../config');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('worker-runner');
@@ -71,10 +72,11 @@ function markChunkFailure(job, error, willRetry) {
 
 async function run({ inference, isInferenceReady = () => true, signal }) {
   const workerId = `${os.hostname()}-${process.pid}-${crypto.randomUUID()}`;
+  const config = getConfig();
   let currentJob = null;
   const heartbeatTimer = setInterval(
     () => heartbeat(workerId, currentJob?.id, isInferenceReady() ? 'ready' : 'not_ready'),
-    5_000,
+    config.workerHeartbeatMs,
   );
   heartbeat(workerId, null, 'starting');
   try {
@@ -84,8 +86,8 @@ async function run({ inference, isInferenceReady = () => true, signal }) {
       // would burn attempts and can eventually make the server delete its only
       // audio copy even though no inference was ever possible.
       currentJob = jobs.claimNext(workerId, undefined, isInferenceReady());
-      if (!currentJob) { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
-      const leaseTimer = setInterval(() => jobs.renewLease(currentJob.id, workerId), 30_000);
+      if (!currentJob) { await new Promise((resolve) => setTimeout(resolve, config.workerIdlePollMs)); continue; }
+      const leaseTimer = setInterval(() => jobs.renewLease(currentJob.id, workerId), config.workerLeaseRenewMs);
       try {
         const handler = handlerFor(currentJob.type);
         await handler.handle(currentJob, inference);

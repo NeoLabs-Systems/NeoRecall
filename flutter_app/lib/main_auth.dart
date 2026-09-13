@@ -24,7 +24,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   final _twoFactor = TextEditingController();
   bool registerMode = false;
   bool serverSetup = false;
-  bool awaitingTwoFactor = false;
   bool localInstall = false;
 
   bool get _canConfigureServer =>
@@ -71,19 +70,15 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     final ok = await widget.controller.signInWithSecurityKey(
       account: account.isEmpty ? null : account,
     );
-    if (!ok &&
-        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
-        mounted) {
-      setState(() => awaitingTwoFactor = true);
-    }
+    if (!ok && mounted) setState(() {});
   }
 
   Future<void> _submit() async {
-    if (awaitingTwoFactor) {
+    if (widget.controller.needsTwoFactor) {
       final ok = await widget.controller.completeTwoFactor(
         _twoFactor.text.trim(),
       );
-      if (ok && mounted) setState(() => awaitingTwoFactor = false);
+      if (ok && mounted) setState(() {});
       return;
     }
     if (registerMode) {
@@ -104,11 +99,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
       _username.text.trim(),
       _password.text,
     );
-    if (!ok &&
-        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
-        mounted) {
-      setState(() => awaitingTwoFactor = true);
-    }
+    if (!ok && mounted) setState(() {});
   }
 
   @override
@@ -125,6 +116,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
         }),
       );
     }
+    final awaitingTwoFactor = widget.controller.needsTwoFactor;
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
     final compact = MediaQuery.sizeOf(context).width < 760;
@@ -263,12 +255,15 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   runSpacing: 4,
                   children: <Widget>[
                     TextButton(
-                      onPressed: () => setState(() {
-                        registerMode = !registerMode;
-                        awaitingTwoFactor = false;
-                      }),
+                      onPressed: awaitingTwoFactor
+                          ? widget.controller.cancelTwoFactor
+                          : () => setState(() {
+                              registerMode = !registerMode;
+                            }),
                       child: Text(
-                        registerMode
+                        awaitingTwoFactor
+                            ? strings.authSwitchToSignIn
+                            : registerMode
                             ? strings.authSwitchToSignIn
                             : strings.authSwitchToRegister,
                       ),

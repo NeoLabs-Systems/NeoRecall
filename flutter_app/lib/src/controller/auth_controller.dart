@@ -42,6 +42,7 @@ mixin AuthController on ChangeNotifier {
   String? _pendingPassword;
   bool _pendingSecurityKeyLogin = false;
   bool _securityKeyDismissed = false;
+  bool needsTwoFactor = false;
 
   Future<bool> login(
     String account,
@@ -67,6 +68,7 @@ mixin AuthController on ChangeNotifier {
         await refreshAll(silent: true);
       },
       onTwoFactor: () {
+        needsTwoFactor = true;
         _pendingAccount = account;
         _pendingPassword = password;
         _pendingSecurityKeyLogin = false;
@@ -112,6 +114,7 @@ mixin AuthController on ChangeNotifier {
         await refreshAll(silent: true);
       },
       onTwoFactor: () {
+        needsTwoFactor = true;
         _pendingAccount = account;
         _pendingPassword = null;
         _pendingSecurityKeyLogin = true;
@@ -205,6 +208,15 @@ mixin AuthController on ChangeNotifier {
           _pendingPassword ?? '',
           twoFactorCode: code,
         );
+
+  void cancelTwoFactor() {
+    needsTwoFactor = false;
+    _pendingAccount = null;
+    _pendingPassword = null;
+    _pendingSecurityKeyLogin = false;
+    error = null;
+    notifyListeners();
+  }
   Future<bool> register(String usernameValue, String? email, String password) =>
       _run(() async {
         final payload =

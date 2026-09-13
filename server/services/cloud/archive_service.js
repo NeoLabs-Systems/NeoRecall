@@ -386,29 +386,18 @@ function sweepPending() {
     ...db.prepare('SELECT local_dir FROM cloud_recording_assemblies WHERE local_dir IS NOT NULL').all()
       .map((row) => path.resolve(row.local_dir)),
   ]);
-  if (fs.existsSync(cloudPending)) {
-    for (const entry of fs.readdirSync(cloudPending, { withFileTypes: true })) {
-      if (entry.name === 'assemblies') continue;
-      if (!entry.isFile()) continue;
-      const file = path.resolve(cloudPending, entry.name);
-      if (referenced.has(file)) continue;
-      if (Date.now() - fs.statSync(file).mtimeMs > 60_000) {
-        tempAudio.unlinkStrict(file);
-        removed += 1;
-      }
-    }
-  }
-  const assembliesRoot = path.join(cloudPending, 'assemblies');
-  if (fs.existsSync(assembliesRoot)) {
-    for (const entry of fs.readdirSync(assembliesRoot, { withFileTypes: true })) {
-      const dir = path.resolve(assembliesRoot, entry.name);
-      if (referenced.has(dir)) continue;
-      if (Date.now() - fs.statSync(dir).mtimeMs > 60_000) {
-        tempAudio.unlinkStrict(dir);
-        removed += 1;
-      }
-    }
-  }
+  removed += tempAudio.sweepOrphans({
+    directory: cloudPending,
+    referenced,
+    accept: (entry) => entry.isFile() && entry.name !== 'assemblies',
+    context: { sweep: 'cloud-pending' },
+  });
+  removed += tempAudio.sweepOrphans({
+    directory: path.join(cloudPending, 'assemblies'),
+    referenced,
+    accept: () => true,
+    context: { sweep: 'cloud-assemblies' },
+  });
   return { removed };
 }
 

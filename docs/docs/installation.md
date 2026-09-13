@@ -106,7 +106,8 @@ neorecall status
 neorecall logs
 neorecall stop
 neorecall channel
-neorecall reset-password USERNAME NEW_SECURE_PASSWORD
+neorecall reset-password USERNAME
+neorecall reset-password USERNAME --password-file PATH
 ```
 
 macOS uses a LaunchAgent and Linux uses a systemd user service when available. On unsupported service managers, `neorecall start` launches the supervisor directly.

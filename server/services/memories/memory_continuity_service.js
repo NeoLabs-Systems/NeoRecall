@@ -4,6 +4,7 @@ const { getDatabase } = require('../../db/database');
 const searchIndex = require('../../embeddings/search_index_service');
 const { MINI_MEMORY_MAX_COUNT } = require('../../ai/schemas/consolidation_schema');
 const processingSettings = require('../settings/processing_settings_service');
+const { placeholders } = require('../../utils/query');
 
 function sourceSessionIds(database, memoryId) {
   return database.prepare(`SELECT DISTINCT ac.session_id
@@ -49,7 +50,7 @@ function findCandidates(userId, conversations, database = getDatabase(), options
     JOIN transcript_segments ts ON ts.id=ms.segment_id
     JOIN audio_chunks ac ON ac.id=ts.chunk_id
     WHERE ms.memory_id=m.id AND ms.segment_id IS NOT NULL
-      AND ac.session_id IN (${inputSessionIds.map(() => '?').join(',')})
+      AND ac.session_id IN (${placeholders(inputSessionIds.length)})
   )` : '';
   // A card the reader put away is not offered as somewhere to file new
   // material: hiding fresh recordings inside an archived card is worse than a
@@ -132,7 +133,7 @@ function absorbClaimed(database, userId, publicIds) {
   const ids = [...new Set(publicIds || [])];
   if (!ids.length) return null;
   const rows = database.prepare(`SELECT * FROM memories WHERE user_id=?
-    AND public_id IN (${ids.map(() => '?').join(',')})`).all(userId, ...ids);
+    AND public_id IN (${placeholders(ids.length)})`).all(userId, ...ids);
   if (rows.length !== ids.length) {
     throw Object.assign(new Error('A continuation candidate changed before consolidation was persisted.'), {
       code: 'CONSOLIDATION_INPUT_CHANGED', retryable: false,

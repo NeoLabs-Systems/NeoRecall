@@ -2,11 +2,12 @@
 
 const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
+const { placeholders } = require('../../utils/query');
 
 function readyItems(userId, sessionIds, database = getDatabase()) {
   if (!sessionIds.length) return [];
   return database.prepare(`SELECT * FROM recording_context_items
-    WHERE user_id=? AND session_id IN (${sessionIds.map(() => '?').join(',')})
+    WHERE user_id=? AND session_id IN (${placeholders(sessionIds.length)})
       AND analysis_state IN ('ready','skipped','failed')
     ORDER BY captured_at,created_at`).all(userId, ...sessionIds);
 }

@@ -32,6 +32,44 @@ function unlinkStrict(file) {
   }
 }
 
+// Deleting audio on a cleanup path that must not abort: a cancelled import
+// still has to reach `cancelled`, and one unreadable file must not strand the
+// rows behind it. Silence is the wrong trade here, though — this product
+// promises that server audio is gone, so a failure that is not "already gone"
+// is reported instead of swallowed.
+function unlinkBestEffort(file, context = {}) {
+  try {
+    unlinkStrict(file);
+    return true;
+  } catch (error) {
+    logger.warn('Temporary audio file could not be deleted', {
+      ...context, file, errorCode: error.code || 'UNLINK_FAILED', error,
+    });
+    return false;
+  }
+}
+
+// One orphan sweep for every work directory. A file no row points at is either
+// mid-write or leaked, and nothing tells the two apart except age — so the rule
+// and its grace period live here rather than being restated, with the threshold
+// inlined, at each directory that needs sweeping.
+//
+// `referenced` holds resolved paths that must survive. `accept` decides which
+// directory entries are even candidates; the default is plain files.
+function sweepOrphans({ directory, referenced, accept = (entry) => entry.isFile(), context = {} }) {
+  if (!fs.existsSync(directory)) return 0;
+  const graceMs = getConfig().orphanFileGraceMs;
+  let removed = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!accept(entry)) continue;
+    const target = path.resolve(directory, entry.name);
+    if (referenced.has(target)) continue;
+    if (Date.now() - fs.statSync(target).mtimeMs <= graceMs) continue;
+    if (unlinkBestEffort(target, context)) removed += 1;
+  }
+  return removed;
+}
+
 // Conditioned copies that outlived the job that made them. Nothing references
 // these from the database — the inference host deletes its own in a finally
 // block and again on exit — so the only way one survives is a hard kill, and
@@ -59,16 +97,7 @@ function sweep() {
   for (const file of referenced) {
     try { if (fs.existsSync(file)) sealedFs.sealInPlace(file); } catch (_) { /* next sweep retries */ }
   }
-  let removed = 0;
-  for (const entry of fs.readdirSync(audioTmp, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const file = path.resolve(audioTmp, entry.name);
-    const stats = fs.statSync(file);
-    if (!referenced.has(file) && Date.now() - stats.mtimeMs > 60_000) {
-      unlinkStrict(file);
-      removed += 1;
-    }
-  }
+  let removed = sweepOrphans({ directory: audioTmp, referenced, context: { sweep: 'audio-temp' } });
   removed += sweepDerived(audioWork);
   const pending = db.prepare("SELECT id,temporary_path FROM audio_chunks WHERE state='persisted_cleanup_pending'").all();
   for (const chunk of pending) {
@@ -83,4 +112,4 @@ function sweep() {
   return removed;
 }
 
-module.exports = { incomingPath, chunkPath, unlinkStrict, sweep, sweepDerived };
+module.exports = { incomingPath, chunkPath, unlinkStrict, unlinkBestEffort, sweepOrphans, sweep, sweepDerived };

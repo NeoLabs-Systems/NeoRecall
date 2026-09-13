@@ -14,12 +14,13 @@ const logger = createLogger('ask');
 
 function reserveAttempt(userId) {
   const db = getDatabase();
+  const windowMs = getConfig().askQuotaWindowMs;
   db.transaction(() => {
-    const cutoff = new Date(Date.now() - 60 * 60_000).toISOString();
+    const cutoff = new Date(Date.now() - windowMs).toISOString();
     const count = db.prepare('SELECT COUNT(*) count FROM ask_quota_events WHERE user_id=? AND attempted_at>=?').get(userId, cutoff).count;
     if (count >= getConfig().askMaxPerHour) {
       const first = db.prepare('SELECT attempted_at FROM ask_quota_events WHERE user_id=? AND attempted_at>=? ORDER BY attempted_at LIMIT 1').get(userId, cutoff);
-      const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(first.attempted_at) + 60 * 60_000 - Date.now()) / 1000));
+      const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(first.attempted_at) + windowMs - Date.now()) / 1000));
       throw new HttpError(429, 'ASK_RATE_LIMITED', 'The hourly Ask limit has been reached.', { retryAfterSeconds });
     }
     db.prepare('INSERT INTO ask_quota_events (user_id) VALUES (?)').run(userId);
@@ -83,18 +84,8 @@ async function retrieveLayer(userId, plan, window, kinds, limit) {
 }
 
 /**
- * Retrieval in two layers, written record first.
- *
- * A memory is a dated, titled account of an occasion; a segment is thirty
- * seconds of speech with no idea what it belongs to. Asked what a day held, the
- * first is the answer and the second is footnotes — so they are retrieved
- * separately and the transcript gets the smaller share, instead of both
- * competing for one list where the day's raw speech simply outnumbers what was
- * written about it.
- *
- * A question that named the kinds it wants is taken at its word, and a
- * restriction that finds nothing is lifted rather than returned as an empty
- * archive.
+ * Written-record kinds first, then a smaller transcript share.
+ * A question that named kinds is honoured; an empty restriction is widened.
  */
 async function retrieve(userId, plan, window) {
   const config = getConfig();
@@ -113,16 +104,43 @@ async function retrieve(userId, plan, window) {
   };
 }
 
+function internalId(sourceId) {
+  const text = String(sourceId || '');
+  const separator = text.indexOf(':');
+  return separator === -1 ? text : text.slice(separator + 1);
+}
+
+function citationHref(userId, kind, sourceId) {
+  const db = getDatabase();
+  const id = internalId(sourceId);
+  if (kind === 'memory') {
+    const row = db.prepare('SELECT public_id FROM memories WHERE id=? AND user_id=?').get(Number(id), userId);
+    return row ? `/memories/${row.public_id}` : `/memories/${id}`;
+  }
+  if (kind === 'mini_memory') {
+    const row = db.prepare(`SELECT m.public_id
+      FROM mini_memories mm JOIN memories m ON m.id=mm.memory_id
+      WHERE mm.id=? AND mm.user_id=?`).get(Number(id), userId);
+    return row ? `/memories/${row.public_id}` : `/memories/${id}`;
+  }
+  if (kind === 'daily_summary') return `/daily-summaries/${id}`;
+  if (kind === 'segment') {
+    const row = db.prepare('SELECT public_id FROM transcript_segments WHERE id=? AND user_id=?').get(Number(id), userId);
+    return row ? `/timeline?segment=${row.public_id}` : `/timeline?segment=${id}`;
+  }
+  return `/memories/${id}`;
+}
+
 async function ask(userId, question) {
   usageLimits.rejectIfReached(userId, 'ai');
   const timezone = settings.get(userId).timezone;
   const nowLocal = localDateTimeNow(timezone);
-  const plan = await planFor(userId, question, nowLocal, timezone);
-  const window = windowFor(plan, timezone);
+  const planned = await planFor(userId, question, nowLocal, timezone);
+  const window = windowFor(planned, timezone);
   // A period the plan could not put a range on is not a period. Retrieving the
   // "whole window" of an unbounded archive would return its newest rows for any
   // question at all.
-  if (!window.from && !window.to) plan.wholePeriod = false;
+  const plan = { ...planned, wholePeriod: Boolean(planned.wholePeriod && (window.from || window.to)) };
   const { results, weakCount } = await retrieve(userId, plan, window);
 
   const context = results.map((result) => ({
@@ -142,18 +160,18 @@ async function ask(userId, question) {
       : { holdsNothingForThePeriod: true, empty: true };
   }
   const response = await aiEngine.answer(userId, question, context, () => reserveAttempt(userId), frame);
+  const excerptChars = getConfig().askCitationExcerptChars;
 
   const citations = response.value.citations.filter((citation) => allowed.has(citation.sourceId)).map((citation) => {
     const result = allowed.get(citation.sourceId);
-    const sourceKey = citation.sourceId.split(':')[1];
     return {
       ...citation,
       kind: result.kind,
       timestamp: result.occurred_at,
       title: result.title,
-      excerpt: String(result.body || '').slice(0, 240),
+      excerpt: String(result.body || '').slice(0, excerptChars),
       relevance: result.relevance,
-      link: result.kind === 'segment' ? `/timeline?segment=${sourceKey}` : `/memories/${sourceKey}`,
+      link: citationHref(userId, result.kind, citation.sourceId),
     };
   });
   return {
@@ -171,4 +189,4 @@ async function ask(userId, question) {
   };
 }
 
-module.exports = { ask, reserveAttempt };
+module.exports = { ask, reserveAttempt, citationHref };

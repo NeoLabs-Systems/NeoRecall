@@ -73,8 +73,8 @@ class NeoRecallApplication : Application() {
     super.onConfigurationChanged(newConfig)
     try {
       WidgetUpdater.refreshAll(this)
-    } catch (_: Exception) {
-      // Cosmetic; never worth taking the process down for.
+    } catch (error: Exception) {
+      android.util.Log.w("NeoRecall", "Widget refresh after configuration change failed", error)
     }
   }
 

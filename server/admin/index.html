@@ -203,6 +203,19 @@
     </div>
   </main>
   <div class="toast" id="toast" role="status"></div>
+  <div class="dialog" id="dialog" hidden>
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-body"></p>
+      <img id="dialog-qr" alt="Authenticator QR code" width="180" height="180" hidden>
+      <pre id="dialog-codes" hidden></pre>
+      <label id="dialog-input-wrap" hidden><span id="dialog-input-label">Authenticator or recovery code</span><input id="dialog-input" type="text" inputmode="text" autocomplete="one-time-code" maxlength="32"></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" id="dialog-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="dialog-confirm">Continue</button>
+      </div>
+    </div>
+  </div>
   <script src="/admin/admin.js"></script>
 </body>
 </html>

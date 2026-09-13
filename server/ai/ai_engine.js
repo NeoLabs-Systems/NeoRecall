@@ -3,7 +3,7 @@
 const { provider } = require('./provider_registry');
 const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps } = require('./schemas/consolidation_schema');
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
-const { answerSchema } = require('./schemas/answer_schema');
+const { answerSchema, answerJsonSchema } = require('./schemas/answer_schema');
 const { queryPlanSchema, queryPlanJsonSchema } = require('./schemas/query_plan_schema');
 const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
 const { memoryDedupeSchema, memoryDedupeJsonSchema } = require('./schemas/memory_dedupe_schema');
@@ -326,12 +326,15 @@ async function answer(userId, question, context, beforeAttempt, frame = {}) {
   const config = getConfig();
   // The question and the instructions ride along with the evidence, so they come
   // out of the same budget before it is spent.
-  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - 1_000;
-  const bounded = contextWithinBudget(context, Math.max(1_000, budget));
+  const reserve = config.askPromptReserveCharacters;
+  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - reserve;
+  const bounded = contextWithinBudget(context, Math.max(reserve, budget));
+  if (beforeAttempt) beforeAttempt();
   return withRetries(async () => {
-    if (beforeAttempt) beforeAttempt();
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: ownerInstructions(userId, 'ask', answerMessages(question, bounded, frame)),
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      messages: ownerInstructions(userId, 'ask', answerMessages(question, bounded, frame)),
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_answer', strict: true, schema: answerJsonSchema } },
     });
     const parsed = answerSchema.safeParse(response.value);
     if (!parsed.success) {
@@ -342,33 +345,35 @@ async function answer(userId, question, context, beforeAttempt, frame = {}) {
   });
 }
 
-async function analyzeContextText(userId, { name, content }) {
+async function analyzeContextChat(userId, messages, emptyMessage) {
   const config = getConfig();
-  const maximum = Math.max(1, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000);
   const response = await provider().chatJSON({
     userId,
     purpose: 'context_analysis',
-    messages: inOwnerLanguage(userId, contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) })),
+    messages: inOwnerLanguage(userId, messages),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: contextAnalysis.responseFormat,
   });
   const description = String(response.value?.descriptionEn || '').trim();
-  if (!description) throw Object.assign(new Error('Context analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  if (!description) throw Object.assign(new Error(emptyMessage), { code: 'AI_SCHEMA_INVALID' });
   return { description, requestId: response.requestId };
 }
 
-async function analyzeContextImage(userId, { name, mediaType, data }) {
-  const config = getConfig();
-  const response = await provider().chatJSON({
+async function analyzeContextText(userId, { name, content }) {
+  const maximum = Math.max(1, inputBudgetCharacters(getConfig().aiPreviewMaxOutputTokens) - 2_000);
+  return analyzeContextChat(
     userId,
-    purpose: 'context_analysis',
-    messages: inOwnerLanguage(userId, contextAnalysis.imageMessages({ name, mediaType, data })),
-    maxTokens: config.aiPreviewMaxOutputTokens,
-    responseFormat: contextAnalysis.responseFormat,
-  });
-  const description = String(response.value?.descriptionEn || '').trim();
-  if (!description) throw Object.assign(new Error('Image analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
-  return { description, requestId: response.requestId };
+    contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    'Context analysis returned no description.',
+  );
+}
+
+async function analyzeContextImage(userId, { name, mediaType, data }) {
+  return analyzeContextChat(
+    userId,
+    contextAnalysis.imageMessages({ name, mediaType, data }),
+    'Image analysis returned no description.',
+  );
 }
 
 async function rewriteMemoryWithContext(userId, { memory, segments, contextItems }) {

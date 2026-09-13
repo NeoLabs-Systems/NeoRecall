@@ -9,6 +9,7 @@ const membership = require('../services/conversations/conversation_membership_se
 const processingSettings = require('../services/settings/processing_settings_service');
 const settings = require('../services/settings/settings_service');
 const { createLogger } = require('../utils/logger');
+const { placeholders } = require('../utils/query');
 
 const logger = createLogger('speaker-resolution');
 
@@ -51,7 +52,7 @@ function claimedIdentities(database, items) {
   const ids = [...new Set(items.flatMap((item) => [...item.voiceprintIds]))];
   if (!ids.length) return new Map();
   const rows = database.prepare(`SELECT id,display_name,display_name_source,entity_id FROM voiceprints
-    WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+    WHERE id IN (${placeholders(ids.length)})`).all(...ids);
   // Only a name the user stands behind counts. A name the model inferred is a
   // reading of the transcript, and this pass is allowed to correct it.
   return new Map(rows
@@ -259,12 +260,11 @@ function apply({ database, userId, conversationId, items, byId, groups, forbidde
     });
     if (!voiceprint || !survivors.length) continue;
     assignedByGroup.set(group.id, voiceprint.id);
-    const placeholders = survivors.map(() => '?').join(',');
     // Only turns that resolved to nobody. An existing assignment may be what a
     // name the user typed is hanging from, and this pass has no standing to
     // move it.
     assignedTurns += database.prepare(`UPDATE speaker_turns SET voiceprint_id=?
-      WHERE user_id=? AND voiceprint_id IS NULL AND cluster_id IN (${placeholders})`)
+      WHERE user_id=? AND voiceprint_id IS NULL AND cluster_id IN (${placeholders(survivors.length)})`)
       .run(voiceprint.id, userId, ...survivors).changes;
   }
 

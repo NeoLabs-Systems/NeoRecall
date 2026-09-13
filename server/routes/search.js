@@ -11,13 +11,21 @@ const { slidingWindow } = require('../middleware/rate_limit');
 const { getConfig } = require('../config');
 const { HttpError } = require('../middleware/error_handler');
 
+const searchQuery = z.object({
+  q: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  kinds: z.preprocess(
+    (value) => (value == null || value === '' ? [] : String(value).split(',').map((kind) => kind.trim()).filter(Boolean)),
+    z.array(z.enum(search.DOCUMENT_KINDS)),
+  ).optional(),
+});
+
 const router = express.Router();
 router.use(requireAuth);
-router.get('/', requireScope('search:read'), asyncRoute(async (req, res) => {
+router.get('/', requireScope('search:read'), validate(searchQuery, 'query'), asyncRoute(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) throw new HttpError(400, 'QUERY_REQUIRED', 'Search query is required.');
-  const kinds = req.query.kinds ? String(req.query.kinds).split(',').filter(Boolean) : [];
-  const found = await search.search(req.auth.userId, q, { limit: req.query.limit, kinds });
+  const found = await search.search(req.auth.userId, q, { limit: req.query.limit, kinds: req.query.kinds || [] });
   res.json({ results: found.results, weakCount: found.weakCount });
 }));
 router.post('/ask', requireScope('search:ask'), slidingWindow({ windowMs: 60_000, limit: getConfig().askBurstPerMinute, code: 'ASK_BURST_LIMITED' }),

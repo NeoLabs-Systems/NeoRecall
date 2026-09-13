@@ -4,10 +4,12 @@ const { getDatabase, isVectorReady } = require('../../db/database');
 const { getConfig } = require('../../config');
 const embeddings = require('../../embeddings/embedding_service');
 const scorer = require('./retrieval_scorer');
+const { DOCUMENT_KINDS } = require('./document_kinds');
+const { placeholders } = require('../../utils/query');
 
 function ftsExpression(query) {
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
-  const terms = [...segmenter.segment(query)].filter((entry) => entry.isWordLike).map((entry) => entry.segment.replace(/"/g, '""')).slice(0, 30);
+  const terms = [...segmenter.segment(query)].filter((entry) => entry.isWordLike).map((entry) => entry.segment.replace(/"/g, '""')).slice(0, getConfig().ftsMaxTerms);
   return terms.map((term) => `"${term}"`).join(' OR ');
 }
 
@@ -35,7 +37,7 @@ function documentsById(db, userId, ids) {
   const found = new Map();
   for (let offset = 0; offset < ids.length; offset += 400) {
     const batch = ids.slice(offset, offset + 400);
-    const rows = db.prepare(`SELECT * FROM search_documents WHERE user_id=? AND id IN (${batch.map(() => '?').join(',')})`).all(userId, ...batch);
+    const rows = db.prepare(`SELECT * FROM search_documents WHERE user_id=? AND id IN (${placeholders(batch.length)})`).all(userId, ...batch);
     for (const row of rows) found.set(row.id, row);
   }
   return found;
@@ -56,7 +58,7 @@ async function search(userId, query, { limit = 20, kinds = [], from = null, to =
   const config = getConfig();
   const requestedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
   const candidateLimit = Math.max(50, requestedLimit * 4);
-  const kindClause = kinds.length ? ` AND d.kind IN (${kinds.map(() => '?').join(',')})` : '';
+  const kindClause = kinds.length ? ` AND d.kind IN (${placeholders(kinds.length)})` : '';
   const windowClause = `${from ? ' AND d.occurred_at>=?' : ''}${to ? ' AND d.occurred_at<?' : ''}`;
   const windowValues = [from, to].filter((value) => value !== null);
   const expression = ftsExpression(query);
@@ -116,9 +118,9 @@ async function search(userId, query, { limit = 20, kinds = [], from = null, to =
 // is only half an answer, and the other half — when something last was — is
 // usually the part that explains why.
 function latestActivity(userId, { kinds = [] } = {}) {
-  const kindClause = kinds.length ? ` AND kind IN (${kinds.map(() => '?').join(',')})` : '';
+  const kindClause = kinds.length ? ` AND kind IN (${placeholders(kinds.length)})` : '';
   return getDatabase().prepare(`SELECT kind,title,occurred_at FROM search_documents
     WHERE user_id=?${kindClause} ORDER BY occurred_at DESC LIMIT 1`).get(userId, ...kinds) || null;
 }
 
-module.exports = { search, latestActivity, ftsExpression, cosineSimilarity };
+module.exports = { search, latestActivity, ftsExpression, cosineSimilarity, DOCUMENT_KINDS };

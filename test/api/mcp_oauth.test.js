@@ -30,6 +30,14 @@ async function registerOwner() {
   return { password, userId: registered.body.user.id, session: registered.body.session.token };
 }
 
+// The sign-in response also clears the pending two-factor cookie, so the session
+// cookie is selected by name rather than by position in the Set-Cookie list.
+function sessionCookie(response) {
+  const header = response.headers['set-cookie'].find((value) => value.startsWith('neorecall_oauth_session='));
+  if (!header) throw new Error('sign-in did not set an OAuth session cookie');
+  return header.split(';')[0];
+}
+
 async function authorizeClient({ password, clientId, redirectUri, scopes }) {
   const { verifier, challenge } = pkce();
   const authorization = {
@@ -41,7 +49,7 @@ async function authorizeClient({ password, clientId, redirectUri, scopes }) {
   const signIn = await request(app).post('/oauth/sign-in').type('form').send({
     account: 'mcp-owner', password, continue: continuePath,
   }).expect(302);
-  const cookie = signIn.headers['set-cookie'][0].split(';')[0];
+  const cookie = sessionCookie(signIn);
   const consent = await request(app).get(continuePath).set('Cookie', cookie).expect(200);
   const approval = await request(app).post('/oauth/authorize').set('Cookie', cookie)
     .type('form').send({ ...authorization, decision: 'approve' }).expect(302);

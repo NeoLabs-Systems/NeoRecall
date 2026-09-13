@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { getDatabase } = require('../../db/database');
+const { getConfig } = require('../../config');
 const { randomToken, sha256, encryptString, decryptString } = require('../../utils/crypto');
 const { publicUser } = require('./auth_service');
 
@@ -176,7 +177,7 @@ function validateAuthorizationRequest(params = {}) {
 }
 
 function createBrowserGrant(userId) {
-  return encryptString(JSON.stringify({ version: 1, userId, expiresAt: Date.now() + 15 * 60_000 }));
+  return encryptString(JSON.stringify({ version: 1, userId, expiresAt: Date.now() + getConfig().oauthBrowserGrantTtlMs }));
 }
 
 function authenticateBrowserGrant(value) {
@@ -186,6 +187,28 @@ function authenticateBrowserGrant(value) {
     if (grant.version !== 1 || Date.now() >= Number(grant.expiresAt)) return null;
     const user = getDatabase().prepare('SELECT * FROM users WHERE id=? AND disabled_at IS NULL').get(String(grant.userId || ''));
     return user ? { userId: user.id, user: publicUser(user) } : null;
+  } catch {
+    return null;
+  }
+}
+
+function createPendingTwoFactorGrant({ userId, account }) {
+  return encryptString(JSON.stringify({
+    version: 2,
+    purpose: 'oauth_2fa',
+    userId,
+    account: String(account || ''),
+    expiresAt: Date.now() + getConfig().oauthPendingTwoFactorTtlMs,
+  }));
+}
+
+function authenticatePendingTwoFactorGrant(value) {
+  if (!value) return null;
+  try {
+    const grant = JSON.parse(decryptString(value));
+    if (grant.version !== 2 || grant.purpose !== 'oauth_2fa' || Date.now() >= Number(grant.expiresAt)) return null;
+    const user = getDatabase().prepare('SELECT * FROM users WHERE id=? AND disabled_at IS NULL').get(String(grant.userId || ''));
+    return user ? { userId: user.id, account: grant.account || user.username } : null;
   } catch {
     return null;
   }
@@ -291,5 +314,6 @@ module.exports = {
   SCOPES, createCompanionClient, registerPublicClient, listUserIntegrations, revokeUserClient,
   validateAuthorizationRequest, createAuthorizationCode,
   createBrowserGrant, authenticateBrowserGrant,
+  createPendingTwoFactorGrant, authenticatePendingTwoFactorGrant,
   exchangeAuthorizationCode, refreshTokenSet, revokeToken, authenticateAccessToken,
 };

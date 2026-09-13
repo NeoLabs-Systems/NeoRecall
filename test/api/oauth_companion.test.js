@@ -51,9 +51,13 @@ test('NeoAgent companion uses consent, PKCE, read-only scopes, and rotating refr
     account: 'recall-owner', password, continue: continuePath,
   }).expect(302);
   assert.equal(signIn.headers.location, continuePath);
-  const cookie = signIn.headers['set-cookie'][0].split(';')[0];
-  assert.match(signIn.headers['set-cookie'][0], /HttpOnly/);
-  assert.match(signIn.headers['set-cookie'][0], /SameSite=Lax/);
+  // The sign-in response also clears the pending two-factor cookie, so the
+  // session cookie is selected by name rather than by position.
+  const sessionHeader = signIn.headers['set-cookie'].find((value) => value.startsWith('neorecall_oauth_session='));
+  assert.ok(sessionHeader, 'sign-in did not set an OAuth session cookie');
+  const cookie = sessionHeader.split(';')[0];
+  assert.match(sessionHeader, /HttpOnly/);
+  assert.match(sessionHeader, /SameSite=Lax/);
   assert.equal(getDatabase().prepare('SELECT COUNT(*) count FROM user_sessions').get().count, 1);
 
   const consent = await request(app).get(continuePath).set('Cookie', cookie).expect(200);
