@@ -1267,6 +1267,54 @@ abstract class AppL10n {
   /// **'Searching your recall'**
   String get askSearching;
 
+  /// No description provided for @askRateLimited.
+  ///
+  /// In en, this message translates to:
+  /// **'You have asked a lot in a short time. Try again in a few minutes.'**
+  String get askRateLimited;
+
+  /// No description provided for @askAiNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'No answering model is configured yet, so this question cannot be answered.'**
+  String get askAiNotConfigured;
+
+  /// No description provided for @askFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'That question could not be answered just now.'**
+  String get askFailed;
+
+  /// No description provided for @askSourceKindTranscript.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcript'**
+  String get askSourceKindTranscript;
+
+  /// No description provided for @askSourceKindMemory.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory'**
+  String get askSourceKindMemory;
+
+  /// No description provided for @askSourceKindDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Detail'**
+  String get askSourceKindDetail;
+
+  /// No description provided for @askSourceKindDay.
+  ///
+  /// In en, this message translates to:
+  /// **'Day'**
+  String get askSourceKindDay;
+
+  /// No description provided for @askSourceKindSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Source'**
+  String get askSourceKindSource;
+
   /// No description provided for @memoriesBulkDeleted.
   ///
   /// In en, this message translates to:
@@ -4183,6 +4231,18 @@ abstract class AppL10n {
   /// **'Enter a complete server URL including http:// or https://.'**
   String get controllerIncompleteUrl;
 
+  /// No description provided for @controllerUnreachableServer.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall could not reach that server. Check the address and that the server is running.'**
+  String get controllerUnreachableServer;
+
+  /// No description provided for @controllerPublicHttpWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'This address uses unencrypted HTTP on a public host. Prefer HTTPS unless you trust the network.'**
+  String get controllerPublicHttpWarning;
+
   /// No description provided for @controllerWidgetStopped.
   ///
   /// In en, this message translates to:
@@ -4320,6 +4380,180 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Storage full — recording stopped'**
   String get controllerStorageFull;
+
+  /// No description provided for @controllerStartupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.'**
+  String get controllerStartupFailed;
+
+  /// No description provided for @controllerStorageWriteFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Device storage is full. Recording stopped; all previously queued audio remains protected.'**
+  String get controllerStorageWriteFailed;
+
+  /// No description provided for @controllerAudioStoreFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Local audio could not be stored. Recording is stopping without deleting queued audio.'**
+  String get controllerAudioStoreFailed;
+
+  /// No description provided for @controllerPartialStoreFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The active audio block could not be written to durable storage.'**
+  String get controllerPartialStoreFailed;
+
+  /// No description provided for @controllerBluetoothRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect a supported Bluetooth device before starting capture.'**
+  String get controllerBluetoothRequired;
+
+  /// No description provided for @controllerBluetoothConnectFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The Bluetooth device could not be connected. Keep it nearby and try again.'**
+  String get controllerBluetoothConnectFailed;
+
+  /// No description provided for @controllerSelectCaptureSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Select at least one capture source.'**
+  String get controllerSelectCaptureSource;
+
+  /// No description provided for @controllerOutsideRecordingWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording is outside the configured daily recording window.'**
+  String get controllerOutsideRecordingWindow;
+
+  /// No description provided for @controllerSignInToRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in before starting a recording.'**
+  String get controllerSignInToRecord;
+
+  /// No description provided for @controllerSchedulePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording paused at the end of its daily window. Android may require NeoRecall to be opened before phone-microphone recording resumes.'**
+  String get controllerSchedulePaused;
+
+  /// No description provided for @controllerBluetoothNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Background capture could not resume because its Bluetooth device is not configured.'**
+  String get controllerBluetoothNotConfigured;
+
+  /// No description provided for @controllerMicrophoneNeedsOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone-microphone recording is waiting for NeoRecall to be opened. Bluetooth capture and device sync continue in the background.'**
+  String get controllerMicrophoneNeedsOpen;
+
+  /// No description provided for @controllerBackgroundRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'Background recording recovered after the app process restarted.'**
+  String get controllerBackgroundRecovered;
+
+  /// No description provided for @controllerBluetoothDisconnected.
+  ///
+  /// In en, this message translates to:
+  /// **'The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.'**
+  String get controllerBluetoothDisconnected;
+
+  /// No description provided for @controllerNoQueuedAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'There is no queued audio ready to upload.'**
+  String get controllerNoQueuedAudio;
+
+  /// No description provided for @controllerUploadingQueuedAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Uploading 1 queued recording using mobile data.} other{Uploading {count} queued recordings using mobile data.}}'**
+  String controllerUploadingQueuedAudio(int count);
+
+  /// No description provided for @controllerBackgroundPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Background recording and device sync are paused. Open NeoRecall to resume them.'**
+  String get controllerBackgroundPaused;
+
+  /// No description provided for @controllerRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reach NeoRecall. Showing what was loaded last.'**
+  String get controllerRefreshFailed;
+
+  /// No description provided for @controllerReprocessAiUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Summaries are not available right now, so this moment was left as it is.'**
+  String get controllerReprocessAiUnavailable;
+
+  /// No description provided for @controllerReprocessStillRecording.
+  ///
+  /// In en, this message translates to:
+  /// **'This conversation is still being recorded.'**
+  String get controllerReprocessStillRecording;
+
+  /// No description provided for @controllerReprocessFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This moment could not be written up again just now.'**
+  String get controllerReprocessFailed;
+
+  /// No description provided for @controllerWidgetRecordSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in before starting recording from the home-screen widget.'**
+  String get controllerWidgetRecordSignIn;
+
+  /// No description provided for @controllerWidgetActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'A home-screen widget action could not be completed: {error}'**
+  String controllerWidgetActionFailed(String error);
+
+  /// No description provided for @controllerCaptureMovedToBluetooth.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording moved back to the reconnected Bluetooth device.'**
+  String get controllerCaptureMovedToBluetooth;
+
+  /// No description provided for @controllerCaptureMovedToPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Bluetooth disconnected; recording continues with the phone microphone.'**
+  String get controllerCaptureMovedToPhone;
+
+  /// No description provided for @controllerInterruptedFinalizeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupted recording could not be finalized safely: {error}'**
+  String controllerInterruptedFinalizeFailed(String error);
+
+  /// No description provided for @controllerCaptureRetrying.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio capture was interrupted ({reason}). The durable tail was saved; capture will retry in {seconds} seconds.'**
+  String controllerCaptureRetrying(String reason, int seconds);
+
+  /// No description provided for @controllerDeviceRecordFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The device requested recording, but capture could not start: {error}'**
+  String controllerDeviceRecordFailed(String error);
+
+  /// No description provided for @controllerBatteryOptimizationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Android could not open the battery-optimization request: {error}'**
+  String controllerBatteryOptimizationFailed(String error);
 
   /// No description provided for @liveEtaLeft.
   ///
@@ -5436,6 +5670,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Copy {label}'**
   String watchCopyLabel(String label);
+
+  /// No description provided for @watchCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} copied'**
+  String watchCopied(String label);
 
   /// No description provided for @backgroundRuntimeFailed.
   ///

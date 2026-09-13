@@ -732,6 +732,32 @@ class AppL10nEn extends AppL10n {
   String get askSearching => 'Searching your recall';
 
   @override
+  String get askRateLimited =>
+      'You have asked a lot in a short time. Try again in a few minutes.';
+
+  @override
+  String get askAiNotConfigured =>
+      'No answering model is configured yet, so this question cannot be answered.';
+
+  @override
+  String get askFailed => 'That question could not be answered just now.';
+
+  @override
+  String get askSourceKindTranscript => 'Transcript';
+
+  @override
+  String get askSourceKindMemory => 'Memory';
+
+  @override
+  String get askSourceKindDetail => 'Detail';
+
+  @override
+  String get askSourceKindDay => 'Day';
+
+  @override
+  String get askSourceKindSource => 'Source';
+
+  @override
   String memoriesBulkDeleted(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -2593,6 +2619,14 @@ class AppL10nEn extends AppL10n {
       'Enter a complete server URL including http:// or https://.';
 
   @override
+  String get controllerUnreachableServer =>
+      'NeoRecall could not reach that server. Check the address and that the server is running.';
+
+  @override
+  String get controllerPublicHttpWarning =>
+      'This address uses unencrypted HTTP on a public host. Prefer HTTPS unless you trust the network.';
+
+  @override
   String get controllerWidgetStopped =>
       'Recording stopped from the home-screen widget.';
 
@@ -2685,6 +2719,133 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get controllerStorageFull => 'Storage full — recording stopped';
+
+  @override
+  String get controllerStartupFailed =>
+      'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.';
+
+  @override
+  String get controllerStorageWriteFailed =>
+      'Device storage is full. Recording stopped; all previously queued audio remains protected.';
+
+  @override
+  String get controllerAudioStoreFailed =>
+      'Local audio could not be stored. Recording is stopping without deleting queued audio.';
+
+  @override
+  String get controllerPartialStoreFailed =>
+      'The active audio block could not be written to durable storage.';
+
+  @override
+  String get controllerBluetoothRequired =>
+      'Connect a supported Bluetooth device before starting capture.';
+
+  @override
+  String get controllerBluetoothConnectFailed =>
+      'The Bluetooth device could not be connected. Keep it nearby and try again.';
+
+  @override
+  String get controllerSelectCaptureSource =>
+      'Select at least one capture source.';
+
+  @override
+  String get controllerOutsideRecordingWindow =>
+      'Recording is outside the configured daily recording window.';
+
+  @override
+  String get controllerSignInToRecord => 'Sign in before starting a recording.';
+
+  @override
+  String get controllerSchedulePaused =>
+      'Recording paused at the end of its daily window. Android may require NeoRecall to be opened before phone-microphone recording resumes.';
+
+  @override
+  String get controllerBluetoothNotConfigured =>
+      'Background capture could not resume because its Bluetooth device is not configured.';
+
+  @override
+  String get controllerMicrophoneNeedsOpen =>
+      'Phone-microphone recording is waiting for NeoRecall to be opened. Bluetooth capture and device sync continue in the background.';
+
+  @override
+  String get controllerBackgroundRecovered =>
+      'Background recording recovered after the app process restarted.';
+
+  @override
+  String get controllerBluetoothDisconnected =>
+      'The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.';
+
+  @override
+  String get controllerNoQueuedAudio =>
+      'There is no queued audio ready to upload.';
+
+  @override
+  String controllerUploadingQueuedAudio(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Uploading $count queued recordings using mobile data.',
+      one: 'Uploading 1 queued recording using mobile data.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get controllerBackgroundPaused =>
+      'Background recording and device sync are paused. Open NeoRecall to resume them.';
+
+  @override
+  String get controllerRefreshFailed =>
+      'Could not reach NeoRecall. Showing what was loaded last.';
+
+  @override
+  String get controllerReprocessAiUnavailable =>
+      'Summaries are not available right now, so this moment was left as it is.';
+
+  @override
+  String get controllerReprocessStillRecording =>
+      'This conversation is still being recorded.';
+
+  @override
+  String get controllerReprocessFailed =>
+      'This moment could not be written up again just now.';
+
+  @override
+  String get controllerWidgetRecordSignIn =>
+      'Sign in before starting recording from the home-screen widget.';
+
+  @override
+  String controllerWidgetActionFailed(String error) {
+    return 'A home-screen widget action could not be completed: $error';
+  }
+
+  @override
+  String get controllerCaptureMovedToBluetooth =>
+      'Recording moved back to the reconnected Bluetooth device.';
+
+  @override
+  String get controllerCaptureMovedToPhone =>
+      'Bluetooth disconnected; recording continues with the phone microphone.';
+
+  @override
+  String controllerInterruptedFinalizeFailed(String error) {
+    return 'Interrupted recording could not be finalized safely: $error';
+  }
+
+  @override
+  String controllerCaptureRetrying(String reason, int seconds) {
+    return 'Audio capture was interrupted ($reason). The durable tail was saved; capture will retry in $seconds seconds.';
+  }
+
+  @override
+  String controllerDeviceRecordFailed(String error) {
+    return 'The device requested recording, but capture could not start: $error';
+  }
+
+  @override
+  String controllerBatteryOptimizationFailed(String error) {
+    return 'Android could not open the battery-optimization request: $error';
+  }
 
   @override
   String liveEtaLeft(String duration) {
@@ -3369,6 +3530,11 @@ class AppL10nEn extends AppL10n {
   @override
   String watchCopyLabel(String label) {
     return 'Copy $label';
+  }
+
+  @override
+  String watchCopied(String label) {
+    return '$label copied';
   }
 
   @override

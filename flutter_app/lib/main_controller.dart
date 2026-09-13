@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show Locale, PlatformDispatcher;
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -55,6 +54,7 @@ import 'src/settings/account_export_save.dart';
 import 'src/settings/usage_section.dart';
 import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
+import 'src/watch/paired_watch.dart';
 import 'src/watch/watch_inbox_audio.dart';
 import 'src/watch/watch_digest.dart';
 import 'src/watch/watch_digest_publisher.dart';
@@ -254,6 +254,7 @@ class NeoRecallController extends ChangeNotifier
   _mobileInterruptionSubscription;
   @override
   SharedPreferences? _preferences;
+  @override
   bool initialized = false;
   @override
   bool loading = false;
@@ -620,6 +621,7 @@ class NeoRecallController extends ChangeNotifier
   /// was reached by, so moving back towards today is a lookup rather than a
   /// refetch from the start of the history.
   static const int momentPageSize = 8;
+  @override
   List<TimelineMoment> moments = <TimelineMoment>[];
   final List<String?> _momentPageCursors = <String?>[null];
   String? _momentNextCursor;
@@ -630,6 +632,7 @@ class NeoRecallController extends ChangeNotifier
   /// Full transcripts for moments the reader has opened. A timeline refresh
   /// carries only a preview of each moment, so opening one fetches the rest
   /// once and keeps it for as long as the page is on screen.
+  @override
   final Map<String, List<TranscriptSegment>> momentTranscripts =
       <String, List<TranscriptSegment>>{};
   final Set<String> loadingMomentTranscripts = <String>{};
@@ -2157,6 +2160,7 @@ class NeoRecallController extends ChangeNotifier
     await _refreshPending();
   }
 
+  @override
   Future<void> stopRecording({
     bool interrupted = false,
     bool preserveMobileIntent = false,
@@ -3235,6 +3239,7 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
   }
 
+  @override
   Future<void> applyRawAudioRetention({bool purgeAll = false}) async {
     final owner = accountId;
     if (owner == null) return;
@@ -3655,6 +3660,7 @@ class NeoRecallController extends ChangeNotifier
     return strings.controllerReprocessFailed;
   }
 
+  @override
   Future<void> refreshAccountUsage({bool silent = false}) async {
     if (api.token == null) return;
     if (!silent) {

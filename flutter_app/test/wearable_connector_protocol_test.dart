@@ -516,7 +516,7 @@ void main() {
     },
   );
 
-  List<int> _memoketLiveNotify(int seq, {List<int>? headerPrefix}) => <int>[
+  List<int> memoketLiveNotify(int seq, {List<int>? headerPrefix}) => <int>[
     ...?headerPrefix,
     if (headerPrefix == null) ...<int>[0, 0, 0, 0],
     seq,
@@ -544,12 +544,12 @@ void main() {
       transport.emit(
         WearableDeviceUuids.memoketService,
         WearableDeviceUuids.memoketAudioNotify,
-        _memoketLiveNotify(255),
+        memoketLiveNotify(255),
       );
       transport.emit(
         WearableDeviceUuids.memoketService,
         WearableDeviceUuids.memoketAudioNotify,
-        _memoketLiveNotify(0, headerPrefix: <int>[0, 0, 0, 1]),
+        memoketLiveNotify(0, headerPrefix: <int>[0, 0, 0, 1]),
       );
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(connector.syncDiagnostics['liveNotifies'], 2);

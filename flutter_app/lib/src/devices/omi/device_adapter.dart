@@ -17,7 +17,11 @@ import 'offline_sync.dart';
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
 /// every device's wire protocol in its own connector.
-class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
+class DeviceAdapter
+    implements
+        AudioDeviceAdapter,
+        StorageSyncCapableAdapter,
+        RadioLinkCapableAdapter {
   DeviceAdapter({GattTransport? gatt}) : _gatt = gatt ?? createGattTransport();
 
   /// Primary services used to select supported wearables during the scan.

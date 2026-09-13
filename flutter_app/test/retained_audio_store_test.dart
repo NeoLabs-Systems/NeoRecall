@@ -2,11 +2,17 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:neorecall/src/sync/ledger_seal.dart';
 import 'package:neorecall/src/sync/retained_audio_store.dart';
 
 void main() {
   late Directory root;
   late RetainedAudioStore store;
+
+  // Retained clips are sealed on the way to disk, and the real key comes from
+  // platform secure storage, which needs a live binding this suite does not
+  // have. A fixed test key keeps the sealing on the path under test.
+  LedgerSeal.debugKey = Uint8List.fromList(List<int>.filled(32, 9));
 
   setUp(() async {
     root = await Directory.systemTemp.createTemp('neorecall-retained-');

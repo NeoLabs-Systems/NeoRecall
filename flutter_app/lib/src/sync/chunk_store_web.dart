@@ -470,12 +470,15 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
     final value = await transaction.objectStore('contexts').getObject(item.id);
     await transaction.completed;
     final bytes = value is Map ? value['bytes'] : null;
-    Uint8List? stored;
-    if (bytes is Uint8List) stored = bytes;
-    if (bytes is List) stored = Uint8List.fromList(bytes.cast<int>());
+    // A Uint8List is already a List, so testing for it second copied every
+    // blob that arrived in the fast form before unsealing it.
+    final Uint8List? stored = switch (bytes) {
+      final Uint8List typed => typed,
+      final List<Object?> list => Uint8List.fromList(list.cast<int>()),
+      _ => null,
+    };
     if (stored == null) return null;
     return (await LedgerSeal.instance()).unseal(stored);
-    return null;
   }
 
   @override

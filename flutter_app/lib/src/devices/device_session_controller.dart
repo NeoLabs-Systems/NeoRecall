@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../diagnostics/client_diagnostic_log.dart';
 import 'audio_device_adapter.dart';
-import 'omi/device_adapter.dart';
 
 /// Coordinates preferred external capture device selection and reconnect.
 class DeviceSessionController {
@@ -226,8 +225,10 @@ class DeviceSessionController {
     // Already linked (e.g. the attempt we just waited on connected this very
     // device): report success instead of tearing a good link down. A stale
     // connectedStandby after the radio powered off must not short-circuit.
-    DeviceAdapter? radio;
-    if (adapter is DeviceAdapter) radio = adapter;
+    final radio = switch (adapter) {
+      final RadioLinkCapableAdapter capable => capable,
+      _ => null,
+    };
     if (state == DeviceTransportState.connectedStandby ||
         state == DeviceTransportState.recording) {
       if (radio == null || await radio.hasLiveLink()) {
@@ -303,8 +304,10 @@ class DeviceSessionController {
   void _bindRadio(AudioDeviceAdapter? adapter) {
     unawaited(_radioSub?.cancel());
     _radioSub = null;
-    DeviceAdapter? radio;
-    if (adapter is DeviceAdapter) radio = adapter;
+    final radio = switch (adapter) {
+      final RadioLinkCapableAdapter capable => capable,
+      _ => null,
+    };
     if (radio != null) {
       _radioSub = radio.radioReadyChanges.listen(_onRadioReady);
     }
@@ -322,9 +325,11 @@ class DeviceSessionController {
   }
 
   Future<void> _tryScheduleReconnect() async {
-    DeviceAdapter? radio;
     final adapter = activeAdapter;
-    if (adapter is DeviceAdapter) radio = adapter;
+    final radio = switch (adapter) {
+      final RadioLinkCapableAdapter capable => capable,
+      _ => null,
+    };
     if (radio != null && !await radio.radioIsReady()) {
       return;
     }

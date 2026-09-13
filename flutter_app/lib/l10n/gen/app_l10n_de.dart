@@ -738,6 +738,32 @@ class AppL10nDe extends AppL10n {
   String get askSearching => 'Ihre Erinnerungen werden durchsucht';
 
   @override
+  String get askRateLimited =>
+      'Sie haben in kurzer Zeit sehr oft gefragt. Versuchen Sie es in ein paar Minuten erneut.';
+
+  @override
+  String get askAiNotConfigured =>
+      'Es ist noch kein Antwortmodell eingerichtet, daher kann diese Frage nicht beantwortet werden.';
+
+  @override
+  String get askFailed => 'Diese Frage konnte gerade nicht beantwortet werden.';
+
+  @override
+  String get askSourceKindTranscript => 'Transkript';
+
+  @override
+  String get askSourceKindMemory => 'Erinnerung';
+
+  @override
+  String get askSourceKindDetail => 'Detail';
+
+  @override
+  String get askSourceKindDay => 'Tag';
+
+  @override
+  String get askSourceKindSource => 'Quelle';
+
+  @override
   String memoriesBulkDeleted(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -2616,6 +2642,14 @@ class AppL10nDe extends AppL10n {
       'Geben Sie eine vollständige Server-Adresse einschließlich http:// oder https:// ein.';
 
   @override
+  String get controllerUnreachableServer =>
+      'NeoRecall konnte diesen Server nicht erreichen. Prüfen Sie die Adresse und ob der Server läuft.';
+
+  @override
+  String get controllerPublicHttpWarning =>
+      'Diese Adresse verwendet unverschlüsseltes HTTP auf einem öffentlichen Host. Nutzen Sie HTTPS, außer Sie vertrauen dem Netzwerk.';
+
+  @override
   String get controllerWidgetStopped =>
       'Aufnahme über das Startbildschirm-Widget beendet.';
 
@@ -2710,6 +2744,134 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get controllerStorageFull => 'Speicher voll – Aufnahme beendet';
+
+  @override
+  String get controllerStartupFailed =>
+      'NeoRecall konnte den lokalen Start nicht abschließen. Ihr gespeichertes Audio wurde nicht gelöscht. Versuchen Sie es erneut, um sicher fortzufahren.';
+
+  @override
+  String get controllerStorageWriteFailed =>
+      'Der Gerätespeicher ist voll. Die Aufnahme wurde beendet; bereits gespeichertes Audio bleibt geschützt.';
+
+  @override
+  String get controllerAudioStoreFailed =>
+      'Lokales Audio konnte nicht gespeichert werden. Die Aufnahme wird beendet, ohne gespeichertes Audio zu löschen.';
+
+  @override
+  String get controllerPartialStoreFailed =>
+      'Der aktuelle Audioblock konnte nicht dauerhaft gespeichert werden.';
+
+  @override
+  String get controllerBluetoothRequired =>
+      'Verbinden Sie ein unterstütztes Bluetooth-Gerät, bevor Sie die Aufnahme starten.';
+
+  @override
+  String get controllerBluetoothConnectFailed =>
+      'Das Bluetooth-Gerät konnte nicht verbunden werden. Halten Sie es in der Nähe und versuchen Sie es erneut.';
+
+  @override
+  String get controllerSelectCaptureSource =>
+      'Wählen Sie mindestens eine Aufnahmequelle.';
+
+  @override
+  String get controllerOutsideRecordingWindow =>
+      'Die Aufnahme liegt außerhalb des eingestellten Tagesfensters.';
+
+  @override
+  String get controllerSignInToRecord =>
+      'Melden Sie sich an, bevor Sie eine Aufnahme starten.';
+
+  @override
+  String get controllerSchedulePaused =>
+      'Die Aufnahme wurde am Ende des Tagesfensters angehalten. Unter Android muss NeoRecall möglicherweise geöffnet werden, bevor die Telefonmikrofon-Aufnahme fortgesetzt wird.';
+
+  @override
+  String get controllerBluetoothNotConfigured =>
+      'Die Hintergrundaufnahme konnte nicht fortgesetzt werden, weil das Bluetooth-Gerät nicht eingerichtet ist.';
+
+  @override
+  String get controllerMicrophoneNeedsOpen =>
+      'Die Telefonmikrofon-Aufnahme wartet darauf, dass NeoRecall geöffnet wird. Bluetooth-Aufnahme und Gerätesynchronisierung laufen im Hintergrund weiter.';
+
+  @override
+  String get controllerBackgroundRecovered =>
+      'Die Hintergrundaufnahme wurde nach einem Neustart der App wiederhergestellt.';
+
+  @override
+  String get controllerBluetoothDisconnected =>
+      'Die Bluetooth-Audioquelle wurde getrennt. Verbinden Sie das Gerät erneut oder beenden Sie die Aufnahme, um sie abzuschließen.';
+
+  @override
+  String get controllerNoQueuedAudio =>
+      'Es ist kein gespeichertes Audio zum Hochladen bereit.';
+
+  @override
+  String controllerUploadingQueuedAudio(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gespeicherte Aufnahmen werden über Mobilfunk hochgeladen.',
+      one: '1 gespeicherte Aufnahme wird über Mobilfunk hochgeladen.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get controllerBackgroundPaused =>
+      'Hintergrundaufnahme und Gerätesynchronisierung sind pausiert. Öffnen Sie NeoRecall, um sie fortzusetzen.';
+
+  @override
+  String get controllerRefreshFailed =>
+      'NeoRecall war nicht erreichbar. Es wird angezeigt, was zuletzt geladen wurde.';
+
+  @override
+  String get controllerReprocessAiUnavailable =>
+      'Zusammenfassungen sind gerade nicht verfügbar, daher blieb dieser Moment unverändert.';
+
+  @override
+  String get controllerReprocessStillRecording =>
+      'Dieses Gespräch wird noch aufgenommen.';
+
+  @override
+  String get controllerReprocessFailed =>
+      'Dieser Moment konnte gerade nicht erneut ausgearbeitet werden.';
+
+  @override
+  String get controllerWidgetRecordSignIn =>
+      'Melden Sie sich an, bevor Sie die Aufnahme über das Startbildschirm-Widget starten.';
+
+  @override
+  String controllerWidgetActionFailed(String error) {
+    return 'Eine Aktion des Startbildschirm-Widgets konnte nicht abgeschlossen werden: $error';
+  }
+
+  @override
+  String get controllerCaptureMovedToBluetooth =>
+      'Die Aufnahme wurde auf das erneut verbundene Bluetooth-Gerät zurückgelegt.';
+
+  @override
+  String get controllerCaptureMovedToPhone =>
+      'Bluetooth getrennt; die Aufnahme läuft mit dem Telefonmikrofon weiter.';
+
+  @override
+  String controllerInterruptedFinalizeFailed(String error) {
+    return 'Die unterbrochene Aufnahme konnte nicht sicher abgeschlossen werden: $error';
+  }
+
+  @override
+  String controllerCaptureRetrying(String reason, int seconds) {
+    return 'Die Audioaufnahme wurde unterbrochen ($reason). Der gespeicherte Schluss bleibt erhalten; ein erneuter Versuch folgt in $seconds Sekunden.';
+  }
+
+  @override
+  String controllerDeviceRecordFailed(String error) {
+    return 'Das Gerät hat eine Aufnahme angefordert, aber sie konnte nicht starten: $error';
+  }
+
+  @override
+  String controllerBatteryOptimizationFailed(String error) {
+    return 'Android konnte die Anfrage zur Akkuoptimierung nicht öffnen: $error';
+  }
 
   @override
   String liveEtaLeft(String duration) {
@@ -3400,6 +3562,11 @@ class AppL10nDe extends AppL10n {
   @override
   String watchCopyLabel(String label) {
     return '$label kopieren';
+  }
+
+  @override
+  String watchCopied(String label) {
+    return '$label kopiert';
   }
 
   @override

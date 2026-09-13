@@ -450,7 +450,7 @@ class _SourceRow extends StatelessWidget {
 
   String _when(BuildContext context) {
     final at = source.occurredAt;
-    final l10n = AppL10n.of(context)!;
+    final l10n = AppL10n.of(context);
     if (at == null) return source.kindLabel(l10n).toUpperCase();
     final time =
         '${at.hour.toString().padLeft(2, '0')}:'
