@@ -6,17 +6,32 @@ const boundary = require('../../services/conversations/boundary_service');
 const jobs = require('../../services/jobs/job_service');
 const membership = require('../../services/conversations/conversation_membership_service');
 const vectors = require('../../transcription/speaker_embeddings');
+const { placeholders } = require('../../utils/query');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('conversations');
 
+// Reads every segment's embedding in one statement.
+//
+// This asked per segment, compiling the same SQL again each time, and boundary
+// detection reruns over a conversation's entire segment list on every terminal
+// chunk — so an hour-long recording paid a query per segment, on every chunk,
+// for as long as it kept growing. A segment with no embedding yet still yields
+// a block with none, which is what lets detection stay silent rather than cut
+// while the search index catches up.
 function blocksForSegments(database, segments) {
+  if (!segments.length) return [];
+  const ids = segments.map((segment) => String(segment.id));
+  const embeddings = new Map(database.prepare(
+    `SELECT d.source_id source_id, se.embedding embedding FROM search_embeddings se
+       JOIN search_documents d ON d.id=se.document_id
+      WHERE d.kind='segment' AND d.user_id=? AND d.source_id IN (${placeholders(ids.length)})`,
+  ).all(segments[0].user_id, ...ids).map((row) => [row.source_id, row.embedding]));
   return segments.map((segment) => {
-    const embedded = database.prepare(`SELECT se.embedding FROM search_embeddings se JOIN search_documents d ON d.id=se.document_id
-      WHERE d.kind='segment' AND d.source_id=? AND d.user_id=?`).get(String(segment.id), segment.user_id);
+    const embedded = embeddings.get(String(segment.id));
     return {
       id: segment.id, segmentIds: [segment.id], startedAt: segment.started_at, endedAt: segment.ended_at,
-      speakerId: segment.speaker_cluster_id, embedding: embedded ? vectors.fromBuffer(embedded.embedding) : null,
+      speakerId: segment.speaker_cluster_id, embedding: embedded ? vectors.fromBuffer(embedded) : null,
       characterCount: segment.text.length,
     };
   });
