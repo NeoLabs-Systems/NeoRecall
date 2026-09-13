@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const stream = require('node:stream/promises');
 const bcrypt = require('bcrypt');
-const { ensureRuntimeDirs } = require('../../runtime/paths');
+const { paths, ensurePrivateDirectory } = require('../../runtime/paths');
 
 function randomToken(bytes = 32) { return crypto.randomBytes(bytes).toString('base64url'); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
@@ -36,9 +36,26 @@ function timingSafeStringEqual(left, right) {
 async function hashPassword(password) { return bcrypt.hash(password, 12); }
 async function verifyPassword(password, hash) { return bcrypt.compare(password, hash); }
 
+// Held in memory after the first read, keyed by the path it came from.
+//
+// Every seal, unseal, encrypt and decrypt calls this, and it used to go through
+// `ensureRuntimeDirs()` — ten mkdir and ten chmod calls — before reading the
+// 32 bytes. Measured, that was 120us of the 130us an unseal took: the
+// filesystem work cost twelve times the AES. Speaker clustering unseals a
+// voiceprint per comparison and asks about pairs of pairs, so it multiplied.
+//
+// Caching is safe because nothing rewrites this file while the process runs;
+// there is no key rotation, and the database is keyed once at open. The cache
+// is keyed by resolved path rather than held unconditionally, so a test that
+// moves NEORECALL_HOME mid-process still reads its own key.
+let cachedKey = null;
+let cachedKeyPath = null;
+
 function masterKey() {
-  const { secretKey } = ensureRuntimeDirs();
+  const { secretKey, data } = paths();
+  if (cachedKeyPath === secretKey && cachedKey) return cachedKey;
   if (!fs.existsSync(secretKey)) {
+    ensurePrivateDirectory(data);
     try {
       fs.writeFileSync(secretKey, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' });
     } catch (error) {
@@ -47,6 +64,8 @@ function masterKey() {
   }
   const key = fs.readFileSync(secretKey);
   if (key.length !== 32) throw new Error('NeoRecall secret.key must contain exactly 32 bytes.');
+  cachedKey = key;
+  cachedKeyPath = secretKey;
   return key;
 }
 
