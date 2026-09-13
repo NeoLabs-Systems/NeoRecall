@@ -104,14 +104,16 @@ esp_err_t nr_geo_autolocate(void)
 esp_err_t nr_geo_from_city(const char *city)
 {
     if (!city || !city[0]) return ESP_ERR_INVALID_ARG;
-    char url[256];
-    // Minimal URL-encoding: spaces -> %20 (city names rarely need more).
-    char enc[128]; size_t o = 0;
-    for (const char *p = city; *p && o + 3 < sizeof(enc); p++) {
-        if (*p == ' ') { enc[o++] = '%'; enc[o++] = '2'; enc[o++] = '0'; }
-        else enc[o++] = *p;
-    }
-    enc[o] = '\0';
+    // The caller's city field holds up to 95 characters, and percent-encoding
+    // can triple each one, so both buffers are sized for the fully-escaped
+    // worst case rather than for a typical name.
+    char url[512];
+    // The panel is asked about German cities, so umlauts are the ordinary case
+    // rather than an edge one. Encoding only spaces put their raw UTF-8 bytes
+    // into the query string, and an ampersand in a name would have ended the
+    // parameter early.
+    char enc[288];
+    nr_url_escape(enc, sizeof(enc), city);
     snprintf(url, sizeof(url), "https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=de&format=json", enc);
 
     nr_http_result_t res;

@@ -6,9 +6,9 @@ set -euo pipefail
 
 if [[ -t 1 ]]; then
   BOLD='\033[1m'; RESET='\033[0m'; RED='\033[1;31m'; GRN='\033[1;32m'
-  CYN='\033[1;36m'; YEL='\033[1;33m'; DIM='\033[2m'
+  CYN='\033[1;36m'; DIM='\033[2m'
 else
-  BOLD=''; RESET=''; RED=''; GRN=''; CYN=''; YEL=''; DIM=''
+  BOLD=''; RESET=''; RED=''; GRN=''; CYN=''; DIM=''
 fi
 
 ok()   { echo -e "  ${GRN}✓${RESET}  $*"; }

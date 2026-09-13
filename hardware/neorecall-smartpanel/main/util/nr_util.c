@@ -95,6 +95,31 @@ bool nr_strlcat(char *dst, const char *src, size_t size)
     return nr_strlcpy(dst + used, src, size - used);
 }
 
+size_t nr_url_escape(char *dst, size_t size, const char *src)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    if (!dst || size == 0) return 0;
+    dst[0] = '\0';
+    if (!src) src = "";
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *) src; *p; p++) {
+        const bool unreserved = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
+                             || (*p >= '0' && *p <= '9')
+                             || *p == '-' || *p == '_' || *p == '.' || *p == '~';
+        const size_t n = unreserved ? 1u : 3u;
+        if (used + n + 1 > size) break;
+        if (unreserved) {
+            dst[used++] = (char) *p;
+        } else {
+            dst[used++] = '%';
+            dst[used++] = HEX[*p >> 4];
+            dst[used++] = HEX[*p & 0x0F];
+        }
+    }
+    dst[used] = '\0';
+    return used;
+}
+
 size_t nr_html_escape(char *dst, size_t size, const char *src)
 {
     if (!dst || size == 0) return 0;
