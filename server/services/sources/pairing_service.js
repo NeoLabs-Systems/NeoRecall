@@ -58,10 +58,10 @@ function consumePairing(token, discordToken) {
 
   // Mark as success so the UI knows it's done
   pairing.status = 'success';
-  
+
   // We don't delete immediately so the UI can fetch the success status,
   // it will be cleaned up on the next expiration sweep.
-  
+
   return true;
 }
 

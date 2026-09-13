@@ -7,6 +7,7 @@ const escapeHtml = (value) => String(value ?? '').replace(
   /[&<>"']/g,
   (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character],
 );
+const megabytes = (bytes) => `${(Number(bytes || 0) / 1048576).toFixed(1)} MB`;
 const dateLabel = (value) => value ? new Date(value).toLocaleString() : '—';
 const pages = {
   overview: ['Overview', 'System health, queue state and retained data.'],
@@ -59,6 +60,10 @@ function showError(error) {
   const element = document.querySelector('#global-error');
   element.textContent = error.message || 'Request failed';
   element.classList.add('visible');
+}
+
+function hideError() {
+  document.querySelector('#global-error').classList.remove('visible');
 }
 
 function showPage(name, updateHash = true) {
@@ -249,60 +254,96 @@ function renderEmpty(columns, message) {
   return `<tr><td colspan="${columns}"><div class="empty">${escapeHtml(message)}</div></td></tr>`;
 }
 
-async function load({ announce = false } = {}) {
-  document.querySelector('#global-error').classList.remove('visible');
-  const [stats, userData, jobData, aiData, auditData, settingsData, providerData, tfStatus, backupData, usageDefaults] = await Promise.all([
-    api('/stats'),
-    api('/users'),
-    api('/jobs?limit=50'),
-    api('/ai-requests?limit=50'),
-    api('/audit?limit=50'),
-    api('/processing-settings'),
-    api('/provider-settings'),
-    api('/settings/2fa'),
-    api('/backups?limit=50'),
-    api('/config/usage-limits'),
-  ]);
-  const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
-  const failed = jobData.jobs.filter((job) => job.status === 'failed').length;
-  const aiTokens = stats.ai.reduce((sum, row) => sum + Number(row.prompt_tokens || 0) + Number(row.completion_tokens || 0), 0);
-  const tiles = [
-    ['Users', stats.users, 'ok'],
-    ['Recordings', stats.recordings, 'ok'],
-    ['Queued work', queued, queued ? 'warn' : 'ok'],
-    ['Oldest queued', stats.oldestQueuedAt ? dateLabel(stats.oldestQueuedAt) : 'None', stats.oldestQueuedAt ? 'warn' : 'ok'],
-    ['Temporary audio', `${(stats.temporaryAudioBytes / 1048576).toFixed(1)} MB`, stats.temporaryAudioBytes ? 'warn' : 'ok'],
-    ['Cleanup pending', stats.cleanupPending, stats.cleanupPending ? 'warn' : 'ok'],
-    ['Vector index', stats.vector.ready ? `Ready · ${stats.vector.version}` : 'Unavailable', stats.vector.ready ? 'ok' : 'fail'],
-    ['AI tokens', aiTokens.toLocaleString(), 'ok'],
-  ];
-  document.querySelector('#status').innerHTML = tiles.map(([label, value, state]) => `<article class="status-tile"><span class="status-dot ${state}"></span><div><div class="status-label">${escapeHtml(label)}</div><div class="status-detail">${escapeHtml(value)}</div></div></article>`).join('');
-  document.querySelector('#workers').textContent = stats.workers.length
-    ? stats.workers.map((worker) => `${worker.host} · ${worker.model_state} · ${dateLabel(worker.heartbeat_at)}`).join('\n')
-    : 'No current worker heartbeat.';
-  document.querySelector('#processing').innerHTML = stats.processing.length
-    ? stats.processing.map((metric) => `<span>${escapeHtml(metric.metric)} · ${Number(metric.average).toFixed(3)} ${escapeHtml(metric.unit)} avg</span>`).join('')
-    : '<span>No processing samples yet</span>';
-  document.querySelector('#users').innerHTML = userData.users.length ? userData.users.map((user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-limits-user="${user.id}" class="btn btn-ghost btn-sm">Limits</button> <button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`).join('') : renderEmpty(6, 'No accounts found.');
-  renderUsageDefaults(usageDefaults.limits);
-  document.querySelector('#jobs').innerHTML = jobData.jobs.length ? jobData.jobs.map((job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td class="reason" title="${escapeHtml(job.last_error_message || '')}">${escapeHtml(job.last_error_code || job.last_error_message || '')}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`).join('') : renderEmpty(6, 'No jobs found.');
-  document.querySelector('#ai').innerHTML = aiData.requests.length ? aiData.requests.map((entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td class="reason">${escapeHtml(entry.error_code || '')}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`).join('') : renderEmpty(6, 'No AI requests found.');
-  document.querySelector('#audit').innerHTML = auditData.entries.length ? auditData.entries.map((entry) => `<tr><td>${escapeHtml(entry.actor_type)}${entry.actor_id ? `<small>${escapeHtml(entry.actor_id.slice(0, 8))}</small>` : ''}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml([entry.resource_type, entry.resource_id].filter(Boolean).join(' · '))}</td><td>${dateLabel(entry.created_at)}</td></tr>`).join('') : renderEmpty(4, 'No audit entries found.');
-  const jobBadge = document.querySelector('#job-badge');
-  jobBadge.hidden = failed === 0;
-  jobBadge.textContent = String(failed);
-  renderSettings(settingsData.settings);
-  renderProviderSettings(providerData.settings);
-  discoverProviderModels('llm', { quiet: true });
-  discoverProviderModels('transcription', { quiet: true });
-  renderSecurity(tfStatus); // 2fa status
-  renderBackups(backupData);
-  document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-  if (announce) showToast('Admin data refreshed');
+// Fills a table body from `rows`, or says why it is empty. A section whose
+// request failed is not a section with no rows, and rendering both as "none
+// found" tells an operator the system is idle when it is actually unreachable.
+function renderRows(selector, rows, columns, emptyMessage, rowHtml) {
+  const body = document.querySelector(selector);
+  if (!rows) {
+    body.innerHTML = renderEmpty(columns, 'This section could not be loaded. Refresh to try again.');
+    return;
+  }
+  body.innerHTML = rows.length ? rows.map(rowHtml).join('') : renderEmpty(columns, emptyMessage);
 }
 
+const ADMIN_ENDPOINTS = {
+  stats: '/stats',
+  users: '/users',
+  jobs: '/jobs?limit=50',
+  ai: '/ai-requests?limit=50',
+  audit: '/audit?limit=50',
+  processingSettings: '/processing-settings',
+  providers: '/provider-settings',
+  twoFactor: '/settings/2fa',
+  backups: '/backups?limit=50',
+  usage: '/config/usage-limits',
+};
 
-const megabytes = (bytes) => `${(Number(bytes || 0) / 1048576).toFixed(1)} MB`;
+// Every panel is fetched together but no longer fails together. These ten
+// requests used to be one `Promise.all`, so a single unreachable endpoint threw
+// before anything rendered and blanked the whole dashboard — at exactly the
+// moment an operator is looking at it to find out what is broken. Each panel now
+// renders from its own result, and only the ones that failed say so.
+async function load({ announce = false } = {}) {
+  hideError();
+  const names = Object.keys(ADMIN_ENDPOINTS);
+  const settled = await Promise.allSettled(names.map((name) => api(ADMIN_ENDPOINTS[name])));
+  const data = {};
+  const failed = [];
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') data[names[index]] = result.value;
+    else failed.push(names[index]);
+  });
+
+  const stats = data.stats;
+  const failedJobs = data.jobs ? data.jobs.jobs.filter((job) => job.status === 'failed').length : 0;
+  if (stats) {
+    const queued = stats.queue.filter((row) => row.status === 'queued').reduce((sum, row) => sum + row.count, 0);
+    const aiTokens = stats.ai.reduce((sum, row) => sum + Number(row.prompt_tokens || 0) + Number(row.completion_tokens || 0), 0);
+    const tiles = [
+      ['Users', stats.users, 'ok'],
+      ['Recordings', stats.recordings, 'ok'],
+      ['Queued work', queued, queued ? 'warn' : 'ok'],
+      ['Oldest queued', stats.oldestQueuedAt ? dateLabel(stats.oldestQueuedAt) : 'None', stats.oldestQueuedAt ? 'warn' : 'ok'],
+      ['Temporary audio', megabytes(stats.temporaryAudioBytes), stats.temporaryAudioBytes ? 'warn' : 'ok'],
+      ['Cleanup pending', stats.cleanupPending, stats.cleanupPending ? 'warn' : 'ok'],
+      ['Vector index', stats.vector.ready ? `Ready · ${stats.vector.version}` : 'Unavailable', stats.vector.ready ? 'ok' : 'fail'],
+      ['AI tokens', aiTokens.toLocaleString(), 'ok'],
+    ];
+    document.querySelector('#status').innerHTML = tiles.map(([label, value, state]) => `<article class="status-tile"><span class="status-dot ${state}"></span><div><div class="status-label">${escapeHtml(label)}</div><div class="status-detail">${escapeHtml(value)}</div></div></article>`).join('');
+    document.querySelector('#workers').textContent = stats.workers.length
+      ? stats.workers.map((worker) => `${worker.host} · ${worker.model_state} · ${dateLabel(worker.heartbeat_at)}`).join('\n')
+      : 'No current worker heartbeat.';
+    document.querySelector('#processing').innerHTML = stats.processing.length
+      ? stats.processing.map((metric) => `<span>${escapeHtml(metric.metric)} · ${Number(metric.average).toFixed(3)} ${escapeHtml(metric.unit)} avg</span>`).join('')
+      : '<span>No processing samples yet</span>';
+  }
+
+  renderRows('#users', data.users?.users, 6, 'No accounts found.', (user) => `<tr><td>${escapeHtml(user.username)}<small>${escapeHtml(user.email || '')}</small></td><td>${escapeHtml(user.role)}</td><td>${user.device_count}</td><td>${user.recording_count}</td><td>${badge(user.disabled_at ? 'Disabled' : 'Active')}</td><td><button data-limits-user="${user.id}" class="btn btn-ghost btn-sm">Limits</button> <button data-user="${user.id}" data-disabled="${!user.disabled_at}" class="${user.disabled_at ? 'btn btn-ghost' : 'btn btn-danger'} btn-sm">${user.disabled_at ? 'Enable' : 'Disable'}</button></td></tr>`);
+  renderRows('#jobs', data.jobs?.jobs, 6, 'No jobs found.', (job) => `<tr><td>${escapeHtml(job.type)}</td><td>${badge(job.status)}</td><td>${job.attempts}/${job.max_attempts}</td><td class="reason" title="${escapeHtml(job.last_error_message || '')}">${escapeHtml(job.last_error_code || job.last_error_message || '')}</td><td>${dateLabel(job.created_at)}</td><td>${job.status === 'failed' ? `<button data-retry="${job.id}" class="btn btn-primary btn-sm">Retry</button>` : ''}${['queued', 'failed'].includes(job.status) ? `<button data-cancel="${job.id}" class="btn btn-ghost btn-sm">Cancel</button>` : ''}</td></tr>`);
+  renderRows('#ai', data.ai?.requests, 6, 'No AI requests found.', (entry) => `<tr><td>${escapeHtml(entry.purpose)}</td><td>${badge(entry.state)}</td><td>${escapeHtml(entry.model)}</td><td>${Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0)}</td><td class="reason">${escapeHtml(entry.error_code || '')}</td><td>${entry.sent_at ? dateLabel(entry.sent_at) : 'Reserved'}</td></tr>`);
+  renderRows('#audit', data.audit?.entries, 4, 'No audit entries found.', (entry) => `<tr><td>${escapeHtml(entry.actor_type)}${entry.actor_id ? `<small>${escapeHtml(entry.actor_id.slice(0, 8))}</small>` : ''}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml([entry.resource_type, entry.resource_id].filter(Boolean).join(' · '))}</td><td>${dateLabel(entry.created_at)}</td></tr>`);
+
+  const jobBadge = document.querySelector('#job-badge');
+  jobBadge.hidden = failedJobs === 0;
+  jobBadge.textContent = String(failedJobs);
+  if (data.usage) renderUsageDefaults(data.usage.limits);
+  if (data.processingSettings) renderSettings(data.processingSettings.settings);
+  if (data.providers) {
+    renderProviderSettings(data.providers.settings);
+    discoverProviderModels('llm', { quiet: true });
+    discoverProviderModels('transcription', { quiet: true });
+  }
+  renderSecurity(data.twoFactor);
+  if (data.backups) renderBackups(data.backups);
+  document.querySelector('#last-refresh').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (failed.length) {
+    showError(new Error(`Could not load: ${failed.join(', ')}. The rest of the page is current.`));
+  } else if (announce) {
+    showToast('Admin data refreshed');
+  }
+}
+
 
 // The three questions an operator actually has — is it on, did the last one
 // work, and when is the next — answered before any history table.

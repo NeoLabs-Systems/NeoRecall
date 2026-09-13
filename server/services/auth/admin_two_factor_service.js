@@ -53,7 +53,7 @@ function verifySecondFactor(adminId, value) {
   if (!factor) return true; // not configured or not enabled
   if (!value) throw new HttpError(401, 'TWO_FACTOR_REQUIRED', 'A two-factor authentication code is required.');
   if (factor.locked_until && Date.parse(factor.locked_until) > Date.now()) throw new HttpError(429, 'TWO_FACTOR_LOCKED', 'Two-factor authentication is temporarily locked.');
-  
+
   const valid = verifyTotp(value, decryptString(factor.secret_encrypted)) || consumeRecoveryCode(adminId, value);
   if (valid) {
     db.prepare('UPDATE admin_two_factor SET failed_attempts = 0, locked_until = NULL WHERE admin_id = ?').run(adminId);
@@ -68,7 +68,7 @@ function activateTwoFactor(adminId, code) {
   const db = getDatabase();
   const factor = db.prepare('SELECT * FROM admin_two_factor WHERE admin_id = ? AND pending = 1').get(adminId);
   if (!factor || !verifyTotp(code, decryptString(factor.secret_encrypted))) throw new HttpError(400, 'INVALID_TWO_FACTOR', 'The two-factor authentication code is invalid.');
-  
+
   const codes = generateRecoveryCodes();
 
   db.transaction(() => {

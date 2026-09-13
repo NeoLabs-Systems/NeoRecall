@@ -27,7 +27,7 @@ async function login(username, password, context = {}) {
   const db = getDatabase();
   const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
   if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
-  
+
   const tfStatus = adminTwoFactor.getStatus(admin.id);
   if (tfStatus.enabled) {
     return { requiresTwoFactor: true, adminId: admin.id };
@@ -36,7 +36,7 @@ async function login(username, password, context = {}) {
     const qrDataUrl = await qrcode.toDataURL(setup.otpauthUrl, { width: 200, margin: 2 });
     return { requiresTwoFactorSetup: true, adminId: admin.id, setup: { ...setup, qrDataUrl } };
   }
-  
+
   return createSession(admin, context);
 }
 
@@ -53,7 +53,7 @@ async function verifyTwoFactorLogin(username, password, code, context = {}) {
   const db = getDatabase();
   const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
   if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
-  
+
   adminTwoFactor.verifySecondFactor(admin.id, code);
   return createSession(admin, context);
 }
@@ -62,7 +62,7 @@ async function setupTwoFactorLogin(username, password, code, context = {}) {
   const db = getDatabase();
   const admin = db.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').get(String(username || '').trim());
   if (!admin || admin.disabled_at || !(await verifyPassword(String(password || ''), admin.password_hash))) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
-  
+
   const recoveryCodes = adminTwoFactor.activateTwoFactor(admin.id, code);
   const session = createSession(admin, context);
   return { ...session, recoveryCodes };
