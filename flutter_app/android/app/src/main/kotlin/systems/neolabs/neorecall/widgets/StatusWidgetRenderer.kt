@@ -6,7 +6,9 @@ import android.widget.RemoteViews
 import systems.neolabs.neorecall.R
 import systems.neolabs.neorecall.widgets.WidgetRender.background
 import systems.neolabs.neorecall.widgets.WidgetRender.meter
+import systems.neolabs.neorecall.widgets.WidgetRender.Stat
 import systems.neolabs.neorecall.widgets.WidgetRender.show
+import systems.neolabs.neorecall.widgets.WidgetRender.stats
 import systems.neolabs.neorecall.widgets.WidgetRender.surface
 import systems.neolabs.neorecall.widgets.WidgetRender.tint
 
@@ -20,8 +22,6 @@ import systems.neolabs.neorecall.widgets.WidgetRender.tint
  */
 internal object StatusWidgetRenderer : WidgetRenderer {
   private const val COMPACT_MAX_HEIGHT_DP = 110
-
-  private data class Stat(val value: String, val label: String, val color: Int?)
 
   override fun render(
     context: Context,
@@ -79,15 +79,7 @@ internal object StatusWidgetRenderer : WidgetRenderer {
 
     val stats = stats(context, snapshot, theme, now)
     views.show(R.id.widget_stats, !compact && stats.isNotEmpty())
-    STAT_SLOTS.forEachIndexed { index, slot ->
-      val stat = stats.getOrNull(index)
-      views.show(slot.container, stat != null)
-      if (stat == null) return@forEachIndexed
-      views.setTextViewText(slot.value, stat.value)
-      views.setTextColor(slot.value, stat.color ?: theme.textPrimary)
-      views.setTextViewText(slot.label, stat.label)
-      views.setTextColor(slot.label, theme.textMuted)
-    }
+    views.stats(theme, stats)
 
     val issue = capture.issue
     views.show(R.id.widget_issue, !compact && issue != null)
@@ -201,11 +193,4 @@ internal object StatusWidgetRenderer : WidgetRenderer {
   private val ACTIVE_PHASES =
     setOf("watchTransfer", "uploading", "transcribing", "finalizing", "queued")
 
-  private data class Slot(val container: Int, val value: Int, val label: Int)
-
-  private val STAT_SLOTS = listOf(
-    Slot(R.id.widget_stat_1, R.id.widget_stat_1_value, R.id.widget_stat_1_label),
-    Slot(R.id.widget_stat_2, R.id.widget_stat_2_value, R.id.widget_stat_2_label),
-    Slot(R.id.widget_stat_3, R.id.widget_stat_3_value, R.id.widget_stat_3_label),
-  )
 }

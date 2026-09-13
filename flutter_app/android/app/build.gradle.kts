@@ -28,6 +28,15 @@ android {
         }
     }
 
+    buildFeatures {
+        // AGP 8 stopped generating BuildConfig unless it is asked for, which
+        // left MainActivity's `BuildConfig.DEBUG` unresolved and the Android
+        // build failing. That flag gates the Memoket end-to-end intent hook,
+        // so it has to keep compiling rather than be worked around: the hook
+        // must not exist in a release build.
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

@@ -5,7 +5,9 @@ import android.content.Context
 import android.widget.RemoteViews
 import systems.neolabs.neorecall.R
 import systems.neolabs.neorecall.widgets.WidgetRender.background
+import systems.neolabs.neorecall.widgets.WidgetRender.Stat
 import systems.neolabs.neorecall.widgets.WidgetRender.show
+import systems.neolabs.neorecall.widgets.WidgetRender.stats
 import systems.neolabs.neorecall.widgets.WidgetRender.surface
 import systems.neolabs.neorecall.widgets.WidgetRender.textOrHide
 import systems.neolabs.neorecall.widgets.WidgetRender.week
@@ -28,8 +30,6 @@ internal object TodayWidgetRenderer : WidgetRenderer {
     val todayIndex: Int,
     val page: String,
   )
-
-  private data class Stat(val id: String, val value: String, val label: String, val color: Int?)
 
   override fun render(
     context: Context,
@@ -86,18 +86,8 @@ internal object TodayWidgetRenderer : WidgetRenderer {
 
     val stats = if (current) stats(choice, today, snapshot, theme) else emptyList()
     views.show(R.id.widget_stats, !compact && stats.isNotEmpty())
-    STAT_SLOTS.forEachIndexed { index, slot ->
-      val stat = stats.getOrNull(index)
-      views.show(slot.container, stat != null)
-      if (stat == null) return@forEachIndexed
-      views.setTextViewText(slot.value, stat.value)
-      views.setTextColor(slot.value, stat.color ?: theme.textPrimary)
-      views.setTextViewText(slot.label, stat.label)
-      views.setTextColor(slot.label, theme.textMuted)
-      views.setOnClickPendingIntent(
-        slot.container,
-        WidgetIntents.open(context, appWidgetId, pageFor(stat.id), statSlot = index + 1),
-      )
+    views.stats(theme, stats) { index, stat ->
+      WidgetIntents.open(context, appWidgetId, pageFor(stat.id), statSlot = index + 1)
     }
 
     val review = snapshot.dayInReview?.takeIf { !compact && current }
@@ -197,23 +187,23 @@ internal object TodayWidgetRenderer : WidgetRenderer {
   ): List<Stat> {
     val talk = WidgetFormat.talkTime(today.talkSeconds)
     val all = listOf(
-      Stat("talk", "${talk.value}${talk.unit}", "CAPTURED", null),
-      Stat("memories", today.memories.toString(), "MEMORIES", null),
-      Stat("highlights", today.highlights.toString(), "HIGHLIGHTS", null),
+      Stat(id = "talk", value = "${talk.value}${talk.unit}", label = "CAPTURED"),
+      Stat(id = "memories", value = today.memories.toString(), label = "MEMORIES"),
+      Stat(id = "highlights", value = today.highlights.toString(), label = "HIGHLIGHTS"),
       Stat(
-        "open",
-        today.openTasks.toString(),
-        if (today.dueToday > 0) "OPEN · ${today.dueToday} DUE" else "OPEN",
-        if (today.overdue > 0) theme.danger else null,
+        id = "open",
+        value = today.openTasks.toString(),
+        label = if (today.dueToday > 0) "OPEN · ${today.dueToday} DUE" else "OPEN",
+        color = if (today.overdue > 0) theme.danger else null,
       ),
     )
     val device = snapshot.device
     val withDevice = if (device != null && device.connected && device.batteryPercent != null) {
       all + Stat(
-        "device",
-        "${device.batteryPercent}%",
-        device.label.uppercase(java.util.Locale.getDefault()).take(9),
-        if (device.batteryPercent <= 15) theme.danger else theme.accentAlt,
+        id = "device",
+        value = "${device.batteryPercent}%",
+        label = device.label.uppercase(java.util.Locale.getDefault()).take(9),
+        color = if (device.batteryPercent <= 15) theme.danger else theme.accentAlt,
       )
     } else {
       all
@@ -221,17 +211,10 @@ internal object TodayWidgetRenderer : WidgetRenderer {
     return withDevice.filter { it.id != choice }.take(3)
   }
 
-  private fun pageFor(id: String) = when (id) {
+  private fun pageFor(id: String?) = when (id) {
     "memories" -> WidgetIntents.PAGE_MEMORIES
     "highlights", "open" -> WidgetIntents.PAGE_HIGHLIGHTS
     else -> WidgetIntents.PAGE_TIMELINE
   }
 
-  private data class Slot(val container: Int, val value: Int, val label: Int)
-
-  private val STAT_SLOTS = listOf(
-    Slot(R.id.widget_stat_1, R.id.widget_stat_1_value, R.id.widget_stat_1_label),
-    Slot(R.id.widget_stat_2, R.id.widget_stat_2_value, R.id.widget_stat_2_label),
-    Slot(R.id.widget_stat_3, R.id.widget_stat_3_value, R.id.widget_stat_3_label),
-  )
 }
