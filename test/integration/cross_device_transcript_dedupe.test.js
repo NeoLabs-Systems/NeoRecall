@@ -17,15 +17,14 @@ test.after(() => {
   fs.rmSync(process.env.NEORECALL_HOME, { recursive: true, force: true });
 });
 
-function recording(db, { userId, deviceId, sessionId, sourceId, platform }) {
+function recording(db, { userId, deviceId, sessionId, sourceId, platform, startedAt = '2026-08-24T10:00:00.000Z' }) {
   db.prepare(`INSERT OR IGNORE INTO devices
     (id,user_id,client_uuid,name,platform,kind) VALUES (?,?,?,?,?,'desktop')`)
     .run(deviceId, userId, deviceId, platform, platform);
   db.prepare(`INSERT INTO recording_sessions
     (id,user_id,device_id,client_uuid,device_started_at,corrected_started_at,timezone,consent_attested_at,status)
     VALUES (?,?,?,?,?,?,?,?,'active')`)
-    .run(sessionId, userId, deviceId, sessionId, '2026-08-24T10:00:00.000Z',
-      '2026-08-24T10:00:00.000Z', 'UTC', '2026-08-24T09:59:00.000Z');
+    .run(sessionId, userId, deviceId, sessionId, startedAt, startedAt, 'UTC', '2026-08-24T09:59:00.000Z');
   db.prepare(`INSERT INTO recording_sources
     (id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format)
     VALUES (?,?,?,'microphone','mono',16000,'pcm_s16le')`).run(sourceId, sessionId, sourceId);
@@ -35,8 +34,8 @@ function recording(db, { userId, deviceId, sessionId, sourceId, platform }) {
   db.prepare(`INSERT INTO audio_chunks
     (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,
      device_started_at,monotonic_offset_ms,duration_ms,overlap_ms,state,temporary_path)
-    VALUES (?,?,?,?,0,?, ?,1,'wav','pcm_s16le','mono','2026-08-24T10:00:00.000Z',0,30000,0,'uploaded',?)`)
-    .run(chunkId, userId, sessionId, sourceId, crypto.randomUUID(), crypto.randomBytes(32).toString('hex'), temporaryPath);
+    VALUES (?,?,?,?,0,?, ?,1,'wav','pcm_s16le','mono',?,0,30000,0,'uploaded',?)`)
+    .run(chunkId, userId, sessionId, sourceId, crypto.randomUUID(), crypto.randomBytes(32).toString('hex'), startedAt, temporaryPath);
   return db.prepare('SELECT * FROM audio_chunks WHERE id=?').get(chunkId);
 }
 
@@ -51,7 +50,7 @@ const inference = [{
   overlappingSpeech: false,
 }];
 
-test('only a timestamp-matched exact transcript from another device is suppressed', () => {
+test('a timestamp-matched exact transcript from another source is suppressed', () => {
   migrate();
   const db = getDatabase();
   const userId = crypto.randomUUID();
@@ -64,11 +63,18 @@ test('only a timestamp-matched exact transcript from another device is suppresse
   });
   assert.equal(transcribe.persistSegments(firstMac, inference), 1);
 
-  // Separate sessions on one physical client are not cross-device evidence.
+  // A later take on the same device is new audio, not a copy of the first.
   const restartedMac = recording(db, {
     userId, deviceId: macDeviceId, sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), platform: 'macos',
+    startedAt: '2026-08-24T10:05:00.000Z',
   });
   assert.equal(transcribe.persistSegments(restartedMac, inference), 1);
+
+  // Live stream plus a later file import of the same take share a device.
+  const importedCopy = recording(db, {
+    userId, deviceId: macDeviceId, sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), platform: 'macos',
+  });
+  assert.equal(transcribe.persistSegments(importedCopy, inference), 0);
 
   const phone = recording(db, {
     userId, deviceId: crypto.randomUUID(), sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), platform: 'android',

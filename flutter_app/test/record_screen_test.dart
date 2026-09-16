@@ -11,6 +11,7 @@ import 'package:neorecall/src/recording/recorder.dart';
 import 'package:neorecall/src/sync/processing_status.dart';
 import 'package:neorecall/src/sync/pending_audio_preview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 /// The record screen animates and samples audio levels only while recording, so
 /// the live state needs its own coverage: the idle screen must settle, the live
@@ -18,6 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// callbacks), and leaving the screen must stop the ticker.
 void main() {
   Widget wrap(Widget child) => MaterialApp(
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     theme: buildNeoRecallTheme(Brightness.dark),
     home: Scaffold(body: child),
   );
@@ -95,7 +98,7 @@ void main() {
 
     await tester.pumpWidget(wrap(RecordScreen(controller: controller)));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('No watch backlog'), findsOneWidget);
+    expect(find.text('No device backlog'), findsOneWidget);
     expect(
       tester
           .widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade))
@@ -113,7 +116,7 @@ void main() {
           .crossFadeState,
       CrossFadeState.showSecond,
     );
-    expect(find.text('Watch transfer'), findsOneWidget);
+    expect(find.text('Device transfer'), findsOneWidget);
     expect(find.text('Stored on phone'), findsOneWidget);
     expect(find.text('Server upload'), findsOneWidget);
     expect(find.text('Server transcription'), findsOneWidget);
@@ -497,12 +500,62 @@ void main() {
       await tester.pump();
     });
   }
+
+  testWidgets('typing a live note survives the audio-level rebuilds', (
+    tester,
+  ) async {
+    final controller = recordingController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => wrap(RecordScreen(controller: controller)),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('recording-context-note')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('recording-context-note')),
+    );
+    await tester.pump();
+    expect(find.text('Add a note'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Alice was in the room');
+    expect(find.text('Alice was in the room'), findsOneWidget);
+
+    // The live app rebuilds MaterialApp on every audio-level tick. A dialog
+    // that allocates a new TextEditingController in its builder loses focus
+    // and the draft, which looked like the take restarting.
+    controller.audioLevel = 0.4;
+    controller.notifyListeners();
+    await tester.pump();
+    controller.audioLevel = 0.9;
+    controller.notifyListeners();
+    await tester.pump();
+
+    expect(find.text('Add a note'), findsOneWidget);
+    expect(find.text('Alice was in the room'), findsOneWidget);
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+    await tester.pump();
+  });
 }
 
 class _PlaybackController extends NeoRecallController {
   _PlaybackController({required super.recorder});
 
   bool mobileDataUploadRequested = false;
+
+  @override
+  String? get activeRecordingSessionId => 'session-live';
 
   @override
   Future<void> uploadQueuedAudioOnMobileDataOnce() async {

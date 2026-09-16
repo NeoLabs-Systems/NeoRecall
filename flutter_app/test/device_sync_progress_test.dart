@@ -20,6 +20,19 @@ void main() {
       );
     });
 
+    test('completeFraction overrides the unit ratio', () {
+      expect(
+        const WearableSyncProgress(
+          transferred: 1,
+          total: 2,
+          completeFraction: 0.75,
+        ).fraction,
+        closeTo(0.75, 0.001),
+        reason:
+            'a two-file drain must not sit at 50% while the second file copies',
+      );
+    });
+
     test('a fraction never exceeds 1 even if extra packets arrive', () {
       expect(
         const WearableSyncProgress(transferred: 31000, total: 30000).fraction,
@@ -50,7 +63,7 @@ void main() {
       const packets = 30249;
       const measuredSeconds = 131012 * 0.02;
       const perPacket = 0.0866; // mirrors OmiConnector._secondsPerPacket
-      expect((packets * perPacket), closeTo(measuredSeconds, 30));
+      expect(packets * perPacket, closeTo(measuredSeconds, 30));
       expect(
         DeviceSyncStatusView.formatDuration((packets * perPacket).round()),
         '44 min of audio',

@@ -23,6 +23,11 @@ process.env.AI_REQUEST_TIMEOUT_MS = '10000';
 const { createApp } = require('../../server/app');
 const { getDatabase, closeDatabase } = require('../../server/db/database');
 const service = require('../../server/services/memories/consolidation_service');
+
+// The evidence turn, found by role. The engine inserts an output-language
+// directive (and any standing owner instructions) between the task's system
+// message and the evidence, so its position is not fixed.
+function userTurn(body) { return body.messages.find((message) => message.role === 'user'); }
 const app = createApp();
 
 let server;
@@ -169,7 +174,7 @@ test('a lesson recorded in two stretches becomes one card, not two', async () =>
   });
   let offeredCandidates = null;
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     offeredCandidates = input.continuationCandidates;
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
@@ -231,7 +236,7 @@ test('a seven-minute recorder restart still offers the earlier occasion for merg
   });
   let offered = [];
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     offered = input.continuationCandidates;
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
@@ -272,7 +277,7 @@ test('a separate occasion on the same subject stays its own card', async () => {
   });
   let offered = null;
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     offered = input.continuationCandidates.length;
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
@@ -312,7 +317,7 @@ test('duplicate fragments of one occasion collapse into a single card', async ()
     lines: ['The lesson wraps up with the summary.'],
   });
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
     return {
@@ -402,7 +407,7 @@ test('a card the reader renamed or put away is left as they left it', async () =
     lines: ['The lesson continues.'],
   });
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
     return {
@@ -437,7 +442,7 @@ test('a card the reader renamed or put away is left as they left it', async () =
   });
   let candidateCount = null;
   respond = (body) => {
-    candidateCount = JSON.parse(body.messages[1].content).continuationCandidates.length;
+    candidateCount = JSON.parse(userTurn(body).content).continuationCandidates.length;
     return firstLessonOutput(body);
   };
   await consolidate(context.userId);
@@ -464,7 +469,7 @@ test('an unrelated recording from hours earlier is never even offered', async ()
   });
   let offered = null;
   respond = (body) => {
-    offered = JSON.parse(body.messages[1].content).continuationCandidates;
+    offered = JSON.parse(userTurn(body).content).continuationCandidates;
     return firstLessonOutput(body);
   };
   await consolidate(context.userId);
@@ -523,7 +528,7 @@ test('folding cards together never attaches the same line twice', async () => {
     lines: ['The rest of the same session.'],
   });
   respond = (body) => {
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userTurn(body).content);
     const segmentIds = body.response_format.json_schema.schema
       .properties.memories.items.properties.sourceSegmentIds.items.enum;
     return {

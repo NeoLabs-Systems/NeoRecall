@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../../diagnostics/client_diagnostic_log.dart';
 import '../audio_device_adapter.dart';
 import '../omi/offline_sync.dart';
+import '../omi/wearable_capture_time.dart';
 import 'plaud_hardware.dart';
 import 'plaud_hardware_factory.dart';
 import 'plaud_session.dart';
@@ -215,7 +216,9 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     );
   }
 
-  Future<PlaudDiscoveredDevice> _waitForMatch(AudioDeviceDescriptor device) async {
+  Future<PlaudDiscoveredDevice> _waitForMatch(
+    AudioDeviceDescriptor device,
+  ) async {
     final existing = _found[device.deviceKey];
     if (existing != null) return existing;
     final serial = device.metadata['serialNumber'] as String?;
@@ -225,7 +228,9 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         (item) =>
             item.uuid == device.deviceKey ||
             (uuid != null && item.uuid == uuid) ||
-            (serial != null && serial.isNotEmpty && item.serialNumber == serial),
+            (serial != null &&
+                serial.isNotEmpty &&
+                item.serialNumber == serial),
       );
     } catch (_) {}
     final found = Completer<PlaudDiscoveredDevice>();
@@ -255,7 +260,9 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
           state == DeviceTransportState.faulted,
     );
     if (_state == DeviceTransportState.faulted) {
-      throw StateError('Plaud handshake failed. The device may already be bound to another app.');
+      throw StateError(
+        'Plaud handshake failed. The device may already be bound to another app.',
+      );
     }
   }
 
@@ -312,9 +319,9 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     for (final file in files) {
       if (_drainCancelled) break;
       try {
-        final bytes = await _hardware.exportAudio(file.sessionId).timeout(
-          exportTimeout,
-        );
+        final bytes = await _hardware
+            .exportAudio(file.sessionId)
+            .timeout(exportTimeout);
         if (bytes.length < minBytes) continue;
         await onRecording(
           WearableRecording(
@@ -327,7 +334,10 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
         );
         await _deleteAfterIngest(file.sessionId);
         count += 1;
-        pendingSeconds = (pendingSeconds - file.durationSeconds).clamp(0, pendingSeconds);
+        pendingSeconds = (pendingSeconds - file.durationSeconds).clamp(
+          0,
+          pendingSeconds,
+        );
         _syncProgress.add(
           WearableSyncProgress(
             transferred: count,
@@ -360,10 +370,9 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
 
   DateTime? _capturedAt(int sessionId) {
     if (sessionId <= 0) return null;
-    final millis = sessionId > 1000000000000 ? sessionId : sessionId * 1000;
-    final time = DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
-    if (time.year < 2015 || time.year > 2100) return null;
-    return time;
+    return sessionId > 1000000000000
+        ? WearableCaptureTime.fromUnixMillis(sessionId)
+        : WearableCaptureTime.fromUnixSeconds(sessionId);
   }
 
   Future<List<PlaudStoredFile>> _listFiles() async {
@@ -404,7 +413,10 @@ class PlaudAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     if (_state != DeviceTransportState.connectedStandby) return null;
     try {
       final files = await _listFiles();
-      final seconds = files.fold<int>(0, (sum, file) => sum + file.durationSeconds);
+      final seconds = files.fold<int>(
+        0,
+        (sum, file) => sum + file.durationSeconds,
+      );
       return WearableSyncProgress(
         transferred: 0,
         total: files.length,
@@ -459,7 +471,8 @@ class _Sync with WearableOfflineSync {
   Future<void> cancelStoredSync() => _adapter.cancelStoredSync();
 
   @override
-  Stream<WearableSyncProgress> get syncProgress => _adapter._syncProgress.stream;
+  Stream<WearableSyncProgress> get syncProgress =>
+      _adapter._syncProgress.stream;
 
   @override
   Future<WearableSyncProgress?> peekPending() => _adapter.peekPending();

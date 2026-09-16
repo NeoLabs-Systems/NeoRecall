@@ -9,10 +9,11 @@ void main() {
       downmixToMono(Int16List.fromList(<int>[10, 20, 30, 40]), 2).toList(),
       <int>[15, 35],
     );
-    expect(
-      downmixToMono(Int16List.fromList(<int>[7, 8, 9]), 1).toList(),
-      <int>[7, 8, 9],
-    );
+    expect(downmixToMono(Int16List.fromList(<int>[7, 8, 9]), 1).toList(), <int>[
+      7,
+      8,
+      9,
+    ]);
   });
 
   test('int16ToBytesLE packs little-endian signed samples', () {
@@ -45,15 +46,15 @@ void main() {
   test('LinearResampler interpolates across buffer boundaries at 1:2', () {
     final resampler = LinearResampler(inputRate: 16000, outputRate: 32000);
     // First buffer emits samples up to its last usable pair.
-    expect(
-      resampler.process(Int16List.fromList(<int>[0, 100])).toList(),
-      <int>[0, 50],
-    );
+    expect(resampler.process(Int16List.fromList(<int>[0, 100])).toList(), <int>[
+      0,
+      50,
+    ]);
     // The next buffer's first outputs interpolate against the retained tail,
     // proving there is no discontinuity at the BLE-chunk seam.
-    expect(
-      resampler.process(Int16List.fromList(<int>[200])).toList(),
-      <int>[100, 150],
-    );
+    expect(resampler.process(Int16List.fromList(<int>[200])).toList(), <int>[
+      100,
+      150,
+    ]);
   });
 }

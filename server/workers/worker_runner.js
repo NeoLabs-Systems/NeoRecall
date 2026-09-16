@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const { getDatabase } = require('../db/database');
 const jobs = require('../services/jobs/job_service');
 const tempAudio = require('../services/ingest/temp_audio_service');
+const { getConfig } = require('../config');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('worker-runner');
@@ -14,6 +15,8 @@ function handlerFor(type) {
   if (['cleanup_chunk_audio', 'sweep_temp_audio'].includes(type)) return require('./handlers/cleanup_handler');
   if (type === 'embed_search_documents') return require('./handlers/embed_handler');
   if (type === 'detect_boundaries') return require('./handlers/boundary_handler');
+  if (type === 'resolve_speakers') return require('./handlers/resolve_speakers_handler');
+  if (type === 'reconcile_speakers') return require('./handlers/reconcile_speakers_handler');
   if (type === 'preview_conversation') return require('./handlers/conversation_preview_handler');
   if (type === 'consolidate_memories') return require('./handlers/consolidation_handler');
   if (type === 'rewrite_merged_memory') return require('./handlers/memory_merge_handler');
@@ -22,6 +25,7 @@ function handlerFor(type) {
   if (['maintenance', 'prune_events'].includes(type)) return require('./handlers/maintenance_handler');
   if (type === 'process_import') return require('./handlers/import_handler');
   if (type === 'backup') return require('./handlers/backup_handler');
+  if (['cloud_put', 'cloud_user_backup'].includes(type)) return require('./handlers/cloud_handler');
   throw Object.assign(new Error(`Unknown job type: ${type}`), { code: 'UNKNOWN_JOB_TYPE', retryable: false });
 }
 
@@ -68,10 +72,11 @@ function markChunkFailure(job, error, willRetry) {
 
 async function run({ inference, isInferenceReady = () => true, signal }) {
   const workerId = `${os.hostname()}-${process.pid}-${crypto.randomUUID()}`;
+  const config = getConfig();
   let currentJob = null;
   const heartbeatTimer = setInterval(
     () => heartbeat(workerId, currentJob?.id, isInferenceReady() ? 'ready' : 'not_ready'),
-    5_000,
+    config.workerHeartbeatMs,
   );
   heartbeat(workerId, null, 'starting');
   try {
@@ -81,16 +86,27 @@ async function run({ inference, isInferenceReady = () => true, signal }) {
       // would burn attempts and can eventually make the server delete its only
       // audio copy even though no inference was ever possible.
       currentJob = jobs.claimNext(workerId, undefined, isInferenceReady());
-      if (!currentJob) { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
-      const leaseTimer = setInterval(() => jobs.renewLease(currentJob.id, workerId), 30_000);
+      if (!currentJob) { await new Promise((resolve) => setTimeout(resolve, config.workerIdlePollMs)); continue; }
+      const leaseTimer = setInterval(() => jobs.renewLease(currentJob.id, workerId), config.workerLeaseRenewMs);
       try {
         const handler = handlerFor(currentJob.type);
         await handler.handle(currentJob, inference);
         jobs.complete(currentJob.id, workerId);
       } catch (error) {
-        logger.error('Job failed', { jobId: currentJob.id, type: currentJob.type, error });
-        const willRetry = jobs.fail(currentJob.id, workerId, error, error.retryable !== false);
-        markChunkFailure(currentJob, error, willRetry);
+        if (error.code === 'USAGE_LIMIT_EXCEEDED') {
+          // A usage pause is not a failure. Burning attempts would eventually
+          // delete the server audio copy and ask the client to reupload, which
+          // is the opposite of keeping the original available until the window
+          // opens. The job goes back to queued at nextDecreaseAt.
+          jobs.defer(currentJob.id, workerId, error.retryAt);
+          logger.info('Deferred a job until the usage window opens', {
+            jobId: currentJob.id, type: currentJob.type, retryAt: error.retryAt || null,
+          });
+        } else {
+          logger.error('Job failed', { jobId: currentJob.id, type: currentJob.type, error });
+          const willRetry = jobs.fail(currentJob.id, workerId, error, error.retryable !== false);
+          markChunkFailure(currentJob, error, willRetry);
+        }
       } finally { clearInterval(leaseTimer); currentJob = null; }
     }
   } finally { clearInterval(heartbeatTimer); getDatabase().prepare('DELETE FROM worker_heartbeats WHERE worker_id=?').run(workerId); }

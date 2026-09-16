@@ -96,6 +96,25 @@ abstract class AudioDeviceAdapter {
   Future<void> dispose();
 }
 
+/// Implemented by a device adapter that talks over a radio the user can switch
+/// off underneath it, so callers can ask whether a link is really there without
+/// knowing which brand of adapter they hold.
+///
+/// This was reachable only by downcasting to the concrete Omi adapter, which
+/// silently confined the connect-time radio checks to one device family: every
+/// other adapter took the `null` branch and skipped them.
+abstract class RadioLinkCapableAdapter {
+  /// Emits whenever the radio becomes usable or stops being usable.
+  Stream<bool> get radioReadyChanges;
+
+  /// Whether the radio can currently be used to reach a device at all.
+  Future<bool> radioIsReady();
+
+  /// Whether this adapter still holds a real link to its connected device.
+  /// A transport state left over from before the radio went down is not one.
+  Future<bool> hasLiveLink();
+}
+
 /// Registry so new wearable brands can be added without rewriting mobile UI.
 class AudioDeviceAdapterRegistry {
   final Map<String, AudioDeviceAdapter> _adapters =

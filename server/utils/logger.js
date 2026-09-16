@@ -3,7 +3,10 @@
 const levels = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 
 function redact(key, value) {
-  if (/token|password|secret|authorization|api.?key|audio|transcript/i.test(key)) return '[redacted]';
+  if (key === 'text' || key === 'body' || key === 'note') return '[redacted]';
+  if (/token|password|secret|authorization|api.?key|audio|transcript|email|ip.?address|ipAddress|user.?agent|userAgent|error_message|last_error_message|note_text|extracted_text|analysis_text|title_en|summary_en|text_en|metadata/i.test(key)) {
+    return '[redacted]';
+  }
   if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
   return value;
 }

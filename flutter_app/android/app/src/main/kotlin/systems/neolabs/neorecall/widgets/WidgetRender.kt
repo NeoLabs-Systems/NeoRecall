@@ -1,5 +1,6 @@
 package systems.neolabs.neorecall.widgets
 
+import android.app.PendingIntent
 import android.view.View
 import android.widget.RemoteViews
 import systems.neolabs.neorecall.R
@@ -24,6 +25,25 @@ internal object WidgetRender {
     R.id.widget_pip_1, R.id.widget_pip_2, R.id.widget_pip_3, R.id.widget_pip_4,
     R.id.widget_pip_5, R.id.widget_pip_6, R.id.widget_pip_7, R.id.widget_pip_8,
     R.id.widget_pip_9, R.id.widget_pip_10, R.id.widget_pip_11, R.id.widget_pip_12,
+  )
+
+  /**
+   * One figure in a widget's stat row. [id] names what the figure counts, for
+   * widgets whose stats are tappable; the ones that only display leave it null.
+   */
+  data class Stat(
+    val value: String,
+    val label: String,
+    val color: Int? = null,
+    val id: String? = null,
+  )
+
+  private data class Slot(val container: Int, val value: Int, val label: Int)
+
+  private val statSlots = listOf(
+    Slot(R.id.widget_stat_1, R.id.widget_stat_1_value, R.id.widget_stat_1_label),
+    Slot(R.id.widget_stat_2, R.id.widget_stat_2_value, R.id.widget_stat_2_label),
+    Slot(R.id.widget_stat_3, R.id.widget_stat_3_value, R.id.widget_stat_3_label),
   )
 
   private val dayLabelIds = intArrayOf(
@@ -74,6 +94,28 @@ internal object WidgetRender {
     val on = if (alert) theme.pipAlert else theme.pipOn
     pipIds.forEachIndexed { index, id ->
       setImageViewResource(id, if (index < lit) on else theme.pipOff)
+    }
+  }
+
+  /**
+   * Fills the stat row, hiding cells with nothing to show. [tapIntent] is asked
+   * for an intent per filled cell by the widgets whose figures navigate
+   * somewhere; a widget that only reports passes nothing.
+   */
+  fun RemoteViews.stats(
+    theme: WidgetTheme,
+    stats: List<Stat>,
+    tapIntent: ((index: Int, stat: Stat) -> PendingIntent)? = null,
+  ) {
+    statSlots.forEachIndexed { index, slot ->
+      val stat = stats.getOrNull(index)
+      show(slot.container, stat != null)
+      if (stat == null) return@forEachIndexed
+      setTextViewText(slot.value, stat.value)
+      setTextColor(slot.value, stat.color ?: theme.textPrimary)
+      setTextViewText(slot.label, stat.label)
+      setTextColor(slot.label, theme.textMuted)
+      tapIntent?.let { setOnClickPendingIntent(slot.container, it(index, stat)) }
     }
   }
 

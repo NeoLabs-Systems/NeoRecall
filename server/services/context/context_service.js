@@ -9,7 +9,9 @@ const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const { HttpError } = require('../../middleware/error_handler');
 const settings = require('../settings/settings_service');
 const jobs = require('../jobs/job_service');
+const tempAudio = require('../ingest/temp_audio_service');
 const analyzer = require('./context_analyzer');
+const conversationInsights = require('../conversations/conversation_insight_service');
 
 function memoryRow(userId, publicId) {
   const row = getDatabase().prepare('SELECT * FROM memories WHERE public_id=? AND user_id=?').get(publicId, userId);
@@ -146,7 +148,7 @@ function create(userId, target, id, input, file) {
     if (!sameTarget || !sameContent) {
       throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', 'That context id already represents different content.');
     }
-    if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    tempAudio.unlinkBestEffort(file?.path, { contextItemId: id, userId });
     return present({ ...existing, memory_public_id: memory?.public_id || null, used_by_ai: 0 });
   }
   const count = session
@@ -169,6 +171,7 @@ function create(userId, target, id, input, file) {
     if (file) {
       storedPath = destination(id, file.originalname);
       fs.renameSync(file.path, storedPath);
+      require('../../utils/sealed_fs').sealInPlace(storedPath);
     }
     const analysisState = file ? 'pending' : 'ready';
     db.prepare(`INSERT INTO recording_context_items
@@ -180,10 +183,13 @@ function create(userId, target, id, input, file) {
     if (memory) db.prepare('INSERT OR IGNORE INTO memory_context_sources (memory_id,context_item_id) VALUES (?,?)').run(memory.id, id);
     if (file) jobs.enqueue({ userId, resourceType: 'recording_context', resourceId: id, type: 'analyze_context', priority: 50 }, db);
     else if (memory) jobs.enqueue({ userId, resourceType: 'memory', resourceId: String(memory.id), type: 'rewrite_memory_context', priority: 60 }, db);
+    if (session && !file) conversationInsights.enqueueForSession(userId, session.id, db);
     return present({ ...owned(userId, id), memory_public_id: memory?.public_id || null, used_by_ai: 0 });
   } catch (error) {
-    if (storedPath && fs.existsSync(storedPath)) fs.unlinkSync(storedPath);
-    if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    // Rollback cleanup reports its own failures rather than throwing: letting it
+    // throw here would replace the error that actually failed the request.
+    tempAudio.unlinkBestEffort(storedPath, { contextItemId: id, userId });
+    tempAudio.unlinkBestEffort(file?.path, { contextItemId: id, userId });
     throw error;
   }
 }
@@ -196,6 +202,7 @@ function update(userId, id, input, target = null) {
   const db = getDatabase();
   db.prepare(`UPDATE recording_context_items SET note_text=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(text, id);
   enqueueAffectedMemoryRewrites(row, db);
+  if (row.session_id) conversationInsights.enqueueForSession(userId, row.session_id, db);
   return present({ ...owned(userId, id), memory_public_id: null, used_by_ai: 0 });
 }
 
@@ -203,7 +210,7 @@ function remove(userId, id, target = null) {
   const row = assertTarget(userId, owned(userId, id), target);
   const db = getDatabase();
   const memoryIds = affectedMemoryIds(row, db);
-  if (row.original_path && fs.existsSync(row.original_path)) fs.unlinkSync(row.original_path);
+  tempAudio.unlinkStrict(row.original_path);
   db.prepare('DELETE FROM recording_context_items WHERE id=? AND user_id=?').run(id, userId);
   for (const memoryId of memoryIds) {
     jobs.enqueue({ userId, resourceType: 'memory', resourceId: String(memoryId), type: 'rewrite_memory_context', priority: 60 }, db);
@@ -230,7 +237,7 @@ function cleanupExpiredOriginals(now = new Date()) {
   for (const row of db.prepare('SELECT * FROM recording_context_items WHERE original_path IS NOT NULL').all()) {
     const days = settings.get(row.user_id).contextOriginalRetentionDays;
     if (Date.parse(row.created_at) + days * 24 * 60 * 60_000 > now.getTime()) continue;
-    try { if (fs.existsSync(row.original_path)) fs.unlinkSync(row.original_path); } catch (_) { continue; }
+    if (!tempAudio.unlinkBestEffort(row.original_path, { contextItemId: row.id, userId: row.user_id })) continue;
     db.prepare(`UPDATE recording_context_items SET original_path=NULL,original_deleted_at=?,
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(now.toISOString(), row.id);
     removed += 1;

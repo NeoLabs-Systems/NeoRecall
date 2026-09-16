@@ -49,6 +49,8 @@ PODS:
     - FlutterMacOS
   - permission_handler_apple (9.4.8):
     - Flutter
+  - plaud_sdk (0.1.0):
+    - Flutter
   - record_ios (1.2.1):
     - Flutter
   - SDWebImage (5.21.5):
@@ -64,6 +66,8 @@ PODS:
   - universal_ble (0.0.1):
     - Flutter
     - FlutterMacOS
+  - url_launcher_ios (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
@@ -74,10 +78,12 @@ DEPENDENCIES:
   - opus_codec_ios (from `.symlinks/plugins/opus_codec_ios/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - plaud_sdk (from `.symlinks/plugins/plaud_sdk/ios`)
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - sqflite_darwin (from `.symlinks/plugins/sqflite_darwin/darwin`)
   - universal_ble (from `.symlinks/plugins/universal_ble/darwin`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
   trunk:
@@ -103,6 +109,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
+  plaud_sdk:
+    :path: ".symlinks/plugins/plaud_sdk/ios"
   record_ios:
     :path: ".symlinks/plugins/record_ios/ios"
   shared_preferences_foundation:
@@ -111,6 +119,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/sqflite_darwin/darwin"
   universal_ble:
     :path: ".symlinks/plugins/universal_ble/darwin"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
   audioplayers_darwin: 835ced6edd4c9fc8ebb0a7cc9e294a91d99917d5
@@ -123,13 +133,15 @@ SPEC CHECKSUMS:
   opus_codec_ios: 92a104ce4500126b25cf0abddf379af393846fd2
   path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   permission_handler_apple: 92d754bbaa7361d436db2d6c3c1c2a0fdcec462e
+  plaud_sdk: b93947b3bbd925fbe93fbc56288723520c52513e
   record_ios: 980fd386a97a35987d0fce3dfda4b26a38c90f4c
   SDWebImage: e9c98383c7572d713c1a0d7dd2783b10599b9838
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   sqflite_darwin: 20b2a3a3b70e43edae938624ce550a3cbf66a3d0
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
   universal_ble: 45519b2aeafe62761e2c6309f8927edb5288b914
+  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
-PODFILE CHECKSUM: b094d7a8f288a953a83e6fb79fa5750a40ad0033
+PODFILE CHECKSUM: a2bba213ff56d0ef27ef81b669db838c98e41fe8
 
 COCOAPODS: 1.16.2

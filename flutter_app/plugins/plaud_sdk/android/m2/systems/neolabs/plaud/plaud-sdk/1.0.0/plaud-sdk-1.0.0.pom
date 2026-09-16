@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coordinates for the vendored Plaud SDK archive next to this file. The archive
+  used to be consumed as `implementation files('libs/plaud-sdk.aar')`, which the
+  Android Gradle Plugin refuses in a library module: `flutter build apk` runs
+  assembleRelease across every subproject, and bundling an AAR that carries a
+  direct local .aar dependency is an error because those classes would not be
+  packaged. Resolving the same archive through a repository is the supported
+  form. Its own transitive dependencies stay declared in build.gradle, where
+  they were already listed, so this descriptor deliberately has none.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>systems.neolabs.plaud</groupId>
+  <artifactId>plaud-sdk</artifactId>
+  <version>1.0.0</version>
+  <packaging>aar</packaging>
+</project>

@@ -10,9 +10,11 @@ const jobs = require('../../services/jobs/job_service');
 const settings = require('../../services/settings/settings_service');
 const searchIndex = require('../../embeddings/search_index_service');
 const deduper = require('../../transcription/token_deduper');
+const sameDeviceCoverage = require('../../transcription/same_device_coverage');
 const transcriptQuality = require('../../transcription/transcript_quality');
 const matching = require('../../transcription/speaker_matching');
 const speakerPreviews = require('../../services/speakers/speaker_preview_service');
+const sourceIdentity = require('../../speakers/source_identity');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('transcribe-handler');
@@ -73,9 +75,10 @@ function previousSegments(database, chunk) {
     .all(chunk.source_id, chunk.sequence, Math.max(0, chunk.sequence - 2));
 }
 
-// Already-persisted transcript segments from another physical client whose
-// corrected time range could describe the same utterance. The exact-word
-// predicate is applied separately; this query only bounds the candidate set.
+// Already-persisted transcript segments from another source whose corrected
+// time range could describe the same utterance — another device, or the same
+// wearable's live stream versus a later file import. The exact-word predicate
+// is applied separately; this query only bounds the candidate set.
 function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs) {
   if (!segments.length) return [];
   const earliest = Math.min(...segments.map((segment) => segment.startMs)) - timeToleranceMs;
@@ -86,9 +89,9 @@ function crossDeviceSegments(database, chunk, session, segments, timeToleranceMs
     FROM transcript_segments t
     JOIN audio_chunks c ON c.id=t.chunk_id
     JOIN recording_sessions r ON r.id=c.session_id
-    WHERE t.user_id=? AND r.device_id<>? AND t.started_at<=? AND t.ended_at>=?
+    WHERE t.user_id=? AND c.source_id<>? AND t.started_at<=? AND t.ended_at>=?
     ORDER BY t.started_at`)
-    .all(chunk.user_id, session.device_id, new Date(latest).toISOString(), new Date(earliest).toISOString());
+    .all(chunk.user_id, chunk.source_id, new Date(latest).toISOString(), new Date(earliest).toISOString());
 }
 
 function updateContiguous(database, sourceId) {
@@ -139,6 +142,13 @@ function persistSegments(chunk, inferred) {
     const speakerCache = new Map();
     const continuity = boundaryContinuity(db, chunk);
     const recurringMatching = settings.get(chunk.user_id).recurringSpeakerMatching;
+    // Whether this recording already knows whose voice it carries. Almost no
+    // source does; the ones that do make every acoustic decision below moot.
+    const declared = sourceIdentity.declaredSpeaker(db, chunk.source_id);
+    // A declaration says whose stream this is. If the chunk turned out to hold
+    // more than one voice, somebody else was audible on it — still that person's
+    // stream, so the label stands, but not evidence of what they sound like.
+    const exclusive = new Set(clean.map((segment) => segment.diarizationSpeaker)).size <= 1;
     const insertSegment = db.prepare(`INSERT INTO transcript_segments
       (public_id,user_id,chunk_id,speaker_cluster_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text,language,asr_confidence,speaker_confidence,overlapping_speech)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -152,17 +162,38 @@ function persistSegments(chunk, inferred) {
         let resolved = speakerCache.get(key);
         if (!resolved) {
           const embedding = segment.speakerEmbedding instanceof Float32Array ? segment.speakerEmbedding : new Float32Array(Object.values(segment.speakerEmbedding));
-          const anchor = continuity.get(segment.sourceComponent || 'combined');
-          const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
-          cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
-            continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null,
-            // The pooled speech behind the fingerprint when diarization supplied
-            // it, falling back to this segment's own length.
-            durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
-          // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
-          voiceprint = cluster
-            ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching })
-            : null;
+          if (declared) {
+            // Nothing acoustic runs. Matching exists to answer a question this
+            // recording already answered, and re-deriving it from the audio can
+            // only be wrong more often than the source that was there. The person
+            // is resolved first, and the recording-local voice follows from them
+            // — the reverse of the anonymous path below, where the voice has to
+            // be found before there is any hope of naming who it belongs to.
+            voiceprint = sourceIdentity.reinforceDeclared(
+              db,
+              sourceIdentity.voiceprintForKey(db, { userId: chunk.user_id, ...declared }),
+              embedding,
+              { exclusive },
+            );
+            cluster = sourceIdentity.clusterForDeclared(db, {
+              userId: chunk.user_id, sessionId: chunk.session_id, voiceprintId: voiceprint.id, embedding,
+            });
+          } else {
+            const anchor = continuity.get(segment.sourceComponent || 'combined');
+            const anchorGapMs = anchor ? Math.max(0, segment.startMs - Date.parse(anchor.endedAt)) : null;
+            cluster = matching.resolveCluster(db, { userId: chunk.user_id, sessionId: chunk.session_id, embedding,
+              continuity: anchor ? { clusterId: anchor.clusterId, gapMs: anchorGapMs } : null,
+              // The pooled speech behind the fingerprint when diarization supplied
+              // it, falling back to this segment's own length.
+              durationMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) });
+            // Speech too brief to fingerprint reliably resolves to no voice rather than a new one.
+            voiceprint = cluster
+              ? matching.resolveVoiceprint(db, { userId: chunk.user_id, clusterId: cluster.id, embedding, enabled: recurringMatching,
+                // Enrolling a person is permanent, so it is gated on the same
+                // pooled speech the fingerprint was actually measured from.
+                speechMs: segment.speakerSpeechMs ?? Math.max(0, segment.endMs - segment.startMs) })
+              : null;
+          }
           resolved = { cluster, voiceprint, embedding };
           speakerCache.set(key, resolved);
         } else ({ cluster, voiceprint } = resolved);
@@ -199,6 +230,9 @@ function persistSegments(chunk, inferred) {
 }
 
 function finishCleanup(chunk, segmentCount) {
+  try { require('../../services/cloud/archive_service').stageAudio(chunk); } catch (error) {
+    logger.warn('Cloud audio staging failed', { chunkId: chunk.id, error });
+  }
   const db = getDatabase();
   try { tempAudio.unlinkStrict(chunk.temporary_path); } catch (error) {
     jobs.enqueue({ userId: chunk.user_id, resourceType: 'audio_chunk', resourceId: chunk.id, type: 'cleanup_chunk_audio', priority: 110 });
@@ -227,12 +261,26 @@ async function handle(job, inference) {
     return finishCleanup(chunk, chunk.transcript_segment_count || 0);
   }
   if (!chunk.temporary_path) throw Object.assign(new Error('Server audio is missing and must be uploaded again.'), { code: 'AUDIO_REUPLOAD_REQUIRED', retryable: false });
+  const session = db.prepare('SELECT * FROM recording_sessions WHERE id=? AND user_id=?').get(chunk.session_id, chunk.user_id);
+  if (session && sameDeviceCoverage.isCovered(db, chunk, session)) {
+    logger.info('Skipped transcription already covered by the same device', {
+      chunkId: chunk.id,
+      sourceId: chunk.source_id,
+      deviceId: session.device_id,
+      coverage: Number(sameDeviceCoverage.coverageRatio(db, chunk, session).toFixed(2)),
+    });
+    persistSegments(chunk, []);
+    return finishCleanup(chunk, 0);
+  }
   db.prepare("UPDATE audio_chunks SET state='processing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(chunk.id);
   const inferenceStartedAt = process.hrtime.bigint();
   const userSettings = settings.get(chunk.user_id);
   const vocabulary = settings.transcriptionVocabulary(chunk.user_id);
+  let preprocess = null;
   const inferredSegments = await inference({ filename: chunk.temporary_path, channelLayout: chunk.channel_layout, vocabulary,
-    vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled });
+    durationMs: chunk.duration_ms, vocabularyCorrectionEnabled: userSettings.vocabularyCorrectionEnabled,
+    userId: chunk.user_id, chunkId: chunk.id },
+  { onDiagnostics: (message) => { preprocess = message.preprocess; } });
   const quality = transcriptQuality.compactSegments(inferredSegments, processingSettings.get());
   const segments = quality.segments;
   if (quality.changedSegments) logger.warn('Compacted degenerate ASR repetition', {
@@ -251,20 +299,33 @@ async function handle(job, inference) {
     speakers: new Set(segments.map((segment) => segment.diarizationSpeaker).filter((value) => value !== null && value !== undefined)).size,
   });
   const inferenceSeconds = Number(process.hrtime.bigint() - inferenceStartedAt) / 1e9;
+  const audioSeconds = chunk.duration_ms / 1000;
   db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
-    VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / (chunk.duration_ms / 1000));
+    VALUES (?,?,'transcription_pipeline_rtf',?,'ratio')`).run(job.id, chunk.user_id, inferenceSeconds / audioSeconds);
+  // Recorded separately from the pipeline total, which already contains it, so
+  // "conditioning became expensive" stays distinguishable from "the
+  // transcription service became slow".
+  if (preprocess?.seconds && audioSeconds > 0) {
+    db.prepare(`INSERT INTO processing_metrics (job_id,user_id,metric,value,unit)
+      VALUES (?,?,'audio_preprocess_rtf',?,'ratio')`).run(job.id, chunk.user_id, preprocess.seconds / audioSeconds);
+  }
   const count = persistSegments(chunk, segments);
   captureSpeakerPreviews(chunk, count);
   if (count && userSettings.recurringSpeakerMatching) {
     try {
-      const result = require('../../services/speakers/speaker_service').reevaluate(chunk.user_id);
-      if (result.mergedCount) logger.info('Reconciled recurring speaker profiles', {
-        userId: chunk.user_id, merged: result.mergedCount, remaining: result.remainingCount,
-      });
+      // Queued rather than run here. Reconciliation compares every enrolled
+      // voice against every other inside a transaction, and running it once per
+      // chunk put that cost on the path that has audio waiting to be deleted and
+      // a receipt waiting to be issued. Keyed on the user, the queue's unique
+      // index collapses a recording's worth of requests into one pass.
+      jobs.enqueue({
+        userId: chunk.user_id, resourceType: 'user', resourceId: chunk.user_id,
+        type: 'reconcile_speakers', priority: 5,
+      }, db);
     } catch (error) {
       // Identity cleanup is derived state. It must never prevent audio deletion
       // and the terminal receipt after transcript persistence has succeeded.
-      logger.warn('Recurring speaker reconciliation failed', {
+      logger.warn('Could not queue recurring speaker reconciliation', {
         userId: chunk.user_id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
       });
     }

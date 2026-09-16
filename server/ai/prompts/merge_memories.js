@@ -24,7 +24,7 @@ function mergeMemoryMessages(memories) {
     {
       role: 'system',
       content: `You merge several personal episodic memories into one coherent memory for a consumer app.
-Return one JSON object matching the supplied contract. Title, summary and topics language must be English.
+Return one JSON object matching the supplied contract. Title, summary and topics must be in the output language.
 Write a single natural title and a faithful standalone summary that cover every important fact from the inputs without padding or inventing details.
 ${TITLE_GUIDANCE}
 Prefer the most specific memory type from: ${MEMORY_TYPES.join('|')}.
@@ -37,8 +37,8 @@ Do not mention that memories were merged. Do not list the source titles mechanic
         memories: input,
         outputContract: {
           type: MEMORY_TYPES.join('|'),
-          titleEn: 'Concise English title for the combined occasion',
-          summaryEn: 'Faithful English summary covering all important points',
+          titleEn: 'Concise title for the combined occasion, in the output language',
+          summaryEn: 'Faithful summary covering all important points, in the output language',
           emoji: '🤝',
         },
       }),

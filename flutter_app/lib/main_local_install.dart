@@ -9,6 +9,7 @@ import 'main_theme.dart';
 import 'src/install/admin_key_store.dart';
 import 'src/install/admin_provider_client.dart';
 import 'src/install/local_backend_installer.dart';
+import 'l10n/gen/app_l10n.dart';
 
 enum _LocalInstallPhase { choose, installing, providers, done, failed }
 
@@ -44,6 +45,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   String? _errorRemedy;
   bool _showDetails = false;
   bool _connecting = false;
+  bool _keyRemembered = true;
   AdminProviderClient? _adminClient;
 
   @override
@@ -108,8 +110,19 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         installDirectory: _directory.text,
       );
       final adminApiKey = result.adminApiKey;
+      var keyRemembered = adminApiKey != null;
       if (adminApiKey != null) {
-        await const AdminKeyStore().save(result.backendUrl, adminApiKey);
+        // Best-effort: the keychain can refuse or prompt, and a server that is
+        // installed and running must not be reported as a failed setup because
+        // its key could not be filed away. Without it, this session still
+        // configures providers; only Settings on a later launch cannot.
+        try {
+          await const AdminKeyStore()
+              .save(result.backendUrl, adminApiKey)
+              .timeout(const Duration(seconds: 10));
+        } on Object {
+          keyRemembered = false;
+        }
       }
       if (!mounted) return;
       setState(() {
@@ -123,6 +136,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
               );
         // Without the administrator key there is nothing this screen can
         // configure, so it goes straight to the finish step.
+        _keyRemembered = keyRemembered;
         _phase = adminApiKey == null
             ? _LocalInstallPhase.done
             : _LocalInstallPhase.providers;
@@ -134,6 +148,16 @@ class _LocalInstallViewState extends State<LocalInstallView> {
       setState(() {
         _errorMessage = '${error.message} (${error.code})';
         _errorRemedy = error.remedy;
+        _phase = _LocalInstallPhase.failed;
+      });
+    } on Object catch (error) {
+      // Anything unexpected still has to land somewhere the person can act on.
+      // Leaving it uncaught stranded this screen on its last progress line with
+      // a spinner that never stopped.
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = AppL10n.of(context).installFailed('$error');
+        _errorRemedy = null;
         _phase = _LocalInstallPhase.failed;
       });
     }
@@ -152,9 +176,12 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final compact = MediaQuery.sizeOf(context).width < 760;
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // Opaque: a transparent scaffold leaves whatever the native window paints
+      // showing through, which on macOS is black.
+      backgroundColor: palette.bgPrimary,
       resizeToAvoidBottomInset: true,
       body: AppBackdrop(
         child: SafeArea(
@@ -182,7 +209,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
                               ? null
                               : widget.onBack,
                           icon: const Icon(Icons.arrow_back, size: 16),
-                          label: const Text('Back'),
+                          label: Text(strings.actionBack),
                           style: TextButton.styleFrom(
                             padding: EdgeInsets.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -195,10 +222,13 @@ class _LocalInstallViewState extends State<LocalInstallView> {
                         child: BrandLockup(logoSize: 60),
                       ),
                       const SizedBox(height: 22),
-                      Text('LOCAL SETUP', style: sectionEyebrowStyle(palette)),
+                      Text(
+                        strings.installEyebrow,
+                        style: sectionEyebrowStyle(palette),
+                      ),
                       const SizedBox(height: 8),
                       Text(
-                        'Set up NeoRecall on this computer',
+                        strings.installTitle,
                         style: displayTitleStyle(palette, size: 28),
                       ),
                       const SizedBox(height: 18),
@@ -230,54 +260,52 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   }
 
   Widget _buildChoose(NeoRecallPalette palette) {
+    final strings = AppL10n.of(context);
     final blocked = _missing.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          'NeoRecall will be downloaded from GitHub, installed as a background '
-          'service, and connected to this app. Both channels can be switched '
-          'later.',
+          strings.installIntro,
           style: TextStyle(color: palette.textSecondary, height: 1.55),
         ),
         const SizedBox(height: 18),
         _ChannelCard(
           selected: _channel == LocalBackendChannel.stable,
           icon: Icons.verified_rounded,
-          title: 'Stable',
-          description: 'Released versions only. Recommended for daily use.',
-          badge: 'Recommended',
+          title: strings.installChannelStable,
+          description: strings.installChannelStableDescription,
+          badge: strings.installChannelRecommended,
           onTap: () => setState(() => _channel = LocalBackendChannel.stable),
         ),
         const SizedBox(height: 10),
         _ChannelCard(
           selected: _channel == LocalBackendChannel.beta,
           icon: Icons.science_rounded,
-          title: 'Beta',
-          description:
-              'New features first, with the rough edges that come with them.',
+          title: strings.installChannelBeta,
+          description: strings.installChannelBetaDescription,
           onTap: () => setState(() => _channel = LocalBackendChannel.beta),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: _directory,
           autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Install directory',
-            prefixIcon: Icon(Icons.folder_outlined),
+          decoration: InputDecoration(
+            labelText: strings.installDirectoryLabel,
+            prefixIcon: const Icon(Icons.folder_outlined),
           ),
         ),
         if (blocked) ...<Widget>[
           const SizedBox(height: 16),
           InlineMessage(
-            message:
-                'Install ${_missing.map((item) => item.label).join(', ')} on '
-                'this computer first, then check again.',
+            message: strings.installMissingRequirements(
+              _missing.map((item) => item.label).join(', '),
+            ),
             error: true,
             action: TextButton(
               onPressed: _refreshRequirements,
-              child: const Text('Check again'),
+              child: Text(strings.installCheckAgain),
             ),
           ),
           const SizedBox(height: 8),
@@ -293,17 +321,16 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: blocked ? null : _install,
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(56),
-          ),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           icon: const Icon(Icons.auto_awesome_rounded),
-          label: Text('Install the ${_channel.cliName} channel'),
+          label: Text(strings.installStart(_channel.cliName)),
         ),
       ],
     );
   }
 
   Widget _buildInstalling(NeoRecallPalette palette) {
+    final strings = AppL10n.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -316,14 +343,14 @@ class _LocalInstallViewState extends State<LocalInstallView> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(_current?.message ?? 'Preparing NeoRecall…'),
+              child: Text(_current?.message ?? strings.installPreparing),
             ),
             TextButton(
               onPressed: () {
                 _installer.cancel();
                 setState(() => _phase = _LocalInstallPhase.choose);
               },
-              child: const Text('Cancel'),
+              child: Text(strings.actionCancel),
             ),
           ],
         ),
@@ -335,8 +362,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         ),
         const SizedBox(height: 6),
         Text(
-          'The first install downloads about 165 MB of local models, so this '
-          'can take a few minutes.',
+          strings.installModelsNote,
           style: TextStyle(color: palette.textMuted, fontSize: 12),
         ),
         const SizedBox(height: 8),
@@ -350,7 +376,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
       initiallyExpanded: _showDetails,
       onExpansionChanged: (value) => setState(() => _showDetails = value),
       tilePadding: EdgeInsets.zero,
-      title: const Text('Setup details'),
+      title: Text(AppL10n.of(context).installDetails),
       children: <Widget>[
         for (final event in _events.reversed.take(40).toList().reversed)
           Padding(
@@ -395,6 +421,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   }
 
   Widget _buildProviders(NeoRecallPalette palette) {
+    final strings = AppL10n.of(context);
     final result = _result;
     final client = _adminClient;
     if (client == null) return _buildDone(palette);
@@ -408,18 +435,26 @@ class _LocalInstallViewState extends State<LocalInstallView> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'NeoRecall is running'
-                '${result == null ? '' : ' at ${result.backendUrl}'}. One step '
-                'left: choose the services that transcribe your recordings and '
-                'write your memories.',
+                strings.installRunning(
+                  result == null
+                      ? ''
+                      : strings.installLocationAt(result.backendUrl),
+                ),
               ),
             ),
           ],
         ),
+        if (!_keyRemembered) ...<Widget>[
+          const SizedBox(height: 12),
+          InlineMessage(
+            message: strings.installNoAdminKey,
+            icon: Icons.info_outline,
+          ),
+        ],
         const SizedBox(height: 18),
         ProviderSetupPanel(
           client: client,
-          finishLabel: 'Create your account',
+          finishLabel: strings.installCreateAccount,
           onFinished: _connecting ? null : _connect,
           showSkip: true,
           onSkip: () => setState(() => _phase = _LocalInstallPhase.done),
@@ -433,6 +468,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   }
 
   Widget _buildDone(NeoRecallPalette palette) {
+    final strings = AppL10n.of(context);
     final result = _result;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -444,8 +480,11 @@ class _LocalInstallViewState extends State<LocalInstallView> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'NeoRecall is installed and running'
-                '${result == null ? '' : ' (${result.serverVersion})'}.',
+                strings.installDone(
+                  result == null
+                      ? ''
+                      : strings.installVersionSuffix(result.serverVersion),
+                ),
               ),
             ),
           ],
@@ -459,10 +498,7 @@ class _LocalInstallViewState extends State<LocalInstallView> {
           if (!result.cliLinked) ...<Widget>[
             const SizedBox(height: 12),
             InlineMessage(
-              message:
-                  'The neorecall terminal command was not linked. NeoRecall '
-                  'runs anyway; run "npm link" in ${result.sourceDirectory} if '
-                  'you want the command.',
+              message: strings.installCliNotLinked(result.sourceDirectory),
               icon: Icons.info_outline,
             ),
           ],
@@ -474,24 +510,23 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         if (_adminClient != null) ...<Widget>[
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: () => setState(() => _phase = _LocalInstallPhase.providers),
+            onPressed: () =>
+                setState(() => _phase = _LocalInstallPhase.providers),
             icon: const Icon(Icons.tune_rounded),
-            label: const Text('Choose transcription and memory services'),
+            label: Text(strings.installChooseServices),
           ),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: _connecting ? null : _connect,
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(56),
-          ),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           icon: _connecting
               ? const SizedBox.square(
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.arrow_forward_rounded),
-          label: const Text('Create your account'),
+          label: Text(strings.installCreateAccount),
         ),
         const SizedBox(height: 8),
         _buildDetails(palette),
@@ -500,12 +535,13 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   }
 
   Widget _buildFailed(NeoRecallPalette palette) {
+    final strings = AppL10n.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         InlineMessage(
-          message: _errorMessage ?? 'NeoRecall setup could not finish.',
+          message: _errorMessage ?? strings.installFailedShort,
           error: true,
         ),
         if (_errorRemedy != null) ...<Widget>[
@@ -522,14 +558,14 @@ class _LocalInstallViewState extends State<LocalInstallView> {
               child: OutlinedButton.icon(
                 onPressed: _install,
                 icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
+                label: Text(strings.actionRetry),
               ),
             ),
             const SizedBox(width: 10),
             TextButton(
               onPressed: () =>
                   setState(() => _phase = _LocalInstallPhase.choose),
-              child: const Text('Change options'),
+              child: Text(strings.installChangeOptions),
             ),
           ],
         ),

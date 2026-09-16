@@ -7,17 +7,29 @@ const processingSettings = require('../settings/processing_settings_service');
 const vectors = require('../../transcription/speaker_embeddings');
 const voiceprintStorage = require('../../transcription/voiceprint_storage');
 const { shouldReplacePreview } = require('./speaker_preview_service');
+const resolutionState = require('../../speakers/resolution_state');
+const { placeholders } = require('../../utils/query');
 
+// The people worth showing.
+//
+// A voice normally has to come with enough clean audio to recognise by ear,
+// because the only way to tell one unnamed profile from another is to listen to
+// it, and a list of clips too short to identify is worse than no list. A voice
+// the recording itself identified is the exception: it already has a name and an
+// exact identity, so waiting for a preview clip before admitting it exists would
+// hide the people the server is most certain about. The client already renders a
+// missing preview as pending and disables playback.
 function list(userId) {
   const { speakerDisplayMinimumPreviewMs } = getConfig();
   return getDatabase().prepare(`SELECT v.id,v.display_name,v.embedding_model,v.sample_count,v.matching_enabled,v.created_at,v.updated_at,
     (SELECT COUNT(*) FROM speaker_turns st WHERE st.voiceprint_id=v.id) occurrence_count,
     (SELECT SUM(end_ms - start_ms) FROM speaker_turns st WHERE st.voiceprint_id=v.id) total_duration_ms,
-    p.duration_ms preview_duration_ms
+    CASE WHEN p.duration_ms>=? THEN p.duration_ms END preview_duration_ms
     FROM voiceprints v
-    JOIN speaker_previews p ON p.voiceprint_id=v.id
-    WHERE v.user_id=? AND p.duration_ms>=?
-    ORDER BY COALESCE(v.display_name,''),v.created_at`).all(userId, speakerDisplayMinimumPreviewMs);
+    LEFT JOIN speaker_previews p ON p.voiceprint_id=v.id
+    WHERE v.user_id=? AND (p.duration_ms>=? OR v.external_key IS NOT NULL)
+    ORDER BY COALESCE(v.display_name,''),v.created_at`)
+    .all(speakerDisplayMinimumPreviewMs, userId, speakerDisplayMinimumPreviewMs);
 }
 
 function getOwned(userId, id) {
@@ -40,13 +52,14 @@ function update(userId, id, changes) {
 }
 
 function mergedCentroid(first, second) {
-  const left = voiceprintStorage.readCentroid(first.centroid_embedding);
-  const right = voiceprintStorage.readCentroid(second.centroid_embedding);
+  // Directions, not raw vectors: the same reason updateCentroid normalizes.
+  const left = vectors.normalize(voiceprintStorage.readCentroid(first.centroid_embedding));
+  const right = vectors.normalize(voiceprintStorage.readCentroid(second.centroid_embedding));
   if (left.length !== right.length) throw new HttpError(409, 'MODEL_MISMATCH', 'Speaker profiles use incompatible embedding models.');
   const total = first.sample_count + second.sample_count;
   const output = new Float32Array(left.length);
   for (let i = 0; i < left.length; i += 1) output[i] = (left[i] * first.sample_count + right[i] * second.sample_count) / total;
-  return { buffer: voiceprintStorage.sealCentroid(output), total };
+  return { buffer: voiceprintStorage.sealCentroid(vectors.normalize(output)), total };
 }
 
 function merge(userId, targetId, sourceId) {
@@ -126,19 +139,33 @@ function rankedPeers(row, rows) {
     .sort((left, right) => right.score - left.score);
 }
 
-function reevaluationPairs(rows, { voiceMatchThreshold }) {
+// Pairs of profiles that are the same person heard twice.
+//
+// Two bars, because two very different kinds of evidence are on offer. A score
+// clearing `voiceMatchThreshold` stands on its own. Below that, the pair must
+// earn it: each has to be the other's closest match *and* stand clear of its own
+// runner-up by `voiceMatchMargin`, so the two are alone together rather than
+// merely adjacent in a crowd of profiles. That second reading is only consulted
+// when `repair` is set — ordinary reconciliation after each chunk stays at the
+// strict bar, and the Speakers screen's re-detect is what reaches the rest.
+function reevaluationPairs(rows, { voiceMatchThreshold, voiceRepairThreshold, voiceMatchMargin }, { repair = false } = {}) {
+  const floor = repair ? Math.min(voiceRepairThreshold, voiceMatchThreshold) : voiceMatchThreshold;
+  const isolated = new Map();
   const matches = new Map();
   for (const row of rows) {
     const ranked = rankedPeers(row, rows);
     const best = ranked[0];
-    if (best && sameExplicitIdentity(row, best.row) && best.score >= voiceMatchThreshold) {
-      matches.set(row.id, best);
-    }
+    if (!best || !sameExplicitIdentity(row, best.row) || best.score < floor) continue;
+    isolated.set(row.id, !ranked[1] || best.score - ranked[1].score >= voiceMatchMargin);
+    if (best.score >= voiceMatchThreshold || isolated.get(row.id)) matches.set(row.id, best);
   }
   const pairs = [];
   for (const row of rows) {
     const match = matches.get(row.id);
     if (!match || matches.get(match.row.id)?.row.id !== row.id || row.id > match.row.id) continue;
+    // A sub-threshold merge needs both halves to be unambiguous, not just the
+    // one whose turn it is to be scored.
+    if (match.score < voiceMatchThreshold && !(isolated.get(row.id) && isolated.get(match.row.id))) continue;
     pairs.push({ first: row, second: match.row, score: match.score });
   }
   return pairs.sort((left, right) => right.score - left.score);
@@ -152,7 +179,98 @@ function preferredMergeTarget(first, second) {
   return first.created_at <= second.created_at ? first : second;
 }
 
-function reevaluate(userId) {
+// How many conversations one sweep or one press of re-detect may queue.
+//
+// Both are bounded for the same reason from two directions: the sweep runs every
+// hour and must not turn an upgrade into an hours-long backlog that starves
+// transcription, and re-detect is an HTTP request somebody is waiting on. What
+// is not queued this time is queued next time, because the condition that
+// selects a conversation stays true until the pass has actually run.
+const RESOLUTION_BATCH = 200;
+
+// Conversations that finished but never had their speakers looked at again.
+//
+// A conversation queues its own resolution when it closes, so in a healthy
+// server this finds nothing. It exists for the times that did not happen: the
+// worker was down when the conversation closed, the queue refused the job, the
+// job failed its last attempt, or the conversation predates this pass entirely.
+// Left alone, those conversations keep the split labels they were written with
+// forever, because nothing else ever revisits a closed conversation.
+//
+// Speech attached to no durable person is the state the pass exists to correct,
+// so it is the first thing asked. It is not on its own an answer to "has the
+// pass run", though: a fingerprint pooled from too little speech enrolls nobody,
+// and a voice resembling an enrolled one without clearing the bar is left alone
+// rather than guessed at. Both are finished answers that leave the turn
+// unattached, and reading them as "never looked at" is what made this sweep
+// queue the same conversation on every tick forever while each job completed
+// without changing anything.
+//
+// So the recorded answer is consulted too, and a conversation is skipped while
+// its answer still applies. It stops applying — and the conversation is picked
+// up again — as soon as something that could change the answer has: a voice
+// enrolled, deleted, merged, renamed or re-enabled, a threshold moved, a new
+// version of the pass, or more speech in the conversation itself.
+function sweepUnresolvedConversations(userId) {
+  const db = getDatabase();
+  const since = new Date(Date.now() - getConfig().speakerRedetectDays * 24 * 60 * 60_000).toISOString();
+  const conversations = db.prepare(`SELECT c.id FROM conversations c
+    WHERE c.user_id=? AND c.state<>'open' AND c.ended_at>=?
+      AND EXISTS (SELECT 1 FROM transcript_segments t JOIN speaker_turns st
+        ON st.chunk_id=t.chunk_id AND st.cluster_id=t.speaker_cluster_id
+        WHERE t.conversation_id=c.id AND st.voiceprint_id IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type='resolve_speakers' AND j.resource_id=c.id
+        AND j.status IN ('queued','leased'))
+      AND NOT EXISTS (SELECT 1 FROM conversation_speaker_resolutions r
+        WHERE r.conversation_id=c.id AND r.world_signature=?
+          AND r.evidence_turns=(${resolutionState.evidenceTurnsSql('c.id')})
+          AND r.unresolved_turns=(${resolutionState.unresolvedTurnsSql('c.id')}))
+    ORDER BY c.ended_at DESC LIMIT ?`)
+    .all(userId, since, resolutionState.worldSignature(db, userId), RESOLUTION_BATCH);
+  return queueResolution(db, userId, conversations.map((row) => row.id));
+}
+
+function queueResolution(database, userId, conversationIds) {
+  const jobs = require('../jobs/job_service');
+  let queued = 0;
+  for (const conversationId of conversationIds) {
+    try {
+      jobs.enqueue({
+        userId, resourceType: 'conversation', resourceId: conversationId, type: 'resolve_speakers', priority: 30,
+      }, database);
+      queued += 1;
+    } catch {
+      // Already queued, or the queue refused it. Neither is worth failing the
+      // sweep or the request the user is waiting on.
+    }
+  }
+  return queued;
+}
+
+// Queues a fresh look at who spoke in each recent conversation.
+//
+// The profile list and the transcripts are two views of one mistake: a voice
+// split in two shows up as a duplicate person in the list and as two speaker
+// labels in the conversation it was heard in. Repairing only the list leaves
+// every transcript still reading the wrong way, so re-detect asks for both.
+//
+// Queued rather than run inline. Re-resolving a month of conversations is more
+// work than an HTTP request should hold open, and the queue already collapses
+// repeats per conversation, so pressing the button twice costs nothing.
+function requestConversationResolution(userId) {
+  const db = getDatabase();
+  const since = new Date(Date.now() - getConfig().speakerRedetectDays * 24 * 60 * 60_000).toISOString();
+  const conversations = db.prepare(`SELECT id FROM conversations
+    WHERE user_id=? AND state<>'open' AND ended_at>=? ORDER BY ended_at DESC LIMIT ?`)
+    .all(userId, since, RESOLUTION_BATCH);
+  return queueResolution(db, userId, conversations.map((row) => row.id));
+}
+
+// `repair` is the Speakers screen's re-detect: the user has looked at the list,
+// seen one person listed several times, and asked for it to be sorted out. That
+// is a different situation from the automatic pass after each chunk, and it gets
+// the wider bar accordingly.
+function reevaluate(userId, { repair = false } = {}) {
   const db = getDatabase();
   const limits = processingSettings.get();
   return db.transaction(() => {
@@ -160,7 +278,7 @@ function reevaluate(userId) {
     while (true) {
       const rows = db.prepare(`SELECT * FROM voiceprints
         WHERE user_id=? AND matching_enabled=1 AND centroid_embedding IS NOT NULL`).all(userId);
-      const pairs = reevaluationPairs(rows, limits);
+      const pairs = reevaluationPairs(rows, limits, { repair });
       if (pairs.length === 0) break;
       for (const pair of pairs) {
         const target = preferredMergeTarget(pair.first, pair.second);
@@ -180,7 +298,7 @@ function reevaluate(userId) {
 function bulkRemove(userId, ids) {
   const uniqueIds = [...new Set(ids)];
   const db = getDatabase();
-  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${uniqueIds.map(() => '?').join(',')})`)
+  const rows = db.prepare(`SELECT id FROM voiceprints WHERE user_id=? AND id IN (${placeholders(uniqueIds.length)})`)
     .all(userId, ...uniqueIds);
   if (rows.length !== uniqueIds.length) throw new HttpError(404, 'NOT_FOUND', 'One or more speakers were not found.');
   db.transaction(() => {
@@ -211,6 +329,8 @@ function remove(userId, id) {
 
 module.exports = {
   list,
+  requestConversationResolution,
+  sweepUnresolvedConversations,
   update,
   merge,
   mergeMany,

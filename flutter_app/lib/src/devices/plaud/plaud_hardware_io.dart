@@ -5,8 +5,9 @@ import 'package:plaud_sdk/plaud_sdk.dart' as sdk;
 
 import 'plaud_hardware.dart';
 
-PlaudHardware createPlaudHardware() =>
-    sdk.isPlaudSdkAvailable ? PluginPlaudHardware() : UnavailablePlaudHardware();
+PlaudHardware createPlaudHardware() => sdk.isPlaudSdkAvailable
+    ? PluginPlaudHardware()
+    : UnavailablePlaudHardware();
 
 class PluginPlaudHardware implements PlaudHardware {
   @override
@@ -62,10 +63,10 @@ class PluginPlaudHardware implements PlaudHardware {
       sdk.PlaudSdk.onChargingState.map((state) => state.level);
 
   @override
-  Stream<({int sessionId, bool ok})> get deleteResults =>
-      sdk.PlaudSdk.onDeleteFile.map(
-        (result) => (sessionId: result.sessionId, ok: result.ok),
-      );
+  Stream<({int sessionId, bool ok})> get deleteResults => sdk
+      .PlaudSdk
+      .onDeleteFile
+      .map((result) => (sessionId: result.sessionId, ok: result.ok));
 
   @override
   Future<void> initialize({

@@ -36,3 +36,12 @@ test('keyword branch finds Unicode evidence and remains user-isolated', async ()
     assert.equal(removed.body.results.length, 0);
   }
 });
+
+test('search rejects an empty query and unknown kinds', async () => {
+  const first = await request(app).post('/api/v1/auth/register').send({ username: 'search-valid', password: 'a long and unique password' }).expect(201);
+  const auth = { Authorization: `Bearer ${first.body.session.token}` };
+  const empty = await request(app).get('/api/v1/search?q=').set(auth).expect(400);
+  assert.equal(empty.body.error.code, 'QUERY_REQUIRED');
+  const kinds = await request(app).get('/api/v1/search?q=hello&kinds=not_a_kind').set(auth).expect(400);
+  assert.equal(kinds.body.error.code, 'VALIDATION_ERROR');
+});

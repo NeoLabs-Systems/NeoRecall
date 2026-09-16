@@ -5,6 +5,12 @@ import 'package:neorecall/src/background/background_live_status.dart';
 import 'package:neorecall/src/background/home_widget_publisher.dart';
 import 'package:neorecall/src/background/home_widget_snapshot.dart';
 import 'package:neorecall/src/models/memory.dart';
+import 'dart:ui';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
+
+// The English translations, for the parts of the app that produce user-facing
+// text away from any widget tree.
+final AppL10n testStrings = lookupAppL10n(const Locale('en'));
 
 void main() {
   const publisher = HomeWidgetPublisher();
@@ -60,6 +66,7 @@ void main() {
     bool recording = false,
     DateTime? startedAt,
   }) => publisher.build(
+    strings: testStrings,
     signedIn: true,
     status: status,
     recording: recording,
@@ -71,6 +78,7 @@ void main() {
 
   test('a signed-out app publishes nothing about its owner', () {
     final snapshot = publisher.build(
+      strings: testStrings,
       signedIn: false,
       status: idle,
       recording: false,
@@ -121,29 +129,35 @@ void main() {
     expect(snapshot.today.memories, 1);
   });
 
-  test('commitments are ordered overdue, then by due date, then importance', () {
-    final snapshot = build(
-      minis: <MiniMemory>[
-        mini('later', dueAt: now.add(const Duration(days: 3))),
-        mini('important', importance: 9),
-        mini('soon', dueAt: now.add(const Duration(hours: 2))),
-        mini('late', dueAt: now.subtract(const Duration(days: 1))),
-        mini('unimportant', importance: 2),
-        mini('done', status: 'completed'),
-        mini('not-actionable', kind: 'fact'),
-      ],
-    );
+  test(
+    'commitments are ordered overdue, then by due date, then importance',
+    () {
+      final snapshot = build(
+        minis: <MiniMemory>[
+          mini('later', dueAt: now.add(const Duration(days: 3))),
+          mini('important', importance: 9),
+          mini('soon', dueAt: now.add(const Duration(hours: 2))),
+          mini('late', dueAt: now.subtract(const Duration(days: 1))),
+          mini('unimportant', importance: 2),
+          mini('done', status: 'completed'),
+          mini('not-actionable', kind: 'fact'),
+        ],
+      );
 
-    expect(
-      snapshot.highlights.map((highlight) => highlight.id),
-      <String>['late', 'soon', 'later', 'important', 'unimportant'],
-    );
-    expect(snapshot.highlights.first.overdue, isTrue);
-    expect(snapshot.highlights[1].dueToday, isTrue);
-    expect(snapshot.today.openTasks, 5);
-    expect(snapshot.today.overdue, 1);
-    expect(snapshot.today.dueToday, 1);
-  });
+      expect(snapshot.highlights.map((highlight) => highlight.id), <String>[
+        'late',
+        'soon',
+        'later',
+        'important',
+        'unimportant',
+      ]);
+      expect(snapshot.highlights.first.overdue, isTrue);
+      expect(snapshot.highlights[1].dueToday, isTrue);
+      expect(snapshot.today.openTasks, 5);
+      expect(snapshot.today.overdue, 1);
+      expect(snapshot.today.dueToday, 1);
+    },
+  );
 
   test('the trailing week ends on today and the week ahead starts on it', () {
     final snapshot = build(

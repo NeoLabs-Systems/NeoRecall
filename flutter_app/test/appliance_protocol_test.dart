@@ -3,25 +3,31 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/appliance/appliance_codec.dart';
 import 'package:neorecall/src/devices/appliance/appliance_protocol.dart';
+import 'dart:ui';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
-Uint8List statusPayload(Map<String, Object?> overrides) => cborEncode(<String, Object?>{
-  'v': 1,
-  'st': 'idle',
-  'el': 0,
-  'pc': 0,
-  'na': 0,
-  'out': 'speaker',
-  'mic': 'built_in',
-  'hc': false,
-  'hn': '',
-  'hb': null,
-  'net': true,
-  'auth': false,
-  'rev': false,
-  'err': '',
-  'fw': '0.1.0',
-  ...overrides,
-});
+Uint8List statusPayload(Map<String, Object?> overrides) =>
+    cborEncode(<String, Object?>{
+      'v': 1,
+      'st': 'idle',
+      'el': 0,
+      'pc': 0,
+      'na': 0,
+      'out': 'speaker',
+      'mic': 'built_in',
+      'hc': false,
+      'hn': '',
+      'hb': null,
+      'net': true,
+      'auth': false,
+      'rev': false,
+      'err': '',
+      'fw': '0.1.0',
+      ...overrides,
+    });
+
+// The English translations: this file is about the protocol, not the copy.
+final AppL10n testStrings = lookupAppL10n(const Locale('en'));
 
 void main() {
   group('the CBOR the appliance speaks', () {
@@ -64,7 +70,10 @@ void main() {
         ..add(cborEncode(<String, Object?>{'a': 1}))
         ..addByte(0x01);
 
-      expect(() => cborDecode(builder.takeBytes()), throwsA(isA<CborFormatException>()));
+      expect(
+        () => cborDecode(builder.takeBytes()),
+        throwsA(isA<CborFormatException>()),
+      );
     });
 
     test('refuses values of unknown length', () {
@@ -86,12 +95,14 @@ void main() {
 
   group('a status update', () {
     test('decodes a device that is quietly ready', () {
-      final status = ApplianceStatus.decode(statusPayload(const <String, Object?>{}));
+      final status = ApplianceStatus.decode(
+        statusPayload(const <String, Object?>{}),
+      );
 
       expect(status.state, ApplianceState.idle);
       expect(status.isRecording, isFalse);
       expect(status.needsSetup, isFalse);
-      expect(status.summary, 'Ready');
+      expect(status.summary(testStrings), 'Ready');
       expect(status.firmware, '0.1.0');
     });
 
@@ -102,7 +113,7 @@ void main() {
 
       expect(status.isRecording, isTrue);
       expect(status.recordingElapsed, const Duration(minutes: 14, seconds: 3));
-      expect(status.summary, 'Recording · 14:03');
+      expect(status.summary(testStrings), 'Recording · 14:03');
     });
 
     test('decodes headphones with their battery', () {
@@ -121,7 +132,7 @@ void main() {
       expect(status.headsetConnected, isTrue);
       expect(status.headsetBattery, 72);
       expect(status.micSource, ApplianceMicSource.headset);
-      expect(status.summary, 'Ready · Sony WH-1000XM5');
+      expect(status.summary(testStrings), 'Ready · Sony WH-1000XM5');
     });
 
     test('says a queue is waiting when there is no network', () {
@@ -130,7 +141,7 @@ void main() {
       );
 
       expect(status.isSyncing, isFalse);
-      expect(status.summary, '12 recordings waiting to be sent');
+      expect(status.summary(testStrings), '12 recordings waiting to be sent');
     });
 
     test('says it is sending once the network is back', () {
@@ -139,7 +150,7 @@ void main() {
       );
 
       expect(status.isSyncing, isTrue);
-      expect(status.summary, 'Sending 1 recording');
+      expect(status.summary(testStrings), 'Sending 1 recording');
     });
 
     test('treats a lost account as needing setup again', () {
@@ -152,13 +163,17 @@ void main() {
 
       expect(revoked.needsSetup, isTrue);
       expect(expired.needsSetup, isTrue);
-      expect(revoked.summary, 'Not set up yet');
+      expect(revoked.summary(testStrings), 'Not set up yet');
     });
 
     test('carries the outcome of the last command', () {
       final status = ApplianceStatus.decode(
         statusPayload(const <String, Object?>{
-          'res': <String, Object?>{'c': 'setup', 'ok': false, 'm': 'That password was not accepted.'},
+          'res': <String, Object?>{
+            'c': 'setup',
+            'ok': false,
+            'm': 'That password was not accepted.',
+          },
         }),
       );
 
@@ -170,7 +185,9 @@ void main() {
     test('survives a field it has never seen before', () {
       // A newer appliance talking to an older app must not brick the screen.
       final status = ApplianceStatus.decode(
-        statusPayload(const <String, Object?>{'somethingNew': 'from the future'}),
+        statusPayload(const <String, Object?>{
+          'somethingNew': 'from the future',
+        }),
       );
 
       expect(status.state, ApplianceState.idle);
@@ -239,10 +256,16 @@ void main() {
 
   group('commands', () {
     test('encode to exactly what the appliance decodes', () {
-      expect(cborDecode(ApplianceCommand.start.encode()), <String, Object?>{'c': 'start'});
-      expect(cborDecode(ApplianceCommand.stop.encode()), <String, Object?>{'c': 'stop'});
+      expect(cborDecode(ApplianceCommand.start.encode()), <String, Object?>{
+        'c': 'start',
+      });
+      expect(cborDecode(ApplianceCommand.stop.encode()), <String, Object?>{
+        'c': 'stop',
+      });
       expect(
-        cborDecode(ApplianceCommand.useOutput(ApplianceOutput.headphones).encode()),
+        cborDecode(
+          ApplianceCommand.useOutput(ApplianceOutput.headphones).encode(),
+        ),
         <String, Object?>{'c': 'set_output', 't': 'headphones'},
       );
       expect(
@@ -250,7 +273,9 @@ void main() {
         <String, Object?>{'c': 'set_headset_mic', 'on': true},
       );
       expect(
-        cborDecode(ApplianceCommand.connectHeadphones('AA:BB:CC:DD:EE:FF').encode()),
+        cborDecode(
+          ApplianceCommand.connectHeadphones('AA:BB:CC:DD:EE:FF').encode(),
+        ),
         <String, Object?>{'c': 'bt_connect', 'a': 'AA:BB:CC:DD:EE:FF'},
       );
       expect(
@@ -298,7 +323,10 @@ void main() {
     test('reads as minutes and seconds until it needs hours', () {
       expect(formatElapsed(const Duration(seconds: 9)), '00:09');
       expect(formatElapsed(const Duration(minutes: 4, seconds: 12)), '04:12');
-      expect(formatElapsed(const Duration(hours: 1, minutes: 23, seconds: 45)), '1:23:45');
+      expect(
+        formatElapsed(const Duration(hours: 1, minutes: 23, seconds: 45)),
+        '1:23:45',
+      );
     });
   });
 }

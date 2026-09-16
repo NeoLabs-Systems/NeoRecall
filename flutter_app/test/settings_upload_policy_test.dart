@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_settings.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   testWidgets('Wi-Fi-only switch applies immediately without page Save', (
@@ -16,6 +17,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: Scaffold(
           body: SettingsScreen(
@@ -48,6 +51,42 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('raw audio keep switch applies immediately', (tester) async {
+    tester.view.physicalSize = const Size(1000, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = _SettingsController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
+        theme: buildNeoRecallTheme(Brightness.dark),
+        home: Scaffold(
+          body: SettingsScreen(
+            controller: controller,
+            initialSection: SettingsSection.recording,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final keepAudio = find.byKey(const ValueKey<String>('keep-raw-audio'));
+    expect(keepAudio, findsOneWidget);
+    await tester.ensureVisible(keepAudio);
+    await tester.tap(keepAudio);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete raw audio'));
+    await tester.pumpAndSettle();
+
+    expect(controller.updates, <Map<String, dynamic>>[
+      <String, dynamic>{'keepRawAudio': false},
+    ]);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _SettingsController extends NeoRecallController {
@@ -68,6 +107,8 @@ class _SettingsController extends NeoRecallController {
     'recordingScheduleEnabled': false,
     'recordingStartMinute': 0,
     'recordingEndMinute': 0,
+    'keepRawAudio': true,
+    'contextOriginalRetentionDays': 7,
   };
 
   @override

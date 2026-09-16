@@ -7,6 +7,13 @@ function queryBoolean(value) {
   return value === true || value === '1' || value === 'true';
 }
 
+// Builds the `?,?,?` list an `IN (...)` clause needs for `count` bound values.
+// Written out inline at every call site that needed one, which is how a
+// parameterized list ends up looking like string-built SQL at a glance.
+function placeholders(count) {
+  return new Array(count).fill('?').join(',');
+}
+
 // Collects `WHERE` fragments and their bound parameters together, so a filter
 // is one line instead of a push into two parallel arrays that must stay in step.
 class Conditions {
@@ -34,4 +41,4 @@ class Conditions {
   get sql() { return this.clauses.join(' AND '); }
 }
 
-module.exports = { queryBoolean, Conditions };
+module.exports = { queryBoolean, placeholders, Conditions };

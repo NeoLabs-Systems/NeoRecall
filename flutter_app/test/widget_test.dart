@@ -18,6 +18,7 @@ import 'package:neorecall/src/models/memory.dart';
 import 'package:neorecall/src/models/speaker.dart';
 import 'package:neorecall/src/models/timeline_moment.dart';
 import 'package:neorecall/src/models/transcript.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   test('web system-audio selection reaches the browser capture request', () {
@@ -46,6 +47,8 @@ void main() {
   testWidgets('NeoRecall theme builds MaterialApp shell', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         darkTheme: buildNeoRecallTheme(Brightness.dark),
         home: const Scaffold(body: Text('NeoRecall')),
@@ -54,13 +57,13 @@ void main() {
     expect(find.text('NeoRecall'), findsOneWidget);
   });
 
-  testWidgets('the source sheet is where a wearable is chosen', (
-    tester,
-  ) async {
+  testWidgets('the source sheet is where a wearable is chosen', (tester) async {
     final controller = NeoRecallController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: RecordScreen(controller: controller)),
       ),
@@ -91,6 +94,8 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: Scaffold(body: RecordScreen(controller: controller)),
           ),
@@ -133,6 +138,8 @@ void main() {
         controller.page = page;
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: NeoRecallShell(controller: controller),
           ),
@@ -173,6 +180,8 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
+            localizationsDelegates: AppL10n.localizationsDelegates,
+            supportedLocales: AppL10n.supportedLocales,
             theme: buildNeoRecallTheme(Brightness.light),
             home: Scaffold(body: MemoriesScreen(controller: controller)),
           ),
@@ -219,6 +228,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: Scaffold(body: SpeakersScreen(controller: controller)),
       ),
@@ -244,6 +255,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: AnimatedBuilder(
           animation: controller,
@@ -265,6 +278,10 @@ void main() {
     expect(find.text('Settings areas'), findsOneWidget);
     expect(find.text('Account devices'), findsOneWidget);
 
+    // The rail scrolls: with ten areas it is taller than a short desktop
+    // window, so the entry has to be brought into view before it can be tapped.
+    await tester.ensureVisible(find.text('Account devices'));
+    await tester.pump();
     await tester.tap(find.text('Account devices'));
     await tester.pump();
     expect(find.text('No devices yet'), findsOneWidget);
@@ -286,6 +303,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: AnimatedBuilder(
           animation: controller,
@@ -317,7 +336,7 @@ void main() {
     controller.selectLibraryTab(LibraryTab.speakers);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('Search'));
+    await tester.tap(find.text('Ask'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(controller.page, RecallPage.search);
@@ -348,6 +367,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallShell(controller: controller),
       ),
@@ -355,7 +376,7 @@ void main() {
 
     // Four groups, not six flat entries. Capture is open because Record is the
     // page on screen; the rest stay collapsed until asked for.
-    for (final label in <String>['Capture', 'Library', 'Search', 'Settings']) {
+    for (final label in <String>['Capture', 'Library', 'Ask', 'Settings']) {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('Record'), findsOneWidget);
@@ -429,6 +450,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: TimelineScreen(controller: controller),
       ),
@@ -450,6 +473,94 @@ void main() {
     expect(find.text('Write up again'), findsOneWidget);
   });
 
+  testWidgets('moment selection can select every visible moment', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime(2026, 7, 29, 12);
+    final controller = NeoRecallController()
+      ..moments = <TimelineMoment>[
+        TimelineMoment(
+          id: 'conversation-a',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 12)),
+          endedAt: now.subtract(const Duration(minutes: 8)),
+          state: 'consolidated',
+          titleEn: 'First moment',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+        TimelineMoment(
+          id: 'conversation-b',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 6)),
+          endedAt: now.subtract(const Duration(minutes: 5)),
+          state: 'closed',
+          titleEn: 'Second moment',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+      ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: TimelineScreen(controller: controller)),
+      ),
+    );
+    await tester.tap(find.text('Select'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Select all moments'));
+    await tester.pump();
+
+    expect(find.text('2 selected'), findsOneWidget);
+    expect(find.byTooltip('All moments selected'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('swiping a moment asks to delete it', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime(2026, 7, 29, 12);
+    final controller = NeoRecallController()
+      ..moments = <TimelineMoment>[
+        TimelineMoment(
+          id: 'conversation-a',
+          kind: 'conversation',
+          startedAt: now.subtract(const Duration(minutes: 12)),
+          endedAt: now.subtract(const Duration(minutes: 8)),
+          state: 'consolidated',
+          titleEn: 'Irrigation planning',
+          topics: const <String>[],
+          segmentCount: 1,
+          segments: const <TranscriptSegment>[],
+        ),
+      ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
+        theme: buildNeoRecallTheme(Brightness.light),
+        home: Scaffold(body: TimelineScreen(controller: controller)),
+      ),
+    );
+    await tester.drag(find.byType(Dismissible), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete this moment?'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('account registration remains reachable in a short viewport', (
     tester,
   ) async {
@@ -462,6 +573,8 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),
@@ -494,6 +607,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),
@@ -517,6 +632,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.light),
         home: NeoRecallAuthScreen(controller: controller),
       ),

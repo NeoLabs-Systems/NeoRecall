@@ -421,8 +421,8 @@ static void refresh_status(void)
 
     if (nr_wifi_ap_active()) {
         char ssid[33]; nr_wifi_ap_ssid(ssid);
-        char line[80];
-        snprintf(line, sizeof(line), LV_SYMBOL_WIFI "  Hotspot: %s → 192.168.4.1", ssid);
+        char ap_ip[16]; nr_wifi_ap_ip(ap_ip);
+        snprintf(line, sizeof(line), LV_SYMBOL_WIFI "  Hotspot: %s → %s", ssid, ap_ip);
         lv_label_set_text(s_status, line);
         lv_obj_set_style_text_color(s_status, NRC_GOLD_HI, 0);
         return;

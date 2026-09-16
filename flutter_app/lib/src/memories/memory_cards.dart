@@ -6,6 +6,7 @@ import '../../main_theme.dart';
 import '../models/memory.dart';
 import 'memory_filters.dart';
 import 'memory_formatting.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class SearchField extends StatelessWidget {
   const SearchField({
@@ -25,7 +26,7 @@ class SearchField extends StatelessWidget {
       onChanged: onChanged,
       style: TextStyle(color: palette.textPrimary),
       decoration: InputDecoration(
-        hintText: 'Search memories…',
+        hintText: AppL10n.of(context).memoriesSearchHint,
         prefixIcon: Icon(Icons.search_rounded, color: palette.textMuted),
         filled: true,
         fillColor: palette.bgSecondary.withValues(alpha: 0.72),
@@ -78,7 +79,7 @@ class MemoriesTabBar extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: TabChip(
-              label: 'Moments',
+              label: AppL10n.of(context).navMoments,
               count: momentsCount,
               selected: tab == MemoriesTab.moments,
               onTap: () => onChanged(MemoriesTab.moments),
@@ -86,7 +87,7 @@ class MemoriesTabBar extends StatelessWidget {
           ),
           Expanded(
             child: TabChip(
-              label: 'Highlights',
+              label: AppL10n.of(context).navHighlights,
               count: highlightsCount,
               selected: tab == MemoriesTab.highlights,
               onTap: () => onChanged(MemoriesTab.highlights),
@@ -184,17 +185,20 @@ class FilterRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppL10n.of(context);
     final chips = <(MemoryFilter, String)>[
-      (MemoryFilter.all, 'All'),
-      (MemoryFilter.pinned, 'Pinned'),
-      (MemoryFilter.thisWeek, 'This week'),
-      (MemoryFilter.meetings, 'Meetings'),
-      (MemoryFilter.decisions, 'Decisions'),
+      (MemoryFilter.all, strings.memoriesFilterAll),
+      (MemoryFilter.pinned, strings.memoriesFilterPinned),
+      (MemoryFilter.thisWeek, strings.memoriesFilterThisWeek),
+      (MemoryFilter.meetings, strings.memoriesFilterMeetings),
+      (MemoryFilter.decisions, strings.memoriesFilterDecisions),
       (
         MemoryFilter.openTasks,
-        openTasks > 0 ? 'Open tasks ($openTasks)' : 'Open tasks',
+        openTasks > 0
+            ? strings.memoriesFilterOpenTasksCount(openTasks)
+            : strings.memoriesFilterOpenTasks,
       ),
-      (MemoryFilter.archived, 'Archived'),
+      (MemoryFilter.archived, strings.memoriesFilterArchived),
     ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -250,7 +254,9 @@ class SelectionBar extends StatelessWidget {
         runSpacing: 6,
         children: <Widget>[
           Text(
-            count == 0 ? 'Select memories' : '$count selected',
+            count == 0
+                ? AppL10n.of(context).memoriesSelectPrompt
+                : AppL10n.of(context).memoriesSelectedCount(count),
             style: TextStyle(
               color: palette.textSecondary,
               fontWeight: FontWeight.w700,
@@ -261,35 +267,35 @@ class SelectionBar extends StatelessWidget {
             children: <Widget>[
               if (onMerge != null)
                 ActionIcon(
-                  tooltip: 'Merge',
+                  tooltip: AppL10n.of(context).memoriesMergeTooltip,
                   icon: Icons.merge_type_rounded,
                   onPressed: onMerge,
                 ),
               if (onRename != null)
                 ActionIcon(
-                  tooltip: 'Rename',
+                  tooltip: AppL10n.of(context).actionRename,
                   icon: Icons.drive_file_rename_outline_rounded,
                   onPressed: enabled ? onRename : null,
                 ),
               ActionIcon(
-                tooltip: 'Pin',
+                tooltip: AppL10n.of(context).memoriesPin,
                 icon: Icons.push_pin_outlined,
                 onPressed: enabled ? onPin : null,
               ),
               ActionIcon(
-                tooltip: 'Unpin',
+                tooltip: AppL10n.of(context).memoriesUnpin,
                 icon: Icons.push_pin,
                 onPressed: enabled ? onUnpin : null,
               ),
               ActionIcon(
                 tooltip: archiveLabel,
-                icon: archiveLabel == 'Restore'
+                icon: archiveLabel == AppL10n.of(context).memoriesRestore
                     ? Icons.unarchive_outlined
                     : Icons.archive_outlined,
                 onPressed: enabled ? onArchive : null,
               ),
               ActionIcon(
-                tooltip: 'Delete',
+                tooltip: AppL10n.of(context).actionDelete,
                 icon: Icons.delete_outline_rounded,
                 danger: true,
                 onPressed: enabled ? onDelete : null,
@@ -367,7 +373,7 @@ class DailySummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Today’s story',
+                      AppL10n.of(context).memoriesTodaysStory,
                       style: TextStyle(
                         color: palette.textPrimary,
                         fontWeight: FontWeight.w800,
@@ -596,7 +602,7 @@ class MiniFilterHint extends StatelessWidget {
       child: Row(
         children: <Widget>[
           FilterChip(
-            label: const Text('All highlights'),
+            label: Text(AppL10n.of(context).memoriesAllHighlights),
             selected: filter != MemoryFilter.openTasks,
             showCheckmark: false,
             onSelected: (_) => onShowAll(),
@@ -604,7 +610,9 @@ class MiniFilterHint extends StatelessWidget {
           const SizedBox(width: 8),
           FilterChip(
             label: Text(
-              openTasks > 0 ? 'Open tasks ($openTasks)' : 'Open tasks',
+              openTasks > 0
+                  ? AppL10n.of(context).memoriesFilterOpenTasksCount(openTasks)
+                  : AppL10n.of(context).memoriesFilterOpenTasks,
             ),
             selected: filter == MemoryFilter.openTasks,
             showCheckmark: false,
@@ -772,7 +780,9 @@ class MiniTimelineRow extends StatelessWidget {
                                     mini.isOpen) ...<Widget>[
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Due ${formatShortDate(mini.dueAt!)}',
+                                    AppL10n.of(
+                                      context,
+                                    ).memoriesDue(formatShortDate(mini.dueAt!)),
                                     style: TextStyle(
                                       color: palette.warning,
                                       fontSize: 11.5,
@@ -813,7 +823,9 @@ class MiniTimelineRow extends StatelessWidget {
                       ),
                       if (onToggle != null)
                         IconButton(
-                          tooltip: completed ? 'Reopen' : 'Mark done',
+                          tooltip: completed
+                              ? AppL10n.of(context).memoriesReopen
+                              : AppL10n.of(context).memoriesMarkDone,
                           onPressed: onToggle,
                           icon: Icon(
                             completed

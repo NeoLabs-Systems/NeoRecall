@@ -1,6 +1,7 @@
 'use strict';
 
 const { getDatabase } = require('../../db/database');
+const { placeholders } = require('../../utils/query');
 
 // The transcript material of one conversation, in the shape every AI prompt
 // consumes. Consolidation reads it for finished conversations and the live
@@ -17,17 +18,22 @@ function quarantineClause(includeQuarantined) {
 }
 
 function listByState(userId, states, database = getDatabase(), { includeQuarantined = false } = {}) {
-  const placeholders = states.map(() => '?').join(',');
   return database.prepare(`SELECT c.*, ${SESSION_ID_SELECT} session_id
-    FROM conversations c WHERE c.user_id=? AND c.state IN (${placeholders})
+    FROM conversations c WHERE c.user_id=? AND c.state IN (${placeholders(states.length)})
     ${quarantineClause(includeQuarantined)} ORDER BY c.started_at`).all(userId, ...states);
 }
 
 function findInState(userId, conversationId, states, database = getDatabase(), { includeQuarantined = false } = {}) {
-  const placeholders = states.map(() => '?').join(',');
   return database.prepare(`SELECT c.*, ${SESSION_ID_SELECT} session_id
-    FROM conversations c WHERE c.id=? AND c.user_id=? AND c.state IN (${placeholders})
+    FROM conversations c WHERE c.id=? AND c.user_id=? AND c.state IN (${placeholders(states.length)})
     ${quarantineClause(includeQuarantined)}`).get(conversationId, userId, ...states) || null;
+}
+
+function listForSession(userId, sessionId, database = getDatabase()) {
+  if (!sessionId) return [];
+  return database.prepare(`SELECT c.*, ${SESSION_ID_SELECT} session_id
+    FROM conversations c WHERE c.user_id=? AND (${SESSION_ID_SELECT})=?
+    ORDER BY c.started_at`).all(userId, sessionId);
 }
 
 // Transcript size without loading the transcript.
@@ -106,6 +112,6 @@ function material(userId, conversation, database = getDatabase()) {
 }
 
 module.exports = {
-  listByState, findInState, isComplete, segmentsOf, segmentsAfter, characterCount, durationMs,
+  listByState, findInState, listForSession, isComplete, segmentsOf, segmentsAfter, characterCount, durationMs,
   transcriptCharacters, material,
 };

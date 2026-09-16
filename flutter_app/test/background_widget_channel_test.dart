@@ -3,6 +3,12 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/background/background_capture_service.dart';
+import 'dart:ui';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
+
+// The English translations, for the parts of the app that produce user-facing
+// text away from any widget tree.
+final AppL10n testStrings = lookupAppL10n(const Locale('en'));
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -74,6 +80,42 @@ void main() {
     expect(await service.takePendingWidgetPhoneRecordingRequest(), isTrue);
     expect(await service.takePendingWidgetPhoneRecordingRequest(), isFalse);
 
+    await service.dispose();
+  });
+
+  test('a persisted Memoket E2E request is claimed exactly once', () async {
+    Map<String, Object?>? pending = <String, Object?>{
+      'liveMs': 90000,
+      'reconnectGapMs': 0,
+      'idleMs': 0,
+    };
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'backgroundRuntimeState':
+          return <String, Object?>{
+            'running': false,
+            'holds': <String>[],
+            'foreground': true,
+            'microphoneUnavailable': false,
+          };
+        case 'takePendingMemoketE2eRequest':
+          final result = pending;
+          pending = null;
+          return result;
+        case 'stopBackgroundCapture':
+          return true;
+      }
+      return null;
+    });
+    final service = AndroidBackgroundCaptureService();
+    await service.initialize();
+
+    expect(await service.takePendingMemoketE2eRequest(), <String, Object?>{
+      'liveMs': 90000,
+      'reconnectGapMs': 0,
+      'idleMs': 0,
+    });
+    expect(await service.takePendingMemoketE2eRequest(), isNull);
     await service.dispose();
   });
 
@@ -166,15 +208,17 @@ void main() {
     });
     final service = AndroidBackgroundCaptureService();
     await service.initialize();
-    const snapshot = HomeWidgetSnapshot(
+    final snapshot = HomeWidgetSnapshot(
       signedIn: true,
-      capture: HomeWidgetCapture.idle,
+      capture: HomeWidgetCapture.idle(testStrings),
       today: HomeWidgetToday.empty,
     );
 
     await service.publishWidgetSnapshot(snapshot);
     await service.publishWidgetSnapshot(snapshot);
-    await service.publishWidgetSnapshot(HomeWidgetSnapshot.signedOut);
+    await service.publishWidgetSnapshot(
+      HomeWidgetSnapshot.signedOut(testStrings),
+    );
 
     final publishes = calls.where((call) => call.method == 'publishWidgetData');
     expect(publishes, hasLength(2));
@@ -207,9 +251,9 @@ void main() {
     });
     final service = AndroidBackgroundCaptureService();
     await service.initialize();
-    const snapshot = HomeWidgetSnapshot(
+    final snapshot = HomeWidgetSnapshot(
       signedIn: true,
-      capture: HomeWidgetCapture.idle,
+      capture: HomeWidgetCapture.idle(testStrings),
       today: HomeWidgetToday.empty,
     );
 

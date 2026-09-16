@@ -13,10 +13,21 @@ buildscript {
     }
 }
 
+// The vendored Plaud archive is served from a repository rather than referenced
+// as a file. `flutter build apk` runs assembleRelease across every subproject,
+// and AGP fails a library's AAR bundling outright when it carries a direct local
+// .aar dependency, because those classes would not be packaged into the result.
+// The repository has to reach every project, not just this one: the app resolves
+// the archive transitively onto its own runtime classpath.
+def plaudArchiveRepository = file('m2')
+
 rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = plaudArchiveRepository.toURI()
+        }
     }
 }
 
@@ -46,7 +57,7 @@ android {
 }
 
 dependencies {
-    implementation files('libs/plaud-sdk.aar')
+    implementation 'systems.neolabs.plaud:plaud-sdk:1.0.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     // Plaud's AAR declares these as `api` but the app still has to pull them in.
     implementation 'com.jakewharton.timber:timber:4.7.1'

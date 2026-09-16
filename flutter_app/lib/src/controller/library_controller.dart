@@ -7,16 +7,22 @@ part of '../../main_controller.dart';
 /// from capture. Grouping it here is what makes that shape visible, and makes
 /// the controller's remaining bulk actually about recording.
 mixin LibraryController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   NeoRecallApiClient get api;
   List<RecallMemory> get memories;
   set memories(List<RecallMemory> value);
   List<MiniMemory> get miniMemories;
   set miniMemories(List<MiniMemory> value);
   List<RecallSpeaker> get speakers;
+  List<TimelineMoment> get moments;
+  set moments(List<TimelineMoment> value);
+  Map<String, List<TranscriptSegment>> get momentTranscripts;
   Future<Map<String, dynamic>> _settings();
   Future<void> refreshAll({bool silent});
   Future<void> _cacheSettings(Map<String, dynamic> value);
   Future<void> _refreshPending();
+  Future<void> applyRawAudioRetention({bool purgeAll = false});
   void _applyRecordingSchedule();
   SyncCoordinator get sync;
   String? get notice;
@@ -64,6 +70,33 @@ mixin LibraryController on ChangeNotifier {
     await refreshAll(silent: true);
   }
 
+  Future<void> deleteMoment(String id) => bulkDeleteMoments(<String>[id]);
+
+  Future<void> bulkDeleteMoments(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final removed = ids.toSet();
+    final previous = moments;
+    moments = moments
+        .where((moment) => moment.id == null || !removed.contains(moment.id))
+        .toList();
+    for (final id in ids) {
+      momentTranscripts.remove(id);
+    }
+    notifyListeners();
+    try {
+      await api.request(
+        'POST',
+        '/api/v1/conversations/bulk',
+        body: <String, dynamic>{'ids': ids, 'action': 'delete'},
+      );
+      unawaited(refreshAll(silent: true));
+    } catch (_) {
+      moments = previous;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> mergeSpeakers(String targetId, List<String> sourceIds) async {
     if (sourceIds.isEmpty) return;
     await api.request(
@@ -86,13 +119,21 @@ mixin LibraryController on ChangeNotifier {
   Future<void> updateSettings(Map<String, dynamic> changes) async {
     final payload =
         await api.request('PUT', '/api/v1/settings', body: changes) as Map;
-    await _cacheSettings(Map<String, dynamic>.from(payload['settings'] as Map));
+    final settings = Map<String, dynamic>.from(payload['settings'] as Map);
+    // An older server drops unknown keys. Keep the choice the user just made
+    // so raw-audio retention does not snap back to the default.
+    if (changes.containsKey('keepRawAudio') &&
+        !settings.containsKey('keepRawAudio')) {
+      settings['keepRawAudio'] = changes['keepRawAudio'];
+    }
+    await _cacheSettings(settings);
+    await applyRawAudioRetention();
     // Status is derived from the cached policy, so refresh it before returning
     // to a settings screen that may have just changed the network rule.
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
     _applyRecordingSchedule();
-    notice = 'Settings saved.';
+    notice = strings.settingsSaved;
     notifyListeners();
   }
 
@@ -174,11 +215,11 @@ mixin LibraryController on ChangeNotifier {
   /// refresh picks them up.
   Future<Map<String, dynamic>> mergeMemories(List<String> ids) async {
     if (ids.length < 2) {
-      throw StateError('Select at least two memories to merge.');
+      throw StateError(strings.controllerMergeTooFew);
     }
     final mergeMax = api.maxMemoryMergeItems;
     if (mergeMax != null && ids.length > mergeMax) {
-      throw StateError('Select at most $mergeMax memories to merge.');
+      throw StateError(strings.controllerMergeTooMany(mergeMax));
     }
     final payload =
         await api.request(

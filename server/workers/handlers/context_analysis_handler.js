@@ -6,6 +6,7 @@ const { getConfig } = require('../../config');
 const ai = require('../../ai/ai_engine');
 const analyzer = require('../../services/context/context_analyzer');
 const contextService = require('../../services/context/context_service');
+const conversationInsights = require('../../services/conversations/conversation_insight_service');
 
 async function handle(job) {
   const db = getDatabase();
@@ -30,7 +31,7 @@ async function handle(job) {
         return { skipped: true };
       }
       result = await ai.analyzeContextImage(row.user_id, {
-        name: row.original_name, mediaType: row.content_type, data: fs.readFileSync(row.original_path).toString('base64'),
+        name: row.original_name, mediaType: row.content_type, data: require('../../utils/sealed_fs').readFileSync(row.original_path).toString('base64'),
       });
     } else {
       result = await ai.analyzeContextText(row.user_id, { name: row.original_name, content: extracted.extractedText });
@@ -39,6 +40,7 @@ async function handle(job) {
       analysis_error_code=NULL,analysis_error_message=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`)
       .run(extracted.extractedText || null, result.description, row.id);
     contextService.enqueueAffectedMemoryRewrites(row, db);
+    if (row.session_id) conversationInsights.enqueueForSession(row.user_id, row.session_id, db);
     return { ready: true };
   } catch (error) {
     if (error.code === 'AI_MEDIA_REJECTED') {

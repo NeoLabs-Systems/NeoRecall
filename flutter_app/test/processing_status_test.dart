@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/models/chunk.dart';
 import 'package:neorecall/src/sync/processing_status.dart';
+import 'dart:ui';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 AudioChunk chunk(
   String id,
@@ -30,9 +32,14 @@ AudioChunk chunk(
   error: error,
 );
 
+// The English translations, for the parts of the app that produce user-facing
+// text away from any widget tree.
+final AppL10n testStrings = lookupAppL10n(const Locale('en'));
+
 void main() {
   test('maps the durable ledger to each visible processing stage', () {
     final status = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[
         chunk('ready', LocalChunkState.ready),
         chunk('uploading', LocalChunkState.uploading),
@@ -86,6 +93,7 @@ void main() {
     'reports policy blockers and manual recovery without losing ETA truth',
     () {
       final status = ProcessingStatusSnapshot.fromChunks(
+        strings: testStrings,
         chunks: <AudioChunk>[
           chunk(
             'attention',
@@ -120,6 +128,7 @@ void main() {
 
   test('exposes a structured mobile-data override affordance', () {
     final waiting = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[chunk('ready', LocalChunkState.ready)],
       pendingBytes: 1024,
       localUploadBytes: 1024,
@@ -130,6 +139,7 @@ void main() {
       deviceIssue: null,
     );
     final unrestricted = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[chunk('ready', LocalChunkState.ready)],
       pendingBytes: 1024,
       localUploadBytes: 1024,
@@ -151,6 +161,7 @@ void main() {
 
   test('groups legacy transport errors without exposing chunk URLs', () {
     final status = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[
         chunk(
           'failed-1',
@@ -182,6 +193,7 @@ void main() {
 
   test('many transport chunks remain one user-facing recording session', () {
     final status = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[
         chunk(
           'part-1',
@@ -224,6 +236,7 @@ void main() {
 
   test('an active chunk makes its recording visibly transcribing', () {
     final status = ProcessingStatusSnapshot.fromChunks(
+      strings: testStrings,
       chunks: <AudioChunk>[
         chunk(
           'active',
@@ -274,4 +287,16 @@ void main() {
       expect(status.complete, isFalse);
     },
   );
+
+  test('byte-accurate transfer progress overrides the unit ratio', () {
+    final status = const ProcessingStatusSnapshot().copyWithTransfer(
+      active: true,
+      pending: 1,
+      pendingSeconds: 16,
+      transferred: 1,
+      total: 2,
+      completeFraction: 0.05,
+    );
+    expect(status.watchFraction, closeTo(0.05, 0.001));
+  });
 }

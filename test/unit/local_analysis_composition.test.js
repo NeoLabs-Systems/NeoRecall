@@ -23,6 +23,10 @@ test.after(() => {
 const { alignSegments } = require('../../server/transcription/speaker_alignment');
 const localAnalysis = require('../../server/transcription/local_analysis');
 const host = require('../../server/workers/inference_host');
+const { paths, ensureRuntimeDirs } = require('../../runtime/paths');
+
+ensureRuntimeDirs();
+const derivedAudio = () => fs.readdirSync(paths().audioWork).filter((name) => !name.startsWith('.'));
 
 const chunk = path.join(process.env.NEORECALL_HOME, 'chunk.wav');
 fs.writeFileSync(chunk, Buffer.from('audio'));
@@ -41,13 +45,19 @@ async function transcribeWith(analysis) {
   const originalAnalyze = localAnalysis.analyze;
   const originalFetch = global.fetch;
   let providerCalls = 0;
-  localAnalysis.analyze = () => analysis;
+  const analyzed = [];
+  localAnalysis.analyze = (filename) => { analyzed.push(filename); return analysis; };
   global.fetch = async () => {
     providerCalls += 1;
     return new Response(JSON.stringify(TRANSCRIPT), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
   try {
-    return { segments: await host.transcribe({ filename: chunk, channelLayout: 'mono' }), providerCalls };
+    const preprocessing = [];
+    const segments = await host.transcribe(
+      { filename: chunk, channelLayout: 'mono', durationMs: 8_000 },
+      (report) => preprocessing.push(report),
+    );
+    return { segments, providerCalls, analyzed, preprocessing };
   } finally {
     localAnalysis.analyze = originalAnalyze;
     global.fetch = originalFetch;
@@ -86,6 +96,67 @@ test('without the local models the transcript still arrives, just anonymous', as
   assert.equal(result.providerCalls, 1);
   assert.deepEqual(result.segments.map((segment) => segment.text), ['Guten Morgen.', 'I am well.']);
   assert.equal(result.segments[0].diarizationSpeaker, null, 'No voice was identified, and none is claimed.');
+});
+
+test('audio that cannot be conditioned is still transcribed from the original', async () => {
+  // This chunk is not audio at all, so conditioning fails on every run above and
+  // below. That is the point: the pipeline's behaviour when the filter chain
+  // cannot run has to be exactly the behaviour it had before the chain existed.
+  const result = await transcribeWith({ analyzed: false, hasSpeech: true, turns: [] });
+  assert.equal(result.providerCalls, 1, 'a failed conditioning attempt must not cost the user their transcript');
+  assert.deepEqual(result.segments.map((segment) => segment.text), ['Guten Morgen.', 'I am well.']);
+  assert.equal(result.preprocessing[0].fellBack, true, 'and the fallback is reported rather than hidden');
+  assert.deepEqual(result.analyzed, [chunk], 'the pass that could not be conditioned reads the original file');
+});
+
+test('no derived audio survives a request, including one that was never transcribed', async () => {
+  // Conditioned copies are the one kind of audio this server creates itself.
+  // They may not outlive the request that needed them, on any path.
+  await transcribeWith({ analyzed: true, hasSpeech: false, turns: [] });
+  assert.deepEqual(derivedAudio(), [], 'a silent chunk leaves nothing behind');
+  await transcribeWith({ analyzed: true, hasSpeech: true, turns: [] });
+  assert.deepEqual(derivedAudio(), [], 'a transcribed chunk leaves nothing behind');
+});
+
+test('speaker detection reads the original recording, transcription reads the conditioned one', async () => {
+  // Handing the two passes different files is only safe because conditioning is
+  // sample-exact, and only correct because the local models measurably do worse
+  // on conditioned audio than on the recording as it arrived. Both halves of
+  // that are asserted here.
+  const real = path.join(process.env.NEORECALL_HOME, 'real.wav');
+  fs.copyFileSync(path.join(__dirname, '../fixtures/de_en_two_speakers.wav'), real);
+
+  const run = async () => {
+    const originalAnalyze = localAnalysis.analyze;
+    const originalFetch = global.fetch;
+    const analyzed = [];
+    let sentBytes = 0;
+    localAnalysis.analyze = (filename) => { analyzed.push(filename); return { analyzed: false, hasSpeech: true, turns: [] }; };
+    global.fetch = async (_url, options) => {
+      sentBytes = options.body.get('file').size;
+      return new Response(JSON.stringify(TRANSCRIPT), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    try {
+      await host.transcribe({ filename: real, channelLayout: 'mono', durationMs: 17_980 });
+    } finally {
+      localAnalysis.analyze = originalAnalyze;
+      global.fetch = originalFetch;
+    }
+    return { analyzed, sentBytes };
+  };
+
+  const byDefault = await run();
+  assert.equal(byDefault.analyzed[0], real, 'speaker detection is given the recording as it arrived');
+  assert.ok(byDefault.sentBytes > 0, 'and the transcription service was still sent audio');
+  assert.deepEqual(derivedAudio(), [], 'the conditioned copy is gone once the request is over');
+
+  process.env.NEORECALL_AUDIO_PREPROCESS_TARGET = 'stt+analysis';
+  try {
+    const opted = await run();
+    assert.notEqual(opted.analyzed[0], real, 'opting in hands speaker detection the conditioned copy instead');
+    assert.equal(path.dirname(opted.analyzed[0]), paths().audioWork);
+  } finally { delete process.env.NEORECALL_AUDIO_PREPROCESS_TARGET; }
+  assert.deepEqual(derivedAudio(), []);
 });
 
 test('overlapping speech is marked rather than silently attributed to one voice', () => {

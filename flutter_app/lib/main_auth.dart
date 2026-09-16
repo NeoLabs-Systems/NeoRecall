@@ -6,6 +6,7 @@ import 'main_local_install.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/install/local_backend_installer.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class NeoRecallAuthScreen extends StatefulWidget {
   const NeoRecallAuthScreen({super.key, required this.controller});
@@ -23,7 +24,6 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   final _twoFactor = TextEditingController();
   bool registerMode = false;
   bool serverSetup = false;
-  bool awaitingTwoFactor = false;
   bool localInstall = false;
 
   bool get _canConfigureServer =>
@@ -70,25 +70,21 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     final ok = await widget.controller.signInWithSecurityKey(
       account: account.isEmpty ? null : account,
     );
-    if (!ok &&
-        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
-        mounted) {
-      setState(() => awaitingTwoFactor = true);
-    }
+    if (!ok && mounted) setState(() {});
   }
 
   Future<void> _submit() async {
-    if (awaitingTwoFactor) {
+    if (widget.controller.needsTwoFactor) {
       final ok = await widget.controller.completeTwoFactor(
         _twoFactor.text.trim(),
       );
-      if (ok && mounted) setState(() => awaitingTwoFactor = false);
+      if (ok && mounted) setState(() {});
       return;
     }
     if (registerMode) {
       if (_password.text != _confirm.text) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Passwords do not match.')),
+          SnackBar(content: Text(AppL10n.of(context).authPasswordsDoNotMatch)),
         );
         return;
       }
@@ -103,15 +99,12 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
       _username.text.trim(),
       _password.text,
     );
-    if (!ok &&
-        widget.controller.error?.toLowerCase().contains('two-factor') == true &&
-        mounted) {
-      setState(() => awaitingTwoFactor = true);
-    }
+    if (!ok && mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppL10n.of(context);
     if (localInstall) {
       return LocalInstallView(
         controller: widget.controller,
@@ -123,6 +116,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
         }),
       );
     }
+    final awaitingTwoFactor = widget.controller.needsTwoFactor;
     final palette = neoRecallPaletteOf(context);
     final controller = widget.controller;
     final compact = MediaQuery.sizeOf(context).width < 760;
@@ -153,19 +147,19 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                 // No eyebrow: it only ever restated the title underneath it.
                 Text(
                   awaitingTwoFactor
-                      ? 'Enter 2FA code'
+                      ? strings.authTwoFactorTitle
                       : registerMode
-                      ? 'Create your NeoRecall account'
-                      : 'Sign in',
+                      ? strings.authRegisterTitle
+                      : strings.authSignInTitle,
                   style: displayTitleStyle(palette, size: 30),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   awaitingTwoFactor
-                      ? 'Open your authenticator app and enter the current NeoRecall code.'
+                      ? strings.authTwoFactorSubtitle
                       : registerMode
-                      ? 'Your first account becomes the NeoRecall administrator for this server.'
-                      : 'Enter your NeoRecall account details.',
+                      ? strings.authRegisterSubtitle
+                      : strings.authSignInSubtitle,
                   style: TextStyle(color: palette.textSecondary, height: 1.5),
                 ),
                 const SizedBox(height: 20),
@@ -179,16 +173,22 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                         ? null
                         : controller.initialize,
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Retry local startup'),
+                    label: Text(strings.authRetryLocalStartup),
                   ),
                   const SizedBox(height: 16),
                 ],
                 TextField(
                   controller: awaitingTwoFactor ? _twoFactor : _username,
+                  keyboardType: awaitingTwoFactor
+                      ? TextInputType.visiblePassword
+                      : TextInputType.text,
+                  autofillHints: awaitingTwoFactor
+                      ? const <String>[AutofillHints.oneTimeCode]
+                      : const <String>[AutofillHints.username],
                   decoration: InputDecoration(
                     labelText: awaitingTwoFactor
-                        ? '2FA or recovery code'
-                        : 'Username',
+                        ? strings.authTwoFactorFieldLabel
+                        : strings.authUsernameLabel,
                   ),
                 ),
                 if (registerMode && !awaitingTwoFactor) ...<Widget>[
@@ -196,8 +196,8 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   TextField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Email (optional)',
+                    decoration: InputDecoration(
+                      labelText: strings.authEmailLabel,
                     ),
                   ),
                 ],
@@ -206,15 +206,17 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   TextField(
                     controller: _password,
                     obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Password'),
+                    decoration: InputDecoration(
+                      labelText: strings.authPasswordLabel,
+                    ),
                   ),
                   if (registerMode) ...<Widget>[
                     const SizedBox(height: 14),
                     TextField(
                       controller: _confirm,
                       obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Confirm password',
+                      decoration: InputDecoration(
+                        labelText: strings.authConfirmPasswordLabel,
                       ),
                     ),
                   ],
@@ -229,10 +231,10 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                         )
                       : Text(
                           awaitingTwoFactor
-                              ? 'Verify'
+                              ? strings.authVerify
                               : registerMode
-                              ? 'Create account'
-                              : 'Sign in',
+                              ? strings.authCreateAccount
+                              : strings.authSignInTitle,
                         ),
                 ),
                 if (!registerMode &&
@@ -244,7 +246,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                         ? null
                         : _signInWithSecurityKey,
                     icon: const Icon(Icons.key_rounded),
-                    label: const Text('Sign in with a security key'),
+                    label: Text(strings.authSecurityKeySignIn),
                   ),
                 ],
                 const SizedBox(height: 10),
@@ -253,20 +255,23 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   runSpacing: 4,
                   children: <Widget>[
                     TextButton(
-                      onPressed: () => setState(() {
-                        registerMode = !registerMode;
-                        awaitingTwoFactor = false;
-                      }),
+                      onPressed: awaitingTwoFactor
+                          ? widget.controller.cancelTwoFactor
+                          : () => setState(() {
+                              registerMode = !registerMode;
+                            }),
                       child: Text(
-                        registerMode
-                            ? 'Already have an account? Sign in'
-                            : 'Need a new account? Register',
+                        awaitingTwoFactor
+                            ? strings.authSwitchToSignIn
+                            : registerMode
+                            ? strings.authSwitchToSignIn
+                            : strings.authSwitchToRegister,
                       ),
                     ),
                     if (_canConfigureServer)
                       TextButton(
                         onPressed: () => setState(() => serverSetup = true),
-                        child: const Text('Server'),
+                        child: Text(strings.authServerButton),
                       ),
                   ],
                 ),
@@ -275,7 +280,9 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     );
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // Opaque, for the same reason the local-setup screen is: a transparent
+      // scaffold shows the native window's own background.
+      backgroundColor: palette.bgPrimary,
       resizeToAvoidBottomInset: true,
       body: AppBackdrop(
         child: SafeArea(
@@ -307,6 +314,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
 
   Widget _serverCard(NeoRecallPalette palette) {
     final controller = widget.controller;
+    final strings = AppL10n.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -316,18 +324,17 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
           child: BrandLockup(logoSize: 60),
         ),
         const SizedBox(height: 22),
-        Text('WELCOME TO NEORECALL', style: sectionEyebrowStyle(palette)),
+        Text(strings.authWelcomeEyebrow, style: sectionEyebrowStyle(palette)),
         const SizedBox(height: 8),
         Text(
-          _canInstallLocally ? 'Set up or connect NeoRecall' : 'Connect NeoRecall',
+          _canInstallLocally ? strings.authSetUpOrConnect : strings.authConnect,
           style: displayTitleStyle(palette, size: 34),
         ),
         const SizedBox(height: 8),
         Text(
           _canInstallLocally
-              ? 'Install NeoRecall on this computer without a terminal, or enter '
-                    'the address of a server that is already running.'
-              : 'Enter the address of the NeoRecall server this device should use.',
+              ? strings.authSetUpOrConnectBody
+              : strings.authConnectBody,
           style: TextStyle(color: palette.textSecondary, height: 1.5),
         ),
         if (_canInstallLocally) ...<Widget>[
@@ -338,7 +345,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
               minimumSize: const Size.fromHeight(58),
             ),
             icon: const Icon(Icons.auto_awesome_rounded),
-            label: const Text('Set up NeoRecall on this computer'),
+            label: Text(strings.authInstallLocally),
           ),
           const SizedBox(height: 18),
           Row(
@@ -347,7 +354,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
-                  'or connect to a running server',
+                  strings.authOrConnectRunning,
                   style: TextStyle(color: palette.textMuted, fontSize: 12),
                 ),
               ),
@@ -367,9 +374,9 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
           textInputAction: TextInputAction.done,
           autocorrect: false,
           onSubmitted: (_) => _saveServer(),
-          decoration: const InputDecoration(
-            labelText: 'NeoRecall server address',
-            prefixIcon: Icon(Icons.dns_outlined),
+          decoration: InputDecoration(
+            labelText: strings.authServerAddressLabel,
+            prefixIcon: const Icon(Icons.dns_outlined),
             hintText: 'http://192.168.1.20:4500',
           ),
         ),
@@ -384,21 +391,21 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Connect to this server'),
+              : Text(strings.authConnectToServer),
         ),
         if (controller.initializationError != null) ...<Widget>[
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: controller.initializing ? null : controller.initialize,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Retry local startup'),
+            label: Text(strings.authRetryLocalStartup),
           ),
         ],
         if (!controller.requiresBackendUrlSetup) ...<Widget>[
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => setState(() => serverSetup = false),
-            child: const Text('Back to sign in'),
+            child: Text(strings.authBackToSignIn),
           ),
         ],
       ],

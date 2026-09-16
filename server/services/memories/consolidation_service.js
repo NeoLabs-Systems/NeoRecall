@@ -11,11 +11,13 @@ const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const searchIndex = require('../../embeddings/search_index_service');
 const memoryContinuity = require('./memory_continuity_service');
+const memoryOccasion = require('./memory_occasion_service');
 const refinement = require('../conversations/conversation_refinement_service');
 const material = require('../conversations/conversation_material_service');
 const contextMaterial = require('../context/context_material_service');
 const speakerIdentity = require('../speakers/speaker_identity_service');
 const { createLogger } = require('../../utils/logger');
+const usageLimits = require('../usage/usage_limit_service');
 
 const logger = createLogger('memories');
 
@@ -62,8 +64,8 @@ function lastOutbound(userId) {
 // then two, four, eight, up to half an hour — so an outage costs a handful of
 // attempts instead of hundreds, and recovery still happens on its own within
 // half an hour of the cause being fixed. Asking by hand ignores it entirely.
-const FAILURE_BACKOFF_BASE_MS = 60_000;
-const FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
+const FAILURE_BACKOFF_BASE_MS = () => getConfig().consolidationFailureBackoffBaseMs;
+const FAILURE_BACKOFF_MAX_MS = () => getConfig().consolidationFailureBackoffMaxMs;
 
 function failureBackoff(userId) {
   const rows = getDatabase().prepare(`SELECT state,error_code,error_message,completed_at
@@ -76,7 +78,7 @@ function failureBackoff(userId) {
     consecutive += 1;
   }
   if (!consecutive || !latest?.completed_at) return null;
-  const delay = Math.min(FAILURE_BACKOFF_MAX_MS, FAILURE_BACKOFF_BASE_MS * 2 ** (consecutive - 1));
+  const delay = Math.min(FAILURE_BACKOFF_MAX_MS(), FAILURE_BACKOFF_BASE_MS() * 2 ** (consecutive - 1));
   const retryAt = Date.parse(latest.completed_at) + delay;
   if (Date.now() >= retryAt) return null;
   return {
@@ -87,9 +89,29 @@ function failureBackoff(userId) {
   };
 }
 
+// A conversation whose speakers are still being re-resolved is not ready to be
+// read.
+//
+// Closing a conversation queues one pass that can fold two speaker labels into
+// one and attach voices to the people they belong to. Consolidating before that
+// finishes means the model reads labels that are about to change, and worse,
+// names a voiceprint the pass is about to merge away — a wrong name on a real
+// person, arrived at from evidence that no longer exists.
+//
+// Only a job still queued or leased holds the conversation back. One that
+// failed leaves it eligible again rather than stranding it forever, which is the
+// right trade: consolidating with provisional speaker labels is a worse outcome
+// than never consolidating at all only while the pass might still run.
+function awaitingSpeakerResolution(userId, conversationId) {
+  return Boolean(getDatabase().prepare(`SELECT 1 FROM jobs
+    WHERE type='resolve_speakers' AND resource_id=? AND user_id=? AND status IN ('queued','leased') LIMIT 1`)
+    .get(conversationId, userId));
+}
+
 function candidateConversations(userId) {
   return material.listByState(userId, ['closed'])
     .filter((conversation) => material.isComplete(userId, conversation.id))
+    .filter((conversation) => !awaitingSpeakerResolution(userId, conversation.id))
     .filter((conversation) => contextMaterial.sessionComplete(userId, conversation.session_id));
 }
 
@@ -105,28 +127,42 @@ function narrowingAfterFailure(userId) {
   return Boolean(previous && previous.state === 'failed' && VALIDATION_FAILURE_CODES.includes(previous.error_code));
 }
 
+// The conversations one run may carry: the oldest occasion still waiting.
+//
+// A run carries one occasion rather than one conversation. A pause of a few
+// minutes cuts the stream mid-meeting, and consolidating each piece on its own
+// wrote one card per piece — so the pieces of a sitting are chained back
+// together here and read as one input. They are never an arbitrary batch: the
+// chain stops at the first conversation from another recording or beyond the
+// occasion gap, which is what keeps the model from being asked to hold two
+// unrelated occasions in mind at once.
 function buildCandidates(userId) {
-  const { maxConsolidationInputChars: maxCharacters, maxConsolidationConversations: maxCount } = processingSettings.get();
+  const options = processingSettings.get();
   const narrowed = narrowingAfterFailure(userId);
-  const output = [];
-  let characters = 0;
-  for (const conversation of candidateConversations(userId)) {
-    if (output.length && (narrowed || output.length >= maxCount)) break;
-    const candidate = material.material(userId, conversation);
-    if (output.length && characters + candidate.characters > maxCharacters) break;
-    const { characters: size, ...rest } = candidate;
-    output.push(rest);
-    characters += size;
-  }
+  const candidates = candidateConversations(userId).map((conversation) => material.material(userId, conversation));
+  // After a validation failure the next run carries a single conversation, which
+  // isolates the cause. Chaining would put the whole occasion back into it.
+  const limits = {
+    occasionGapMs: options.memoryOccasionGapMs,
+    maxConversations: narrowed ? 1 : options.maxConsolidationConversations,
+    maxCharacters: options.maxConsolidationInputChars,
+    maxSpanMs: options.conversationMaximumMs,
+  };
+  const { conversations: chained, characters } = memoryOccasion.chain(candidates, limits);
+  const output = chained.map(({ characters: _size, ...rest }) => rest);
   const audioMs = output.reduce((sum, conversation) => sum + material.durationMs(conversation), 0);
   contextMaterial.attach(userId, output);
   return { conversations: output, characters, audioMs, narrowed };
 }
 
-function eligibility(userId, { ignoreBackoff = false } = {}) {
+function eligibility(userId, { ignoreBackoff = false, manual = false } = {}) {
   const config = getConfig();
   const processingConfig = processingSettings.get();
   if (!aiProviders.ready()) return { eligible: false, reason: 'ai_not_configured' };
+  const usage = usageLimits.getUsageSnapshot(userId).ai;
+  if (usage.reached.any) {
+    return { eligible: false, reason: 'usage_limit', retryAt: usageLimits.retryAtForMeter(usage) };
+  }
   const active = getDatabase().prepare("SELECT id FROM consolidation_runs WHERE user_id=? AND state IN ('reserved','running')").get(userId);
   if (active) return { eligible: false, reason: 'already_running', runId: active.id };
   const interval = Math.max(settings.get(userId).consolidationIntervalMs, config.minConsolidationIntervalMs);
@@ -159,6 +195,19 @@ function eligibility(userId, { ignoreBackoff = false } = {}) {
     if (Date.now() < Date.parse(consolidateAfter)) {
       return { eligible: false, reason: 'insufficient_material', materialCharacters: candidates.characters,
         requiredCharacters: processingConfig.minNewMaterialChars, consolidateAfter };
+    }
+  }
+  // The last gate: has this occasion finished happening?
+  //
+  // Everything above asks whether there is enough material; this asks whether
+  // the material is all of it. A sitting that is still running would otherwise
+  // be written up in pieces, one card per pause. Asking by hand skips it —
+  // someone who presses the button is saying they want what exists now.
+  if (!manual) {
+    const settled = memoryOccasion.readiness(userId, candidates.conversations, processingConfig);
+    if (!settled.ready) {
+      return { eligible: false, reason: settled.reason, consolidateAfter: settled.consolidateAfter,
+        materialConversations: candidates.conversations.length };
     }
   }
   return { eligible: true, nextEligibleAt, ...candidates };
@@ -195,11 +244,11 @@ function recordValidationFailure(userId, conversationIds, errorCode) {
 }
 
 function request(userId, { manual = false } = {}) {
-  let state = eligibility(userId);
+  let state = eligibility(userId, { manual });
   // Someone who presses the button has decided to try now, and is watching the
   // result — the backoff exists to stop unattended retries, not to refuse them.
   if (!state.eligible && state.reason === 'recent_failure' && manual) {
-    state = eligibility(userId, { ignoreBackoff: true });
+    state = eligibility(userId, { ignoreBackoff: true, manual });
   }
   if (!state.eligible) {
     if (manual && state.reason === 'interval') {
@@ -207,6 +256,7 @@ function request(userId, { manual = false } = {}) {
       throw new HttpError(429, 'CONSOLIDATION_INTERVAL', 'The consolidation interval has not elapsed.', { retryAfterSeconds, nextEligibleAt: state.nextEligibleAt });
     }
     if (manual && state.reason === 'ai_not_configured') throw new HttpError(503, 'AI_NOT_CONFIGURED', 'The external language-model provider is not configured. Choose a provider and model in the admin dashboard or `.env`.');
+    if (manual && state.reason === 'usage_limit') usageLimits.rejectIfReached(userId, 'ai');
     return state;
   }
   const id = crypto.randomUUID();
@@ -605,6 +655,7 @@ function latest(userId) {
 }
 
 module.exports = {
+  awaitingSpeakerResolution,
   eligibility, request, execute, latest, failureBackoff, validateReferences, applyMemoryWorthinessFloors,
   anchorMemoryRanges, localDate,
   recordValidationFailure, buildCandidates, persist, VALIDATION_FAILURE_CODES,

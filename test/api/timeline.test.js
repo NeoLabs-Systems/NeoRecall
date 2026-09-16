@@ -51,7 +51,7 @@ async function account(username) {
     (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
     VALUES (?,?,?,?,0,?,?,1,'wav','pcm_s16le','mono','2026-08-01T10:00:00.000Z',0,1000,'transcribed')`)
     .run(chunkId, userId, sessionId, sourceId, chunkId, crypto.randomBytes(32).toString('hex'));
-  return { userId, chunkId, token };
+  return { userId, chunkId, sessionId, token };
 }
 
 function conversation(context, { day, index, state = 'consolidated', segments = 3, title = null }) {
@@ -89,6 +89,8 @@ test('the timeline is paged by moments, newest first, each one previewed', async
   // megabytes for moments nobody opened.
   assert.equal(first.body.moments[0].segments.length, 3);
   assert.equal(first.body.moments[0].segmentCount, 40);
+  assert.deepEqual(first.body.moments[0].sessionIds, [context.sessionId]);
+  assert.deepEqual(first.body.moments[0].importIds, []);
 
   const second = await request(app).get(`/api/v1/conversations/timeline?limit=8&before=${first.body.nextCursor}`)
     .set(auth).expect(200);
@@ -242,5 +244,94 @@ test('one account cannot open another account moment', async () => {
   const outsider = await account('segments-outsider');
   const conversationId = conversation(owner, { day: 1, index: 0 });
   await request(app).get(`/api/v1/conversations/${conversationId}/segments`)
+    .set('Authorization', `Bearer ${outsider.token}`).expect(404);
+});
+
+test('deleting a moment removes its transcript rather than leaving it pending', async () => {
+  const context = await account('timeline-delete');
+  const conversationId = conversation(context, { day: 1, index: 0, segments: 4 });
+  const db = getDatabase();
+  db.prepare(`INSERT INTO consolidation_runs (id,user_id,state,reserved_at)
+    VALUES ('run-delete',?,'succeeded','2026-08-01T09:00:00.000Z')`).run(context.userId);
+  const memory = db.prepare(`INSERT INTO memories
+    (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
+    VALUES (?,?,'meeting','Only this talk','Gone with the moment.','📝',5,'2026-08-01T10:00:00.000Z','2026-08-01T10:30:00.000Z','run-delete')
+    RETURNING id`).get(crypto.randomUUID(), context.userId);
+  db.prepare('INSERT INTO memory_sources (memory_id,conversation_id) VALUES (?,?)').run(memory.id, conversationId);
+  const auth = { Authorization: `Bearer ${context.token}` };
+
+  await request(app).delete(`/api/v1/conversations/${conversationId}`).set(auth).expect(200);
+  const timeline = await request(app).get('/api/v1/conversations/timeline?limit=8').set(auth).expect(200);
+  assert.equal(timeline.body.moments.length, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM transcript_segments WHERE user_id=?').get(context.userId).c, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id=?').get(context.userId).c, 0);
+});
+
+test('a memory built from several conversations survives deleting one of them', async () => {
+  const context = await account('timeline-delete-shared');
+  const first = conversation(context, { day: 2, index: 0 });
+  const second = conversation(context, { day: 2, index: 1 });
+  const db = getDatabase();
+  db.prepare(`INSERT INTO consolidation_runs (id,user_id,state,reserved_at)
+    VALUES ('run-shared-delete',?,'succeeded','2026-08-02T09:00:00.000Z')`).run(context.userId);
+  const memory = db.prepare(`INSERT INTO memories
+    (public_id,user_id,type,title_en,summary_en,emoji,importance,started_at,ended_at,consolidation_run_id)
+    VALUES (?,?,'meeting','Shared write-up','Covers both.','📝',5,'2026-08-02T10:00:00.000Z','2026-08-02T12:00:00.000Z','run-shared-delete')
+    RETURNING id`).get(crypto.randomUUID(), context.userId);
+  db.prepare('INSERT INTO memory_sources (memory_id,conversation_id) VALUES (?,?)').run(memory.id, first);
+  db.prepare('INSERT INTO memory_sources (memory_id,conversation_id) VALUES (?,?)').run(memory.id, second);
+
+  await request(app).delete(`/api/v1/conversations/${first}`)
+    .set('Authorization', `Bearer ${context.token}`).expect(200);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id=?').get(context.userId).c, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM conversations WHERE user_id=?').get(context.userId).c, 1);
+});
+
+test('bulk deletion removes several moments in one request and is account-scoped', async () => {
+  const mine = await account('timeline-bulk-mine');
+  const theirs = await account('timeline-bulk-theirs');
+  const first = conversation(mine, { day: 3, index: 0 });
+  const second = conversation(mine, { day: 3, index: 1 });
+  const other = conversation(theirs, { day: 3, index: 0 });
+  const auth = { Authorization: `Bearer ${mine.token}` };
+
+  const response = await request(app).post('/api/v1/conversations/bulk').set(auth).send({
+    ids: [first, second],
+    action: 'delete',
+  }).expect(200);
+  assert.equal(response.body.count, 2);
+  const db = getDatabase();
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM conversations WHERE user_id=?').get(mine.userId).c, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM conversations WHERE id=?').get(other).c, 1);
+
+  await request(app).post('/api/v1/conversations/bulk').set(auth).send({
+    ids: [other],
+    action: 'delete',
+  }).expect(404);
+});
+
+test('ungrouped speech can be deleted as the pending moment', async () => {
+  const context = await account('timeline-delete-pending');
+  conversation(context, { day: 4, index: 0 });
+  const db = getDatabase();
+  db.prepare(`INSERT INTO transcript_segments
+    (public_id,user_id,chunk_id,conversation_id,source_component,started_at,ended_at,chunk_start_ms,chunk_end_ms,text,language)
+    VALUES (?,?,?,NULL,'combined','2026-08-25T17:00:00.000Z','2026-08-25T17:00:30.000Z',0,30000,'just said this','en')`)
+    .run(crypto.randomUUID(), context.userId, context.chunkId);
+  const auth = { Authorization: `Bearer ${context.token}` };
+
+  await request(app).delete('/api/v1/conversations/pending').set(auth).expect(200);
+  const timeline = await request(app).get('/api/v1/conversations/timeline?limit=8').set(auth).expect(200);
+  assert.equal(timeline.body.moments.length, 1);
+  assert.equal(timeline.body.moments[0].kind, 'conversation');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM transcript_segments WHERE user_id=? AND conversation_id IS NULL')
+    .get(context.userId).c, 0);
+});
+
+test('another account cannot delete a conversation it does not own', async () => {
+  const owner = await account('timeline-delete-owner');
+  const outsider = await account('timeline-delete-outsider');
+  const id = conversation(owner, { day: 5, index: 0 });
+  await request(app).delete(`/api/v1/conversations/${id}`)
     .set('Authorization', `Bearer ${outsider.token}`).expect(404);
 });

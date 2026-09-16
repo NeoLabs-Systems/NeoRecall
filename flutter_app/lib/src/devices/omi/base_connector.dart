@@ -21,23 +21,42 @@ abstract class WearableConnector {
       <StreamSubscription<dynamic>>[];
   bool recording = false;
 
+  /// True when this connect is resuming capture after a radio drop.
+  ///
+  /// Connectors whose handshake shares a characteristic with live start/stop
+  /// must not write that channel until live audio is joined — those writes have
+  /// stopped an in-progress take.
+  bool resumeLiveOnConnect = false;
+
   WearableDeviceType get type => device.type;
   bool get isRecording => recording;
   WearableAudioCodec get codec;
 
-  Future<void> connect({bool requiresPairing = false}) async {
+  Future<void> connect({
+    bool requiresPairing = false,
+    bool resumeLive = false,
+  }) async {
+    resumeLiveOnConnect = resumeLive;
     await transport.connect(requiresPairing: requiresPairing);
     await onConnected();
   }
 
   Future<void> onConnected() async {}
 
+  /// Whether tearing down the BLE session should also stop on-device recording.
+  ///
+  /// Omi's live stream *is* the recording, so a drop must stop it. Memoket
+  /// keeps the take on flash; sending stop here is what split one long
+  /// recording into many when Android dropped the link in the background.
+  bool get stopDeviceOnDisconnect => true;
+
   Future<void> disconnect() async {
-    if (recording) {
+    if (recording && stopDeviceOnDisconnect) {
       try {
         await stopRecording();
       } catch (_) {}
     }
+    recording = false;
     for (final sub in _subs) {
       try {
         await sub.cancel();

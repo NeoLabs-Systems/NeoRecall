@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown in the tile picker before the tile has any real state to render. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#FF000000" />
+        </shape>
+    </item>
+    <item
+        android:width="56dp"
+        android:height="56dp"
+        android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="#24E1B052" />
+            <stroke android:width="3dp" android:color="#FFE1B052" />
+        </shape>
+    </item>
+</layer-list>

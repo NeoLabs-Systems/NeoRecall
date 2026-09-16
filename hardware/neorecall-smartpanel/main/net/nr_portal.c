@@ -81,22 +81,25 @@ static void emit_field(httpd_req_t *req, const nr_config_t *c, const nrs_field_t
             break;
         case NRS_TEXT: case NRS_URL: case NRS_PASSWORD: {
             const char *itype = f->type == NRS_URL ? "url" : (f->type == NRS_PASSWORD ? "password" : "text");
-            const char *val = f->type == NRS_PASSWORD ? "" : v;   // never prefill passwords
+            char escaped[NR_CFG_URL_MAX * 6];
+            nr_html_escape(escaped, sizeof(escaped), f->type == NRS_PASSWORD ? "" : v);
             snprintf(buf, sizeof(buf),
                 "<label>%s</label><input type=%s name=%s value=\"%s\">%s%s%s",
-                f->label, itype, f->id, val,
+                f->label, itype, f->id, escaped,
                 f->hint ? "<div class=hint>" : "", f->hint ? f->hint : "", f->hint ? "</div>" : "");
             httpd_resp_sendstr_chunk(req, buf);
             break;
         }
-        case NRS_SSID:
-            // A real selector, populated with the scan results by the page script.
+        case NRS_SSID: {
+            char escaped[NR_CFG_STR_MAX * 6];
+            nr_html_escape(escaped, sizeof(escaped), v);
             snprintf(buf, sizeof(buf),
                 "<label>%s</label><select name=%s id=nets>%s%s%s</select>",
                 f->label, f->id,
-                v[0] ? "<option selected>" : "", v[0] ? v : "", v[0] ? "</option>" : "");
+                v[0] ? "<option selected>" : "", v[0] ? escaped : "", v[0] ? "</option>" : "");
             httpd_resp_sendstr_chunk(req, buf);
             break;
+        }
         case NRS_BOOL: case NRS_BOOL_INV: case NRS_NIGHTMODE:
             snprintf(buf, sizeof(buf),
                 "<div class=row><label>%s</label><input type=checkbox name=%s value=1 %s></div>",
@@ -109,11 +112,14 @@ static void emit_field(httpd_req_t *req, const nr_config_t *c, const nrs_field_t
                 f->label, f->id, f->min, f->max, v);
             httpd_resp_sendstr_chunk(req, buf);
             break;
-        case NRS_TIME:
+        case NRS_TIME: {
+            char escaped[64];
+            nr_html_escape(escaped, sizeof(escaped), v);
             snprintf(buf, sizeof(buf),
-                "<label>%s</label><input type=time name=%s value=\"%s\">", f->label, f->id, v);
+                "<label>%s</label><input type=time name=%s value=\"%s\">", f->label, f->id, escaped);
             httpd_resp_sendstr_chunk(req, buf);
             break;
+        }
     }
 }
 
@@ -122,8 +128,12 @@ static esp_err_t get_root(httpd_req_t *req)
     // OS captive-portal probes and the root all get the form; else redirect.
     if (!(strcmp(req->uri, "/") == 0 || strstr(req->uri, "hotspot") || strstr(req->uri, "generate_204") ||
           strstr(req->uri, "ncsi") || strstr(req->uri, "connectivity") || strstr(req->uri, "canonical"))) {
+        char location[32];
+        char ap_ip[16];
+        nr_wifi_ap_ip(ap_ip);
+        snprintf(location, sizeof(location), "http://%s/", ap_ip);
         httpd_resp_set_status(req, "302 Found");
-        httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+        httpd_resp_set_hdr(req, "Location", location);
         return httpd_resp_send(req, NULL, 0);
     }
     nr_config_t c; nr_config_get(&c);
@@ -152,8 +162,10 @@ static esp_err_t get_scan(httpd_req_t *req)
     int emitted = 0;
     for (uint16_t i = 0; i < got && recs; i++) {
         if (recs[i].ssid[0] == '\0') continue;
-        char item[80];
-        snprintf(item, sizeof(item), "%s\"%s\"", emitted++ ? "," : "", (char *) recs[i].ssid);
+        char json[160];
+        nr_json_escape(json, sizeof(json), (char *) recs[i].ssid);
+        char item[176];
+        snprintf(item, sizeof(item), "%s\"%s\"", emitted++ ? "," : "", json);
         httpd_resp_sendstr_chunk(req, item);
     }
     httpd_resp_sendstr_chunk(req, "]}");
@@ -258,7 +270,14 @@ static void dns_task(void *arg)
         buf[8] = 0; buf[9] = 0; buf[10] = 0; buf[11] = 0;
         int len = n;
         if (len + 16 > (int) sizeof(buf)) continue;
-        uint8_t ans[] = { 0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04, 192, 168, 4, 1 };
+        uint8_t ip[4] = { 192, 168, 4, 1 };
+        char dotted[16];
+        unsigned a = 192, b = 168, c = 4, d = 1;
+        nr_wifi_ap_ip(dotted);
+        if (sscanf(dotted, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+            ip[0] = (uint8_t) a; ip[1] = (uint8_t) b; ip[2] = (uint8_t) c; ip[3] = (uint8_t) d;
+        }
+        uint8_t ans[] = { 0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04, ip[0], ip[1], ip[2], ip[3] };
         memcpy(buf + len, ans, sizeof(ans));
         len += sizeof(ans);
         sendto(sock, buf, len, 0, (struct sockaddr *) &from, fl);

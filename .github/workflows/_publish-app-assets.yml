@@ -73,6 +73,7 @@ jobs:
             "dist/NeoRecall-macOS-${version}.dmg"
             "dist/NeoRecall-Windows-x64-${version}.zip"
             "dist/NeoRecall-Android-${version}.apk"
+            "dist/NeoRecall-WearOS-${version}.apk"
           )
           available_assets=()
           missing_assets=()

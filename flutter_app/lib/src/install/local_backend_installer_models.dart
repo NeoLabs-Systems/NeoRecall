@@ -110,7 +110,7 @@ const List<LocalBackendRequirement> localBackendRequirements =
       ),
       LocalBackendRequirement(
         command: 'node',
-        label: 'Node.js 20 or newer',
+        label: 'Node.js 20+',
         downloadUrl: 'https://nodejs.org',
       ),
       LocalBackendRequirement(

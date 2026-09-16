@@ -5,6 +5,7 @@ import 'main_shared.dart';
 import 'main_theme.dart';
 import 'src/devices/appliance/ui/appliance_capture_section.dart';
 import 'src/devices/appliance/ui/appliance_setup_flow.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Account-level device management.
 ///
@@ -12,7 +13,11 @@ import 'src/devices/appliance/ui/appliance_setup_flow.dart';
 /// [ApplianceDeviceTile], so status language, reconnecting, and the detail sheet
 /// cannot drift into a second implementation.
 class DevicesPanel extends StatelessWidget {
-  const DevicesPanel({super.key, required this.controller, this.scrollable = true});
+  const DevicesPanel({
+    super.key,
+    required this.controller,
+    this.scrollable = true,
+  });
 
   final NeoRecallController controller;
 
@@ -29,12 +34,10 @@ class DevicesPanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const EmptyState(
+            EmptyState(
               icon: Icons.devices_outlined,
-              title: 'No devices yet',
-              message:
-                  'Apps appear here after their first recording. A NeoRecall Desk '
-                  'appears once you set it up.',
+              title: AppL10n.of(context).devicesEmptyTitle,
+              message: AppL10n.of(context).devicesEmptyMessage,
             ),
             const SizedBox(height: 8),
             _addDeskButton(context, palette),
@@ -74,7 +77,7 @@ class DevicesPanel extends StatelessWidget {
     return OutlinedButton.icon(
       onPressed: () => _addDesk(context),
       icon: const Icon(Icons.add_rounded, size: 20),
-      label: const Text('Add a NeoRecall Desk'),
+      label: Text(AppL10n.of(context).devicesAddDesk),
       style: OutlinedButton.styleFrom(
         foregroundColor: palette.accent,
         side: BorderSide(color: palette.accent.withValues(alpha: 0.4)),
@@ -84,7 +87,10 @@ class DevicesPanel extends StatelessWidget {
   }
 
   Future<void> _addDesk(BuildContext context) async {
-    final completed = await showApplianceSetupFlow(context, controller.appliance);
+    final completed = await showApplianceSetupFlow(
+      context,
+      controller.appliance,
+    );
     if (!completed || !context.mounted) return;
     // The appliance registers itself right after it is provisioned, so a refresh
     // here is what makes it appear in this list without a manual reload.
@@ -141,7 +147,7 @@ class DevicesPanel extends StatelessWidget {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
-                          'REVOKED',
+                          AppL10n.of(context).devicesRevoked,
                           style: TextStyle(
                             color: palette.danger,
                             fontSize: 10,
@@ -154,7 +160,7 @@ class DevicesPanel extends StatelessWidget {
                   ],
                 ),
                 Text(
-                  '${device['platform']} · ${device['last_heartbeat_at'] ?? 'not recently connected'}',
+                  '${device['platform']} · ${device['last_heartbeat_at'] ?? AppL10n.of(context).devicesNotRecentlyConnected}',
                   style: TextStyle(color: palette.textMuted),
                 ),
               ],
@@ -162,12 +168,12 @@ class DevicesPanel extends StatelessWidget {
           ),
           if (device['clock_offset_ms'] != null &&
               (device['clock_offset_ms'] as num).abs() > 120000)
-            const Tooltip(
-              message: 'Device clock differs by more than two minutes',
-              child: Icon(Icons.schedule_send_outlined),
+            Tooltip(
+              message: AppL10n.of(context).devicesClockOffset,
+              child: const Icon(Icons.schedule_send_outlined),
             ),
           IconButton(
-            tooltip: 'Revoke device',
+            tooltip: AppL10n.of(context).devicesRevokeTooltip,
             onPressed: revoked
                 ? null
                 : () => controller.revokeDevice(device['id'] as String),

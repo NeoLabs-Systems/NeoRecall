@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/src/devices/ble/gatt_connector_transport.dart';
 import 'package:neorecall/src/devices/ble/gatt_transport.dart';
@@ -11,8 +12,15 @@ import 'package:neorecall/src/devices/omi/memoket_protocol.dart';
 import 'package:neorecall/src/devices/omi/offline_sync.dart';
 import 'package:neorecall/src/devices/omi/omi_connector.dart';
 import 'package:neorecall/src/devices/omi/ring_protocol.dart';
+import 'package:neorecall/src/devices/wearable_ingested_files.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    WearableIngestedFiles.resetForTest();
+  });
+
   test('OmiGlass uses its documented Opus fallback codec', () async {
     final connector = OmiGlassConnector(
       device: _device(WearableDeviceType.omiGlass),
@@ -100,7 +108,7 @@ void main() {
         device: _device(WearableDeviceType.heyPocket),
         transport: transport,
       );
-      final now = DateTime.now();
+      final now = DateTime.now().toUtc();
       String pad(int value) => value.toString().padLeft(2, '0');
       final ymd =
           '${now.year.toString().padLeft(4, '0')}${pad(now.month)}${pad(now.day)}';
@@ -183,7 +191,7 @@ void main() {
       );
       final captured = file.capturedAt!;
       expect(captured.isUtc, isTrue);
-      expect(captured, DateTime(2026, 7, 31, 18).toUtc());
+      expect(captured, DateTime.utc(2026, 7, 31, 18));
     });
 
     test('two recordings from one day do not collapse onto one instant', () {
@@ -204,7 +212,7 @@ void main() {
 
     test('a file id without a timestamp still falls back to its day', () {
       const file = HeyPocketStoredFile(date: '2026-07-31', fileId: '0007');
-      expect(file.capturedAt, DateTime.tryParse('2026-07-31')?.toUtc());
+      expect(file.capturedAt, DateTime.utc(2026, 7, 31));
     });
   });
 
@@ -221,6 +229,13 @@ void main() {
       await connector.connect();
       expect(connector.codec, WearableAudioCodec.opus);
       expect(await connector.readBatteryLevel(), 78);
+      expect(
+        transport.writes.any(
+          (write) =>
+              write.value.toString() == MemoketProtocol.batteryQuery.toString(),
+        ),
+        isTrue,
+      );
 
       await connector.startRecording();
       expect(
@@ -268,6 +283,553 @@ void main() {
     },
   );
 
+  test('Memoket live 480-byte notifies emit six Opus frames', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    await connector.startRecording();
+    final frames = <List<int>>[];
+    final audioSub = connector.audioBytes.stream.listen(frames.add);
+    final payload = <int>[
+      for (var i = 0; i < 6; i += 1) ...<int>[
+        0xbc,
+        i,
+        ...List<int>.filled(78, 0),
+      ],
+    ];
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketAudioNotify,
+      <int>[0, 0, 0, 0, 1, ...payload],
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(frames, hasLength(6));
+    expect(frames[2].first, 0xbc);
+    expect(frames[2][1], 2);
+    await connector.stopRecording();
+    await audioSub.cancel();
+    await connector.dispose();
+  });
+
+  test('Memoket stop does not delete a take that sent no live audio', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    await connector.startRecording();
+    await connector.stopRecording();
+    expect(
+      transport.writes.any(
+        (write) =>
+            write.value.isNotEmpty &&
+            write.value.first == MemoketProtocol.opDelete,
+      ),
+      isFalse,
+    );
+    await connector.dispose();
+  });
+
+  test('Memoket does not write a battery query while live', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+
+    await connector.connect();
+    expect(await connector.readBatteryLevel(), 78);
+    await connector.startRecording();
+    final writesAfterStart = transport.writes.length;
+    expect(await connector.readBatteryLevel(), 78);
+    expect(
+      transport.writes
+          .skip(writesAfterStart)
+          .any(
+            (write) =>
+                write.value.toString() ==
+                MemoketProtocol.batteryQuery.toString(),
+          ),
+      isFalse,
+    );
+    await connector.stopRecording();
+    await connector.dispose();
+  });
+
+  test('Memoket radio teardown does not stop an on-device take', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    await connector.startRecording();
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opRecordStart,
+      ),
+      isTrue,
+    );
+    final stopsBefore = transport.writes
+        .where((write) => write.value.first == MemoketProtocol.opRecordStop)
+        .length;
+    await connector.disconnect();
+    expect(
+      transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opRecordStop)
+          .length,
+      stopsBefore,
+      reason: 'a background GATT drop must not send 02 and split the take',
+    );
+    await connector.dispose();
+  });
+
+  test(
+    'Memoket live frames while idle keep the Gem from being listed',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+      await connector.connect();
+      final payload = <int>[
+        for (var i = 0; i < 6; i += 1) ...<int>[
+          0xbc,
+          i,
+          ...List<int>.filled(78, 0),
+        ],
+      ];
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        <int>[0, 0, 0, 0, 1, ...payload],
+      );
+      await Future<void>.delayed(Duration.zero);
+      final listsBefore = transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opListFiles)
+          .length;
+      final startsBefore = transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opRecordStart)
+          .length;
+      expect(await connector.drainStoredAudio((_) async {}), 0);
+      expect(
+        transport.writes
+            .where((write) => write.value.first == MemoketProtocol.opListFiles)
+            .length,
+        listsBefore,
+      );
+      await connector.startRecording();
+      expect(
+        transport.writes
+            .where(
+              (write) => write.value.first == MemoketProtocol.opRecordStart,
+            )
+            .length,
+        startsBefore,
+        reason: 'joining an already-live Gem must not send 01 and restart it',
+      );
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket handshake skips control writes when live audio is already flowing',
+    () async {
+      final transport = _FakeWearableTransport();
+      transport.onSubscribe = (characteristic) {
+        if (characteristic != WearableDeviceUuids.memoketAudioNotify) return;
+        Future<void>.delayed(const Duration(milliseconds: 10), () {
+          transport.emit(
+            WearableDeviceUuids.memoketService,
+            WearableDeviceUuids.memoketAudioNotify,
+            <int>[
+              0,
+              0,
+              0,
+              0,
+              1,
+              for (var i = 0; i < 6; i += 1) ...<int>[
+                0xbc,
+                i,
+                ...List<int>.filled(78, 0),
+              ],
+            ],
+          );
+        });
+      };
+      _bindMemoketReplies(transport);
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      await connector.connect();
+      expect(
+        transport.writes.where(
+          (write) =>
+              write.value.first == MemoketProtocol.opBattery ||
+              write.value.first == MemoketProtocol.opFirmware ||
+              write.value.first == MemoketProtocol.opSetTime ||
+              write.value.first == MemoketProtocol.opListFiles,
+        ),
+        isEmpty,
+        reason:
+            'handshake writes share the control characteristic with start/stop',
+      );
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket resumeLive skips handshake even when live frames have not resumed',
+    () async {
+      final transport = _FakeWearableTransport();
+      _bindMemoketReplies(transport);
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+        liveJoinTimeout: Duration.zero,
+      );
+      await connector.connect(resumeLive: true);
+      expect(
+        transport.writes.where(
+          (write) =>
+              write.value.first == MemoketProtocol.opPing ||
+              write.value.first == MemoketProtocol.opBattery ||
+              write.value.first == MemoketProtocol.opFirmware ||
+              write.value.first == MemoketProtocol.opSetTime ||
+              write.value.first == MemoketProtocol.opListFiles,
+        ),
+        isEmpty,
+        reason: 'control writes on resume have stopped an in-progress take',
+      );
+      await connector.dispose();
+    },
+  );
+
+  List<int> memoketLiveNotify(int seq, {List<int>? headerPrefix}) => <int>[
+    ...?headerPrefix,
+    if (headerPrefix == null) ...<int>[0, 0, 0, 0],
+    seq,
+    for (var i = 0; i < 6; i += 1) ...<int>[
+      0xbc,
+      i,
+      ...List<int>.filled(78, 0),
+    ],
+  ];
+
+  test(
+    'Memoket live wrap headers keep emitting audio without a second start',
+    () async {
+      final transport = _FakeWearableTransport();
+      _bindMemoketReplies(transport);
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      await connector.connect();
+      await connector.startRecording();
+      final startsBefore = transport.writes
+          .where((write) => write.value.first == MemoketProtocol.opRecordStart)
+          .length;
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        memoketLiveNotify(255),
+      );
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        memoketLiveNotify(0, headerPrefix: <int>[0, 0, 0, 1]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(connector.syncDiagnostics['liveNotifies'], 2);
+      expect(connector.syncDiagnostics['skippedLive'], 0);
+      expect(
+        transport.writes
+            .where(
+              (write) => write.value.first == MemoketProtocol.opRecordStart,
+            )
+            .length,
+        startsBefore,
+      );
+      expect(
+        transport.writes.where(
+          (write) => write.value.first == MemoketProtocol.opRecordStop,
+        ),
+        isEmpty,
+      );
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket vendor battery is not replaced by a 100% standard reading',
+    () async {
+      final transport = _FakeWearableTransport();
+      transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[100];
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+
+      await connector.connect();
+      expect(await connector.readBatteryLevel(), 78);
+      transport.emit(
+        WearableDeviceUuids.batteryService,
+        WearableDeviceUuids.batteryLevel,
+        <int>[100],
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(await connector.readBatteryLevel(), 78);
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket falls back to the standard battery when the vendor query is silent',
+    () async {
+      final transport = _FakeWearableTransport();
+      transport.readValues[WearableDeviceUuids.batteryLevel] = <int>[64];
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport, silentBattery: true);
+
+      await connector.connect();
+      expect(await connector.readBatteryLevel(), 64);
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'a Memoket start notify with no audio behind it never opens a recording',
+    () async {
+      // The failure this guards: after a take ended, the 15 s storage sweep
+      // wrote `03` on the control characteristic, the Gem answered with a start
+      // notify, and the app opened a recording the user never began — over and
+      // over, chopping one long conversation into seconds-long takes. Live
+      // audio is what separates a real take from that echo.
+      fakeAsync((async) {
+        final transport = _FakeWearableTransport();
+        final connector = MemoketConnector(
+          device: _device(WearableDeviceType.memoket),
+          transport: transport,
+        );
+        _bindMemoketReplies(transport);
+        unawaited(connector.connect());
+        async.elapse(const Duration(seconds: 2));
+
+        final buttons = <List<int>>[];
+        connector.buttonEvents.stream.listen(buttons.add);
+
+        // The take ends, then the sweep writes and the Gem echoes a start.
+        transport.emit(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlNotify,
+          <int>[MemoketProtocol.opRecordStop, 0x00],
+        );
+        async.elapse(const Duration(seconds: 20));
+        transport.emit(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlNotify,
+          <int>[
+            MemoketProtocol.opRecordStart,
+            0x01,
+            0x01,
+            ...ascii.encode('20260908_121500_2.opus'),
+          ],
+        );
+        async.elapse(const Duration(seconds: 10));
+
+        expect(buttons, isEmpty);
+        // And the echo must not leave the device "live" either: that state
+        // makes every automatic sweep skip it, so its files never come off.
+        expect(
+          connector.syncDiagnostics['ready'],
+          isTrue,
+          reason: 'the connector is still usable after an unconfirmed start',
+        );
+        unawaited(connector.dispose());
+        async.flushTimers();
+      });
+    },
+  );
+
+
+  // The failure this guards: the Gem answers ordinary control traffic with a
+  // start notify. When that echo lands inside the holdoff a stop just armed,
+  // the connector marked the device live and then had nothing left to clear
+  // the flag — no pending-start timer is armed on that path and no stop notify
+  // follows an echo. The device stayed "live" forever, so every drain returned
+  // early and its files never came off the Gem.
+  test('a Memoket start echo inside the stop holdoff still drains', () {
+    fakeAsync((async) {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport);
+      unawaited(connector.connect());
+      async.elapse(const Duration(seconds: 2));
+
+      // A take ends: the stop notify arms the hardware-start holdoff.
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[MemoketProtocol.opRecordStop, 0x00],
+      );
+      // Well inside the 10 s holdoff, the Gem echoes a start.
+      async.elapse(const Duration(seconds: 2));
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        <int>[
+          MemoketProtocol.opRecordStart,
+          0x01,
+          0x01,
+          ...ascii.encode('20260908_121500_2.opus'),
+        ],
+      );
+      // No live audio ever follows, so nothing is recording.
+      async.elapse(const Duration(minutes: 5));
+
+      var count = 0;
+      Object? error;
+      unawaited(
+        connector.drainStoredAudio((_) async {}).then(
+          (value) => count = value,
+          onError: (Object e, StackTrace _) => error = e,
+        ),
+      );
+      async.elapse(const Duration(seconds: 30));
+      expect(error, isNull, reason: error?.toString());
+      expect(
+        count,
+        1,
+        reason: 'the echo must not leave the Gem permanently "live"',
+      );
+      unawaited(connector.dispose());
+      async.flushTimers();
+    });
+  });
+
+
+  // The holdoff's original job: the Gem answers the post-stop list/delete
+  // traffic with start notifies. Audio confirmation must not let trailing
+  // frames from the take that just ended re-open a recording.
+  test('a Memoket start echo after a stop does not re-open the take', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    final buttons = <List<int>>[];
+    connector.buttonEvents.stream.listen(buttons.add);
+
+    await connector.startRecording();
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketAudioNotify,
+      <int>[0x00, 0x00, 0x01, ...List<int>.filled(480, 0x11)],
+    );
+    await Future<void>.delayed(Duration.zero);
+    await connector.stopRecording();
+
+    // The Gem echoes a start for the post-stop control traffic, and a late
+    // audio notify from the finished take arrives behind it.
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketControlNotify,
+      <int>[
+        MemoketProtocol.opRecordStart,
+        0x01,
+        0x01,
+        ...ascii.encode('20260905_222343_2.opus'),
+      ],
+    );
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketAudioNotify,
+      <int>[0x00, 0x00, 0x02, ...List<int>.filled(480, 0x11)],
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(
+      buttons.where((e) => e.first == WearableControlCodes.startRecording),
+      isEmpty,
+      reason: 'trailing audio behind a stop must not open a new take',
+    );
+    await connector.dispose();
+  });
+
+
+  // The failure this guards, seen on a real Gem: the app was force-stopped
+  // while the device kept recording. On reopen it joined the take already in
+  // progress, caught the last few seconds live, and on stop deleted the
+  // device's copy — the only copy of everything recorded while the app was
+  // gone. The take's clock is the filename's, not the moment we joined it.
+  test('a Memoket take joined in progress keeps its on-device copy', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+
+    // The Gem has been recording for ten minutes already; the phone only now
+    // sees the start notify for that in-progress take.
+    final started = DateTime.now().toUtc().subtract(
+      const Duration(minutes: 10),
+    );
+    String two(int v) => v.toString().padLeft(2, '0');
+    final name =
+        '${started.year}${two(started.month)}${two(started.day)}_'
+        '${two(started.hour)}${two(started.minute)}${two(started.second)}'
+        '_2.opus';
+    transport.emit(
+      WearableDeviceUuids.memoketService,
+      WearableDeviceUuids.memoketControlNotify,
+      <int>[MemoketProtocol.opRecordStart, 0x01, 0x01, ...ascii.encode(name)],
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    // A couple of seconds of live audio arrive before the take ends.
+    for (var i = 0; i < 3; i += 1) {
+      transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketAudioNotify,
+        <int>[0x00, 0x00, i, ...List<int>.filled(480, 0x11)],
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    }
+    await connector.stopRecording();
+
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDelete,
+      ),
+      isFalse,
+      reason: 'seconds of live audio do not cover a ten-minute take',
+    );
+    await connector.dispose();
+  });
+
   test(
     'Memoket hardware start/stop raises control events without a phone command',
     () async {
@@ -279,6 +841,16 @@ void main() {
       _bindMemoketReplies(transport);
 
       await connector.connect();
+
+      // A take the phone watches start carries the clock it started on. The
+      // coverage check measures the take against that stamp, so a fixture
+      // dated in the past would read as a week-long take.
+      final startedAt = DateTime.now().toUtc();
+      String two(int v) => v.toString().padLeft(2, '0');
+      final takeName =
+          '${startedAt.year}${two(startedAt.month)}${two(startedAt.day)}_'
+          '${two(startedAt.hour)}${two(startedAt.minute)}'
+          '${two(startedAt.second)}_2.opus';
 
       final buttons = <List<int>>[];
       final frames = <List<int>>[];
@@ -292,13 +864,13 @@ void main() {
           MemoketProtocol.opRecordStart,
           0x01,
           0x01,
-          ...ascii.encode('20260905_223000_2.opus'),
+          ...ascii.encode(takeName),
         ],
       );
       await Future<void>.delayed(Duration.zero);
-      expect(buttons, <List<int>>[
-        <int>[WearableControlCodes.startRecording],
-      ]);
+      // The notify alone proves nothing: the Gem answers control traffic with
+      // one too, and acting on that reopened takes nobody started.
+      expect(buttons, isEmpty);
 
       transport.emit(
         WearableDeviceUuids.memoketService,
@@ -308,6 +880,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(frames, <List<int>>[
         <int>[0xbc, 0x62, 0x11],
+      ]);
+      // Audio followed, so the take is real and the start is reported now.
+      expect(buttons, <List<int>>[
+        <int>[WearableControlCodes.startRecording],
       ]);
 
       final writesBeforeAttach = List<_GattWrite>.from(transport.writes);
@@ -331,7 +907,7 @@ void main() {
           0x00,
           0x01,
           0x00,
-          ...ascii.encode('20260905_223000_2.opus'),
+          ...ascii.encode(takeName),
         ],
       );
       await Future<void>.delayed(Duration.zero);
@@ -357,7 +933,7 @@ void main() {
                   write.value.first == MemoketProtocol.opDelete &&
                   ascii
                       .decode(write.value.sublist(2), allowInvalid: true)
-                      .contains('20260905_223000_2.opus'),
+                      .contains(takeName),
             ),
         isTrue,
       );
@@ -432,6 +1008,357 @@ void main() {
     },
   );
 
+  test(
+    'Memoket drain can target one take and leave the others on the device',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      final chunk = List<int>.filled(480, 0xbc);
+      _bindMemoketReplies(transport, fileChunk: chunk);
+      await connector.connect();
+
+      final recordings = <WearableRecording>[];
+      final count = await connector.drainStoredAudio(
+        (recording) async => recordings.add(recording),
+        shouldTransfer: (id) => id == 'not-the-listed-file.opus',
+      );
+
+      expect(count, 0);
+      expect(recordings, isEmpty);
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDownload,
+        ),
+        isFalse,
+      );
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDelete,
+        ),
+        isFalse,
+      );
+      await connector.dispose();
+    },
+  );
+
+  test('a long Memoket file keeps copying after 90 seconds', () {
+    fakeAsync((async) {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      const filename = '20260907_080000_2.opus';
+      final chunk = List<int>.filled(480, 0xbc);
+      const chunkCount = 100;
+      void ctrl(List<int> value) => scheduleMicrotask(
+        () => transport.emit(
+          WearableDeviceUuids.memoketService,
+          WearableDeviceUuids.memoketControlNotify,
+          value,
+        ),
+      );
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.memoketControlWrite) return;
+        if (value.isEmpty) return;
+        switch (value.first) {
+          case MemoketProtocol.opPing:
+            ctrl(<int>[MemoketProtocol.opPing, 0x00]);
+          case MemoketProtocol.opBattery:
+            ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+          case MemoketProtocol.opFirmware:
+            ctrl(<int>[
+              MemoketProtocol.opFirmware,
+              ...ascii.encode('01.42.01.10'),
+            ]);
+          case MemoketProtocol.opTimeQuery:
+            ctrl(<int>[MemoketProtocol.opTimeQuery, 0x68, 0, 0, 0, 0]);
+          case MemoketProtocol.opSetTime:
+            ctrl(<int>[MemoketProtocol.opSetTime, 0x01]);
+          case MemoketProtocol.opStorage:
+            ctrl(<int>[MemoketProtocol.opStorage, 0x0d, 0x00]);
+          case MemoketProtocol.opListFiles:
+            final size = chunk.length * chunkCount;
+            ctrl(<int>[
+              MemoketProtocol.opListFiles,
+              0x01,
+              0x00,
+              0x00,
+              100,
+              filename.length,
+              ...ascii.encode(filename),
+              (size >> 24) & 0xff,
+              (size >> 16) & 0xff,
+              (size >> 8) & 0xff,
+              size & 0xff,
+            ]);
+            ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
+          case MemoketProtocol.opDownload:
+            scheduleMicrotask(() async {
+              for (var i = 0; i < chunkCount; i += 1) {
+                await Future<void>.delayed(const Duration(milliseconds: 1150));
+                transport.emit(
+                  WearableDeviceUuids.memoketService,
+                  WearableDeviceUuids.memoketFileNotify,
+                  chunk,
+                );
+              }
+              ctrl(<int>[MemoketProtocol.opDownload, 0x02]);
+            });
+          case MemoketProtocol.opDelete:
+            ctrl(<int>[MemoketProtocol.opDelete, 0x01]);
+        }
+      };
+
+      var count = 0;
+      Object? error;
+      unawaited(
+        connector
+            .connect()
+            .then((_) => connector.drainStoredAudio((_) async {}))
+            .then((value) {
+              count = value;
+            }, onError: (Object e, StackTrace _) => error = e),
+      );
+      async.elapse(const Duration(seconds: 130));
+      expect(error, isNull, reason: error?.toString());
+      expect(count, 1);
+      unawaited(connector.dispose());
+      async.flushMicrotasks();
+    });
+  });
+
+  test('Memoket drain skips a file already captured live', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    // The listed file is ten seconds long and the live stream carried all ten.
+    await WearableIngestedFiles.remember(
+      'device-id',
+      '20260905_222817_2.opus',
+      10,
+    );
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    final chunk = List<int>.filled(480, 0xbc);
+    _bindMemoketReplies(transport, fileChunk: chunk);
+    await connector.connect();
+    final count = await connector.drainStoredAudio((_) async {});
+    expect(count, 0);
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDownload,
+      ),
+      isFalse,
+    );
+    expect(
+      transport.writes.any(
+        (write) => write.value.first == MemoketProtocol.opDelete,
+      ),
+      isTrue,
+    );
+    await connector.dispose();
+  });
+
+  // The failure this exists to prevent: a live stream that died after a moment
+  // used to mark the whole device take as captured, and the drain then deleted
+  // the device's copy of everything that came after — the only copy there was.
+  test(
+    'Memoket drain transfers a take the live stream only partly covered',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      await WearableIngestedFiles.remember(
+        'device-id',
+        '20260905_222817_2.opus',
+        2,
+      );
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      _bindMemoketReplies(transport, fileChunk: List<int>.filled(480, 0xbc));
+      await connector.connect();
+
+      final imported = <String>[];
+      final count = await connector.drainStoredAudio(
+        (recording) async => imported.add(recording.id),
+      );
+
+      expect(count, 1);
+      expect(imported, <String>['20260905_222817_2.opus']);
+      expect(
+        transport.writes.any(
+          (write) => write.value.first == MemoketProtocol.opDownload,
+        ),
+        isTrue,
+      );
+      await connector.dispose();
+    },
+  );
+
+  test(
+    'Memoket drain ignores a repeated list entry for the same file',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = MemoketConnector(
+        device: _device(WearableDeviceType.memoket),
+        transport: transport,
+      );
+      final chunk = List<int>.filled(480, 0xbc);
+      _bindMemoketReplies(transport, fileChunk: chunk, repeatListEntry: true);
+      await connector.connect();
+      final count = await connector.drainStoredAudio((_) async {});
+      expect(count, 1);
+      expect(
+        transport.writes
+            .where((write) => write.value.first == MemoketProtocol.opDownload)
+            .length,
+        1,
+      );
+      expect(
+        transport.writes
+            .where((write) => write.value.first == MemoketProtocol.opDelete)
+            .length,
+        1,
+      );
+      await connector.dispose();
+    },
+  );
+
+  test('Memoket drain reports byte progress inside each file', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    const first = '20260905_222817_2.opus';
+    const second = '20260905_222900_2.opus';
+    final chunk = List<int>.filled(480, 0xbc);
+    void ctrl(List<int> value) => scheduleMicrotask(
+      () => transport.emit(
+        WearableDeviceUuids.memoketService,
+        WearableDeviceUuids.memoketControlNotify,
+        value,
+      ),
+    );
+    List<int> listEntry(String name) => <int>[
+      MemoketProtocol.opListFiles,
+      0x01,
+      0x00,
+      0x00,
+      0x0a,
+      name.length,
+      ...ascii.encode(name),
+      0x00,
+      0x00,
+      0x03,
+      0xc0,
+    ];
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.memoketControlWrite) return;
+      if (value.isEmpty) return;
+      switch (value.first) {
+        case MemoketProtocol.opPing:
+          ctrl(<int>[MemoketProtocol.opPing, 0x00]);
+        case MemoketProtocol.opBattery:
+          ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        case MemoketProtocol.opFirmware:
+          ctrl(<int>[
+            MemoketProtocol.opFirmware,
+            ...ascii.encode('01.42.01.10'),
+          ]);
+        case MemoketProtocol.opTimeQuery:
+          ctrl(<int>[MemoketProtocol.opTimeQuery, 0x68, 0, 0, 0, 0]);
+        case MemoketProtocol.opSetTime:
+          ctrl(<int>[MemoketProtocol.opSetTime, 0x01]);
+        case MemoketProtocol.opStorage:
+          ctrl(<int>[MemoketProtocol.opStorage, 0x0d, 0x00]);
+        case MemoketProtocol.opListFiles:
+          ctrl(listEntry(first));
+          ctrl(listEntry(second));
+          ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
+        case MemoketProtocol.opDownload:
+          scheduleMicrotask(() async {
+            transport.emit(
+              WearableDeviceUuids.memoketService,
+              WearableDeviceUuids.memoketFileNotify,
+              chunk,
+            );
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+            transport.emit(
+              WearableDeviceUuids.memoketService,
+              WearableDeviceUuids.memoketFileNotify,
+              chunk,
+            );
+            ctrl(<int>[MemoketProtocol.opDownload, 0x02]);
+          });
+        case MemoketProtocol.opDelete:
+          ctrl(<int>[MemoketProtocol.opDelete, 0x01]);
+      }
+    };
+
+    await connector.connect();
+    final fractions = <double>[];
+    final sub = connector.syncProgress.listen((progress) {
+      final fraction = progress.fraction;
+      if (fraction != null) fractions.add(fraction);
+    });
+    final count = await connector.drainStoredAudio((_) async {});
+    await sub.cancel();
+
+    expect(count, 2);
+    expect(fractions, isNotEmpty);
+    expect(fractions.first, closeTo(0.0, 0.001));
+    expect(
+      fractions.any((value) => value > 0.05 && value < 0.45),
+      isTrue,
+      reason: 'the first file must move the bar before 50%',
+    );
+    expect(
+      fractions.any((value) => value > 0.55 && value < 0.99),
+      isTrue,
+      reason: 'the second file must not sit at 50% for the whole copy',
+    );
+    expect(
+      fractions.reduce((a, b) => a > b ? a : b),
+      greaterThan(0.99),
+      reason: 'finishing the last file must take the bar off 50%',
+    );
+    await connector.dispose();
+  });
+
+  test('Memoket sync maps a BLE write failure to a reconnect hint', () async {
+    final transport = _FakeWearableTransport();
+    final connector = MemoketConnector(
+      device: _device(WearableDeviceType.memoket),
+      transport: transport,
+    );
+    _bindMemoketReplies(transport);
+    await connector.connect();
+    transport.writeError = StateError(
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+      'Message: Unable to establish connection on channel: '
+      '"dev.flutter.pigeon.universal_ble.UniversalBlePlatformChannel.writeValue".',
+    );
+
+    await expectLater(
+      connector.drainStoredAudio((_) async {}),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('official Memoket app'),
+        ),
+      ),
+    );
+    await connector.dispose();
+  });
+
   test('HeyPocket readBatteryLevel round-trips APP&BAT/MCU&BAT', () async {
     final transport = _FakeWearableTransport();
     final connector = HeyPocketConnector(
@@ -457,6 +1384,116 @@ void main() {
 
     await connector.connect();
     expect(await connector.readBatteryLevel(), 64);
+    await connector.dispose();
+  });
+
+  test('HeyPocket resumeLive skips post-auth control writes', () async {
+    final transport = _FakeWearableTransport();
+    final connector = HeyPocketConnector(
+      device: _device(WearableDeviceType.heyPocket),
+      transport: transport,
+    );
+    transport.onWrite = (service, characteristic, value) {
+      if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+      final cmd = ascii.decode(value);
+      if (cmd.startsWith('APP&SK&')) {
+        scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode('MCU&SK&OK'),
+          ),
+        );
+      }
+    };
+
+    await connector.connect(resumeLive: true);
+    final commands = transport.writes
+        .where(
+          (write) =>
+              write.characteristic == WearableDeviceUuids.heyPocketControlWrite,
+        )
+        .map((write) => ascii.decode(write.value));
+    expect(commands.where((cmd) => cmd.startsWith('APP&SK&')), isNotEmpty);
+    expect(
+      commands.where((cmd) => cmd == 'APP&BAT' || cmd.startsWith('APP&T&')),
+      isEmpty,
+    );
+    await connector.dispose();
+  });
+
+  test(
+    'HeyPocket does not query battery while live capture is running',
+    () async {
+      final transport = _FakeWearableTransport();
+      final connector = HeyPocketConnector(
+        device: _device(WearableDeviceType.heyPocket),
+        transport: transport,
+      );
+      transport.onWrite = (service, characteristic, value) {
+        if (characteristic != WearableDeviceUuids.heyPocketControlWrite) return;
+        final cmd = ascii.decode(value);
+        void ctrl(String s) => scheduleMicrotask(
+          () => transport.emit(
+            WearableDeviceUuids.heyPocketService,
+            WearableDeviceUuids.heyPocketAudioNotify,
+            ascii.encode(s),
+          ),
+        );
+        if (cmd.startsWith('APP&SK&')) ctrl('MCU&SK&OK');
+        if (cmd == 'APP&BAT') ctrl('MCU&BAT&64');
+        if (cmd == 'APP&STA') {}
+      };
+
+      await connector.connect();
+      await connector.startRecording();
+      final before = transport.writes.length;
+      expect(await connector.readBatteryLevel(), 64);
+      expect(transport.writes.length, before);
+      await connector.dispose();
+    },
+  );
+
+  test('a time-sync write is never counted as a ring advance', () async {
+    // The epoch goes out little-endian, so the first byte of the time-sync
+    // write is the low byte of the current second: for one second in every 256
+    // it is 0x12, which is also cmdAdvance. Counting advances by first byte
+    // alone therefore failed on the clock rather than on the code.
+    final transport = _FakeWearableTransport();
+    final connector = OmiConnector(
+      device: _device(WearableDeviceType.omi),
+      transport: transport,
+    );
+    transport.readValues[WearableDeviceUuids.omiAudioCodec] = <int>[1];
+    await connector.connect();
+
+    final timeSync = transport.writes.where(
+      (w) => w.characteristic == WearableDeviceUuids.timeSyncWrite,
+    );
+    expect(timeSync, isNotEmpty, reason: 'connect() syncs the device clock');
+    // Stand in for the unlucky second, whatever second the suite actually runs
+    // in, by writing the value that collides.
+    await transport.writeCharacteristic(
+      WearableDeviceUuids.timeSyncService,
+      WearableDeviceUuids.timeSyncWrite,
+      <int>[RingProtocol.cmdAdvance, 0, 0, 0],
+    );
+
+    expect(
+      transport.writes.where(
+        (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
+      ),
+      isNotEmpty,
+      reason:
+          'the hazard is real: by first byte alone this write looks like one',
+    );
+    expect(
+      transport.ringAdvances,
+      isEmpty,
+      reason:
+          'a colliding first byte on another characteristic is not an advance',
+    );
+
     await connector.dispose();
   });
 
@@ -551,12 +1588,7 @@ void main() {
       final count = await connector.drainStoredAudio((recording) async {
         recordings.add(recording);
         // The ring cursor must NOT have advanced yet: ingest happens first.
-        advancesAtIngest = transport.writes
-            .where(
-              (w) =>
-                  w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-            )
-            .length;
+        advancesAtIngest = transport.ringAdvances.length;
       });
 
       expect(count, 1);
@@ -566,11 +1598,7 @@ void main() {
       // No advance had been written at the moment of ingest...
       expect(advancesAtIngest, 0);
       // ...and exactly one advance, targeting nextSeq = 1, was written after.
-      final advances = transport.writes
-          .where(
-            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-          )
-          .toList();
+      final advances = transport.ringAdvances.toList();
       expect(advances.length, 1);
       expect(advances.single.value.sublist(1), <int>[0, 0, 0, 0, 0, 0, 0, 1]);
 
@@ -667,11 +1695,7 @@ void main() {
         }),
         throwsA(isA<StateError>()),
       );
-      final advances = transport.writes
-          .where(
-            (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-          )
-          .toList();
+      final advances = transport.ringAdvances.toList();
       expect(advances, isEmpty);
 
       await connector.dispose();
@@ -779,9 +1803,7 @@ void main() {
 
     expect(ingested, 0, reason: 'a short transfer must never reach the import');
     expect(
-      transport.writes.where(
-        (w) => w.value.isNotEmpty && w.value[0] == RingProtocol.cmdAdvance,
-      ),
+      transport.ringAdvances,
       isEmpty,
       reason: 'the cursor stays put so the range is re-read intact next sweep',
     );
@@ -890,6 +1912,8 @@ void main() {
 void _bindMemoketReplies(
   _FakeWearableTransport transport, {
   List<int>? fileChunk,
+  bool repeatListEntry = false,
+  bool silentBattery = false,
 }) {
   const filename = '20260905_222817_2.opus';
   const liveName = '20260905_222343_2.opus';
@@ -907,7 +1931,9 @@ void _bindMemoketReplies(
       case MemoketProtocol.opPing:
         ctrl(<int>[MemoketProtocol.opPing, 0x00]);
       case MemoketProtocol.opBattery:
-        ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        if (!silentBattery) {
+          ctrl(<int>[MemoketProtocol.opBattery, 78, 0x02]);
+        }
       case MemoketProtocol.opFirmware:
         ctrl(<int>[MemoketProtocol.opFirmware, ...ascii.encode('01.42.01.10')]);
       case MemoketProtocol.opTimeQuery:
@@ -933,7 +1959,7 @@ void _bindMemoketReplies(
           ...ascii.encode(liveName),
         ]);
       case MemoketProtocol.opListFiles:
-        ctrl(<int>[
+        final entry = <int>[
           MemoketProtocol.opListFiles,
           0x01,
           0x00,
@@ -945,7 +1971,9 @@ void _bindMemoketReplies(
           0x00,
           0x01,
           0xe0,
-        ]);
+        ];
+        ctrl(entry);
+        if (repeatListEntry) ctrl(entry);
         ctrl(<int>[MemoketProtocol.opListFiles, 0xff]);
       case MemoketProtocol.opDownload:
         scheduleMicrotask(() {
@@ -974,6 +2002,20 @@ class _GattWrite {
 }
 
 class _FakeWearableTransport implements WearableTransport {
+  /// Ring-cursor advances, and nothing else.
+  ///
+  /// Matching on the first byte alone counted the time-sync write too: it
+  /// carries the epoch as a little-endian uint32, so its first byte is the low
+  /// byte of the current second and equals cmdAdvance (0x12) for one second in
+  /// every 256. That turned these tests red on the clock rather than on the
+  /// code -- twice in CI, 256 seconds apart.
+  Iterable<_GattWrite> get ringAdvances => writes.where(
+    (w) =>
+        w.characteristic == WearableDeviceUuids.omiStorageData &&
+        w.value.isNotEmpty &&
+        w.value[0] == RingProtocol.cmdAdvance,
+  );
+
   final Map<String, StreamController<List<int>>> _streams =
       <String, StreamController<List<int>>>{};
   final StreamController<bool> _connections =
@@ -981,6 +2023,8 @@ class _FakeWearableTransport implements WearableTransport {
   final List<_GattWrite> writes = <_GattWrite>[];
   void Function(String service, String characteristic, List<int> value)?
   onWrite;
+  void Function(String characteristic)? onSubscribe;
+  Object? writeError;
   bool requiredPairing = false;
 
   @override
@@ -1019,12 +2063,16 @@ class _FakeWearableTransport implements WearableTransport {
   Future<Stream<List<int>>> characteristicStream(
     String serviceUuid,
     String characteristicUuid,
-  ) async => _streams
-      .putIfAbsent(
-        _key(serviceUuid, characteristicUuid),
-        () => StreamController<List<int>>.broadcast(),
-      )
-      .stream;
+  ) async {
+    final stream = _streams
+        .putIfAbsent(
+          _key(serviceUuid, characteristicUuid),
+          () => StreamController<List<int>>.broadcast(),
+        )
+        .stream;
+    onSubscribe?.call(characteristicUuid);
+    return stream;
+  }
 
   void emit(String service, String characteristic, List<int> value) {
     _streams
@@ -1050,6 +2098,8 @@ class _FakeWearableTransport implements WearableTransport {
     List<int> value, {
     bool withoutResponse = false,
   }) async {
+    final error = writeError;
+    if (error != null) throw error;
     final copy = List<int>.from(value);
     writes.add(_GattWrite(serviceUuid, characteristicUuid, copy));
     onWrite?.call(serviceUuid, characteristicUuid, copy);

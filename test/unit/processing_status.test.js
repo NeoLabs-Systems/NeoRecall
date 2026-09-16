@@ -109,6 +109,33 @@ test('memory writing that keeps failing says so, with when it will try again', a
   assert.equal(failing.retryAt, '2026-08-01T10:08:00.000Z');
 });
 
+test('a paused transcription allowance says the audio is still kept', async () => {
+  const usage = require('../../server/services/usage/usage_limit_service');
+  const pausedUser = crypto.randomUUID();
+  db.prepare('INSERT INTO users (id,username,password_hash) VALUES (?,?,?)').run(pausedUser, `p-${pausedUser.slice(0, 8)}`, 'hash');
+  usage.setUserLimits(pausedUser, { transcriptionLimit4h: 1 });
+  const deviceId = crypto.randomUUID(); const sessionId = crypto.randomUUID(); const sourceId = crypto.randomUUID();
+  db.prepare("INSERT INTO devices(id,user_id,client_uuid,name,platform,kind) VALUES (?,?,?,'D','test','desktop')").run(deviceId, pausedUser, deviceId);
+  db.prepare(`INSERT INTO recording_sessions(id,user_id,device_id,client_uuid,device_started_at,corrected_started_at,timezone,consent_attested_at,status)
+    VALUES (?,?,?,?,?,?, 'UTC',?,'ended')`).run(sessionId, pausedUser, deviceId, sessionId, '2026-08-01T10:00:00.000Z', '2026-08-01T10:00:00.000Z', '2026-08-01T09:59:00.000Z');
+  db.prepare(`INSERT INTO recording_sources(id,session_id,client_uuid,kind,channel_layout,sample_rate,sample_format,final_sequence,contiguous_terminal_sequence)
+    VALUES (?,?,?,'microphone','mono',16000,'pcm_s16le',0,-1)`).run(sourceId, sessionId, sourceId);
+  const insertChunk = db.prepare(`INSERT INTO audio_chunks
+    (id,user_id,session_id,source_id,sequence,idempotency_key,sha256,byte_size,container,codec,channel_layout,device_started_at,monotonic_offset_ms,duration_ms,state)
+    VALUES (?,?,?,?,?,?,?,1,'wav','pcm_s16le','mono','2026-08-01T10:00:00.000Z',0,2000,?)`);
+  const waiting = crypto.randomUUID();
+  const billed = crypto.randomUUID();
+  insertChunk.run(waiting, pausedUser, sessionId, sourceId, 0, waiting, 'd'.repeat(64), 'uploaded');
+  insertChunk.run(billed, pausedUser, sessionId, sourceId, 1, billed, 'e'.repeat(64), 'transcribed');
+  usage.recordTranscription(pausedUser, billed, 2000);
+  const result = await status.forUser(pausedUser);
+  const paused = issue(result, 'USAGE_LIMIT_TRANSCRIPTION');
+  assert.ok(paused, 'the user is told writing-up is paused');
+  const prose = `${paused.title} ${paused.detail} ${paused.action}`;
+  assert.equal(/token|HTTP|\b[45]\d\d\b|endpoint|API|schema/i.test(prose), false);
+  assert.match(paused.detail, /audio|original/i);
+});
+
 test('a healthy installation says so plainly instead of staying silent', async () => {
   const issues = status.issuesFor(
     { inFlight: 0, failing: 0, needsReupload: 0, transcribed: 12, quarantined: 0, failedJobs: [], oldestQueuedAt: null },

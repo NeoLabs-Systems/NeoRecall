@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../main_theme.dart';
 import 'platform_copy.dart';
 import 'source_status_chip.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class SourcePlatformCard extends StatelessWidget {
   const SourcePlatformCard({
@@ -90,13 +91,13 @@ class SourcePlatformCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           if (!available && !isConnected)
-                            SourceStatusChip.unavailable()
+                            SourceStatusChip.unavailable(AppL10n.of(context))
                           else if (hasError)
-                            SourceStatusChip.error()
+                            SourceStatusChip.error(AppL10n.of(context))
                           else if (isConnected && source!['enabled'] != true)
-                            SourceStatusChip.disabled()
+                            SourceStatusChip.disabled(AppL10n.of(context))
                           else if (isConnected)
-                            SourceStatusChip.connected(),
+                            SourceStatusChip.connected(AppL10n.of(context)),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -120,7 +121,9 @@ class SourcePlatformCard extends StatelessWidget {
                       if (lastSyncAt != null && lastSyncAt!.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          'Last synced ${_friendlyTime(lastSyncAt!)}',
+                          AppL10n.of(context).sourcesLastSynced(
+                            _friendlyTime(lastSyncAt!, AppL10n.of(context)),
+                          ),
                           style: TextStyle(
                             color: palette.textMuted,
                             fontSize: 12,
@@ -200,7 +203,7 @@ class SourcePlatformCard extends StatelessWidget {
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 4),
                   title: Text(
-                    'How it works',
+                    AppL10n.of(context).sourcesHowItWorks,
                     style: TextStyle(
                       color: palette.textSecondary,
                       fontSize: 13,
@@ -234,7 +237,7 @@ class SourcePlatformCard extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          'NeoRecall imports cloud recordings after the platform finishes them — it does not join the live call.',
+                          AppL10n.of(context).sourcesOauthNote,
                           style: TextStyle(
                             color: palette.textMuted,
                             fontSize: 12.5,
@@ -252,14 +255,14 @@ class SourcePlatformCard extends StatelessWidget {
     );
   }
 
-  String _friendlyTime(String iso) {
+  String _friendlyTime(String iso, AppL10n l10n) {
     final parsed = DateTime.tryParse(iso)?.toLocal();
     if (parsed == null) return iso;
     final now = DateTime.now();
     final diff = now.difference(parsed);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inMinutes < 1) return l10n.sourcesJustNow;
+    if (diff.inMinutes < 60) return l10n.sourcesMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.sourcesHoursAgo(diff.inHours);
     return '${parsed.year}-${parsed.month.toString().padLeft(2, '0')}-${parsed.day.toString().padLeft(2, '0')}';
   }
 }
@@ -289,11 +292,14 @@ class _ConnectedActions extends StatelessWidget {
         if (onReconnect != null)
           TextButton(
             onPressed: onReconnect,
-            child: const Text('Reconnect', style: TextStyle(fontSize: 12)),
+            child: Text(
+              AppL10n.of(context).sourceReconnect,
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
         if (onSync != null)
           IconButton(
-            tooltip: 'Sync now',
+            tooltip: AppL10n.of(context).sourcesSyncNow,
             onPressed: onSync,
             icon: Icon(Icons.sync, color: palette.textSecondary),
           ),
@@ -304,7 +310,7 @@ class _ConnectedActions extends StatelessWidget {
         ),
         IconButton(
           icon: Icon(Icons.link_off, color: palette.danger),
-          tooltip: 'Disconnect',
+          tooltip: AppL10n.of(context).sourcesDisconnect,
           onPressed: onDisconnect,
         ),
       ],

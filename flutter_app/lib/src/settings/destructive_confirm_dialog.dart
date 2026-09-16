@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../main_theme.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Confirmation flow for permanent account deletion.
 ///
@@ -172,7 +173,9 @@ class _DestructiveConfirmDialogState extends State<DestructiveConfirmDialog> {
                 obscureText: true,
                 autofocus: true,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(labelText: 'Your password'),
+                decoration: InputDecoration(
+                  labelText: AppL10n.of(context).destructiveYourPassword,
+                ),
               ),
               if (widget.twoFactorEnabled) ...<Widget>[
                 const SizedBox(height: 12),
@@ -181,10 +184,11 @@ class _DestructiveConfirmDialogState extends State<DestructiveConfirmDialog> {
                   enabled: !_working,
                   keyboardType: TextInputType.number,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Authenticator code',
-                    helperText:
-                        'A current code, or one of your recovery codes.',
+                  decoration: InputDecoration(
+                    labelText: AppL10n.of(
+                      context,
+                    ).securityAuthenticatorCodeLabel,
+                    helperText: AppL10n.of(context).destructiveCodeHelper,
                   ),
                 ),
               ],
@@ -200,7 +204,9 @@ class _DestructiveConfirmDialogState extends State<DestructiveConfirmDialog> {
                 onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => _submit(),
                 decoration: InputDecoration(
-                  labelText: 'Type ${widget.username} to confirm',
+                  labelText: AppL10n.of(
+                    context,
+                  ).destructiveTypeToConfirm(widget.username),
                   suffixIcon: _confirmed
                       ? Icon(Icons.check_rounded, color: palette.textSecondary)
                       : null,
@@ -245,7 +251,7 @@ class _DestructiveConfirmDialogState extends State<DestructiveConfirmDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _working ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+          child: Text(AppL10n.of(context).actionCancel),
         ),
         FilledButton(
           onPressed: _canDelete ? _submit : null,

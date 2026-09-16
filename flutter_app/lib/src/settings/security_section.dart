@@ -1,15 +1,17 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
 import 'destructive_confirm_dialog.dart';
 import 'settings_section_list.dart';
+import '../../l10n/gen/app_l10n.dart';
 
-/// The security area of settings: password, two-factor, security keys, and
-/// account deletion.
+/// The security area of settings: password, two-factor, security keys,
+/// a copy of the account's data, and account deletion.
 ///
 /// Its own widget rather than ten more methods on the settings screen — it owns
 /// a self-contained set of flows (enrol a key, enable 2FA, regenerate recovery
@@ -26,10 +28,14 @@ class SecuritySection extends StatefulWidget {
 
 class _SecuritySectionState extends State<SecuritySection> {
   @override
-  Widget build(BuildContext context) => _securitySettings();
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) => _securitySettings(),
+  );
 
   Widget _securitySettings() {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     final ctrl = widget.controller;
     final tfStatus = ctrl.accountTwoFactor;
     final isEnabled = tfStatus['enabled'] == true;
@@ -40,12 +46,12 @@ class _SecuritySectionState extends State<SecuritySection> {
       controller: widget.controller,
       children: <Widget>[
         SectionCard(
-          eyebrow: 'SECURITY',
+          eyebrow: strings.securitySectionEyebrow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Two-factor authentication',
+                strings.securityTwoFactorTitle,
                 style: TextStyle(
                   color: palette.textPrimary,
                   fontSize: 17,
@@ -54,7 +60,7 @@ class _SecuritySectionState extends State<SecuritySection> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Protect your account with an authenticator app.',
+                strings.securityTwoFactorDescription,
                 style: TextStyle(color: palette.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 16),
@@ -66,7 +72,7 @@ class _SecuritySectionState extends State<SecuritySection> {
                     Icon(Icons.check_circle, color: palette.accent, size: 20),
                     const SizedBox(width: 8),
                     Text(
-                      '2FA is enabled ($recoveryCodesRemaining recovery codes remaining)',
+                      strings.securityTwoFactorEnabled(recoveryCodesRemaining),
                       style: TextStyle(
                         color: palette.textPrimary,
                         fontWeight: FontWeight.w600,
@@ -79,12 +85,12 @@ class _SecuritySectionState extends State<SecuritySection> {
                   children: [
                     OutlinedButton(
                       onPressed: () => _disableTwoFactor(ctrl),
-                      child: const Text('Disable 2FA'),
+                      child: Text(strings.securityDisableTwoFactor),
                     ),
                     const SizedBox(width: 8),
                     OutlinedButton(
                       onPressed: () => _regenerateRecoveryCodes(ctrl),
-                      child: const Text('Regenerate codes'),
+                      child: Text(strings.securityRegenerateCodes),
                     ),
                   ],
                 ),
@@ -98,7 +104,7 @@ class _SecuritySectionState extends State<SecuritySection> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      '2FA is not enabled',
+                      strings.securityTwoFactorDisabled,
                       style: TextStyle(
                         color: palette.textPrimary,
                         fontWeight: FontWeight.w600,
@@ -109,15 +115,19 @@ class _SecuritySectionState extends State<SecuritySection> {
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: () => _setupTwoFactor(ctrl),
-                  child: const Text('Enable 2FA'),
+                  child: Text(strings.securityEnableTwoFactor),
                 ),
               ],
             ],
           ),
         ),
         SectionCard(
-          eyebrow: 'SECURITY KEYS',
+          eyebrow: strings.securityKeysEyebrow,
           child: _securityKeysCard(palette, ctrl),
+        ),
+        SectionCard(
+          eyebrow: strings.securityExportEyebrow,
+          child: _exportCard(palette, ctrl),
         ),
         _dangerZone(ctrl),
       ],
@@ -130,7 +140,7 @@ class _SecuritySectionState extends State<SecuritySection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Security keys',
+          AppL10n.of(context).securityKeysTitle,
           style: TextStyle(
             color: palette.textPrimary,
             fontSize: 17,
@@ -139,13 +149,13 @@ class _SecuritySectionState extends State<SecuritySection> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Sign in with a hardware key or passkey instead of your password. A key that asks for a PIN or a fingerprint also replaces your two-factor code.',
+          AppL10n.of(context).securityKeysDescription,
           style: TextStyle(color: palette.textSecondary, height: 1.45),
         ),
         const SizedBox(height: 16),
         if (keys.isEmpty)
           Text(
-            'No security keys registered.',
+            AppL10n.of(context).securityKeysNone,
             style: TextStyle(color: palette.textSecondary),
           )
         else
@@ -157,11 +167,11 @@ class _SecuritySectionState extends State<SecuritySection> {
           FilledButton.icon(
             onPressed: ctrl.loading ? null : () => _addSecurityKey(ctrl),
             icon: const Icon(Icons.key_rounded),
-            label: const Text('Add security key'),
+            label: Text(AppL10n.of(context).securityKeysAdd),
           )
         else
           Text(
-            'This device cannot register security keys. Open NeoRecall in a browser over HTTPS to add one.',
+            AppL10n.of(context).securityKeysUnsupported,
             style: TextStyle(color: palette.textSecondary, height: 1.45),
           ),
       ],
@@ -185,7 +195,8 @@ class _SecuritySectionState extends State<SecuritySection> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  key['label'] as String? ?? 'Security key',
+                  key['label'] as String? ??
+                      AppL10n.of(context).securityKeyFallbackName,
                   style: TextStyle(
                     color: palette.textPrimary,
                     fontWeight: FontWeight.w600,
@@ -193,8 +204,10 @@ class _SecuritySectionState extends State<SecuritySection> {
                 ),
                 Text(
                   lastUsedAt == null
-                      ? 'Never used'
-                      : 'Last used ${lastUsedAt.split('T').first}',
+                      ? AppL10n.of(context).securityKeyNeverUsed
+                      : AppL10n.of(
+                          context,
+                        ).securityKeyLastUsed(lastUsedAt.split('T').first),
                   style: TextStyle(color: palette.textSecondary, fontSize: 12),
                 ),
               ],
@@ -206,9 +219,15 @@ class _SecuritySectionState extends State<SecuritySection> {
             onSelected: (action) => action == 'rename'
                 ? _renameSecurityKey(ctrl, key)
                 : ctrl.removeSecurityKey(key['id'] as String),
-            itemBuilder: (context) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(value: 'rename', child: Text('Rename')),
-              PopupMenuItem<String>(value: 'remove', child: Text('Remove')),
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'rename',
+                child: Text(AppL10n.of(context).actionRename),
+              ),
+              PopupMenuItem<String>(
+                value: 'remove',
+                child: Text(AppL10n.of(context).actionRemove),
+              ),
             ],
           ),
         ],
@@ -216,81 +235,114 @@ class _SecuritySectionState extends State<SecuritySection> {
     );
   }
 
-  /// The two irreversible actions, deliberately the last thing in the last
-  /// section. They differ in one respect: whether the account survives.
-  Future<void> _eraseContent(NeoRecallController ctrl) async {
-    final erased = await DestructiveConfirmDialog.show(
-      context,
-      username: ctrl.username ?? 'your username',
-      twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
-      onConfirm: ctrl.eraseContent,
-      title: 'Erase everything you have recorded',
-      intro:
-          'This empties your library but keeps your account. There is no undo '
-          'and no backup you can ask to restore from.',
-      erased: const <String>[
-        'Every recording, transcript and conversation',
-        'All memories, highlights and daily summaries',
-        'Named speakers and their voice profiles',
-        'Imported audio and anything still waiting to upload',
+  Widget _exportCard(NeoRecallPalette palette, NeoRecallController ctrl) {
+    final strings = AppL10n.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          strings.securityExportTitle,
+          style: TextStyle(
+            color: palette.textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          strings.securityExportDescription,
+          style: TextStyle(color: palette.textSecondary, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: ctrl.loading ? null : () => _downloadExport(ctrl),
+          icon: const Icon(Icons.download_outlined),
+          label: Text(strings.securityExportAction),
+        ),
       ],
-      kept: const <String>[
-        'Your account, password and security keys',
-        'Your settings and paired devices',
-      ],
-      confirmLabel: 'Erase my data',
-    );
-    if (!erased || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Everything you had recorded was erased.'),
-      ),
     );
   }
 
+  Future<void> _downloadExport(NeoRecallController ctrl) async {
+    final strings = AppL10n.of(context);
+    final saved = await ctrl.downloadAccountExport();
+    if (!mounted) return;
+    if (ctrl.error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
+      return;
+    }
+    if (saved == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(strings.securityExportSaved(saved))),
+    );
+  }
+
+  /// The two irreversible actions, deliberately the last thing in the last
+  /// section. They differ in one respect: whether the account survives.
+  Future<void> _eraseContent(NeoRecallController ctrl) async {
+    final strings = AppL10n.of(context);
+    final erased = await DestructiveConfirmDialog.show(
+      context,
+      username: ctrl.username ?? strings.securityYourUsername,
+      twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
+      onConfirm: ctrl.eraseContent,
+      title: strings.securityEraseTitle,
+      intro: strings.securityEraseIntro,
+      erased: <String>[
+        strings.securityEraseItem1,
+        strings.securityEraseItem2,
+        strings.securityEraseItem3,
+        strings.securityEraseItem4,
+      ],
+      kept: <String>[strings.securityKeptItem1, strings.securityKeptItem2],
+      confirmLabel: strings.securityEraseConfirm,
+    );
+    if (!erased || !mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(strings.securityErasedNotice)));
+  }
+
   Future<void> _deleteAccount(NeoRecallController ctrl) async {
+    final strings = AppL10n.of(context);
     final deleted = await DestructiveConfirmDialog.show(
       context,
-      username: ctrl.username ?? 'your username',
+      username: ctrl.username ?? strings.securityYourUsername,
       twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
       onConfirm: ctrl.deleteAccount,
-      title: 'Delete your account',
-      intro:
-          'This removes everything, permanently, and closes the account. There '
-          'is no undo and no backup you can ask to restore from.',
-      erased: const <String>[
-        'Every transcript, conversation and memory',
-        'Named speakers and their voice profiles',
-        'Recordings still waiting to upload on this device',
-        'Connected devices, security keys and sign-in history',
-        'The account itself, and your ability to sign in',
+      title: strings.securityDeleteAccountTitle,
+      intro: strings.securityDeleteAccountIntro,
+      erased: <String>[
+        strings.securityDeleteItem1,
+        strings.securityEraseItem3,
+        strings.securityDeleteItem2,
+        strings.securityDeleteItem3,
+        strings.securityDeleteItem4,
       ],
-      confirmLabel: 'Delete permanently',
+      confirmLabel: strings.securityDeleteConfirm,
     );
     if (!deleted || !mounted) return;
     // logout() has already cleared the session, so the app is back at sign-in.
     // Confirm what happened rather than dropping the user somewhere silently.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Your account and all its data were deleted.'),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(strings.securityDeletedNotice)));
   }
 
   Widget _dangerZone(NeoRecallController ctrl) {
     final palette = neoRecallPaletteOf(context);
+    final strings = AppL10n.of(context);
     return SectionCard(
-      eyebrow: 'DANGER ZONE',
+      eyebrow: strings.securityDangerZone,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           _DangerAction(
-            title: 'Erase everything you have recorded',
-            description:
-                'Empties your library — recordings, transcripts, memories, '
-                'highlights and voice profiles — and keeps your account, '
-                'settings and paired devices. This cannot be undone.',
-            actionLabel: 'Erase my data…',
+            title: strings.securityEraseTitle,
+            description: strings.securityEraseCardDescription,
+            actionLabel: strings.securityEraseCardAction,
             icon: Icons.delete_sweep_outlined,
             onPressed: ctrl.loading ? null : () => _eraseContent(ctrl),
           ),
@@ -299,12 +351,9 @@ class _SecuritySectionState extends State<SecuritySection> {
             child: Container(height: 1, color: palette.border),
           ),
           _DangerAction(
-            title: 'Delete your account',
-            description:
-                'Removes everything above and closes the account itself, '
-                'including your sign-in, security keys and connected devices. '
-                'Nothing identifying you is kept. This cannot be undone.',
-            actionLabel: 'Delete account…',
+            title: strings.securityDeleteAccountTitle,
+            description: strings.securityDeleteCardDescription,
+            actionLabel: strings.securityDeleteCardAction,
             icon: Icons.delete_forever_outlined,
             onPressed: ctrl.loading ? null : () => _deleteAccount(ctrl),
           ),
@@ -314,13 +363,14 @@ class _SecuritySectionState extends State<SecuritySection> {
   }
 
   Future<void> _addSecurityKey(NeoRecallController ctrl) async {
+    final strings = AppL10n.of(context);
     final label = await _promptDialog(
-      'Name this key',
-      'Give the key a name you will recognise, for example "YubiKey".',
+      strings.securityNameKeyTitle,
+      strings.securityNameKeyMessage,
     );
     if (label == null) return;
     final name = label.trim().isEmpty
-        ? 'Security key ${ctrl.securityKeys.length + 1}'
+        ? strings.securityKeyDefaultName(ctrl.securityKeys.length + 1)
         : label.trim();
     await ctrl.registerSecurityKey(name);
     if (ctrl.error != null && mounted) {
@@ -335,8 +385,8 @@ class _SecuritySectionState extends State<SecuritySection> {
     Map<String, dynamic> key,
   ) async {
     final label = await _promptDialog(
-      'Rename security key',
-      'Enter a new name for "${key['label']}".',
+      AppL10n.of(context).securityRenameKeyTitle,
+      AppL10n.of(context).securityRenameKeyMessage('${key['label']}'),
     );
     if (label == null || label.trim().isEmpty) return;
     await ctrl.renameSecurityKey(key['id'] as String, label.trim());
@@ -349,12 +399,17 @@ class _SecuritySectionState extends State<SecuritySection> {
 
   Future<void> _disableTwoFactor(NeoRecallController ctrl) async {
     final password = await _promptDialog(
-      'Enter password',
-      'Your current password is required to disable 2FA',
+      AppL10n.of(context).securityEnterPassword,
+      AppL10n.of(context).securityPasswordForDisable,
       obscure: true,
     );
-    if (password == null || password.isEmpty) return;
-    await ctrl.disableTwoFactor(password: password);
+    if (password == null || password.isEmpty || !mounted) return;
+    final code = await _promptDialog(
+      AppL10n.of(context).securityEnterTwoFactorCode,
+      AppL10n.of(context).securityEnterAuthenticatorCode,
+    );
+    if (code == null || code.isEmpty) return;
+    await ctrl.disableTwoFactor(password: password, code: code);
     if (ctrl.error != null && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -364,14 +419,14 @@ class _SecuritySectionState extends State<SecuritySection> {
 
   Future<void> _regenerateRecoveryCodes(NeoRecallController ctrl) async {
     final password = await _promptDialog(
-      'Enter password',
-      'Your current password is required.',
+      AppL10n.of(context).securityEnterPassword,
+      AppL10n.of(context).securityPasswordRequired,
       obscure: true,
     );
-    if (password == null || password.isEmpty) return;
+    if (password == null || password.isEmpty || !mounted) return;
     final code = await _promptDialog(
-      'Enter 2FA code',
-      'Enter your current authenticator code.',
+      AppL10n.of(context).securityEnterTwoFactorCode,
+      AppL10n.of(context).securityEnterAuthenticatorCode,
     );
     if (code == null || code.isEmpty) return;
     final codes = await ctrl.regenerateTwoFactorCodes(
@@ -395,48 +450,10 @@ class _SecuritySectionState extends State<SecuritySection> {
     final code = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) {
-        final codeController = TextEditingController();
-        return AlertDialog(
-          title: const Text('Enable 2FA'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Scan this QR code in your authenticator app.'),
-              const SizedBox(height: 16),
-              if (setup['qrDataUrl'] != null)
-                Image.memory(
-                  base64Decode((setup['qrDataUrl'] as String).split(',').last),
-                  width: 200,
-                  height: 200,
-                ),
-              const SizedBox(height: 8),
-              SelectableText(setup['manualKey'] as String? ?? ''),
-              const SizedBox(height: 16),
-              TextField(
-                controller: codeController,
-                decoration: const InputDecoration(
-                  labelText: 'Authenticator code',
-                ),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, codeController.text),
-              child: const Text('Verify'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _TwoFactorSetupDialog(setup: setup),
     );
     if (code == null || code.isEmpty) return;
-    final codes = await ctrl.enableTwoFactor(code);
+    final codes = await ctrl.enableTwoFactor(code.trim());
     if (ctrl.error != null && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -452,14 +469,12 @@ class _SecuritySectionState extends State<SecuritySection> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Recovery Codes'),
+        title: Text(AppL10n.of(context).securityRecoveryCodesTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Save these codes in a secure place. They are shown only once.',
-            ),
+            Text(AppL10n.of(context).securityRecoveryCodesBody),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
@@ -484,7 +499,7 @@ class _SecuritySectionState extends State<SecuritySection> {
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
+            child: Text(AppL10n.of(context).actionDone),
           ),
         ],
       ),
@@ -516,14 +531,103 @@ class _SecuritySectionState extends State<SecuritySection> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(AppL10n.of(context).actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('OK'),
+            child: Text(AppL10n.of(context).actionOk),
           ),
         ],
       ),
+    );
+  }
+}
+
+String groupedTotpSecret(String secret) {
+  final compact = secret.replaceAll(RegExp(r'[\s-]+'), '').toUpperCase();
+  if (compact.isEmpty) return '';
+  final chunks = <String>[];
+  for (var i = 0; i < compact.length; i += 4) {
+    final end = i + 4 > compact.length ? compact.length : i + 4;
+    chunks.add(compact.substring(i, end));
+  }
+  return chunks.join(' ');
+}
+
+class _TwoFactorSetupDialog extends StatefulWidget {
+  const _TwoFactorSetupDialog({required this.setup});
+
+  final Map<String, dynamic> setup;
+
+  @override
+  State<_TwoFactorSetupDialog> createState() => _TwoFactorSetupDialogState();
+}
+
+class _TwoFactorSetupDialogState extends State<_TwoFactorSetupDialog> {
+  final _code = TextEditingController();
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final setup = widget.setup;
+    final qr = setup['qrDataUrl'] as String?;
+    final secret = groupedTotpSecret(
+      setup['manualKey'] as String? ?? setup['secret'] as String? ?? '',
+    );
+    return AlertDialog(
+      title: Text(AppL10n.of(context).securityEnableTwoFactor),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(AppL10n.of(context).securityScanQr),
+          const SizedBox(height: 16),
+          if (qr != null)
+            Image.memory(
+              base64Decode(qr.split(',').last),
+              width: 200,
+              height: 200,
+            ),
+          const SizedBox(height: 8),
+          SelectableText(
+            secret,
+            style: const TextStyle(
+              fontFamily: 'IBM Plex Mono',
+              fontSize: 13,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _code,
+            decoration: InputDecoration(
+              labelText: AppL10n.of(context).securityAuthenticatorCodeLabel,
+            ),
+            keyboardType: TextInputType.number,
+            autofillHints: const <String>[AutofillHints.oneTimeCode],
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(6),
+            ],
+            autofocus: true,
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(AppL10n.of(context).actionCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _code.text),
+          child: Text(AppL10n.of(context).actionVerify),
+        ),
+      ],
     );
   }
 }

@@ -69,12 +69,30 @@ function fail(id, workerId, error, retryable = true) {
     const job = db.prepare("SELECT * FROM jobs WHERE id=? AND status='leased' AND lease_owner=?").get(id, workerId);
     if (!job) return false;
     const shouldRetry = retryable && job.attempts < job.max_attempts;
-    const delayMs = Math.min(15 * 60_000, 2 ** Math.max(0, job.attempts - 1) * 5_000);
+    const { jobRetryBaseMs, jobRetryMaxMs } = getConfig();
+    const delayMs = Math.min(jobRetryMaxMs, 2 ** Math.max(0, job.attempts - 1) * jobRetryBaseMs);
     db.prepare(`UPDATE jobs SET status=?,lease_owner=NULL,lease_expires_at=NULL,next_attempt_at=?,
       last_error_code=?,last_error_message=?,completed_at=?,updated_at=? WHERE id=?`)
       .run(shouldRetry ? 'queued' : 'failed', new Date(Date.now() + delayMs).toISOString(), error.code || 'JOB_FAILED',
         String(error.message || error).slice(0, 1000), shouldRetry ? null : new Date().toISOString(), new Date().toISOString(), id);
     return shouldRetry;
+  })();
+}
+
+function defer(id, workerId, nextAttemptAt) {
+  const db = getDatabase();
+  const when = nextAttemptAt && !Number.isNaN(Date.parse(nextAttemptAt))
+    ? new Date(nextAttemptAt).toISOString()
+    : new Date(Date.now() + 60_000).toISOString();
+  const now = new Date().toISOString();
+  return db.transaction(() => {
+    const job = db.prepare("SELECT * FROM jobs WHERE id=? AND status='leased' AND lease_owner=?").get(id, workerId);
+    if (!job) return false;
+    db.prepare(`UPDATE jobs SET status='queued',lease_owner=NULL,lease_expires_at=NULL,
+      attempts=MAX(0, attempts-1),next_attempt_at=?,last_error_code='USAGE_LIMIT_EXCEEDED',
+      last_error_message=?,completed_at=NULL,updated_at=? WHERE id=?`)
+      .run(when, 'Waiting for the account usage window to open.', now, id);
+    return true;
   })();
 }
 
@@ -89,4 +107,4 @@ function cancel(id) {
     .run(new Date().toISOString(), new Date().toISOString(), id).changes === 1;
 }
 
-module.exports = { enqueue, claimNext, renewLease, complete, fail, retry, cancel };
+module.exports = { enqueue, claimNext, renewLease, complete, fail, defer, retry, cancel };

@@ -22,10 +22,20 @@ function paths(env = process.env) {
     data: path.join(home, 'data'),
     models: path.join(home, 'models'),
     audioTmp: path.join(home, 'audio_tmp'),
+    // Conditioned copies of a chunk, alive only for the length of one inference
+    // request. Deliberately not audioTmp: the sweep there deletes anything not
+    // referenced by audio_chunks.temporary_path after a minute, which would pull
+    // the file out from under an upload that may run for the transcription
+    // timeout.
+    audioWork: path.join(home, 'audio_work'),
     importTmp: path.join(home, 'import_tmp'),
     context: path.join(home, 'context'),
     logs: path.join(home, 'logs'),
     backups: path.join(home, 'backups'),
+    // Copies waiting to be PUT to a user's Nextcloud. Not an audio library:
+    // nothing serves these files, and they are unlinked as soon as the PUT
+    // succeeds (or after the pending-age limit).
+    cloudPending: path.join(home, 'cloud_pending'),
     database: env.NEORECALL_DATABASE_PATH || path.join(home, 'data', 'neorecall.sqlite3'),
     envFile: path.join(home, '.env'),
     secretKey: path.join(home, 'data', 'secret.key'),
@@ -55,7 +65,7 @@ function ensurePrivateDirectory(dir) {
 
 function ensureRuntimeDirs(env = process.env) {
   const result = paths(env);
-  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.importTmp, result.context, result.logs, result.backups]) {
+  for (const directory of [result.home, result.data, result.models, result.audioTmp, result.audioWork, result.importTmp, result.context, result.logs, result.backups, result.cloudPending]) {
     ensurePrivateDirectory(directory);
   }
   return result;

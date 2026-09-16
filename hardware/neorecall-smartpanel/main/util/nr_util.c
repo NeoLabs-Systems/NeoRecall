@@ -2,6 +2,7 @@
 #include "nr_util.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_random.h"
 #include "mbedtls/sha256.h"
@@ -80,4 +81,101 @@ bool nr_strlcpy(char *dst, const char *src, size_t size)
     memcpy(dst, src, copy);
     dst[copy] = '\0';
     return copy == n;
+}
+
+bool nr_strlcat(char *dst, const char *src, size_t size)
+{
+    if (!dst || size == 0) return false;
+    if (!src) src = "";
+    size_t used = strlen(dst);
+    if (used >= size) {
+        dst[size - 1] = '\0';
+        return false;
+    }
+    return nr_strlcpy(dst + used, src, size - used);
+}
+
+size_t nr_url_escape(char *dst, size_t size, const char *src)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    if (!dst || size == 0) return 0;
+    dst[0] = '\0';
+    if (!src) src = "";
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *) src; *p; p++) {
+        const bool unreserved = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
+                             || (*p >= '0' && *p <= '9')
+                             || *p == '-' || *p == '_' || *p == '.' || *p == '~';
+        const size_t n = unreserved ? 1u : 3u;
+        if (used + n + 1 > size) break;
+        if (unreserved) {
+            dst[used++] = (char) *p;
+        } else {
+            dst[used++] = '%';
+            dst[used++] = HEX[*p >> 4];
+            dst[used++] = HEX[*p & 0x0F];
+        }
+    }
+    dst[used] = '\0';
+    return used;
+}
+
+size_t nr_html_escape(char *dst, size_t size, const char *src)
+{
+    if (!dst || size == 0) return 0;
+    dst[0] = '\0';
+    if (!src) src = "";
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *) src; *p; p++) {
+        const char *rep = NULL;
+        char one[2] = { (char) *p, 0 };
+        switch (*p) {
+            case '&':  rep = "&amp;"; break;
+            case '<':  rep = "&lt;"; break;
+            case '>':  rep = "&gt;"; break;
+            case '"':  rep = "&quot;"; break;
+            case '\'': rep = "&#39;"; break;
+            default:   rep = one; break;
+        }
+        size_t n = strlen(rep);
+        if (used + n + 1 > size) {
+            dst[used] = '\0';
+            return used;
+        }
+        memcpy(dst + used, rep, n);
+        used += n;
+    }
+    dst[used] = '\0';
+    return used;
+}
+
+size_t nr_json_escape(char *dst, size_t size, const char *src)
+{
+    if (!dst || size == 0) return 0;
+    dst[0] = '\0';
+    if (!src) src = "";
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *) src; *p; p++) {
+        char buf[8];
+        const char *rep;
+        if (*p == '"' || *p == '\\') {
+            buf[0] = '\\'; buf[1] = (char) *p; buf[2] = 0;
+            rep = buf;
+        } else if (*p < 0x20) {
+            snprintf(buf, sizeof(buf), "\\u%04x", *p);
+            rep = buf;
+        } else {
+            buf[0] = (char) *p; buf[1] = 0;
+            rep = buf;
+        }
+        size_t n = strlen(rep);
+        if (used + n + 1 > size) {
+            dst[used] = '\0';
+            return used;
+        }
+        memcpy(dst + used, rep, n);
+        used += n;
+    }
+    dst[used] = '\0';
+    return used;
 }

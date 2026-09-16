@@ -7,8 +7,18 @@ part of '../../main_controller.dart';
 /// stand down when live capture claims the device, and reports its own progress
 /// and failures.
 mixin DeviceSyncController on ChangeNotifier {
+  /// The controller's translations, for the messages this mixin produces.
+  AppL10n get strings;
   NeoRecallApiClient get api;
   ChunkStore get store;
+  RetainedAudioStore get retainedAudio;
+  Future<void> retainImportedAudio({
+    required String importId,
+    required Uint8List bytes,
+    required String contentType,
+    required String filename,
+    DateTime? capturedAt,
+  });
   RecallRecorder get recorder;
   SyncCoordinator get sync;
   AudioDeviceAdapterRegistry get audioDeviceRegistry;
@@ -168,16 +178,18 @@ mixin DeviceSyncController on ChangeNotifier {
       notifyListeners();
     });
     try {
+      // Hold the radio awake for the BLE copy itself, not just the ingest that
+      // follows it. A 1.5 h Gem file takes many minutes to drain; without this
+      // the CPU sleeps mid-copy and the stall timer aborts the take.
+      await _setBackgroundSyncActive(true);
       // The connector owns its device protocol (file list/download/delete,
       // ring-buffer drain, or flash-page batch) and hands back complete
       // recordings; each is ingested through the durable import pipeline before
       // the connector removes it from the device.
       await storage.drainStoredAudio((recording) async {
         // The first transferred recording makes an automatic sweep visible:
-        // now there is real progress to report. It also tells the background
-        // host to keep the CPU awake until the transfer finishes.
+        // now there is real progress to report.
         deviceStorageSyncing = true;
-        await _setBackgroundSyncActive(true);
         notifyListeners();
         await _ingestDeviceRecording(recording);
         deviceStorageSyncedCount += 1;
@@ -196,7 +208,7 @@ mixin DeviceSyncController on ChangeNotifier {
         if (userInitiated) {
           // Only tell the user "nothing to sync" when they asked; the automatic
           // sweep stays quiet on an empty device.
-          notice = 'No new recordings on $deviceName to sync.';
+          notice = strings.controllerNoNewRecordings(deviceName);
         }
       }
       if (succeeded) deviceStorageSyncError = null;
@@ -212,7 +224,10 @@ mixin DeviceSyncController on ChangeNotifier {
       // A single transient miss (device busy, a momentary link drop) between
       // unattended sweeps is not worth alarming anyone; a repeat is.
       if (userInitiated || _deviceSyncFailureIsPersistent) {
-        deviceStorageSyncError = 'Sync of $deviceName failed: $message';
+        deviceStorageSyncError = strings.controllerSyncFailed(
+          deviceName,
+          message,
+        );
       }
     } finally {
       // Unattended polling must not flood the diagnostic ring: record a sweep
@@ -329,6 +344,13 @@ mixin DeviceSyncController on ChangeNotifier {
         // stretches of one recording. Naming the device lets the server keep
         // them in one stream instead of one conversation per sweep.
         deviceId: await _registeredDeviceId(),
+      );
+      await retainImportedAudio(
+        importId: importId,
+        bytes: recording.bytes,
+        contentType: recording.contentType,
+        filename: recording.filename,
+        capturedAt: recording.capturedAt,
       );
       ClientDiagnosticLog.instance.record(
         'device_import',

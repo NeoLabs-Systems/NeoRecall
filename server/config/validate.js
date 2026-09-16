@@ -13,6 +13,13 @@ function validateConfig(config, { promptReserveTokens }) {
   if (config.conversationMinimumMs >= config.conversationHardGapMs) {
     throw new Error('NEORECALL_CONVERSATION_MINIMUM_MS must be shorter than NEORECALL_CONVERSATION_HARD_GAP_MS.');
   }
+  // Closing is what makes a boundary permanent: a closed conversation is never
+  // reconsidered, so speech arriving after it starts a new one. Closing sooner
+  // than the hard gap therefore splits a recording at a pause the hard gap has
+  // just declared too short to split on.
+  if (config.conversationQuietCloseMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_CONVERSATION_QUIET_CLOSE_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
   if (config.conversationMaximumMs <= config.conversationMinimumMs) {
     throw new Error('NEORECALL_CONVERSATION_MAXIMUM_MS must be longer than NEORECALL_CONVERSATION_MINIMUM_MS.');
   }
@@ -21,6 +28,24 @@ function validateConfig(config, { promptReserveTokens }) {
   }
   if (config.conversationPreviewMinCharacters > config.conversationMaximumCharacters) {
     throw new Error('NEORECALL_CONVERSATION_PREVIEW_MIN_CHARACTERS must not exceed NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS.');
+  }
+  // Every conversation is already cut at the hard gap, so an occasion gap below
+  // it could never join two fragments, and a settle delay below it writes the
+  // first fragment up before the pause that follows has even ended.
+  if (config.memoryOccasionGapMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_MEMORY_OCCASION_GAP_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.memorySettleMs < config.conversationHardGapMs) {
+    throw new Error('NEORECALL_MEMORY_SETTLE_MS must be at least NEORECALL_CONVERSATION_HARD_GAP_MS.');
+  }
+  if (config.memoryOccasionMaxWaitMs <= config.memorySettleMs) {
+    throw new Error('NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS must be longer than NEORECALL_MEMORY_SETTLE_MS.');
+  }
+  // A conditioning step that outlives the request it prepares audio for would
+  // hold a worker past the point where the transcription attempt has already
+  // been abandoned.
+  if (config.audioPreprocessTimeoutMs > config.transcriptionTimeoutMs) {
+    throw new Error('NEORECALL_AUDIO_PREPROCESS_TIMEOUT_MS must not exceed TRANSCRIPTION_REQUEST_TIMEOUT_MS.');
   }
   // An output budget the context cannot also hold a prompt beside would leave
   // nothing to send. Caught at startup, where it is a one-line fix, rather than

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'local_backend_installer_models.dart';
 
 /// Desktop hosts can run the NeoRecall server themselves.
@@ -62,6 +64,19 @@ class LocalBackendInstaller {
         retryable: false,
       );
     }
+    if (_isSandboxed) {
+      throw const LocalBackendInstallerException(
+        'SETUP_APP_SANDBOX',
+        'This build of NeoRecall runs in the macOS App Sandbox, which cannot '
+            'install a server: it redirects the home directory into the app '
+            'container and blocks git, npm, and the background service.',
+        retryable: false,
+        remedy:
+            'Install from a terminal instead:\n'
+            'bash <(curl -fsSL https://raw.githubusercontent.com/'
+            'NeoLabs-Systems/NeoRecall/main/install.sh)',
+      );
+    }
     _cancelled = false;
     final directory = Directory(
       (installDirectory?.trim().isNotEmpty ?? false)
@@ -96,11 +111,7 @@ class LocalBackendInstaller {
         progress: 0.06,
       );
 
-      await _prepareCheckout(
-        git: git,
-        directory: directory,
-        channel: channel,
-      );
+      await _prepareCheckout(git: git, directory: directory, channel: channel);
       _throwIfCancelled();
 
       _emit(
@@ -183,7 +194,8 @@ class LocalBackendInstaller {
         progressFrom: 0.64,
         progressTo: 0.66,
         failureCode: 'SETUP_CHANNEL_FAILED',
-        failureMessage: 'Could not store the ${channel.cliName} release channel.',
+        failureMessage:
+            'Could not store the ${channel.cliName} release channel.',
       );
 
       // Created before the service starts so the server reads it at boot; this
@@ -217,7 +229,8 @@ class LocalBackendInstaller {
         progressFrom: 0.67,
         progressTo: 0.92,
         failureCode: 'SETUP_INSTALL_FAILED',
-        failureMessage: 'NeoRecall could not finish installing on this computer.',
+        failureMessage:
+            'NeoRecall could not finish installing on this computer.',
       );
       _emit(
         LocalBackendInstallStage.install,
@@ -277,7 +290,10 @@ class LocalBackendInstaller {
   /// Asks the CLI for the administrator API key, which it creates on first use.
   /// Deliberately not streamed into the event log: the key is a secret and the
   /// log is shown on screen.
-  Future<String?> _ensureAdminApiKey(String node, String sourceDirectory) async {
+  Future<String?> _ensureAdminApiKey(
+    String node,
+    String sourceDirectory,
+  ) async {
     try {
       final result = await Process.run(
         node,
@@ -329,8 +345,49 @@ class LocalBackendInstaller {
           'SETUP_DIRECTORY_OCCUPIED',
           '${directory.path} is a Git repository, but not a NeoRecall checkout.',
           retryable: false,
-          remedy: 'Choose a different install directory and start the setup '
+          remedy:
+              'Choose a different install directory and start the setup '
               'again.',
+        );
+      }
+      // Updating means reset --hard and clean -fd. That is right for an install
+      // directory and ruinous for a working checkout, which is easy to pick by
+      // accident when a developer's clone sits at the default path. Refuse
+      // anything holding work that this would destroy.
+      final dirty = await _runQuiet(git, <String>[
+        '-C',
+        directory.path,
+        'status',
+        '--porcelain',
+      ]);
+      if ('${dirty?.stdout ?? ''}'.trim().isNotEmpty) {
+        throw LocalBackendInstallerException(
+          'SETUP_CHECKOUT_DIRTY',
+          '${directory.path} has uncommitted changes.',
+          retryable: false,
+          remedy:
+              'Installing here would discard them. Commit or stash them '
+              'first, or choose a different install directory.',
+        );
+      }
+      final published = await _runQuiet(git, <String>[
+        '-C',
+        directory.path,
+        'branch',
+        '--remotes',
+        '--contains',
+        'HEAD',
+      ]);
+      if (published != null &&
+          published.exitCode == 0 &&
+          '${published.stdout}'.trim().isEmpty) {
+        throw LocalBackendInstallerException(
+          'SETUP_CHECKOUT_UNPUSHED',
+          '${directory.path} holds commits that are not on any remote branch.',
+          retryable: false,
+          remedy:
+              'Installing here would discard them. Push them first, or '
+              'choose a different install directory.',
         );
       }
       _emit(
@@ -364,7 +421,8 @@ class LocalBackendInstaller {
           'SETUP_DIRECTORY_OCCUPIED',
           '${directory.path} already exists and is not a NeoRecall checkout.',
           retryable: false,
-          remedy: 'Choose a different install directory, or move that folder '
+          remedy:
+              'Choose a different install directory, or move that folder '
               'somewhere else and start the setup again.',
         );
       }
@@ -494,8 +552,7 @@ class LocalBackendInstaller {
 
   Future<String> _waitForServer(int port) async {
     final deadline = DateTime.now().add(const Duration(minutes: 3));
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 3);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     try {
       while (DateTime.now().isBefore(deadline)) {
         _throwIfCancelled();
@@ -522,15 +579,14 @@ class LocalBackendInstaller {
     throw LocalBackendInstallerException(
       'SETUP_SERVER_UNREACHABLE',
       'NeoRecall was installed, but the service did not answer on port $port.',
-      remedy: 'Open a terminal and run "neorecall status" and "neorecall logs" '
+      remedy:
+          'Open a terminal and run "neorecall status" and "neorecall logs" '
           'to see what the service reported.',
     );
   }
 
   int _configuredPort() {
-    final envFile = File(
-      '${_runtimeHome()}${Platform.pathSeparator}.env',
-    );
+    final envFile = File('${_runtimeHome()}${Platform.pathSeparator}.env');
     final fromEnvironment = int.tryParse(
       Platform.environment['NEORECALL_PORT']?.trim() ?? '',
     );
@@ -570,10 +626,13 @@ class LocalBackendInstaller {
 
   /// A window-server launch gives the app a minimal PATH, so every child
   /// process gets the resolved tool directories added back.
-  Map<String, String> _childEnvironment() {
+  Map<String, String> _childEnvironment({
+    Iterable<String> extraDirectories = const <String>[],
+  }) {
     final environment = Map<String, String>.from(Platform.environment);
     final separator = Platform.isWindows ? ';' : ':';
     final directories = <String>{
+      ...extraDirectories,
       for (final path in _resolvedExecutables.values)
         if (path != null && path.isNotEmpty) File(path).parent.path,
     };
@@ -604,8 +663,9 @@ class LocalBackendInstaller {
       Platform.isWindows ? 'where' : 'which',
       <String>[command],
     );
-    final direct = _firstExistingPath(lookup);
-    if (direct != null) return direct;
+    for (final path in _existingPaths(lookup)) {
+      if (await _runs(path)) return path;
+    }
 
     if (!Platform.isWindows) {
       // Apps launched from Finder or a .desktop entry inherit a minimal PATH,
@@ -615,24 +675,66 @@ class LocalBackendInstaller {
         '-lc',
         'command -v $command',
       ]);
-      final shellPath = _firstExistingPath(viaShell);
-      if (shellPath != null) return shellPath;
+      for (final path in _existingPaths(viaShell)) {
+        if (await _runs(path)) return path;
+      }
+
+      // nvm, fnm and asdf define their shims in .zshrc or .bashrc, which a
+      // non-interactive shell never reads, so the login lookup above cannot see
+      // them however correct the user's setup is.
+      final viaInteractiveShell = await _runQuiet(shell, <String>[
+        '-ilc',
+        'command -v $command',
+      ]);
+      for (final path in _existingPaths(viaInteractiveShell)) {
+        if (await _runs(path)) return path;
+      }
     }
 
     for (final candidate in _candidatePaths(command)) {
-      if (File(candidate).existsSync()) return candidate;
+      if (File(candidate).existsSync() && await _runs(candidate)) {
+        return candidate;
+      }
     }
     return null;
   }
 
-  String? _firstExistingPath(ProcessResult? result) {
-    if (result == null || result.exitCode != 0) return null;
-    for (final line in const LineSplitter().convert('${result.stdout}')) {
-      final path = line.trim();
-      if (path.isNotEmpty && File(path).existsSync()) return path;
-    }
-    return null;
+  /// Whether the file at this path is the working tool and not a stand-in for
+  /// one. `/usr/bin/git` exists on every Mac but is an Xcode shim: without the
+  /// command line tools installed it only prints an error, and treating it as
+  /// Git would fail the install halfway through instead of up front.
+  ///
+  /// The probe runs with the tool's own directory on PATH. npm is a script that
+  /// begins `#!/usr/bin/env node`, and a window-server launch hands the app a
+  /// PATH with neither on it -- probed bare, a perfectly good npm reports
+  /// `env: node: No such file or directory` and would be called missing.
+  @visibleForTesting
+  Future<bool> probeExecutable(String path) => _runs(path);
+
+  Future<bool> _runs(String path) async {
+    final probe = await _runQuiet(
+      path,
+      <String>['--version'],
+      environment: _childEnvironment(
+        extraDirectories: <String>[File(path).parent.path],
+      ),
+    );
+    return probe != null && probe.exitCode == 0;
   }
+
+  List<String> _existingPaths(ProcessResult? result) {
+    if (result == null || result.exitCode != 0) return const <String>[];
+    return <String>[
+      for (final line in const LineSplitter().convert('${result.stdout}'))
+        if (line.trim().isNotEmpty && File(line.trim()).existsSync())
+          line.trim(),
+    ];
+  }
+
+  /// The sandbox sets this for every process it contains.
+  bool get _isSandboxed =>
+      Platform.isMacOS &&
+      (Platform.environment['APP_SANDBOX_CONTAINER_ID']?.isNotEmpty ?? false);
 
   List<String> _candidatePaths(String command) {
     final home = _homeDirectory();
@@ -656,18 +758,62 @@ class LocalBackendInstaller {
       '/usr/local/bin/$command',
       '/usr/bin/$command',
       '/bin/$command',
-      if (home.isNotEmpty) '$home/.volta/bin/$command',
-      if (home.isNotEmpty) '$home/.local/bin/$command',
-      if (home.isNotEmpty) '$home/.nix-profile/bin/$command',
+      // Apple ships git only through /usr/bin/git, which is a shim: it refuses
+      // to run when the command line tools are absent, and equally when Xcode
+      // is installed but its licence has not been accepted. The tools it stands
+      // in for work in both cases, so reach them directly.
+      if (Platform.isMacOS) ...<String>[
+        '/Library/Developer/CommandLineTools/usr/bin/$command',
+        '/Applications/Xcode.app/Contents/Developer/usr/bin/$command',
+      ],
+      if (home.isNotEmpty) ...<String>[
+        '$home/.volta/bin/$command',
+        '$home/.local/bin/$command',
+        '$home/.nix-profile/bin/$command',
+        '$home/.asdf/shims/$command',
+        ..._versionManagerPaths(home, command),
+      ],
     ];
+  }
+
+  /// Node installed through a version manager lives under a directory named for
+  /// the version, so the newest one is tried first.
+  List<String> _versionManagerPaths(String home, String command) {
+    const roots = <String, String>{
+      '.nvm/versions/node': 'bin',
+      '.fnm/node-versions': 'installation/bin',
+      '.local/share/fnm/node-versions': 'installation/bin',
+      'n/bin': '',
+    };
+    final paths = <String>[];
+    for (final entry in roots.entries) {
+      final root = Directory('$home/${entry.key}');
+      if (!root.existsSync()) continue;
+      if (entry.value.isEmpty) {
+        paths.add('${root.path}/$command');
+        continue;
+      }
+      final versions = root.listSync().whereType<Directory>().toList(
+        growable: false,
+      )..sort((a, b) => b.path.compareTo(a.path));
+      for (final version in versions) {
+        paths.add('${version.path}/${entry.value}/$command');
+      }
+    }
+    return paths;
   }
 
   Future<ProcessResult?> _runQuiet(
     String executable,
-    List<String> arguments,
-  ) async {
+    List<String> arguments, {
+    Map<String, String>? environment,
+  }) async {
     try {
-      return await Process.run(executable, arguments);
+      return await Process.run(
+        executable,
+        arguments,
+        environment: environment,
+      ).timeout(const Duration(seconds: 20));
     } on Object {
       return null;
     }

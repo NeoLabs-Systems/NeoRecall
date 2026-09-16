@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_settings.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   testWidgets('integrations settings show the MCP URL and connected apps', (
@@ -15,6 +16,8 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppL10n.localizationsDelegates,
+        supportedLocales: AppL10n.supportedLocales,
         theme: buildNeoRecallTheme(Brightness.dark),
         home: Scaffold(
           body: SettingsScreen(
@@ -28,6 +31,7 @@ void main() {
 
     expect(find.text('https://recall.example.test/mcp'), findsOneWidget);
     expect(find.text('Copy MCP URL'), findsOneWidget);
+    expect(find.text('Back up to your Nextcloud'), findsOneWidget);
     expect(find.text('Claude'), findsOneWidget);
     expect(find.text('MCP client'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -61,4 +65,7 @@ class _IntegrationsController extends NeoRecallController {
 
   @override
   Future<void> loadIntegrations() async {}
+
+  @override
+  Future<void> loadCloudStatus() async {}
 }

@@ -83,6 +83,7 @@ function closeSession(userId, sessionId, input) {
     getDatabase().prepare(`UPDATE recording_sessions SET device_ended_at=?,corrected_ended_at=?,status=?,
       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`).run(input.endedAt, correctedTime(input.endedAt, offset), status, sessionId);
   })();
+  try { require('../cloud/archive_service').finalizeSession(sessionId); } catch { /* a missed enqueue retries on the scheduler */ }
   return ownedSession(userId, sessionId);
 }
 
@@ -176,6 +177,7 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
       if (existing.state !== 'reupload_required') return { ...receipts.receipt(existing), duplicate: true };
       const destination = tempAudio.chunkPath(existing.id, input.container);
       fs.renameSync(uploadedFile.path, destination);
+      require('../../utils/sealed_fs').sealInPlace(destination);
       try {
         db.transaction(() => {
           db.prepare(`UPDATE audio_chunks SET temporary_path=?,state='uploaded',error_code=NULL,error_message=NULL,
@@ -193,6 +195,7 @@ async function acceptChunk(userId, sessionId, sourceId, sequence, input, uploade
     const id = crypto.randomUUID();
     const destination = tempAudio.chunkPath(id, input.container);
     fs.renameSync(uploadedFile.path, destination);
+    require('../../utils/sealed_fs').sealInPlace(destination);
     try {
       db.transaction(() => {
         db.prepare(`INSERT INTO audio_chunks

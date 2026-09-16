@@ -18,6 +18,8 @@ class TimelineMoment {
     this.memoryWorthy,
     this.refinedAt,
     this.quarantined = false,
+    this.sessionIds = const <String>[],
+    this.importIds = const <String>[],
   });
 
   final String? id;
@@ -34,6 +36,8 @@ class TimelineMoment {
   final bool quarantined;
   final int segmentCount;
   final List<TranscriptSegment> segments;
+  final List<String> sessionIds;
+  final List<String> importIds;
 
   /// Speech that arrived so recently it has not been grouped into a
   /// conversation yet.
@@ -82,6 +86,14 @@ class TimelineMoment {
         .map(
           (row) => TranscriptSegment.fromJson(Map<String, dynamic>.from(row)),
         )
+        .toList(),
+    sessionIds: ((json['sessionIds'] as List?) ?? const <dynamic>[])
+        .map((id) => id.toString())
+        .where((id) => id.isNotEmpty)
+        .toList(),
+    importIds: ((json['importIds'] as List?) ?? const <dynamic>[])
+        .map((id) => id.toString())
+        .where((id) => id.isNotEmpty)
         .toList(),
   );
 }

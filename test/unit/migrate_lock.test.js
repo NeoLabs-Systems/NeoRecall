@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const Database = require('better-sqlite3');
+const { openKeyedDatabase } = require('../../server/db/sqlite');
 
 const repoRoot = path.join(__dirname, '..', '..');
 
@@ -32,12 +32,19 @@ test('two processes can migrate a fresh database without colliding', async () =>
   require('../../runtime/paths').ensureRuntimeDirs({ NEORECALL_HOME: home });
   try {
     await Promise.all([migrateProcess(home), migrateProcess(home)]);
-    const db = new Database(path.join(home, 'data', 'neorecall.sqlite3'));
-    const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version);
-    const unique = new Set(versions);
-    assert.equal(unique.size, versions.length, 'each migration version is recorded once');
-    assert.ok(versions.length > 0);
-    db.close();
+    const previousHome = process.env.NEORECALL_HOME;
+    process.env.NEORECALL_HOME = home;
+    const db = openKeyedDatabase(path.join(home, 'data', 'neorecall.sqlite3'));
+    try {
+      const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version);
+      const unique = new Set(versions);
+      assert.equal(unique.size, versions.length, 'each migration version is recorded once');
+      assert.ok(versions.length > 0);
+    } finally {
+      db.close();
+      if (previousHome === undefined) delete process.env.NEORECALL_HOME;
+      else process.env.NEORECALL_HOME = previousHome;
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Advertised to the watch so it can say whether the phone it is paired to
+         is the one running NeoRecall. -->
+    <string-array name="android_wear_capabilities">
+        <item>neorecall_phone_app</item>
+    </string-array>
+</resources>

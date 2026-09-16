@@ -5,12 +5,15 @@ import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_settings.dart';
 import 'package:neorecall/main_theme.dart';
 import 'package:neorecall/src/record/record_sheets.dart';
+import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 /// Diagnostics are out of Settings. They sit behind an unadvertised long-press
 /// on the device chip, and as an explicit row inside the device sheet once a
 /// device exists: reachable for support, invisible in normal use.
 void main() {
   Widget wrap(Widget child) => MaterialApp(
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     theme: buildNeoRecallTheme(Brightness.light),
     home: Scaffold(body: child),
   );

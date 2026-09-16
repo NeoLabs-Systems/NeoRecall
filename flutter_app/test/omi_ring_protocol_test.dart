@@ -75,7 +75,10 @@ void main() {
 
     test('CMD_ADVANCE to the done cursor matches the official app', () {
       // After DONE reported nextSeq=350 the app advanced the read cursor to it.
-      expect(RingProtocol.encodeAdvanceCommand(350), _hex('12000000000000015e'));
+      expect(
+        RingProtocol.encodeAdvanceCommand(350),
+        _hex('12000000000000015e'),
+      );
     });
 
     test('a real 444-byte ring record decodes into opus frames', () {

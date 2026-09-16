@@ -57,6 +57,9 @@ class MobileRecallRecorder implements RecallRecorder {
   bool _uploading = false;
   bool _initialized = false;
 
+  /// ADB hardware probe: keep wearable link/capture/sync holds for its duration.
+  bool hardwareProbeHolds = false;
+
   @override
   Stream<RecordedAudioChunk> get chunks => _chunks.stream;
   @override
@@ -115,6 +118,11 @@ class MobileRecallRecorder implements RecallRecorder {
     final holds = <BackgroundHold>{..._captureHolds};
     if (!_backgroundPaused) {
       if (devices.linkDesired) holds.add(BackgroundHold.wearableLink);
+      if (hardwareProbeHolds) {
+        holds.add(BackgroundHold.wearableLink);
+        holds.add(BackgroundHold.wearableCapture);
+        holds.add(BackgroundHold.wearableSync);
+      }
       // A transfer already in flight keeps the host regardless of the standing
       // preference: dropping it mid-drain would strand audio on the device.
       if (_syncing) holds.add(BackgroundHold.wearableSync);

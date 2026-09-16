@@ -7,6 +7,8 @@ import 'main_controller.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
 import 'src/sync/pending_audio_preview.dart';
+import 'src/widgets/local_audio_transport.dart';
+import 'l10n/gen/app_l10n.dart';
 
 Future<void> showPendingAudioReviewSheet(
   BuildContext context,
@@ -186,17 +188,6 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
     }
   }
 
-  String _clock(Duration duration) {
-    final totalSeconds = duration.inSeconds.clamp(0, 359999);
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds ~/ 60).remainder(60);
-    final seconds = totalSeconds.remainder(60);
-    if (hours > 0) {
-      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
-  }
-
   String _title(BuildContext context, DateTime startedAt) {
     final local = startedAt.toLocal();
     final localizations = MaterialLocalizations.of(context);
@@ -257,7 +248,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Review queued audio',
+                          AppL10n.of(context).pendingAudioTitle,
                           style: TextStyle(
                             color: palette.textPrimary,
                             fontSize: 18,
@@ -265,7 +256,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                           ),
                         ),
                         Text(
-                          'Local playback only · upload continues normally',
+                          AppL10n.of(context).pendingAudioSubtitle,
                           style: TextStyle(
                             color: palette.textMuted,
                             fontSize: 11.5,
@@ -275,7 +266,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Close',
+                    tooltip: AppL10n.of(context).actionClose,
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close_rounded),
                   ),
@@ -306,7 +297,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Recording is active. Use headphones to avoid recording the playback again.',
+                        AppL10n.of(context).audioHeadphonesWarning,
                         style: TextStyle(
                           color: palette.textSecondary,
                           fontSize: 11.5,
@@ -336,7 +327,10 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                         ),
                       ),
                     ),
-                    TextButton(onPressed: _load, child: const Text('Refresh')),
+                    TextButton(
+                      onPressed: _load,
+                      child: Text(AppL10n.of(context).actionRefresh),
+                    ),
                   ],
                 ),
               ),
@@ -366,7 +360,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
             Icon(Icons.audio_file_outlined, size: 34, color: palette.textMuted),
             const SizedBox(height: 10),
             Text(
-              'No retained audio is currently available to review.',
+              AppL10n.of(context).pendingAudioEmpty,
               textAlign: TextAlign.center,
               style: TextStyle(color: palette.textSecondary),
             ),
@@ -391,9 +385,6 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
     final globalPosition = selected
         ? _globalPosition(recording)
         : Duration.zero;
-    final maxMs = recording.duration.inMilliseconds <= 0
-        ? 1.0
-        : recording.duration.inMilliseconds.toDouble();
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.all(12),
@@ -416,7 +407,9 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                 width: 42,
                 height: 42,
                 child: IconButton.filledTonal(
-                  tooltip: playing ? 'Pause' : 'Play',
+                  tooltip: playing
+                      ? AppL10n.of(context).actionPause
+                      : AppL10n.of(context).actionPlay,
                   onPressed: _loadingPart ? null : () => _toggle(recording),
                   icon: _loadingPart && selected
                       ? const SizedBox(
@@ -448,7 +441,7 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_clock(recording.duration)} · '
+                      '${LocalAudioTransport.clock(recording.duration)} · '
                       '${(recording.byteSize / 1048576).toStringAsFixed(1)} MB',
                       style: TextStyle(color: palette.textMuted, fontSize: 11),
                     ),
@@ -475,43 +468,26 @@ class _PendingAudioReviewSheetState extends State<_PendingAudioReviewSheet> {
           ),
           if (selected) ...<Widget>[
             const SizedBox(height: 10),
-            Slider(
-              value:
-                  (_scrubPositionMs ?? globalPosition.inMilliseconds.toDouble())
-                      .clamp(0.0, maxMs)
-                      .toDouble(),
-              max: maxMs,
-              onChanged: _loadingPart
-                  ? null
-                  : (value) => setState(() => _scrubPositionMs = value),
-              onChangeEnd: _loadingPart
-                  ? null
-                  : (value) {
-                      setState(() => _scrubPositionMs = null);
-                      unawaited(
-                        _seek(recording, Duration(milliseconds: value.round())),
-                      );
-                    },
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                children: <Widget>[
-                  Text(
-                    _clock(
-                      _scrubPositionMs == null
-                          ? globalPosition
-                          : Duration(milliseconds: _scrubPositionMs!.round()),
-                    ),
-                    style: TextStyle(color: palette.textMuted, fontSize: 10.5),
-                  ),
-                  const Spacer(),
-                  Text(
-                    _clock(recording.duration),
-                    style: TextStyle(color: palette.textMuted, fontSize: 10.5),
-                  ),
-                ],
+            LocalAudioTransport(
+              playing: playing,
+              loading: _loadingPart,
+              position: globalPosition,
+              duration: recording.duration,
+              scrubMs: _scrubPositionMs,
+              onPlayPause: () => _toggle(recording),
+              onSkipBack: () => unawaited(
+                _seek(recording, globalPosition - LocalAudioTransport.skip),
               ),
+              onSkipForward: () => unawaited(
+                _seek(recording, globalPosition + LocalAudioTransport.skip),
+              ),
+              onScrub: (value) => setState(() => _scrubPositionMs = value),
+              onScrubEnd: (value) {
+                setState(() => _scrubPositionMs = null);
+                unawaited(
+                  _seek(recording, Duration(milliseconds: value.round())),
+                );
+              },
             ),
           ],
         ],

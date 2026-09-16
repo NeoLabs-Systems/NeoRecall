@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../l10n/gen/app_l10n.dart';
 
 /// Everything the Android home-screen widgets are allowed to show.
 ///
@@ -18,9 +19,12 @@ class HomeWidgetSnapshot {
     this.highlights = const <HomeWidgetHighlight>[],
   });
 
-  static const HomeWidgetSnapshot signedOut = HomeWidgetSnapshot(
+  // A function of the translations rather than a constant: the widget on the
+  // home screen is read in whatever language the app is set to, signed in or
+  // not.
+  static HomeWidgetSnapshot signedOut(AppL10n strings) => HomeWidgetSnapshot(
     signedIn: false,
-    capture: HomeWidgetCapture.idle,
+    capture: HomeWidgetCapture.idle(strings),
     today: HomeWidgetToday.empty,
   );
 
@@ -69,10 +73,10 @@ class HomeWidgetCapture {
     this.issue,
   });
 
-  static const HomeWidgetCapture idle = HomeWidgetCapture(
+  static HomeWidgetCapture idle(AppL10n strings) => HomeWidgetCapture(
     phase: 'idle',
-    title: 'Ready to record',
-    detail: 'Nothing is capturing or waiting.',
+    title: strings.widgetIdleTitle,
+    detail: strings.widgetIdleDetail,
   );
 
   final String phase;

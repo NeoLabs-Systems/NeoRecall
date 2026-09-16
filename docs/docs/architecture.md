@@ -35,7 +35,7 @@ redirect queued audio.
 
 `server/supervisor.js` owns the HTTP and worker-manager processes. The worker manager renews SQLite leases and heartbeats while `inference_host.js` isolates outbound transcription requests. It periodically re-reads provider configuration so admin changes become active without leasing audio work before a provider is ready.
 
-Routes contain HTTP translation only. Business logic lives in `server/services`, inference adapters in `server/transcription`, and all SQL is parameterized through `better-sqlite3`. Numbered migrations run before serving traffic.
+Routes contain HTTP translation only. Business logic lives in `server/services`, inference adapters in `server/transcription`, and all SQL is parameterized through SQLite. The database file is page-encrypted with the installation key. Numbered migrations run before serving traffic.
 
 Source processing is sequence-ordered. A missing sequence blocks later inference unless an explicit capture-gap record covers that sequence; sync-state responses distinguish declared loss from audio that still needs upload.
 
@@ -120,14 +120,33 @@ recording, and drains stored files over a separate notify characteristic.
 
 ## Processing pipeline
 
-Each independently decodable audio chunk is first read locally. A 640 KB
-voice-activity detector decides whether it contains speech at all — if it does
+Before it is transcribed, the chunk is conditioned: a short ffmpeg
+filter chain removes rumble and any DC offset, applies gentle spectral
+denoising, normalizes the level, and resamples to 16 kHz behind a limiter.
+It is ordinary signal processing with no notion of language in it, so it helps
+every language the same way, and it exists because the recordings arrive from
+pocket wearables, meeting bots and imported files tens of decibels apart. Every
+stage is sample-count and channel-count exact by design — the diarization turns,
+the transcript timestamps and the speaker previews cut later from the original
+chunk all describe one timeline, and a filter that added or removed samples
+would slide them apart with nothing to notice it. Conditioning never fails a
+chunk: any error falls back to the original bytes, and the derived copy is
+deleted when the request that needed it ends.
+
+The local pass reads the recording as it arrived rather than the conditioned
+copy. Conditioning helps a transcription service and measurably hurts the
+segmentation and speaker-embedding models, which were trained on unprocessed
+speech; because conditioning does not move the timeline, the two passes can read
+different files and still describe the same recording. A 640 KB voice-activity
+detector decides whether it contains speech at all — if it does
 not, the chunk is silence, no request is made, and the receipt is terminal
 without anything leaving the machine. When there is speech, a diarization model
 and a speaker-embedding model produce speaker turns with a voice fingerprint
 each.
 
-The chunk is then sent unchanged to the configured transcription service.
+When a per-user transcription budget is configured and that window is exhausted, the local speech check still runs. Silence completes as it always did. Speech is not sent to the transcription service: the job is deferred until the rolling window opens, the temporary server file stays referenced, and no terminal receipt is issued. The client therefore keeps its original. That pause is not a failure and must not delete audio.
+
+The conditioned chunk is sent to the configured transcription service.
 OpenAI-compatible endpoints receive multipart form data with a `file` field plus
 the configured `model`, `language`, and `response_format` fields; native Deepgram
 and AssemblyAI adapters normalize their responses into the same timestamped
@@ -149,20 +168,35 @@ after transcript persistence: a failed provider request cannot produce a
 terminal receipt, and a client must retain its local audio until that receipt
 also proves server-side unlink.
 
-Provisional boundary detection is time-driven: hard and soft silence gaps split a
-stream into conversations, and configurable duration and character ceilings
-prevent an uninterrupted 24/7 stream from creating an unbounded model input.
-Short fragments join their semantically closest neighbor.
+Provisional boundary detection is evidence-driven. Time alone separates two
+*sittings* and nothing finer — that is the hard gap — and configurable duration
+and character ceilings prevent an uninterrupted 24/7 stream from creating an
+unbounded model input. Every boundary below the hard gap needs evidence that the
+subject changed: a soft gap cuts only where the speech after the pause is also
+about something else, and an embedding valley cuts only where a full context
+window exists on both sides of it, so one aside inside a meeting cannot start a
+conversation of its own.
 
-An embedding-valley path exists alongside the gaps but is conservative by
-design, and on real continuous speech it effectively never fires: measured over
-three hours of a real meeting, no adjacent-segment similarity came within 0.2 of
-the shipping threshold, and the deepest valleys sat mid-sentence — the signal
-tracks VAD fragmentation, not topic shifts. Do not tune the threshold up to
-"activate" it; that splits sentences, not topics. Topic-level splitting is the
-refinement model's job: consolidation may split or merge provisional
-conversations with full transcript context, which is where within-stream topic
-boundaries actually come from.
+Absent evidence never cuts. A segment whose embedding has not been written yet
+produces no opinion rather than a boundary, so detection groups a recording the
+same way whether or not the search index has caught up with the transcript —
+which matters because transcription outranks indexing, and a run that lacks
+evidence simply leaves the conversation whole and open for the next run to judge
+again. Erring towards one conversation is deliberate: over-splitting is
+irreversible, since a closed group is never reconsidered and each fragment
+becomes its own memory card, while under-splitting is corrected downstream.
+
+Short fragments join their semantically closest neighbour, but only across a
+boundary that evidence set. A fragment is never folded across the hard gap or a
+ceiling, because those say something about the recording rather than about what
+was said, and dissolving them would put two unrelated sittings in one
+conversation.
+
+Topic-level splitting remains the refinement model's job: consolidation may split
+or merge provisional conversations with full transcript context, which is where
+fine within-stream topic boundaries actually come from. Detection's earlier
+three-minute hard gap tried to do that work with a clock and cut one meeting at
+every coffee break; the gaps are now sized as occasion boundaries instead.
 
 ## Conversation lifecycle
 
@@ -236,7 +270,11 @@ A validation failure records the specific reason it failed, not only a code, so 
 
 ## Search
 
-Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. Reciprocal Rank Fusion combines them. Memories add configurable relevance, exponential recency, and importance terms; transcript evidence remains relevance-first. Ask is a separate, rate-limited retrieval-augmented request to the configured external language model, with result citations.
+Every search runs Unicode FTS5 BM25 and multilingual-e5-small sqlite-vec KNN. The vector branch keeps only neighbours at or above a configurable cosine floor: KNN returns the k nearest embeddings whatever their distance, so an archive holding nothing relevant would otherwise contribute its least irrelevant rows as if they were matches. Reciprocal Rank Fusion combines the branches, and every kind is then scored alike on configurable relevance, exponential recency, and importance terms. Ask is a separate, rate-limited retrieval-augmented request to the configured external language model, with result citations. The same rolling language-model budget that pauses memory writing also refuses Ask with `USAGE_LIMIT_EXCEEDED` when a cap is configured and reached. Each account may store standing instructions for the model — one global, and one each for memory writing, summaries, and Ask — folded into the end of the task's own system message, ahead of the evidence. They shape tone, length, language and emphasis; they cannot widen what the model may read, and every caller still validates the response against its schema.
+
+One setting above those decides the language the product writes in. The account holds an output language — English or German — and the AI layer folds a directive for it into the task's system message, before the owner's standing instructions, so an instruction that says something more specific about language still wins. Folded, not appended: a request may carry exactly one system message and it must come first. Several chat templates enforce that — a live Qwen3.5-4B rejects a second one with HTTP 500 and "System message must be at the beginning" — so every layer that wants to say something to the model goes through `prompts/system_messages`, which collapses the leading system turns into one. Prompts no longer name a language themselves; they describe their fields as being in the output language, which is what makes a third language a row in one registry rather than an edit to nine prompts. Transcription and retrieval are unaffected: a German conversation is still transcribed as German speech and searched as German text, and quoted transcript is never translated. The same setting drives the interface, so nobody reads a German app over English memory cards. It is null until an account chooses, which is what lets a client adopt the language it detected from the device on first sign-in without overwriting a choice made on another device.
+
+Its context is read in two layers, written record first: memories, mini-memories and daily summaries get the larger share of slots and transcript segments the smaller one, because a day of recording produces far more raw speech than it produces written accounts of itself, and one list would let the speech crowd out the accounts. It reads the question into a retrieval plan first — restatements to search for, and a local time range resolved against the user's timezone — so a question about a period is answered from that period rather than from whatever resembles its wording. The plan is model-driven and multilingual by construction; when it cannot be produced the question is retrieved as written.
 
 ## NeoAgent and MCP boundary
 

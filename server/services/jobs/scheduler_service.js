@@ -74,6 +74,11 @@ function tick() {
       jobs.enqueue({ resourceType: 'maintenance_bucket', resourceId: `backup-${maintenanceBucket}`, type: 'backup', priority: -30 });
     }
   } catch (error) { logger.warn('Backup scheduling failed', { error: error.message }); }
+  try {
+    const archive = require('../cloud/archive_service');
+    archive.scheduleDueBackups();
+    archive.enqueuePendingPuts();
+  } catch (error) { logger.warn('Cloud archive scheduling failed', { error: error.message }); }
 }
 
 function start(intervalMs = require('../../config').getConfig().schedulerIntervalMs) {

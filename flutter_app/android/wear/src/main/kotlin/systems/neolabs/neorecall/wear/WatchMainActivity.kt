@@ -1,168 +1,193 @@
 package systems.neolabs.neorecall.wear
 
 import android.Manifest
-import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.os.Bundle
+import android.net.Uri
 import android.os.Build
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.LinearLayout
-import android.widget.ImageView
-import android.widget.Space
-import android.widget.TextView
-import androidx.core.app.ActivityCompat
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import systems.neolabs.neorecall.wear.recording.WatchRecordingService
-import systems.neolabs.neorecall.wear.storage.WatchRecordingStore
+import systems.neolabs.neorecall.wear.state.WatchStateRepository
 import systems.neolabs.neorecall.wear.sync.WatchSyncManager
+import systems.neolabs.neorecall.wear.ui.NeoRecallWatchApp
 
-class WatchMainActivity : Activity() {
-  private lateinit var status: TextView
-  private lateinit var pending: TextView
-  private lateinit var action: TextView
-  private var receiverRegistered = false
+/**
+ * The watch app's single Android entry point.
+ *
+ * Owns exactly three things the composition cannot: the microphone permission
+ * prompt, the broadcast the recording service uses to report itself, and the
+ * commands sent to that service. Everything else is state and Compose.
+ *
+ * The screen itself starts nothing. Capture is the Record tile's, and the tile
+ * routes its start through this Activity only because Android refuses a
+ * microphone foreground service to a process with no attached UI.
+ */
+class WatchMainActivity : ComponentActivity() {
+  private val repository by lazy { WatchStateRepository.get(this) }
+  private val permissionPrefs by lazy {
+    getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
+  }
 
   private val stateReceiver = object : BroadcastReceiver() {
-    override fun onReceive(context: Context?, intent: Intent?) = refresh()
+    override fun onReceive(context: Context?, intent: Intent?) = repository.refresh()
   }
+
+  private val microphonePermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    repository.refresh()
+    if (granted) {
+      requestNotificationPermissionIfNeeded()
+      startRecording()
+    } else {
+      // The optimistic flip made when the start arrived has to be undone, or a
+      // refused prompt leaves the screen claiming to be recording.
+      repository.setRecordingOptimistically(false)
+      if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+        openAppSettings()
+      }
+    }
+  }
+
+  private val notificationPermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { repository.refresh() }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    setContentView(buildContent())
-    action.setOnClickListener {
-      if (WatchRecordingService.isRecording(this)) stopRecording() else requestStart()
-    }
-    WatchSyncManager.get(this).syncPending(includeEnqueued = true)
-  }
-
-  override fun onStart() {
-    super.onStart()
     ContextCompat.registerReceiver(
       this,
       stateReceiver,
       IntentFilter(WatchRecordingService.ACTION_STATE_CHANGED),
       ContextCompat.RECEIVER_NOT_EXPORTED,
     )
-    receiverRegistered = true
-    refresh()
+    setContent {
+      val state by repository.state.collectAsStateWithLifecycle()
+      NeoRecallWatchApp(state = state)
+    }
+    WatchSyncManager.get(this).syncPending(includeEnqueued = true)
+    consumeStartRequest(intent)
+  }
+
+  override fun onDestroy() {
+    unregisterReceiver(stateReceiver)
+    super.onDestroy()
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    consumeStartRequest(intent)
+  }
+
+  /**
+   * Honours the Record tile's start, once.
+   *
+   * The extra is cleared before acting so a configuration change, or the
+   * activity being returned to from the recents list, cannot replay it and
+   * restart a session the wearer has since stopped.
+   */
+  private fun consumeStartRequest(intent: Intent?) {
+    if (intent?.getBooleanExtra(EXTRA_START_ON_OPEN, false) != true) return
+    intent.removeExtra(EXTRA_START_ON_OPEN)
+    if (WatchRecordingService.isRecording(this)) return
+    beginRecording()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    // Everything on screen stays live for as long as the screen is: the phone
+    // link is otherwise only ever read here, which is what made a watch that had
+    // been open for a minute show a link state from whenever it was opened.
+    repository.startWatching()
+    if (!hasMicrophonePermission() && !permissionPrefs.getBoolean(KEY_PROMPTED_MICROPHONE, false)) {
+      requestMicrophonePermission()
+    }
   }
 
   override fun onStop() {
-    if (receiverRegistered) unregisterReceiver(stateReceiver)
-    receiverRegistered = false
+    repository.stopWatching()
     super.onStop()
   }
 
-  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
-    super.onRequestPermissionsResult(requestCode, permissions, results)
-    if (requestCode == MIC_PERMISSION &&
-      ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    ) {
+  /**
+   * Starts capture on the tile's behalf, asking for the microphone first when it
+   * has never been granted. Stopping is the tile's own, and never passes here.
+   */
+  private fun beginRecording() {
+    if (hasMicrophonePermission()) {
+      requestNotificationPermissionIfNeeded()
       startRecording()
+      return
     }
+    requestMicrophonePermission()
   }
 
-  private fun requestStart() {
-    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-      startRecording()
-    } else {
-      val permissions = buildList {
-        add(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-      }
-      ActivityCompat.requestPermissions(this, permissions.toTypedArray(), MIC_PERMISSION)
+  /**
+   * Asks for the microphone on its own.
+   *
+   * Wear OS often drops [ActivityResultContracts.RequestMultiplePermissions]
+   * without showing a dialog. Asking for one permission, then opening the app
+   * settings page when the system will not ask again, is what keeps the tile's
+   * start from failing silently on a watch that has never granted the
+   * microphone.
+   */
+  private fun requestMicrophonePermission() {
+    if (hasMicrophonePermission()) return
+    val alreadyAsked = permissionPrefs.getBoolean(KEY_PROMPTED_MICROPHONE, false)
+    permissionPrefs.edit().putBoolean(KEY_PROMPTED_MICROPHONE, true).apply()
+    if (alreadyAsked && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+      openAppSettings()
+      return
     }
+    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+  }
+
+  private fun requestNotificationPermissionIfNeeded() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+      PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+  }
+
+  private fun openAppSettings() {
+    startActivity(
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        .setData(Uri.fromParts("package", packageName, null)),
+    )
   }
 
   private fun startRecording() {
+    repository.setRecordingOptimistically(true)
     ContextCompat.startForegroundService(
       this,
-      Intent(this, WatchRecordingService::class.java).setAction(WatchRecordingService.ACTION_START),
+      Intent(this, WatchRecordingService::class.java)
+        .setAction(WatchRecordingService.ACTION_START),
     )
-    refresh()
   }
 
-  private fun stopRecording() {
-    startService(Intent(this, WatchRecordingService::class.java).setAction(WatchRecordingService.ACTION_STOP))
-    refresh()
+  companion object {
+    /** Set by the Record tile, which cannot start a microphone service itself. */
+    const val EXTRA_START_ON_OPEN = "systems.neolabs.neorecall.wear.START_ON_OPEN"
+    private const val PERMISSION_PREFS = "neorecall_watch_permissions"
+    private const val KEY_PROMPTED_MICROPHONE = "prompted_microphone"
   }
 
-  private fun refresh() {
-    val recording = WatchRecordingService.isRecording(this)
-    status.text = if (recording) "Recording in background" else "Ready to remember"
-    action.text = if (recording) "STOP" else "START"
-    action.setBackgroundResource(
-      if (recording) R.drawable.watch_record_button_live else R.drawable.watch_record_button_ready,
-    )
-    pending.text = when (val count = WatchRecordingStore.get(this).pendingCount()) {
-      0 -> "All recordings synced"
-      1 -> "1 recording safely stored"
-      else -> "$count recordings safely stored"
-    }
-  }
-
-  private fun buildContent(): LinearLayout {
-    val density = resources.displayMetrics.density
-    fun dp(value: Int) = (value * density).toInt()
-    return LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      gravity = Gravity.CENTER
-      setPadding(dp(20), dp(14), dp(20), dp(14))
-      setBackgroundColor(Color.rgb(7, 17, 12))
-      addView(
-        LinearLayout(context).apply {
-          orientation = LinearLayout.HORIZONTAL
-          gravity = Gravity.CENTER
-          addView(
-            ImageView(context).apply {
-              setImageResource(R.drawable.neorecall_logo)
-              contentDescription = "NeoRecall logo"
-            },
-            LinearLayout.LayoutParams(dp(40), dp(40)),
-          )
-          addView(TextView(context).apply {
-            text = "NEORECALL"
-            textSize = 12f
-            setTextColor(Color.rgb(233, 183, 86))
-            letterSpacing = 0.18f
-            gravity = Gravity.CENTER
-            setPadding(dp(8), 0, 0, 0)
-          })
-        },
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)),
-      )
-      status = TextView(context).apply {
-        textSize = 15f
-        setTextColor(Color.WHITE)
-        gravity = Gravity.CENTER
-        setPadding(0, dp(7), 0, dp(10))
-      }
-      addView(status)
-      action = TextView(context).apply {
-        textSize = 15f
-        setTextColor(Color.rgb(7, 17, 12))
-        gravity = Gravity.CENTER
-        isClickable = true
-        isFocusable = true
-      }
-      addView(action, LinearLayout.LayoutParams(dp(92), dp(92)))
-      addView(Space(context), LinearLayout.LayoutParams(1, dp(9)))
-      pending = TextView(context).apply {
-        textSize = 11f
-        setTextColor(Color.rgb(172, 190, 179))
-        gravity = Gravity.CENTER
-      }
-      addView(pending, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-  }
-
-  companion object { private const val MIC_PERMISSION = 71 }
+  private fun hasMicrophonePermission(): Boolean = ContextCompat.checkSelfPermission(
+    this,
+    Manifest.permission.RECORD_AUDIO,
+  ) == PackageManager.PERMISSION_GRANTED
 }

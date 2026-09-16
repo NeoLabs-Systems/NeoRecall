@@ -1,4 +1,5 @@
 import '../models/chunk.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 String _presentableUploadError(String value) {
   final withoutUris = value.replaceAll(
@@ -44,6 +45,7 @@ class ProcessingStatusSnapshot {
     this.watchTransferred = 0,
     this.watchTotal = 0,
     this.watchTransferActive = false,
+    this.transferFraction,
     this.phoneQueued = 0,
     this.uploading = 0,
     this.serverQueued = 0,
@@ -63,6 +65,7 @@ class ProcessingStatusSnapshot {
   final int watchTransferred;
   final int watchTotal;
   final bool watchTransferActive;
+  final double? transferFraction;
   final int phoneQueued;
   final int uploading;
   final int serverQueued;
@@ -80,8 +83,13 @@ class ProcessingStatusSnapshot {
       pendingAudioDuration + Duration(seconds: watchPendingSeconds);
   bool get hasIssues => issues.isNotEmpty;
   bool get canRetry => issues.any((issue) => issue.recoverable);
-  double? get watchFraction =>
-      watchTotal > 0 ? (watchTransferred / watchTotal).clamp(0.0, 1.0) : null;
+  double? get watchFraction {
+    final override = transferFraction;
+    if (override != null) return override.clamp(0.0, 1.0);
+    return watchTotal > 0
+        ? (watchTransferred / watchTotal).clamp(0.0, 1.0)
+        : null;
+  }
 
   ProcessingPipelineStage get activeStage {
     if (watchTransferActive || watchPending > 0) {
@@ -101,6 +109,7 @@ class ProcessingStatusSnapshot {
     required int pendingSeconds,
     required int transferred,
     required int total,
+    double? completeFraction,
     List<ProcessingIssue>? issues,
   }) => ProcessingStatusSnapshot(
     pendingBytes: pendingBytes,
@@ -110,6 +119,7 @@ class ProcessingStatusSnapshot {
     watchTransferred: transferred,
     watchTotal: total,
     watchTransferActive: active,
+    transferFraction: completeFraction,
     phoneQueued: phoneQueued,
     uploading: uploading,
     serverQueued: serverQueued,
@@ -131,6 +141,9 @@ class ProcessingStatusSnapshot {
     required bool unmeteredOnly,
     required bool networkUnmetered,
     required String? deviceIssue,
+    // The four issue messages this builds are read by the user, and it runs far
+    // from any BuildContext, so the caller supplies the translations.
+    required AppL10n strings,
   }) {
     var phoneQueued = 0;
     var uploading = 0;
@@ -170,7 +183,7 @@ class ProcessingStatusSnapshot {
         addIssue(
           chunk.error?.trim().isNotEmpty == true
               ? _presentableUploadError(chunk.error!)
-              : 'A recording needs a manual upload retry.',
+              : strings.statusManualRetry,
           sessionId: chunk.sessionId,
           recoverable: true,
         );
@@ -179,7 +192,7 @@ class ProcessingStatusSnapshot {
         addIssue(
           chunk.error?.trim().isNotEmpty == true
               ? _presentableUploadError(chunk.error!)
-              : 'A recording upload failed and will retry automatically.',
+              : strings.statusUploadFailed,
           sessionId: chunk.sessionId,
         );
       }
@@ -234,20 +247,9 @@ class ProcessingStatusSnapshot {
     final waitingForUnmeteredNetwork =
         !offline && unmeteredOnly && !networkUnmetered && localUploadBytes > 0;
     if (offline && localUploadBytes > 0) {
-      issues.insert(
-        0,
-        const ProcessingIssue(
-          message: 'Offline — audio remains safely stored on this device.',
-        ),
-      );
+      issues.insert(0, ProcessingIssue(message: strings.statusOffline));
     } else if (waitingForUnmeteredNetwork) {
-      issues.insert(
-        0,
-        const ProcessingIssue(
-          message:
-              'Waiting for Wi‑Fi because mobile-data uploads are disabled.',
-        ),
-      );
+      issues.insert(0, ProcessingIssue(message: strings.statusWaitingForWifi));
     }
     if (deviceIssue?.trim().isNotEmpty == true) {
       issues.add(ProcessingIssue(message: deviceIssue!, recoverable: true));

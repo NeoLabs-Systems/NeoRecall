@@ -24,6 +24,10 @@ class LocalBackendInstaller {
 
   String get defaultInstallDirectory => '';
 
+  /// Mirrors the io implementation so tests and callers see one interface.
+  /// A platform that cannot start processes cannot vouch for one either.
+  Future<bool> probeExecutable(String path) async => false;
+
   void cancel() {}
 
   void dispose() {}

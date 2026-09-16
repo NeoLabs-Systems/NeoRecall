@@ -77,6 +77,17 @@ class DiscoveredWearable {
   static bool hasMemoketName(String name) =>
       name.trim().toLowerCase().startsWith('memoket');
 
+  /// Android often omits the local name from a just-disconnected advertisement.
+  /// The protocol service is still enough to classify, and this label stands in
+  /// until the GATT device-name characteristic fills the real one in.
+  static String protocolLabel(WearableDeviceType type) => switch (type) {
+    WearableDeviceType.memoket => 'Memoket',
+    WearableDeviceType.heyPocket => 'HeyPocket',
+    WearableDeviceType.omi => 'Omi',
+    WearableDeviceType.omiGlass => 'OmiGlass',
+    WearableDeviceType.custom => '',
+  };
+
   static WearableDeviceType classify({
     required String name,
     required List<String> serviceUuids,

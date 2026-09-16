@@ -7,6 +7,7 @@ import 'main_spacing.dart';
 import 'main_speakers.dart';
 import 'main_timeline.dart';
 import 'src/memories/memory_filters.dart';
+import 'l10n/gen/app_l10n.dart';
 
 /// Everything the account has recorded, in one place.
 ///
@@ -19,12 +20,14 @@ class LibraryScreen extends StatelessWidget {
 
   final NeoRecallController controller;
 
-  static const List<({LibraryTab value, String label})> _segments =
+  // Built per build rather than held as a const: the labels come from the
+  // active translations, which change when the language does.
+  static List<({LibraryTab value, String label})> _segments(AppL10n l10n) =>
       <({LibraryTab value, String label})>[
-        (value: LibraryTab.moments, label: 'Moments'),
-        (value: LibraryTab.memories, label: 'Memories'),
-        (value: LibraryTab.highlights, label: 'Highlights'),
-        (value: LibraryTab.speakers, label: 'Speakers'),
+        (value: LibraryTab.moments, label: l10n.navMoments),
+        (value: LibraryTab.memories, label: l10n.navMemories),
+        (value: LibraryTab.highlights, label: l10n.navHighlights),
+        (value: LibraryTab.speakers, label: l10n.navSpeakers),
       ];
 
   Widget _body() {
@@ -70,9 +73,9 @@ class LibraryScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const ScreenHeader(title: 'Library'),
+              ScreenHeader(title: AppL10n.of(context).libraryTitle),
               SegmentedTabs<LibraryTab>(
-                segments: _segments,
+                segments: _segments(AppL10n.of(context)),
                 selected: controller.libraryTab,
                 onSelected: controller.selectLibraryTab,
               ),

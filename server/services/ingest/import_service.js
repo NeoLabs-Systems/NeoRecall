@@ -8,6 +8,7 @@ const { getConfig } = require('../../config');
 const { ensureRuntimeDirs } = require('../../../runtime/paths');
 const { HttpError } = require('../../middleware/error_handler');
 const jobs = require('../jobs/job_service');
+const tempAudio = require('./temp_audio_service');
 
 function get(userId, id) {
   const row = getDatabase().prepare('SELECT * FROM imports WHERE id=? AND user_id=?').get(id, userId);
@@ -63,6 +64,7 @@ async function acceptPart(userId, id, partNumber, metadata, uploaded) {
     }
     const destination = path.join(ensureRuntimeDirs().importTmp, `${id}.${partNumber}.part`);
     fs.renameSync(uploaded.path, destination);
+    require('../../utils/sealed_fs').sealInPlace(destination);
     db.transaction(() => {
       db.prepare(`INSERT INTO import_parts (import_id,part_number,range_start,range_end,byte_size,sha256,temporary_path)
         VALUES (?,?,?,?,?,?,?)`).run(id, partNumber, metadata.rangeStart, metadata.rangeEnd, uploaded.size, digest, destination);
@@ -81,13 +83,14 @@ async function complete(userId, id) {
   const output = fs.openSync(destination, 'w', 0o600);
   try {
     for (const part of getDatabase().prepare('SELECT * FROM import_parts WHERE import_id=? ORDER BY part_number').all(id)) {
-      const bytes = fs.readFileSync(part.temporary_path);
+      const bytes = require('../../utils/sealed_fs').readFileSync(part.temporary_path);
       fs.writeSync(output, bytes);
     }
     fs.fsyncSync(output);
   } finally { fs.closeSync(output); }
   const digest = await shaFile(destination);
   if (digest !== record.sha256) { fs.unlinkSync(destination); throw new HttpError(422, 'HASH_MISMATCH', 'The assembled import hash does not match.'); }
+  require('../../utils/sealed_fs').sealInPlace(destination);
   const db = getDatabase();
   const partFiles = db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id).map((part) => part.temporary_path);
   db.transaction(() => {
@@ -152,8 +155,10 @@ async function importLocalFile(userId, filename, input) {
 function cancel(userId, id) {
   const record = get(userId, id);
   const db = getDatabase();
-  for (const part of db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id)) { try { fs.unlinkSync(part.temporary_path); } catch (_) {} }
-  if (record.temporary_path) { try { fs.unlinkSync(record.temporary_path); } catch (_) {} }
+  for (const part of db.prepare('SELECT temporary_path FROM import_parts WHERE import_id=?').all(id)) {
+    tempAudio.unlinkBestEffort(part.temporary_path, { importId: id, userId });
+  }
+  tempAudio.unlinkBestEffort(record.temporary_path, { importId: id, userId });
   db.prepare("UPDATE imports SET state='cancelled',temporary_path=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND user_id=?").run(id, userId);
 }
 
@@ -184,16 +189,7 @@ function sweepOrphans() {
     ...db.prepare('SELECT temporary_path FROM imports WHERE temporary_path IS NOT NULL').all(),
     ...db.prepare('SELECT temporary_path FROM import_parts WHERE temporary_path IS NOT NULL').all(),
   ].map((row) => path.resolve(row.temporary_path)));
-  let removed = 0;
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const filename = path.resolve(directory, entry.name);
-    if (!referenced.has(filename) && Date.now() - fs.statSync(filename).mtimeMs > 60_000) {
-      fs.unlinkSync(filename);
-      removed += 1;
-    }
-  }
-  return removed;
+  return tempAudio.sweepOrphans({ directory, referenced, context: { sweep: 'import-temp' } });
 }
 
 module.exports = { declare, get, acceptPart, complete, cancel, shaFile, importLocalFile, reconcileProcessing, sweepOrphans };

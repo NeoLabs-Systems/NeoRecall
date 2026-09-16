@@ -36,6 +36,7 @@ esp_err_t nr_wifi_start_ap(void);
 void nr_wifi_stop_ap(void);
 bool nr_wifi_ap_active(void);
 void nr_wifi_ap_ssid(char out[33]);   // stable per-device SSID
+bool nr_wifi_ap_ip(char out[16]);     // SoftAP IPv4, or 192.168.4.1 if unknown
 
 #ifdef __cplusplus
 }

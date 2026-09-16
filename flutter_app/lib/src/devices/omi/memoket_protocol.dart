@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'wearable_capture_time.dart';
+
 /// Wire frames captured from a Memoket Gem (firmware 01.42.01.10) while the
 /// official app remotely started/stopped recording and later drained a file
 /// that was recorded offline. Opcodes and layouts below are exactly what
@@ -32,6 +34,11 @@ class MemoketProtocol {
   ]);
 
   static final Uint8List ping = Uint8List.fromList(const <int>[opPing]);
+
+  /// Phone → Gem on the control write characteristic. Reply is
+  /// `e1 <percent> <status>` (`e14e02` = 78%, status 0x02 charging/full).
+  /// The Gem also exposes standard Battery (180F / 2A19), but that
+  /// characteristic is a stub that reports 100. The vendor reply is the gauge.
   static final Uint8List batteryQuery = Uint8List.fromList(const <int>[
     opBattery,
   ]);
@@ -66,10 +73,35 @@ class MemoketProtocol {
     return Uint8List.fromList(<int>[opcode, name.length, ...name]);
   }
 
-  /// Live notify packets are `00 00 00 00 <seq> <opus-frame>`; stored-file
-  /// chunks are already a single Opus frame (they start with the TOC `0xbc`
-  /// seen on every captured packet).
+  /// Live notify packets are `<header> <opus…>` (HCI: 485 bytes every 120 ms).
+  /// The captured header is `00 00 00 00 <seq8>`. That seq is not ACKed and
+  /// wraps. IRL a 120 s soak continued past wrap when we did not write START
+  /// mid-stream. A second START at wrap stopped live notifies. Decode any
+  /// header whose trailing 480 bytes are packed Opus. Stored-file notifies
+  /// are that payload without a header. Both pack six 20 ms CELT frames.
+  static const int packedNotifyBytes = 480;
+  static const int packedFrameBytes = 80;
+  static const int packedFramesPerNotify = 6;
+
+  /// Live notify packets are `<header><opus-payload>`; stored-file chunks
+  /// are the 480-byte payload alone (they start with TOC `0xbc`).
   static Uint8List? liveOpusFrame(List<int> packet) {
+    final framed = _livePayloadAfterHeader(packet);
+    if (framed != null) return framed;
+    if (packet.isNotEmpty && packet.first == 0xbc) {
+      return Uint8List.fromList(packet);
+    }
+    return null;
+  }
+
+  static Uint8List? _livePayloadAfterHeader(List<int> packet) {
+    if (packet.length >= packedNotifyBytes + 1) {
+      final headerLen = packet.length - packedNotifyBytes;
+      final body = packet.sublist(headerLen);
+      if (body.isNotEmpty && body.first == 0xbc) {
+        return Uint8List.fromList(body);
+      }
+    }
     if (packet.length >= 6 &&
         packet[0] == 0 &&
         packet[1] == 0 &&
@@ -77,15 +109,58 @@ class MemoketProtocol {
         packet[3] == 0) {
       return Uint8List.fromList(packet.sublist(5));
     }
-    if (packet.isNotEmpty && packet.first == 0xbc) {
-      return Uint8List.fromList(packet);
+    return null;
+  }
+
+  /// Sequence byte immediately before a packed live payload, when present.
+  static int? liveSeq(List<int> packet) {
+    if (packet.length >= packedNotifyBytes + 1) {
+      return packet[packet.length - packedNotifyBytes - 1];
+    }
+    if (packet.length >= 5 &&
+        packet[0] == 0 &&
+        packet[1] == 0 &&
+        packet[2] == 0 &&
+        packet[3] == 0) {
+      return packet[4];
     }
     return null;
   }
 
-  static int? batteryLevel(List<int> frame) {
+  /// One BLE notify is 120 ms of audio: six 20 ms frames of [packedFrameBytes].
+  /// Treating the 480-byte blob as a single TOC `0xbc` packet made a 10 s take
+  /// decode as 1.8 s and play about 6× too fast.
+  static List<Uint8List> splitPackedOpusFrames(List<int> payload) {
+    if (payload.isEmpty) return const <Uint8List>[];
+    if (payload.length >= packedFrameBytes * 2 &&
+        payload.length % packedFrameBytes == 0) {
+      final count = payload.length ~/ packedFrameBytes;
+      final frames = <Uint8List>[];
+      final expectedConfig = opusConfig(payload.first);
+      for (var i = 0; i < count; i += 1) {
+        final slice = Uint8List.fromList(
+          payload.sublist(i * packedFrameBytes, (i + 1) * packedFrameBytes),
+        );
+        if (opusConfig(slice.first) != expectedConfig) {
+          return <Uint8List>[Uint8List.fromList(payload)];
+        }
+        frames.add(slice);
+      }
+      return frames;
+    }
+    return <Uint8List>[Uint8List.fromList(payload)];
+  }
+
+  static int? batteryLevel(List<int> frame) => parseBattery(frame)?.percent;
+
+  /// Vendor battery notify/reply captured on the control channel.
+  /// Status 0x01 = charging, 0x02 = charging or full (HCI: `e14e02`).
+  static MemoketBattery? parseBattery(List<int> frame) {
     if (frame.length < 2 || frame.first != opBattery) return null;
-    return frame[1];
+    final percent = frame[1];
+    if (percent > 100) return null;
+    final status = frame.length > 2 ? frame[2] : null;
+    return MemoketBattery(percent: percent, status: status);
   }
 
   static String? firmwareVersion(List<int> frame) {
@@ -102,7 +177,12 @@ class MemoketProtocol {
     if (frame.length < 10 || frame.first != opListFiles || frame[1] == 0xff) {
       return null;
     }
-    final duration = frame[4];
+    // Duration is not one byte. A 10 s take listed as `03 01 00 00 0a …`, so
+    // the field spans frame[2..4] big-endian; read as frame[4] alone anything
+    // past 255 s wrapped, and a half-hour take came back as a handful of
+    // seconds. That number decides whether the device's only copy of a file may
+    // be deleted, so it is never allowed to read short.
+    final duration = (frame[2] << 16) | (frame[3] << 8) | frame[4];
     final nameLen = frame[5];
     if (nameLen <= 0 || frame.length < 6 + nameLen + 4) return null;
     final name = ascii.decode(
@@ -121,6 +201,56 @@ class MemoketProtocol {
       durationSeconds: duration,
       byteLength: size,
     );
+  }
+
+  /// The Gem sometimes repeats the same list entry. Keep the fattest copy.
+  static List<MemoketStoredFile> uniqueStoredFiles(
+    Iterable<MemoketStoredFile> files,
+  ) {
+    final byId = <String, MemoketStoredFile>{};
+    for (final file in files) {
+      final existing = byId[file.id];
+      if (existing == null ||
+          file.byteLength > existing.byteLength ||
+          (file.byteLength == existing.byteLength &&
+              file.durationSeconds > existing.durationSeconds)) {
+        byId[file.id] = file;
+      }
+    }
+    return byId.values.toList(growable: false);
+  }
+
+  /// How many payload bytes a listed take should still produce.
+  ///
+  /// Prefer the device's announced size. Duration is only a floor when the
+  /// size is missing — firmware duration is not a 20 ms frame count.
+  static int expectedAudioBytes({
+    required int durationSeconds,
+    required int announcedBytes,
+  }) {
+    if (announcedBytes > 0) return announcedBytes;
+    if (durationSeconds <= 0) return 0;
+    return durationSeconds * 4000;
+  }
+
+  /// BLE copy budget for one listed take.
+  ///
+  /// A 90-second ceiling cut off hour-long Gem files: 1.5 h of packed Opus is
+  /// tens of megabytes, which BLE will not finish that fast. Floor keeps short
+  /// files from retrying too eagerly; cap bounds a stuck transfer.
+  static Duration downloadBudget(
+    int expectedBytes, {
+    int minBytesPerSecond = 4000,
+    Duration floor = const Duration(minutes: 2),
+    Duration cap = const Duration(hours: 3),
+  }) {
+    if (expectedBytes <= 0) return floor;
+    final needed = Duration(
+      seconds: (expectedBytes / minBytesPerSecond).ceil() + 60,
+    );
+    if (needed < floor) return floor;
+    if (needed > cap) return cap;
+    return needed;
   }
 
   static String? recordingFilename(List<int> frame) {
@@ -143,19 +273,79 @@ class MemoketProtocol {
   /// Concatenated raw Opus frames are not a file. The import pipeline needs a
   /// container; Ogg Opus is what the server already accepts as `audio/ogg`.
   /// Opus TOC bit 2 is the stereo flag (RFC 6716). Captured Gem frames are
-  /// `0xbc` — stereo CELT.
+  /// `0xbc` — stereo CELT wideband, 20 ms.
   static int opusChannelCount(List<int> frame) {
     if (frame.isEmpty) return 1;
     return ((frame.first >> 2) & 1) == 1 ? 2 : 1;
   }
 
-  static Uint8List wrapOpusFramesAsOgg(
-    List<Uint8List> frames, {
-    int sampleRate = 16000,
-    int samplesPerFrame = 1920,
-  }) {
+  /// RFC 6716 configuration number (TOC bits 7–3).
+  static int opusConfig(int toc) => (toc >> 3) & 31;
+
+  /// How many Opus frames one packet contains (TOC code, bits 1–0).
+  static int opusFrameCount(int toc) {
+    switch (toc & 3) {
+      case 1:
+      case 2:
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
+  /// Duration of one coded frame inside the packet, in microseconds.
+  static int opusFrameDurationUs(int toc) {
+    final config = opusConfig(toc);
+    if (config <= 11) {
+      return const <int>[10000, 20000, 40000, 60000][config % 4];
+    }
+    if (config <= 15) return config.isEven ? 10000 : 20000;
+    return const <int>[2500, 5000, 10000, 20000][(config - 16) % 4];
+  }
+
+  static int opusPacketDurationUs(int toc) =>
+      opusFrameDurationUs(toc) * opusFrameCount(toc);
+
+  /// Informational input rate for OpusHead. The decoder still works at 48 kHz;
+  /// this is the bandwidth the TOC advertised (RFC 6716 Table 2).
+  static int opusInputSampleRate(int toc) {
+    final config = opusConfig(toc);
+    if (config <= 3) return 8000;
+    if (config <= 7) return 12000;
+    if (config <= 11) return 16000;
+    if (config <= 13) return 24000;
+    if (config <= 15) return 48000;
+    if (config <= 19) return 8000;
+    if (config <= 23) return 16000;
+    if (config <= 27) return 24000;
+    return 48000;
+  }
+
+  /// RFC 7845: an Ogg Opus granule is PCM samples at 48 kHz, not the
+  /// input-rate sample count. Labeling a 20 ms `0xbc` frame as 1920 samples
+  /// at 16 kHz made a 1.6 s take look like 9 s and stretched Whisper's input.
+  static int opusGranuleIncrement(int toc) =>
+      (48000 * opusPacketDurationUs(toc)) ~/ 1000000;
+
+  static int opusFramesDurationMs(Iterable<List<int>> frames) {
+    var microseconds = 0;
+    for (final frame in frames) {
+      if (frame.isEmpty) continue;
+      microseconds += opusPacketDurationUs(frame.first);
+    }
+    return (microseconds + 500) ~/ 1000;
+  }
+
+  /// One Ogg page holds at most 255 lacing values. 80-byte Gem frames use one
+  /// each, so 255 packets/page. Packing is what keeps a 1.5 h take under the
+  /// 32 MB ingest cap: one page per frame adds ~28 bytes × 270k frames.
+  static const int _oggMaxSegments = 255;
+
+  static Uint8List wrapOpusFramesAsOgg(List<Uint8List> frames) {
     final serial = 0x4d4b4731; // 'MKG1'
+    final toc = frames.isEmpty ? 0 : frames.first.first;
     final channels = frames.isEmpty ? 1 : opusChannelCount(frames.first);
+    final sampleRate = frames.isEmpty ? 16000 : opusInputSampleRate(toc);
     final pages = <Uint8List>[];
     pages.add(
       _oggPage(
@@ -163,7 +353,7 @@ class MemoketProtocol {
         granule: 0,
         serial: serial,
         sequence: 0,
-        body: _opusHead(sampleRate, channels),
+        packets: <List<int>>[_opusHead(sampleRate, channels)],
       ),
     );
     pages.add(
@@ -172,27 +362,46 @@ class MemoketProtocol {
         granule: 0,
         serial: serial,
         sequence: 1,
-        body: _opusTags(),
+        packets: <List<int>>[_opusTags()],
       ),
     );
     var granule = 0;
-    for (var i = 0; i < frames.length; i += 1) {
-      granule += samplesPerFrame;
+    var sequence = 2;
+    var i = 0;
+    while (i < frames.length) {
+      final packets = <List<int>>[];
+      var segments = 0;
+      while (i < frames.length) {
+        final needed = _oggSegmentCount(frames[i].length);
+        if (packets.isNotEmpty && segments + needed > _oggMaxSegments) break;
+        packets.add(frames[i]);
+        segments += needed;
+        i += 1;
+      }
+      for (final packet in packets) {
+        if (packet.isNotEmpty) granule += opusGranuleIncrement(packet.first);
+      }
       pages.add(
         _oggPage(
-          headerType: i == frames.length - 1 ? 0x04 : 0x00,
+          headerType: i >= frames.length ? 0x04 : 0x00,
           granule: granule,
           serial: serial,
-          sequence: i + 2,
-          body: frames[i],
+          sequence: sequence,
+          packets: packets,
         ),
       );
+      sequence += 1;
     }
     final out = BytesBuilder();
     for (final page in pages) {
       out.add(page);
     }
     return out.toBytes();
+  }
+
+  static int _oggSegmentCount(int packetBytes) {
+    if (packetBytes <= 0) return 1;
+    return (packetBytes / 255).ceil();
   }
 
   static Uint8List _opusHead(int sampleRate, int channels) {
@@ -235,15 +444,23 @@ class MemoketProtocol {
     required int granule,
     required int serial,
     required int sequence,
-    required List<int> body,
+    required List<List<int>> packets,
   }) {
     final lacing = <int>[];
-    var remaining = body.length;
-    while (remaining >= 255) {
-      lacing.add(255);
-      remaining -= 255;
+    final body = BytesBuilder();
+    for (final packet in packets) {
+      body.add(packet);
+      var remaining = packet.length;
+      if (remaining == 0) {
+        lacing.add(0);
+        continue;
+      }
+      while (remaining >= 255) {
+        lacing.add(255);
+        remaining -= 255;
+      }
+      lacing.add(remaining);
     }
-    lacing.add(remaining);
     final header = BytesBuilder()
       ..add(ascii.encode('OggS'))
       ..add(<int>[0, headerType])
@@ -254,7 +471,7 @@ class MemoketProtocol {
       ..add(<int>[lacing.length, ...lacing]);
     final page = BytesBuilder()
       ..add(header.toBytes())
-      ..add(body);
+      ..add(body.toBytes());
     final bytes = page.toBytes();
     final crc = _oggCrc(bytes);
     bytes[22] = crc & 0xff;
@@ -299,38 +516,53 @@ class MemoketProtocol {
   }
 }
 
+class MemoketBattery {
+  const MemoketBattery({required this.percent, this.status});
+
+  final int percent;
+  final int? status;
+
+  bool get charging => status == 0x01 || status == 0x02;
+}
+
 class MemoketStoredFile {
   const MemoketStoredFile({
     required this.filename,
-    required this.durationSeconds,
+    required int durationSeconds,
     required this.byteLength,
-  });
+  }) : listedDurationSeconds = durationSeconds;
 
   /// Device filename, e.g. `20260905_222817_2.opus`.
   final String filename;
-  final int durationSeconds;
+
+  /// Duration exactly as the Gem listed it.
+  final int listedDurationSeconds;
   final int byteLength;
+
+  /// Payload rate of packed Gem Opus: 480 bytes per 120 ms notify.
+  static const int _bytesPerSecond = 4000;
+
+  /// How long the take is, never reading shorter than its own byte count.
+  ///
+  /// Only a duration decides whether live audio covered a take well enough to
+  /// drop the device's copy, so an under-reading duration deletes recordings.
+  /// The announced size is the independent witness — it is already the number
+  /// the download itself is sized against — and rounding up keeps the answer on
+  /// the side that re-transfers audio rather than losing it. The server
+  /// discards what it has already heard from this device.
+  int get durationSeconds {
+    if (byteLength <= 0) return listedDurationSeconds;
+    final fromBytes = (byteLength / _bytesPerSecond).ceil();
+    return fromBytes > listedDurationSeconds
+        ? fromBytes
+        : listedDurationSeconds;
+  }
 
   String get id => filename;
   String get contentType => 'audio/ogg';
   String get importFilename =>
       'memoket-${filename.replaceFirst(RegExp(r'\.opus$'), '.ogg')}';
 
-  /// The device stamps its own wall clock, which the handshake sets from this
-  /// phone — so the `YYYYMMDD_HHMMSS` prefix is read back as local time.
-  DateTime? get capturedAt {
-    final stamp = RegExp(
-      r'^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})',
-    ).firstMatch(filename);
-    if (stamp == null) return null;
-    final local = DateTime(
-      int.parse(stamp.group(1)!),
-      int.parse(stamp.group(2)!),
-      int.parse(stamp.group(3)!),
-      int.parse(stamp.group(4)!),
-      int.parse(stamp.group(5)!),
-      int.parse(stamp.group(6)!),
-    );
-    return local.toUtc();
-  }
+  /// The handshake sets the Gem with unix UTC; the filename is that clock.
+  DateTime? get capturedAt => WearableCaptureTime.parseUtcStamp(filename);
 }

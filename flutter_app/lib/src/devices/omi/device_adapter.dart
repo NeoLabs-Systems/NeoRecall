@@ -17,7 +17,11 @@ import 'offline_sync.dart';
 /// There is deliberately one scanner and connection owner for the complete
 /// family. This avoids competing browser choosers/native scans while keeping
 /// every device's wire protocol in its own connector.
-class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
+class DeviceAdapter
+    implements
+        AudioDeviceAdapter,
+        StorageSyncCapableAdapter,
+        RadioLinkCapableAdapter {
   DeviceAdapter({GattTransport? gatt}) : _gatt = gatt ?? createGattTransport();
 
   /// Primary services used to select supported wearables during the scan.
@@ -49,11 +53,17 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       StreamController<DeviceTransportState>.broadcast();
   final Map<String, DiscoveredWearable> _found = <String, DiscoveredWearable>{};
 
+  static const Duration _linkWatchdogInterval = Duration(seconds: 8);
+
   StreamSubscription<GattPeripheral>? _scanSub;
   StreamSubscription<bool>? _connectionSub;
+  StreamSubscription<GattAvailability>? _availabilitySub;
   StreamSubscription<List<int>>? _audioSub;
   StreamSubscription<List<int>>? _buttonSub;
   StreamSubscription<int>? _batterySub;
+  Timer? _linkWatchdog;
+  Timer? _batteryPoll;
+  static const Duration _batteryPollInterval = Duration(seconds: 30);
   WearableConnector? _connector;
 
   /// The connected device's offline-storage capability, if it exposes one.
@@ -71,6 +81,10 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   DeviceTransportState _state = DeviceTransportState.disconnected;
   bool _initialized = false;
   bool _disposed = false;
+
+  /// Current transport state. Broadcast [transportStates] can miss the value
+  /// already in force when a subscriber attaches.
+  DeviceTransportState get currentState => _state;
   bool _resumeRecordingAfterReconnect = false;
   bool _intentionalDisconnect = false;
 
@@ -89,6 +103,39 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   @override
   Stream<DeviceTransportState> get transportStates => _states.stream;
 
+  @override
+  Stream<bool> get radioReadyChanges =>
+      _gatt.availabilityChanges.map(_radioCanConnect).distinct();
+
+  @override
+  Future<bool> radioIsReady() async {
+    final availability = await _gatt.availability();
+    return _radioCanConnect(availability);
+  }
+
+  @override
+  Future<bool> hasLiveLink() async {
+    if (_connector == null) return false;
+    if (_state != DeviceTransportState.connectedStandby &&
+        _state != DeviceTransportState.recording) {
+      return false;
+    }
+    if (!await radioIsReady()) return false;
+    try {
+      return await _gatt.isDeviceConnected(_connector!.device.id);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool _radioCanConnect(GattAvailability value) =>
+      value == GattAvailability.ready || value == GattAvailability.unknown;
+
+  bool get _hasLinkState =>
+      _state == DeviceTransportState.connecting ||
+      _state == DeviceTransportState.connectedStandby ||
+      _state == DeviceTransportState.recording;
+
   void _setState(DeviceTransportState next) {
     if (_state == next) return;
     _state = next;
@@ -103,7 +150,72 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     if (availability == GattAvailability.unsupported) {
       throw UnsupportedError('Bluetooth LE is unavailable on this platform.');
     }
+    _availabilitySub ??= _gatt.availabilityChanges.listen(_handleRadioChange);
     _initialized = true;
+  }
+
+  void _handleRadioChange(GattAvailability value) {
+    if (_radioCanConnect(value) || !_hasLinkState) return;
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'radio_unavailable',
+      details: <String, Object?>{'availability': value.name},
+    );
+    unawaited(_disconnectProtocol(clearResumeIntent: false));
+  }
+
+  Future<void> _ensureRadioReady() async {
+    final availability = await _gatt.availability();
+    if (availability == GattAvailability.poweredOff) {
+      throw StateError('Bluetooth is turned off.');
+    }
+    if (availability == GattAvailability.unauthorized) {
+      throw StateError('Bluetooth permission was not granted.');
+    }
+    if (availability == GattAvailability.unsupported) {
+      throw UnsupportedError('Bluetooth LE is unavailable on this platform.');
+    }
+  }
+
+  void _startLinkWatchdog() {
+    _linkWatchdog?.cancel();
+    _linkWatchdog = Timer.periodic(_linkWatchdogInterval, (_) {
+      unawaited(_verifyLiveLink());
+    });
+  }
+
+  void _stopLinkWatchdog() {
+    _linkWatchdog?.cancel();
+    _linkWatchdog = null;
+  }
+
+  Future<void> _verifyLiveLink() async {
+    if (_state != DeviceTransportState.connectedStandby &&
+        _state != DeviceTransportState.recording) {
+      return;
+    }
+    if (!await radioIsReady()) {
+      await _disconnectProtocol(clearResumeIntent: false);
+      return;
+    }
+    final connector = _connector;
+    if (connector == null) return;
+    final live = await _gatt.isDeviceConnected(connector.device.id);
+    if (live) return;
+    if (_state != DeviceTransportState.connectedStandby &&
+        _state != DeviceTransportState.recording) {
+      return;
+    }
+    ClientDiagnosticLog.instance.record(
+      'bluetooth',
+      'stale_link',
+      level: 'warning',
+      details: <String, Object?>{'name': connector.device.name},
+    );
+    if (_state == DeviceTransportState.recording) {
+      _resumeRecordingAfterReconnect = true;
+    }
+    await _disconnectProtocol(clearResumeIntent: false);
   }
 
   @override
@@ -112,13 +224,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   }) async {
     await initialize();
     await _gatt.requestAccess();
-    final availability = await _gatt.availability();
-    if (availability == GattAvailability.poweredOff) {
-      throw StateError('Bluetooth is turned off.');
-    }
-    if (availability == GattAvailability.unauthorized) {
-      throw StateError('Bluetooth permission was not granted.');
-    }
+    await _ensureRadioReady();
     await stopScan();
     _found.clear();
     _scanSub = _gatt.discoveries.listen(
@@ -145,15 +251,18 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   }
 
   void _handlePeripheral(GattPeripheral peripheral) {
-    final name = peripheral.name.trim();
-    if (name.isEmpty) return;
+    final advertised = peripheral.name.trim();
     final services = peripheral.serviceUuids
         .map((value) => value.toLowerCase())
         .toList(growable: false);
     final type = DiscoveredWearable.classify(
-      name: name,
+      name: advertised,
       serviceUuids: services,
     );
+    if (type == WearableDeviceType.custom && advertised.isEmpty) return;
+    final name = advertised.isEmpty
+        ? DiscoveredWearable.protocolLabel(type)
+        : advertised;
     final wearable = DiscoveredWearable(
       id: peripheral.id,
       name: name,
@@ -253,6 +362,7 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   @override
   Future<void> connect(AudioDeviceDescriptor device) async {
     await initialize();
+    await _ensureRadioReady();
     if (device.adapterId != id) {
       throw ArgumentError.value(device.adapterId, 'device.adapterId');
     }
@@ -301,7 +411,15 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       // verified against the real devices. Bonding is only requested on the
       // unknown-device probe path, where an encrypted characteristic may be the
       // thing being probed.
-      await connector.connect(requiresPairing: false);
+      // Battery and button notifies fire during the handshake. A broadcast
+      // listener attached afterwards never sees that first reading, so the
+      // record sheet stayed on "—" until the next (rare) change notify.
+      _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
+      _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
+      await connector.connect(
+        requiresPairing: false,
+        resumeLive: resumeRecording,
+      );
       _connector = connector;
       final omiFraming =
           wearable.type == WearableDeviceType.omi ||
@@ -316,9 +434,15 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       );
       _assembler = omiFraming ? OmiFrameAssembler() : null;
       _audioSub = connector.audioBytes.stream.listen(_handleAudioPacket);
-      _buttonSub = connector.buttonEvents.stream.listen(_handleButton);
-      _batterySub = connector.batteryLevels.stream.listen(_handleBattery);
       _setState(DeviceTransportState.connectedStandby);
+      _startLinkWatchdog();
+      if (resumeRecording) {
+        await connector.startRecording();
+        _enterLiveLink();
+      } else {
+        await _refreshBattery();
+        _startBatteryPoll();
+      }
       ClientDiagnosticLog.instance.record(
         'bluetooth',
         'connection_ready',
@@ -326,12 +450,9 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
           'name': wearable.name,
           'type': wearable.type.name,
           'codec': connector.codec.name,
+          'resumeLive': resumeRecording,
         },
       );
-      if (resumeRecording) {
-        await connector.startRecording();
-        _setState(DeviceTransportState.recording);
-      }
     } catch (error) {
       ClientDiagnosticLog.instance.record(
         'bluetooth',
@@ -468,6 +589,28 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     }
   }
 
+  Future<void> _refreshBattery() async {
+    final connector = _connector;
+    if (connector == null) return;
+    // Vendor battery queries often share the control characteristic with
+    // start/stop. A poll mid-take has halted live audio on Memoket and would
+    // do the same on any protocol that multiplexes those writes.
+    if (_state == DeviceTransportState.recording) return;
+    try {
+      final level = await connector.readBatteryLevel();
+      if (level >= 0 && level <= 100) _handleBattery(level);
+    } catch (_) {
+      // A missed poll must not drop the last reading the UI is showing.
+    }
+  }
+
+  void _startBatteryPoll() {
+    _batteryPoll?.cancel();
+    _batteryPoll = Timer.periodic(_batteryPollInterval, (_) {
+      unawaited(_refreshBattery());
+    });
+  }
+
   void _handleBattery(int level) {
     if (!_controlEvents.isClosed) {
       _controlEvents.add(
@@ -521,7 +664,15 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
       );
     }
     await connector.startRecording();
+    _enterLiveLink();
+  }
+
+  /// Capture is running: keep the radio awake and do not poll vendor battery.
+  /// Shared by an explicit start and by reconnect-while-recording.
+  void _enterLiveLink() {
     _resumeRecordingAfterReconnect = true;
+    _batteryPoll?.cancel();
+    _batteryPoll = null;
     _setState(DeviceTransportState.recording);
   }
 
@@ -532,11 +683,25 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     if (connector == null || _state != DeviceTransportState.recording) return;
     await connector.stopRecording();
     _setState(DeviceTransportState.connectedStandby);
+    _startBatteryPoll();
   }
 
   @override
   Future<void> disconnect() async {
     await _disconnectProtocol(clearResumeIntent: true);
+  }
+
+  /// Drop the GATT session without forgetting that capture should resume.
+  ///
+  /// Radio loss and the hardware probe's mid-take drop both use this: the next
+  /// [connect] rejoins live audio instead of treating the user as having
+  /// stopped. Protocols that keep a take on flash (Memoket, HeyPocket) must
+  /// not run a control handshake that would stop it.
+  Future<void> disconnectPreservingCaptureIntent() async {
+    if (_state == DeviceTransportState.recording) {
+      _resumeRecordingAfterReconnect = true;
+    }
+    await _disconnectProtocol(clearResumeIntent: false);
   }
 
   Future<void> _disconnectProtocol({required bool clearResumeIntent}) async {
@@ -557,6 +722,9 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
   }
 
   Future<void> _clearProtocolState() async {
+    _stopLinkWatchdog();
+    _batteryPoll?.cancel();
+    _batteryPoll = null;
     await _cancelSafely(_audioSub);
     await _cancelSafely(_buttonSub);
     await _cancelSafely(_batterySub);
@@ -586,6 +754,9 @@ class DeviceAdapter implements AudioDeviceAdapter, StorageSyncCapableAdapter {
     if (_disposed) return;
     await stopScan();
     await disconnect();
+    await _cancelSafely(_availabilitySub);
+    _availabilitySub = null;
+    _stopLinkWatchdog();
     await _gatt.dispose();
     _disposed = true;
     await _discoveries.close();

@@ -48,7 +48,7 @@ const jsonSchema = {
 
 function messages(memory, segments, contextItems) {
   return [
-    { role: 'system', content: `Rewrite one personal memory from its transcript and user-supplied context. Return one JSON object matching the contract. Context is evidence and may contribute facts not spoken aloud, but distinguish plans or reference material from events and decisions that actually happened. Cite every context item used in sourceContextItemIds. Never cite an unknown id. Action items require an explicit owner and accepted next action. English output only.\n${TITLE_GUIDANCE}\nReturn no prose outside JSON.` },
+    { role: 'system', content: `Rewrite one personal memory from its transcript and user-supplied context. Return one JSON object matching the contract. Context is evidence and may contribute facts not spoken aloud, but distinguish plans or reference material from events and decisions that actually happened. Cite every context item used in sourceContextItemIds. Never cite an unknown id. Action items require an explicit owner and accepted next action.\n${TITLE_GUIDANCE}\nReturn no prose outside JSON.` },
     { role: 'user', content: JSON.stringify({
       existingMemory: { type: memory.type, titleEn: memory.title_en, summaryEn: memory.summary_en, emoji: memory.emoji,
         importance: memory.importance, startedAt: memory.started_at, endedAt: memory.ended_at },
@@ -56,8 +56,8 @@ function messages(memory, segments, contextItems) {
       contextItems: contextItems.map((item) => ({ id: item.id, kind: item.kind, capturedAt: item.captured_at,
         content: item.note_text || item.analysis_text, sourceName: item.original_name || null })),
       outputContract: {
-        type: MEMORY_TYPES.join('|'), titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
-        topics: ['English topic'], sourceContextItemIds: ['context UUID'],
+        type: MEMORY_TYPES.join('|'), titleEn: 'title, in the output language', summaryEn: 'summary, in the output language', emoji: '🤝', importance: 1,
+        topics: ['topic, in the output language'], sourceContextItemIds: ['context UUID'],
         miniMemories: [{ kind: GENERATED_MINI_MEMORY_KINDS.join('|'), textEn: 'Atomic action with responsible actor',
           importance: 1, confidence: 0.5, dueAt: null, status: 'open', sourceSegmentIds: ['transcript UUID when spoken'] }],
       },

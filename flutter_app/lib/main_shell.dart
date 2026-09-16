@@ -4,13 +4,15 @@ import 'main_controller.dart';
 import 'main_library.dart';
 import 'main_navigation.dart';
 import 'main_record.dart';
-import 'main_search.dart';
+import 'main_ask.dart';
 import 'main_settings.dart';
 import 'main_shared.dart';
 import 'main_sources.dart';
 import 'main_spacing.dart';
 import 'main_theme.dart';
+import 'src/context/recording_context_drop_target.dart';
 import 'src/record/sync_cards.dart';
+import 'l10n/gen/app_l10n.dart';
 
 class NeoRecallShell extends StatefulWidget {
   const NeoRecallShell({super.key, required this.controller});
@@ -56,7 +58,7 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
   Widget _screen() => switch (controller.page) {
     RecallPage.record => RecordScreen(controller: controller),
     RecallPage.library => LibraryScreen(controller: controller),
-    RecallPage.search => SearchScreen(controller: controller),
+    RecallPage.search => AskScreen(controller: controller),
     RecallPage.sources => SourcesScreen(controller: controller),
     RecallPage.devices => SettingsScreen(
       controller: controller,
@@ -76,62 +78,67 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
 
   @override
   Widget build(BuildContext context) {
-    return AppBackdrop(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= AppBreakpoints.rail;
-          final content = AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            // A String, not a List: ValueKey compares its value with ==, and
-            // two equal Lists are not equal, so a list key rebuilt the whole
-            // screen on every notification and threw away its scroll position.
-            child: KeyedSubtree(
-              key: ValueKey<String>(
-                '${controller.page.name}:${controller.libraryTab.name}',
-              ),
-              child: _screen(),
-            ),
-          );
-
-          if (wide) {
-            return Scaffold(
-              backgroundColor: Colors.transparent,
-              body: Row(
-                children: <Widget>[
-                  _Sidebar(
-                    controller: controller,
-                    openGroup: _openGroup,
-                    onSelectGroup: _selectGroup,
-                  ),
-                  Expanded(
-                    child: Column(
-                      children: <Widget>[
-                        _GlobalStatusBar(controller: controller),
-                        Expanded(child: ClipRect(child: content)),
-                      ],
-                    ),
-                  ),
-                ],
+    // Wrapping the shell, not the recording screen: a file dropped anywhere in
+    // the app — timeline, search, settings — joins the running recording.
+    return RecordingContextDropTarget(
+      controller: controller,
+      child: AppBackdrop(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= AppBreakpoints.rail;
+            final content = AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              // A String, not a List: ValueKey compares its value with ==, and
+              // two equal Lists are not equal, so a list key rebuilt the whole
+              // screen on every notification and threw away its scroll position.
+              child: KeyedSubtree(
+                key: ValueKey<String>(
+                  '${controller.page.name}:${controller.libraryTab.name}',
+                ),
+                child: _screen(),
               ),
             );
-          }
 
-          return Scaffold(
-            backgroundColor: Colors.transparent,
-            body: SafeArea(
-              bottom: false,
-              child: Column(
-                children: <Widget>[
-                  _GlobalStatusBar(controller: controller),
-                  Expanded(child: ClipRect(child: content)),
-                ],
+            if (wide) {
+              return Scaffold(
+                backgroundColor: Colors.transparent,
+                body: Row(
+                  children: <Widget>[
+                    _Sidebar(
+                      controller: controller,
+                      openGroup: _openGroup,
+                      onSelectGroup: _selectGroup,
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: <Widget>[
+                          _GlobalStatusBar(controller: controller),
+                          Expanded(child: ClipRect(child: content)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Scaffold(
+              backgroundColor: Colors.transparent,
+              body: SafeArea(
+                bottom: false,
+                child: Column(
+                  children: <Widget>[
+                    _GlobalStatusBar(controller: controller),
+                    Expanded(child: ClipRect(child: content)),
+                  ],
+                ),
               ),
-            ),
-            bottomNavigationBar: _TabBar(controller: controller),
-          );
-        },
+              bottomNavigationBar: _TabBar(controller: controller),
+            );
+          },
+        ),
       ),
     );
   }
@@ -159,7 +166,7 @@ class _TabBar extends StatelessWidget {
           for (final destination in neoRecallTabDestinations)
             NavigationDestination(
               icon: Icon(destination.icon),
-              label: destination.label,
+              label: destination.label(AppL10n.of(context)),
             ),
         ],
       ),
@@ -184,7 +191,7 @@ class _Sidebar extends StatelessWidget {
     final accountLabel = controller.username?.trim();
     final safeLabel = accountLabel?.isNotEmpty == true
         ? accountLabel!
-        : 'Account';
+        : AppL10n.of(context).shellAccountFallback;
     final initial = safeLabel.characters.first.toUpperCase();
 
     return Container(
@@ -224,7 +231,7 @@ class _Sidebar extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'CONTROL SURFACE',
+                          AppL10n.of(context).shellControlSurface,
                           style: sectionEyebrowStyle(
                             palette,
                           ).copyWith(fontSize: 9.5, letterSpacing: 1.8),
@@ -244,7 +251,7 @@ class _Sidebar extends StatelessWidget {
                   _SidebarButton(
                     selected: group.isCurrent(controller),
                     icon: group.icon,
-                    label: group.label,
+                    label: group.label(AppL10n.of(context)),
                     trailing: group.hasChildren
                         ? Icon(
                             openGroup == group
@@ -272,7 +279,7 @@ class _Sidebar extends StatelessWidget {
                               _SidebarButton(
                                 selected: destination.isCurrent(controller),
                                 icon: destination.icon,
-                                label: destination.label,
+                                label: destination.label(AppL10n.of(context)),
                                 compact: true,
                                 onTap: () => destination.select(controller),
                               ),
@@ -326,13 +333,13 @@ class _Sidebar extends StatelessWidget {
                   ),
                 ),
                 _SidebarIconButton(
-                  tooltip: 'Settings',
+                  tooltip: AppL10n.of(context).navSettings,
                   icon: Icons.settings_outlined,
                   onTap: () => controller.selectPage(RecallPage.settings),
                 ),
                 const SizedBox(width: 4),
                 _SidebarIconButton(
-                  tooltip: 'Sign out',
+                  tooltip: AppL10n.of(context).shellSignOut,
                   icon: Icons.logout,
                   onTap: () async => controller.logout(),
                 ),
@@ -487,9 +494,8 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.battery_alert_rounded,
           color: palette.danger,
-          message:
-              'Battery optimization may suspend always-on capture on this device.',
-          actionLabel: 'Fix',
+          message: AppL10n.of(context).shellBatteryWarning,
+          actionLabel: AppL10n.of(context).shellBatteryFix,
           onAction: () => controller.openBatterySettings(),
         ),
       );
@@ -499,8 +505,7 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.cloud_off_rounded,
           color: palette.textMuted,
-          message:
-              'Offline — capture continues; uploads resume when reconnected.',
+          message: AppL10n.of(context).shellOffline,
         ),
       );
     }
@@ -521,8 +526,8 @@ class _GlobalStatusBar extends StatelessWidget {
         _StatusBanner(
           icon: Icons.fiber_manual_record_rounded,
           color: palette.secondary,
-          message: 'Recording is active.',
-          actionLabel: 'Open',
+          message: AppL10n.of(context).shellRecordingActive,
+          actionLabel: AppL10n.of(context).shellRecordingOpen,
           onAction: () => controller.selectPage(RecallPage.record),
         ),
       );
@@ -605,7 +610,7 @@ class _SyncStatusPillState extends State<_SyncStatusPill>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Syncing $label',
+                  AppL10n.of(context).shellSyncing(label),
                   style: TextStyle(
                     color: palette.textSecondary,
                     fontSize: 12.5,

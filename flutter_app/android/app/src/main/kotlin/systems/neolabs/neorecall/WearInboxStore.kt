@@ -105,17 +105,21 @@ class WearInboxStore private constructor(context: Context) :
     return inserted
   }
 
-  fun pending(limit: Int = 20): List<PhoneWearRecording> = readableDatabase.rawQuery(
+  @Synchronized fun pending(limit: Int = 20): List<PhoneWearRecording> = readableDatabase.rawQuery(
     "SELECT * FROM inbox WHERE state=? ORDER BY session_started_at_ms, sequence LIMIT ?",
     arrayOf(STATE_RECEIVED, limit.toString()),
   ).use { cursor ->
     buildList {
       while (cursor.moveToNext()) {
+        val recordingId = cursor.getString(cursor.getColumnIndexOrThrow("recording_id"))
         val file = File(cursor.getString(cursor.getColumnIndexOrThrow("file_path")))
-        if (!file.exists()) continue
+        if (!file.exists()) {
+          writableDatabase.delete("inbox", "recording_id=?", arrayOf(recordingId))
+          continue
+        }
         add(
           PhoneWearRecording(
-            recordingId = cursor.getString(cursor.getColumnIndexOrThrow("recording_id")),
+            recordingId = recordingId,
             sessionId = cursor.getString(cursor.getColumnIndexOrThrow("session_id")),
             sourceId = cursor.getString(cursor.getColumnIndexOrThrow("source_id")),
             watchDeviceId = cursor.getString(cursor.getColumnIndexOrThrow("watch_device_id")),
@@ -138,7 +142,7 @@ class WearInboxStore private constructor(context: Context) :
     }
   }
 
-  fun markImported(recordingId: String) {
+  @Synchronized fun markImported(recordingId: String) {
     writableDatabase.update(
       "inbox",
       ContentValues().apply { put("state", STATE_IMPORTED) },
@@ -147,12 +151,12 @@ class WearInboxStore private constructor(context: Context) :
     )
   }
 
-  fun state(recordingId: String): String? = readableDatabase.rawQuery(
+  @Synchronized fun state(recordingId: String): String? = readableDatabase.rawQuery(
     "SELECT state FROM inbox WHERE recording_id=?",
     arrayOf(recordingId),
   ).use { if (it.moveToFirst()) it.getString(0) else null }
 
-  fun markAcknowledged(recordingId: String) {
+  @Synchronized fun markAcknowledged(recordingId: String) {
     val path = readableDatabase.rawQuery(
       "SELECT file_path FROM inbox WHERE recording_id=?",
       arrayOf(recordingId),

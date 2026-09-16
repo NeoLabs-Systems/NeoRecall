@@ -2,6 +2,7 @@
 #include "nr_wifi.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
@@ -207,7 +208,9 @@ esp_err_t nr_wifi_start_ap(void)
     s_ap_active = true;
     nr_portal_start();
     esp_event_post(NR_EVENT, NR_EVT_WIFI_CHANGED, NULL, 0, 0);   // UI shows the portal banner
-    ESP_LOGI(TAG, "config hotspot up: %s (open) -> http://192.168.4.1", ssid);
+    char ap_ip[16];
+    nr_wifi_ap_ip(ap_ip);
+    ESP_LOGI(TAG, "config hotspot up: %s (open) -> http://%s", ssid, ap_ip);
     return ESP_OK;
 }
 
@@ -222,3 +225,19 @@ void nr_wifi_stop_ap(void)
 }
 
 bool nr_wifi_ap_active(void) { return s_ap_active; }
+
+bool nr_wifi_ap_ip(char out[16])
+{
+    if (!out) return false;
+    if (!s_ap_netif) {
+        nr_strlcpy(out, "192.168.4.1", 16);
+        return false;
+    }
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(s_ap_netif, &ip) != ESP_OK) {
+        nr_strlcpy(out, "192.168.4.1", 16);
+        return false;
+    }
+    snprintf(out, 16, IPSTR, IP2STR(&ip.ip));
+    return true;
+}

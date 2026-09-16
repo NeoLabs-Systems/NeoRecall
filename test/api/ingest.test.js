@@ -44,6 +44,12 @@ test('idempotent upload becomes terminal only after transcript commit and audio 
   assert.equal(status.body.receipts[0].transcriptSegmentCount, 1);
   await request(app).post('/api/v1/ingest/chunks/released').set(auth).send({ chunkIds: [chunkId] }).expect(200);
   assert.ok(getDatabase().prepare('SELECT client_released_at FROM audio_chunks WHERE id=?').get(chunkId).client_released_at);
+  // The uploaded chunk is not the only audio a recording produces on this
+  // server any more: conditioning writes a copy of its own. The invariant is
+  // about all of it, so the working directory has to be empty here too.
+  const { paths } = require('../../runtime/paths');
+  assert.deepEqual(fs.readdirSync(paths().audioWork).filter((name) => !name.startsWith('.')), [],
+    'no conditioned copy of the recording outlives the receipt that says the audio is gone');
 
   const db = getDatabase();
   const userId = registered.body.user.id;

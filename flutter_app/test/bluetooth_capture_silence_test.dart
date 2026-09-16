@@ -30,8 +30,10 @@ void main() {
 
     await source.start(sampleRate: 16000, channels: 1);
 
-    expect(await warning.timeout(const Duration(seconds: 2)),
-        contains('has not sent any audio'));
+    expect(
+      await warning.timeout(const Duration(seconds: 2)),
+      contains('has not sent any audio'),
+    );
     await source.dispose();
   });
 
@@ -70,8 +72,10 @@ void main() {
 
     final warning = source.warningStream.first;
     await source.start(sampleRate: 16000, channels: 1);
-    expect(await warning.timeout(const Duration(seconds: 2)),
-        contains('has not sent any audio'));
+    expect(
+      await warning.timeout(const Duration(seconds: 2)),
+      contains('has not sent any audio'),
+    );
     await source.dispose();
   });
 }
@@ -104,7 +108,9 @@ class _StubAdapter implements AudioDeviceAdapter {
   @override
   Future<void> initialize() async {}
   @override
-  Future<void> startScan({Duration timeout = const Duration(seconds: 12)}) async {}
+  Future<void> startScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
   @override
   Future<void> stopScan() async {}
   @override

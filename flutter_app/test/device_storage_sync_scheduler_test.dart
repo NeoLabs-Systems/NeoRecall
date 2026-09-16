@@ -20,90 +20,104 @@ class _ManualClock {
 }
 
 void main() {
-  test('polls automatically while eligible and stops sweeping when not', () async {
-    var eligible = true;
-    var sweeps = 0;
-    void Function(Timer)? tick;
-    final scheduler = DeviceStorageSyncScheduler(
-      isEligible: () => eligible,
-      runSync: ({required bool userInitiated}) async {
-        sweeps += 1;
-        return true;
-      },
-      createTimer: (interval, callback) {
-        tick = callback;
-        return _FakeTimer();
-      },
-    );
-    addTearDown(scheduler.dispose);
+  test(
+    'polls automatically while eligible and stops sweeping when not',
+    () async {
+      var eligible = true;
+      var sweeps = 0;
+      void Function(Timer)? tick;
+      final scheduler = DeviceStorageSyncScheduler(
+        isEligible: () => eligible,
+        runSync: ({required bool userInitiated}) async {
+          sweeps += 1;
+          return true;
+        },
+        createTimer: (interval, callback) {
+          tick = callback;
+          return _FakeTimer();
+        },
+      );
+      addTearDown(scheduler.dispose);
 
-    scheduler.start();
-    expect(scheduler.isPolling, isTrue);
+      scheduler.start();
+      expect(scheduler.isPolling, isTrue);
 
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 1);
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(sweeps, 1);
 
-    // No user action is needed for the next sweep: polling is the mechanism.
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 2);
+      // No user action is needed for the next sweep: polling is the mechanism.
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(sweeps, 2);
 
-    eligible = false;
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 2, reason: 'a sweep must not run while it is not eligible');
-  });
+      eligible = false;
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(
+        sweeps,
+        2,
+        reason: 'a sweep must not run while it is not eligible',
+      );
+    },
+  );
 
-  test('a failing device backs off instead of being polled every tick', () async {
-    final clock = _ManualClock();
-    var sweeps = 0;
-    var succeed = false;
-    void Function(Timer)? tick;
-    const policy = DeviceStorageSyncPolicy(
-      pollInterval: Duration(seconds: 15),
-      initialFailureBackoff: Duration(seconds: 30),
-      maximumFailureBackoff: Duration(minutes: 2),
-    );
-    final scheduler = DeviceStorageSyncScheduler(
-      isEligible: () => true,
-      runSync: ({required bool userInitiated}) async {
-        sweeps += 1;
-        return succeed;
-      },
-      policy: policy,
-      clock: () => clock.now,
-      createTimer: (interval, callback) {
-        tick = callback;
-        return _FakeTimer();
-      },
-    );
-    addTearDown(scheduler.dispose);
-    scheduler.start();
+  test(
+    'a failing device backs off instead of being polled every tick',
+    () async {
+      final clock = _ManualClock();
+      var sweeps = 0;
+      var succeed = false;
+      void Function(Timer)? tick;
+      const policy = DeviceStorageSyncPolicy(
+        pollInterval: Duration(seconds: 15),
+        initialFailureBackoff: Duration(seconds: 30),
+        maximumFailureBackoff: Duration(minutes: 2),
+      );
+      final scheduler = DeviceStorageSyncScheduler(
+        isEligible: () => true,
+        runSync: ({required bool userInitiated}) async {
+          sweeps += 1;
+          return succeed;
+        },
+        policy: policy,
+        clock: () => clock.now,
+        createTimer: (interval, callback) {
+          tick = callback;
+          return _FakeTimer();
+        },
+      );
+      addTearDown(scheduler.dispose);
+      scheduler.start();
 
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 1);
-    expect(scheduler.consecutiveFailures, 1);
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(sweeps, 1);
+      expect(scheduler.consecutiveFailures, 1);
 
-    // Still inside the backoff window: the tick is skipped.
-    clock.advance(const Duration(seconds: 15));
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 1);
+      // Still inside the backoff window: the tick is skipped.
+      clock.advance(const Duration(seconds: 15));
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(sweeps, 1);
 
-    clock.advance(const Duration(seconds: 20));
-    tick!(_FakeTimer());
-    await pumpEventQueue();
-    expect(sweeps, 2);
-    expect(scheduler.consecutiveFailures, 2);
+      clock.advance(const Duration(seconds: 20));
+      tick!(_FakeTimer());
+      await pumpEventQueue();
+      expect(sweeps, 2);
+      expect(scheduler.consecutiveFailures, 2);
 
-    // A user-initiated sweep ignores the backoff so the button always acts.
-    succeed = true;
-    await scheduler.requestSync(userInitiated: true);
-    expect(sweeps, 3);
-    expect(scheduler.consecutiveFailures, 0, reason: 'success clears backoff');
-  });
+      // A user-initiated sweep ignores the backoff so the button always acts.
+      succeed = true;
+      await scheduler.requestSync(userInitiated: true);
+      expect(sweeps, 3);
+      expect(
+        scheduler.consecutiveFailures,
+        0,
+        reason: 'success clears backoff',
+      );
+    },
+  );
 
   test('backoff grows and is capped', () {
     const policy = DeviceStorageSyncPolicy(
@@ -161,7 +175,11 @@ void main() {
     expect(scheduler.isRunning, isTrue);
 
     await scheduler.requestSync();
-    expect(sweeps, 1, reason: 'overlapping drains would corrupt the BLE channel');
+    expect(
+      sweeps,
+      1,
+      reason: 'overlapping drains would corrupt the BLE channel',
+    );
 
     // A user-initiated request waits for the in-flight sweep, then runs.
     final manual = scheduler.requestSync(userInitiated: true);

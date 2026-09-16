@@ -33,6 +33,10 @@ class UploadPump {
   // continues to obey the saved Wi-Fi-only policy.
   static const int _ledgerScanLimit = 10000;
   final Set<String> _meteredOverrideChunkIds = <String>{};
+
+  /// Chunks already reported as held back, so the per-cycle retry stays quiet.
+  /// Cleared when the chunk finally releases, so a later block is heard again.
+  final Set<String> _forwardingBlockedChunkIds = <String>{};
   String? _meteredOverrideAccountId;
 
   bool get meteredUploadOverrideActive =>
@@ -43,6 +47,10 @@ class UploadPump {
   /// copy can be released (Wear OS does this to release the watch original).
   Future<bool> Function(AudioChunk chunk, Map<String, dynamic> receipt)?
   onTerminalReceipt;
+
+  /// Copies local audio aside after a terminal receipt, before [store.release].
+  /// Failures must not block release.
+  Future<void> Function(AudioChunk chunk)? onRetainAudio;
   bool _running = false;
   Timer? _timer;
   String? _accountId;
@@ -212,22 +220,33 @@ class UploadPump {
         // draining, so the exceptional authorization is no longer needed.
         _clearMeteredOverride();
       }
-      if (!policyAllowed && !meteredOverride) return;
-      await _setUploadActivity(true);
-      final sessions = await store.pendingSessions(pumpingAccountId);
+      // The policy governs sending audio, not finishing recordings that were
+      // already sent. Receipt polling and release are a few hundred bytes, and
+      // they are the only thing that can free local audio — gating them behind
+      // an unmetered network left uploaded chunks, and the device originals
+      // they still own, stranded for as long as the phone stayed on mobile
+      // data.
+      final uploadsAllowed = policyAllowed || meteredOverride;
+      if (uploadsAllowed) await _setUploadActivity(true);
       final blockedSessionIds = <String>{};
-      for (final session in sessions) {
-        if (!_isCurrent(pumpingAccountId)) return;
-        try {
-          await api.syncSession(session);
+      if (uploadsAllowed) {
+        final sessions = await store.pendingSessions(pumpingAccountId);
+        for (final session in sessions) {
           if (!_isCurrent(pumpingAccountId)) return;
-          await store.markSessionSynced(session.id);
-        } catch (error) {
-          // Keep trying other sessions/devices. Network or one bad session
-          // must not freeze the entire multi-device upload ledger.
-          blockedSessionIds.add(session.id);
-          processingIssue = _issueMessage('Server session setup failed', error);
-          continue;
+          try {
+            await api.syncSession(session);
+            if (!_isCurrent(pumpingAccountId)) return;
+            await store.markSessionSynced(session.id);
+          } catch (error) {
+            // Keep trying other sessions/devices. Network or one bad session
+            // must not freeze the entire multi-device upload ledger.
+            blockedSessionIds.add(session.id);
+            processingIssue = _issueMessage(
+              'Server session setup failed',
+              error,
+            );
+            continue;
+          }
         }
       }
       if (!_isCurrent(pumpingAccountId)) return;
@@ -259,7 +278,7 @@ class UploadPump {
           .toList(growable: false);
       for (final chunk in terminal) {
         final receipt = chunk.receipt;
-        if (receipt != null) await _acceptReceipt(chunk, receipt);
+        if (receipt != null) await _acceptReceiptGuarded(chunk, receipt);
       }
       final uploaded = chunks
           .where(
@@ -273,6 +292,7 @@ class UploadPump {
       final ready = chunks
           .where(
             (chunk) =>
+                uploadsAllowed &&
                 !blockedSessionIds.contains(chunk.sessionId) &&
                 (!meteredOverride ||
                     _meteredOverrideChunkIds.contains(chunk.id)) &&
@@ -414,7 +434,9 @@ class UploadPump {
       if (!_isCurrent(pumpingAccountId)) return;
       for (final receipt in receipts) {
         final localChunk = serverToLocal[receipt['chunkId'] as String?];
-        if (localChunk != null) await _acceptReceipt(localChunk, receipt);
+        if (localChunk != null) {
+          await _acceptReceiptGuarded(localChunk, receipt);
+        }
       }
     } catch (error) {
       /* Connectivity failures leave durable audio untouched. */
@@ -423,6 +445,68 @@ class UploadPump {
         error,
       );
     }
+  }
+
+  /// Accepts one receipt without letting its failure reach any other chunk.
+  ///
+  /// Acting on a receipt touches the filesystem, the ledger and the platform
+  /// host, so it can fail for reasons that belong to a single recording. An
+  /// escaping exception used to abort the whole pump cycle — and because the
+  /// periodic timer swallows it, every later chunk stayed unreleased
+  /// indefinitely with the card still reporting that all was well. The failure
+  /// is now confined to its own chunk, named in the diagnostic log, and shown
+  /// to the user; audio is untouched either way, so the next cycle retries.
+  Future<void> _acceptReceiptGuarded(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+  ) async {
+    try {
+      await _acceptReceipt(chunk, receipt);
+    } catch (error) {
+      processingIssue = _issueMessage(
+        'Could not finish securing a recording',
+        error,
+      );
+      ClientDiagnosticLog.instance.record(
+        'upload',
+        'receipt_acceptance_failed',
+        level: 'warn',
+        details: <String, Object?>{
+          'chunkId': chunk.id,
+          'serverChunkId': receipt['chunkId'],
+          'localState': chunk.state.name,
+          'receiptState': receipt['state'],
+          'reason': error.toString(),
+        },
+      );
+    }
+  }
+
+  /// Says out loud that a proven recording is being held back.
+  ///
+  /// Refusing to release is correct — the device that recorded it still owns
+  /// the original — but it is indistinguishable from a stall unless it is
+  /// reported, and a wedged handoff can hold audio forever. Logged once per
+  /// chunk so a repeating pump cycle cannot flood the diagnostic ring.
+  void _reportForwardingBlocked(
+    AudioChunk chunk,
+    Map<String, dynamic> receipt,
+    String reason,
+  ) {
+    processingIssue =
+        'A recording is secured on the server but the device that made it has '
+        'not confirmed the handover yet.';
+    if (!_forwardingBlockedChunkIds.add(chunk.id)) return;
+    ClientDiagnosticLog.instance.record(
+      'upload',
+      'terminal_forwarding_blocked',
+      level: 'warn',
+      details: <String, Object?>{
+        'chunkId': chunk.id,
+        'serverChunkId': receipt['chunkId'],
+        'reason': reason,
+      },
+    );
   }
 
   String _issueMessage(String context, Object error) {
@@ -446,13 +530,24 @@ class UploadPump {
       final forward = onTerminalReceipt;
       if (forward != null) {
         try {
-          if (!await forward(chunk, receipt)) return;
-        } catch (_) {
+          if (!await forward(chunk, receipt)) {
+            _reportForwardingBlocked(chunk, receipt, 'refused');
+            return;
+          }
+        } catch (error) {
           // The terminal receipt stays durable and is retried next pump. Audio
           // remains in both ownership ledgers until forwarding succeeds.
+          _reportForwardingBlocked(chunk, receipt, error.toString());
           return;
         }
       }
+      try {
+        await onRetainAudio?.call(chunk);
+      } catch (_) {
+        // Playback copies are a convenience. A retain failure must never keep
+        // the upload pump from releasing audio that already has a receipt.
+      }
+      _forwardingBlockedChunkIds.remove(id);
       await store.release(id);
       try {
         await api.releaseChunks(<String>[receipt['chunkId'] as String]);

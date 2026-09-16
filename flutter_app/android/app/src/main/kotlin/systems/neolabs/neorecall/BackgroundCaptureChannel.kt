@@ -99,6 +99,22 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
           result.success(pending)
         }
+        "takePendingMemoketE2eRequest" -> {
+          val pending = e2ePreferences().getBoolean(KEY_E2E_PENDING, false)
+          if (!pending) {
+            result.success(null)
+          } else {
+            val payload = mapOf(
+              "liveMs" to e2ePreferences().getInt(KEY_E2E_LIVE_MS, 0),
+              "reconnectGapMs" to e2ePreferences().getInt(KEY_E2E_RECONNECT_GAP_MS, 0),
+              "idleMs" to e2ePreferences().getInt(KEY_E2E_IDLE_MS, 0),
+            )
+            e2ePreferences().edit()
+              .putBoolean(KEY_E2E_PENDING, false)
+              .commit()
+            result.success(payload)
+          }
+        }
         "publishWidgetData" -> {
           val payload = call.argument<String>("payload")
           if (payload == null) {
@@ -110,26 +126,68 @@ class BackgroundCaptureChannel(private val context: Context) {
           }
         }
         "takePendingWidgetActions" -> result.success(WidgetStore.takeActions(context))
+        "publishWatchDigest" -> {
+          val payload = call.argument<String>("payload")
+          if (payload == null) {
+            result.error("INVALID_WATCH_DIGEST", "Watch digest payload is missing.", null)
+          } else {
+            // Answered once the put has been queued, not once a watch has drawn
+            // it: a watch that is out of range must not stall the Dart caller.
+            PhoneWearDigestPublisher.get(context).publish(
+              payload,
+              force = call.argument<Boolean>("force") == true,
+            ) { error ->
+              if (error != null) {
+                android.util.Log.w("NeoRecall", "Watch digest not published: $error")
+              }
+            }
+            result.success(true)
+          }
+        }
+        "pairedWatches" -> {
+          // Play services answers this off the main thread; the reply has to
+          // come back onto it before Flutter is allowed to hear it.
+          PhoneWearDigestPublisher.get(context).nodes { nodes ->
+            Handler(Looper.getMainLooper()).post { result.success(nodes) }
+          }
+        }
         "takePendingWatchRecordings" -> try {
           result.success(PhoneWearTransferManager.get(context).pending())
         } catch (error: Exception) {
           result.error("WATCH_INBOX_FAILED", error.message, null)
         }
         "markWatchRecordingImported" -> {
-          PhoneWearTransferManager.get(context).markImported(
-            requireNotNull(call.argument<String>("recordingId")),
-          )
-          result.success(true)
+          val recordingId = call.argument<String>("recordingId")
+          if (recordingId.isNullOrBlank()) {
+            result.error("INVALID_WATCH_RECORDING", "recordingId is required.", null)
+          } else {
+            PhoneWearTransferManager.get(context).markImported(recordingId)
+            result.success(true)
+          }
         }
-        "acknowledgeWatchRecording" -> try {
-          result.success(
-            PhoneWearTransferManager.get(context).acknowledge(
-              requireNotNull(call.argument<String>("recordingId")),
-              requireNotNull(call.argument<Map<String, Any?>>("receipt")),
-            ),
-          )
-        } catch (error: Exception) {
-          result.error("WATCH_ACK_FAILED", error.message, null)
+        "acknowledgeWatchRecording" -> {
+          val recordingId = call.argument<String>("recordingId")
+          val receipt = call.argument<Map<String, Any?>>("receipt")
+          if (recordingId.isNullOrBlank() || receipt == null) {
+            result.error("INVALID_WATCH_ACK", "recordingId and receipt are required.", null)
+            return@setMethodCallHandler
+          }
+          // Answered off the main thread, then handed back to it: the Data Layer
+          // write blocks, and Flutter may only be replied to on the main thread.
+          PhoneWearTransferManager.get(context).acknowledge(
+            recordingId,
+            receipt,
+          ) { outcome ->
+            Handler(Looper.getMainLooper()).post {
+              outcome.fold(
+                { acknowledged -> result.success(acknowledged) },
+                { error ->
+                  android.util.Log.w("NeoRecall", "Watch acknowledgement failed: ${error.message}")
+                  result.error("WATCH_ACK_FAILED", error.message, null)
+                },
+              )
+            }
+          }
         }
         else -> result.notImplemented()
       }
@@ -148,6 +206,31 @@ class BackgroundCaptureChannel(private val context: Context) {
     Handler(Looper.getMainLooper()).post {
       if (::channel.isInitialized) {
         channel.invokeMethod("widgetPhoneRecordingRequested", null)
+      }
+    }
+  }
+
+  /**
+   * Persists a Memoket hardware probe request so a cold Flutter engine still
+   * runs it. Invoked from ADB via MainActivity; there is no user-facing entry.
+   */
+  fun requestMemoketE2e(liveMs: Int?, reconnectGapMs: Int?, idleMs: Int?) {
+    e2ePreferences().edit()
+      .putBoolean(KEY_E2E_PENDING, true)
+      .putInt(KEY_E2E_LIVE_MS, liveMs ?: 0)
+      .putInt(KEY_E2E_RECONNECT_GAP_MS, reconnectGapMs ?: 0)
+      .putInt(KEY_E2E_IDLE_MS, idleMs ?: 0)
+      .commit()
+    Handler(Looper.getMainLooper()).post {
+      if (::channel.isInitialized) {
+        channel.invokeMethod(
+          "memoketE2eRequested",
+          mapOf(
+            "liveMs" to (liveMs ?: 0),
+            "reconnectGapMs" to (reconnectGapMs ?: 0),
+            "idleMs" to (idleMs ?: 0),
+          ),
+        )
       }
     }
   }
@@ -172,6 +255,9 @@ class BackgroundCaptureChannel(private val context: Context) {
 
   private fun widgetPreferences() =
     context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+
+  private fun e2ePreferences() =
+    context.getSharedPreferences(E2E_PREFS, Context.MODE_PRIVATE)
 
   private fun networkRuntimeState(): Map<String, Boolean> {
     val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -240,6 +326,11 @@ class BackgroundCaptureChannel(private val context: Context) {
     private const val WIDGET_PREFS = "neorecall_record_widget"
     private const val KEY_WIDGET_PHONE_RECORDING_PENDING =
       "phoneRecordingPending"
+    private const val E2E_PREFS = "neorecall_memoket_e2e"
+    private const val KEY_E2E_PENDING = "pending"
+    private const val KEY_E2E_LIVE_MS = "liveMs"
+    private const val KEY_E2E_RECONNECT_GAP_MS = "reconnectGapMs"
+    private const val KEY_E2E_IDLE_MS = "idleMs"
 
     fun isWidgetPhoneRecordingPending(context: Context): Boolean =
       context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)

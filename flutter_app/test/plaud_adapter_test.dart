@@ -8,75 +8,81 @@ import 'package:neorecall/src/devices/plaud/plaud_hardware.dart';
 import 'package:neorecall/src/devices/plaud/plaud_session.dart';
 
 void main() {
-  test('scan and connect bind through Embedded hardware, not a cloud file poll', () async {
-    final hardware = _FakePlaudHardware();
-    final adapter = PlaudAdapter(
-      hardware: hardware,
-      fetchSession: () async => PlaudEmbeddedSession(
-        accessToken: 'user-jwt',
-        customDomain: 'platform-us.plaud.ai',
-        userId: 'neouser',
-        expiresAt: DateTime.now().add(const Duration(hours: 12)),
-      ),
-      connectTimeout: const Duration(seconds: 2),
-    );
-    final seen = <AudioDeviceDescriptor>[];
-    adapter.discoveries.listen(seen.add);
-    await adapter.startScan(timeout: const Duration(milliseconds: 20));
-    expect(seen, isNotEmpty);
-    expect(seen.first.metadata['type'], 'plaud');
-    expect(hardware.initialized, isTrue);
+  test(
+    'scan and connect bind through Embedded hardware, not a cloud file poll',
+    () async {
+      final hardware = _FakePlaudHardware();
+      final adapter = PlaudAdapter(
+        hardware: hardware,
+        fetchSession: () async => PlaudEmbeddedSession(
+          accessToken: 'user-jwt',
+          customDomain: 'platform-us.plaud.ai',
+          userId: 'neouser',
+          expiresAt: DateTime.now().add(const Duration(hours: 12)),
+        ),
+        connectTimeout: const Duration(seconds: 2),
+      );
+      final seen = <AudioDeviceDescriptor>[];
+      adapter.discoveries.listen(seen.add);
+      await adapter.startScan(timeout: const Duration(milliseconds: 20));
+      expect(seen, isNotEmpty);
+      expect(seen.first.metadata['type'], 'plaud');
+      expect(hardware.initialized, isTrue);
 
-    await adapter.connect(seen.first);
-    expect(adapter.offlineSyncConnector, isNotNull);
-    await adapter.dispose();
-  });
+      await adapter.connect(seen.first);
+      expect(adapter.offlineSyncConnector, isNotNull);
+      await adapter.dispose();
+    },
+  );
 
-  test('drain exports locally, ingest first, then deletes on the device', () async {
-    final hardware = _FakePlaudHardware();
-    final adapter = PlaudAdapter(
-      hardware: hardware,
-      fetchSession: () async => PlaudEmbeddedSession(
-        accessToken: 'user-jwt',
-        customDomain: 'platform-us.plaud.ai',
-        userId: 'neouser',
-        expiresAt: DateTime.now().add(const Duration(hours: 12)),
-      ),
-      connectTimeout: const Duration(seconds: 2),
-      fileListTimeout: const Duration(seconds: 2),
-      exportTimeout: const Duration(seconds: 2),
-      deleteTimeout: const Duration(seconds: 2),
-    );
-    await adapter.startScan(timeout: const Duration(milliseconds: 10));
-    await adapter.connect(
-      AudioDeviceDescriptor(
-        adapterId: PlaudAdapter.adapterId,
-        deviceKey: 'uuid-1',
-        displayName: 'Note Pro',
-        transport: 'bluetooth_le',
-        metadata: const <String, Object?>{
-          'type': 'plaud',
-          'uuid': 'uuid-1',
-          'serialNumber': '8811',
-        },
-      ),
-    );
+  test(
+    'drain exports locally, ingest first, then deletes on the device',
+    () async {
+      final hardware = _FakePlaudHardware();
+      final adapter = PlaudAdapter(
+        hardware: hardware,
+        fetchSession: () async => PlaudEmbeddedSession(
+          accessToken: 'user-jwt',
+          customDomain: 'platform-us.plaud.ai',
+          userId: 'neouser',
+          expiresAt: DateTime.now().add(const Duration(hours: 12)),
+        ),
+        connectTimeout: const Duration(seconds: 2),
+        fileListTimeout: const Duration(seconds: 2),
+        exportTimeout: const Duration(seconds: 2),
+        deleteTimeout: const Duration(seconds: 2),
+      );
+      await adapter.startScan(timeout: const Duration(milliseconds: 10));
+      await adapter.connect(
+        AudioDeviceDescriptor(
+          adapterId: PlaudAdapter.adapterId,
+          deviceKey: 'uuid-1',
+          displayName: 'Note Pro',
+          transport: 'bluetooth_le',
+          metadata: const <String, Object?>{
+            'type': 'plaud',
+            'uuid': 'uuid-1',
+            'serialNumber': '8811',
+          },
+        ),
+      );
 
-    final ingested = <String>[];
-    final order = <String>[];
-    hardware.onExport = () => order.add('export');
-    hardware.onDelete = () => order.add('delete');
-    await adapter.drainStoredAudio((recording) async {
-      order.add('ingest');
-      ingested.add(recording.id);
-      expect(recording.contentType, 'audio/mpeg');
-      expect(recording.bytes, isNotEmpty);
-    });
-    expect(ingested, ['plaud:8811:1700000000']);
-    expect(order, ['export', 'ingest', 'delete']);
-    expect(hardware.deleted, [1700000000]);
-    await adapter.dispose();
-  });
+      final ingested = <String>[];
+      final order = <String>[];
+      hardware.onExport = () => order.add('export');
+      hardware.onDelete = () => order.add('delete');
+      await adapter.drainStoredAudio((recording) async {
+        order.add('ingest');
+        ingested.add(recording.id);
+        expect(recording.contentType, 'audio/mpeg');
+        expect(recording.bytes, isNotEmpty);
+      });
+      expect(ingested, ['plaud:8811:1700000000']);
+      expect(order, ['export', 'ingest', 'delete']);
+      expect(hardware.deleted, [1700000000]);
+      await adapter.dispose();
+    },
+  );
 
   test('a failed ingest leaves the recording on the device', () async {
     final hardware = _FakePlaudHardware();

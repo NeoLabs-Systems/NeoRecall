@@ -12,6 +12,7 @@ import 'main_floating.dart';
 import 'main_shared.dart';
 import 'main_shell.dart';
 import 'main_theme.dart';
+import 'l10n/gen/app_l10n.dart';
 import 'src/desktop/meeting_detector.dart';
 import 'src/desktop/window_coordinator.dart';
 import 'src/devices/audio_codec_decoder.dart';
@@ -24,7 +25,7 @@ Future<void> main() async {
           defaultTargetPlatform == TargetPlatform.windows)) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
-      DesktopWindowCoordinator.initialOptions,
+      await const DesktopWindowCoordinator().initialWindowOptions(),
       () async {
         await windowManager.show();
         await windowManager.focus();
@@ -117,6 +118,10 @@ class _NeoRecallAppState extends State<NeoRecallApp>
         await _meetingDetector?.dispose();
         _meetingDetector = null;
         await _openLibrary(selectNotes: false);
+      } else if (_desktop) {
+        // Sign-in and local setup are ordinary windows: make sure nothing left
+        // the native window transparent from an earlier floating session.
+        await _applyChromeBackground();
       }
       return;
     }
@@ -193,16 +198,22 @@ class _NeoRecallAppState extends State<NeoRecallApp>
     await trayManager.setContextMenu(
       Menu(
         items: <MenuItem>[
-          MenuItem(label: 'Quick capture', onClick: (_) => _showWindow()),
-          MenuItem(label: 'Open notes library', onClick: (_) => _openLibrary()),
+          MenuItem(
+            label: controller.strings.trayQuickCapture,
+            onClick: (_) => _showWindow(),
+          ),
+          MenuItem(
+            label: controller.strings.trayOpenLibrary,
+            onClick: (_) => _openLibrary(),
+          ),
           if (controller.isRecording)
             MenuItem(
-              label: 'Stop recording',
+              label: controller.strings.trayStopRecording,
               onClick: (_) async => controller.stopRecording(),
             ),
           MenuItem.separator(),
           MenuItem(
-            label: 'Quit',
+            label: controller.strings.trayQuit,
             onClick: (_) async {
               if (controller.isRecording) await controller.stopRecording();
               await windowManager.setPreventClose(false);
@@ -240,9 +251,24 @@ class _NeoRecallAppState extends State<NeoRecallApp>
   void onTrayIconMouseDown() => _showWindow();
 
   @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    if (_desktop && !_floatingMode) unawaited(_applyChromeBackground());
+  }
+
+  Future<void> _applyChromeBackground() => _window.applyChromeBackground(
+    WidgetsBinding.instance.platformDispatcher.platformBrightness,
+  );
+
+  @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'NeoRecall',
+    // The chosen language, not the device's: the picker in settings has to win
+    // over the platform, and it is also what the server writes memories in.
+    locale: controller.language.locale,
+    localizationsDelegates: AppL10n.localizationsDelegates,
+    supportedLocales: AppL10n.supportedLocales,
     themeMode: ThemeMode.system,
     theme: buildNeoRecallTheme(Brightness.light),
     darkTheme: buildNeoRecallTheme(Brightness.dark),
@@ -287,7 +313,7 @@ class _NeoRecallSplashView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
-              const Text('Loading NeoRecall'),
+              Text(AppL10n.of(context).appLoading),
             ],
           ),
         ),

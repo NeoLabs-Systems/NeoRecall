@@ -60,7 +60,7 @@ const OWNED_TABLES = [
   'entities', 'recording_sessions', 'audio_chunks', 'devices', 'jobs',
   'api_keys', 'user_two_factor', 'user_recovery_codes', 'search_documents',
   'diagnostic_request_events', 'processing_metrics',
-  'recording_context_items',
+  'recording_context_items', 'transcription_usage',
 ];
 
 test('deleting an account erases every row it owns', async () => {
@@ -122,8 +122,10 @@ test('an API key cannot delete the account it can otherwise read', async () => {
 test('deleting an account leaves no trace of it in the audit trail', async () => {
   const { userId, token } = await accountWithData('audit-user');
   const db = getDatabase();
-  db.prepare(`INSERT INTO audit_log (actor_type,actor_id,affected_user_id,action)
-    VALUES ('user',?,?,'test.action')`).run(userId, userId);
+  db.prepare(`INSERT INTO audit_log (actor_type,actor_id,affected_user_id,action,ip_address,metadata_json,resource_id)
+    VALUES ('user',?,?,'test.action','203.0.113.9','{"email":"gone@example.test"}','res-1')`).run(userId, userId);
+  db.prepare(`INSERT INTO audit_log (actor_type,actor_id,affected_user_id,action,ip_address,metadata_json)
+    VALUES ('system',NULL,?,'system.action','198.51.100.4','{"note":"identifying leftover"}')`).run(userId);
 
   await request(app).delete('/api/v1/auth/account').set('Authorization', `Bearer ${token}`)
     .send({ password: PASSWORD }).expect(204);
@@ -132,4 +134,12 @@ test('deleting an account leaves no trace of it in the audit trail', async () =>
   const naming = db.prepare(`SELECT COUNT(*) c FROM audit_log
     WHERE actor_id=? OR affected_user_id=?`).get(userId, userId).c;
   assert.equal(naming, 0, 'the audit trail still identifies the deleted account');
+  const leftovers = db.prepare(`SELECT action, ip_address, metadata_json, resource_id FROM audit_log
+    WHERE action IN ('test.action','system.action')`).all();
+  assert.ok(leftovers.length >= 1);
+  for (const row of leftovers) {
+    assert.equal(row.ip_address, null, `${row.action} still has an IP`);
+    assert.equal(row.metadata_json, null, `${row.action} still has metadata`);
+  }
+  assert.equal(leftovers.find((row) => row.action === 'test.action')?.resource_id, null);
 });

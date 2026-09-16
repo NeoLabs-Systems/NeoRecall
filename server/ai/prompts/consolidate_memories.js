@@ -228,7 +228,7 @@ function consolidationMessages({ conversations, previousDailySummary, timezone, 
     {
       role: 'system',
       content: `You consolidate personal transcripts into reliable memories. Return one JSON object matching the supplied contract.
-All titles, summaries, topics, canonical entity names, and mini-memory text MUST be English, even when the source transcript is German or another language. Preserve proper names accurately.
+All titles, summaries, topics, canonical entity names, and mini-memory text MUST be in the output language, even when the source transcript is in another language. Preserve proper names accurately.
 The input conversation objects are provisional local groups, not authoritative conversation boundaries. Produce conversationSections that partition the transcript into coherent real-world conversations or topic areas. You may merge adjacent input conversations when they belong to the same stream and same real conversation, and split any input conversation when its topic or real-world conversation changes. Never combine segments from different streams. A speaker change alone, a brief aside, or a short pause is not a topic boundary. Do not force a fixed number or duration of sections.
 Every conversation section needs a concise specific title and a faithful standalone summary. Ordinary ambient speech can be marked not memory-worthy, but it still needs an accurate title and summary. Mini-memories are action items only and must be atomic and evidence-backed.
 ${TITLE_GUIDANCE}
@@ -267,22 +267,22 @@ ${carryOver ? WINDOW_INSTRUCTIONS : ''}`,
         conversations: references.compactConversations,
         outputContract: {
           conversationSections: [{
-            titleEn: 'Concise English title',
-            summaryEn: 'Faithful English summary',
+            titleEn: 'Concise title, in the output language',
+            summaryEn: 'Faithful summary, in the output language',
             memoryWorthy: true,
             continuesPrevious: false,
-            topics: ['English topic'],
+            topics: ['topic, in the output language'],
             sourceSegmentIds: ['contiguous input segment IDs'],
           }],
-          entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'English canonical name', displayName: null,
+          entities: [{ ref: 'response-local ID', kind: alternatives(ENTITY_KINDS), canonicalNameEn: 'canonical name, in the output language', displayName: null,
             aliases: [{ value: 'name as found in source', language: 'ISO 639-1 language code or null' }],
             speakerAlias: 'speaker label this person is heard speaking as, or null' }],
           memories: [{ type: alternatives(MEMORY_TYPES), continuesPrevious: false,
             continuationReasoning: 'one sentence, or null when there are no candidates', continuesMemoryIds: [],
-            titleEn: 'English', summaryEn: 'English', emoji: '🤝', importance: 1,
-            sourceSegmentIds: ['input segment ID'], topics: ['English'],
+            titleEn: 'title, in the output language', summaryEn: 'summary, in the output language', emoji: '🤝', importance: 1,
+            sourceSegmentIds: ['input segment ID'], topics: ['topic, in the output language'],
             entities: [{ ref: 'response-local entity ref', role: 'participant' }], miniMemories: [{ kind: alternatives(GENERATED_MINI_MEMORY_KINDS),
-              textEn: 'English atomic statement', importance: 1, confidence: 0.5,
+              textEn: 'atomic statement, in the output language', importance: 1, confidence: 0.5,
               dueAt: { localDateTime: 'YYYY-MM-DDTHH:mm:ss', timezone: 'IANA timezone' }, occurredAt: null, status: 'open',
               sourceSegmentIds: ['input segment ID'], entities: [] }] }],
           dailySummary: null,

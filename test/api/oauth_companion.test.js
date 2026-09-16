@@ -51,14 +51,24 @@ test('NeoAgent companion uses consent, PKCE, read-only scopes, and rotating refr
     account: 'recall-owner', password, continue: continuePath,
   }).expect(302);
   assert.equal(signIn.headers.location, continuePath);
-  const cookie = signIn.headers['set-cookie'][0].split(';')[0];
-  assert.match(signIn.headers['set-cookie'][0], /HttpOnly/);
-  assert.match(signIn.headers['set-cookie'][0], /SameSite=Lax/);
+  // The sign-in response also clears the pending two-factor cookie, so the
+  // session cookie is selected by name rather than by position.
+  const sessionHeader = signIn.headers['set-cookie'].find((value) => value.startsWith('neorecall_oauth_session='));
+  assert.ok(sessionHeader, 'sign-in did not set an OAuth session cookie');
+  const cookie = sessionHeader.split(';')[0];
+  assert.match(sessionHeader, /HttpOnly/);
+  assert.match(sessionHeader, /SameSite=Lax/);
   assert.equal(getDatabase().prepare('SELECT COUNT(*) count FROM user_sessions').get().count, 1);
 
   const consent = await request(app).get(continuePath).set('Cookie', cookie).expect(200);
   assert.match(consent.text, /Connect NeoAgent/);
   assert.match(consent.text, /cannot record audio, modify memories, or trigger NeoRecall/);
+  // The approval POST ends in a redirect to the client's callback, and browsers apply
+  // form-action to the whole redirect chain, so that origin must be allowed.
+  assert.match(
+    consent.headers['content-security-policy'],
+    /form-action 'self' https:\/\/agent\.example\.test;/,
+  );
 
   const approval = await request(app).post('/oauth/authorize').set('Cookie', cookie)
     .type('form').send({ ...authorization, decision: 'approve' }).expect(302);

@@ -8,6 +8,9 @@ const { HttpError } = require('../../middleware/error_handler');
 const schema = z.object({
   voiceMatchThreshold: z.number().min(-1).max(1).optional(),
   voiceMatchMargin: z.number().min(0).max(2).optional(),
+  voiceEnrollFloor: z.number().min(-1).max(1).optional(),
+  voiceEnrollMinimumMs: z.number().int().min(0).max(120_000).optional(),
+  voiceRepairThreshold: z.number().min(-1).max(1).optional(),
   speakerClusterThreshold: z.number().min(-1).max(1).optional(),
   speakerClusterMergeThreshold: z.number().min(-1).max(1).optional(),
   speakerMinimumTurnMs: z.number().int().min(0).max(60_000).optional(),
@@ -15,6 +18,14 @@ const schema = z.object({
   speakerClusterMargin: z.number().min(0).max(2).optional(),
   speakerContinuityGapMs: z.number().int().min(0).max(60_000).optional(),
   speakerClusterContinuityThreshold: z.number().min(-1).max(1).optional(),
+  // Audio conditioning. Only the values worth changing without a restart: a
+  // switch to stop it outright on a live system, and the two knobs that decide
+  // how hard it acts. Which normalizer and which output format are deployment
+  // decisions, and stay in the environment.
+  audioPreprocessEnabled: z.boolean().optional(),
+  audioPreprocessHighpassHz: z.number().int().min(0).max(300).optional(),
+  audioPreprocessDenoiseDb: z.number().min(0.01).max(97).optional(),
+  audioPreprocessMaxGain: z.number().min(1).max(100).optional(),
   dedupeTokenSimilarity: z.number().min(0).max(1).optional(),
   dedupeTimeToleranceMs: z.number().int().min(0).max(30_000).optional(),
   transcriptRepetitionMinimumRepeats: z.number().int().min(3).max(1_000).optional(),
@@ -44,6 +55,14 @@ const schema = z.object({
   maxMemoryContinuationCandidates: z.number().int().min(0).max(32).optional(),
   memoryContinuationLookbackMs: z.number().int().min(0).max(30 * 24 * 60 * 60_000).optional(),
   maxConsolidationLatencyMs: z.number().int().min(0).max(7 * 24 * 60 * 60_000).optional(),
+  memoryOccasionGapMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
+  memorySettleMs: z.number().int().min(0).max(24 * 60 * 60_000).optional(),
+  memoryOccasionMaxWaitMs: z.number().int().min(60_000).max(7 * 24 * 60 * 60_000).optional(),
+  memoryDedupeEnabled: z.boolean().optional(),
+  memoryDedupeSimilarityThreshold: z.number().min(0).max(1).optional(),
+  memoryDedupeWindowMs: z.number().int().min(0).max(30 * 24 * 60 * 60_000).optional(),
+  memoryDedupeMaxPairsPerRun: z.number().int().min(0).max(500).optional(),
+  memoryDedupeNeighbours: z.number().int().min(1).max(50).optional(),
   consolidationMaxFailures: z.number().int().min(1).max(100).optional(),
 }).strict();
 
@@ -65,6 +84,12 @@ function update(input) {
   if (next.speakerClusterContinuityThreshold > next.speakerClusterThreshold) {
     throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The continuity match threshold must not exceed the plain cluster match threshold.');
   }
+  if (next.voiceEnrollFloor > next.voiceMatchThreshold) {
+    throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The bar for treating a voice as a new person must not exceed the bar for recognising a known one, or every voice would become a new person.');
+  }
+  if (next.voiceRepairThreshold > next.voiceMatchThreshold) {
+    throw new HttpError(400, 'INVALID_SPEAKER_LIMITS', 'The duplicate-repair threshold must not exceed the voice match threshold.');
+  }
   if (next.maxConsolidationInputChars < next.minNewMaterialChars) {
     throw new HttpError(400, 'INVALID_MATERIAL_LIMITS', 'The consolidation input limit must not be lower than the material threshold.');
   }
@@ -74,6 +99,12 @@ function update(input) {
   if (next.conversationSoftGapMs >= next.conversationHardGapMs) {
     throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The soft conversation gap must be shorter than the hard boundary gap.');
   }
+  // A closed conversation is never reconsidered, so closing before the hard gap
+  // has elapsed splits a recording at a pause the hard gap just declared too
+  // short to split on.
+  if (next.conversationQuietCloseMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The quiet-close delay must be at least as long as the hard boundary gap, or a conversation closes while a pause could still continue it.');
+  }
   if (next.conversationMaximumMs <= next.conversationMinimumMs) {
     throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The maximum conversation duration must be longer than the minimum duration.');
   }
@@ -82,6 +113,21 @@ function update(input) {
   }
   if (next.conversationPreviewMinCharacters > next.conversationMaximumCharacters) {
     throw new HttpError(400, 'INVALID_MATERIAL_LIMITS', 'The preview threshold must not exceed the conversation character limit, or no conversation would ever be previewed.');
+  }
+  // An occasion gap narrower than the boundary gap could never join anything:
+  // every conversation is cut at the hard gap, so a shorter occasion gap means
+  // no two fragments are ever read as one sitting.
+  if (next.memoryOccasionGapMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The occasion gap must be at least as long as the hard boundary gap, or fragments of one sitting could never be joined.');
+  }
+  // Settling has to outlast an ordinary pause. Below the hard gap the first
+  // fragment is written up before the pause that follows it has even ended,
+  // which is the duplicate-card behaviour this exists to prevent.
+  if (next.memorySettleMs < next.conversationHardGapMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The settle delay must be at least as long as the hard boundary gap, or a fragment is written up before the pause after it has ended.');
+  }
+  if (next.memoryOccasionMaxWaitMs <= next.memorySettleMs) {
+    throw new HttpError(400, 'INVALID_CONVERSATION_LIMITS', 'The maximum occasion wait must be longer than the settle delay.');
   }
   const db = getDatabase();
   db.transaction(() => {

@@ -23,6 +23,7 @@ internal object WidgetIntents {
   const val TAP_OPEN = "open"
   const val TAP_STOP = "stop"
   const val TAP_COMPLETE = "complete"
+  const val TAP_START = "start"
 
   const val EXTRA_TAP = "systems.neolabs.neorecall.widget.TAP"
   const val EXTRA_PAGE = "systems.neolabs.neorecall.widget.PAGE"
@@ -54,17 +55,12 @@ internal object WidgetIntents {
     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
   )
 
-  /** Opens NeoRecall and starts phone capture, as the recorder widget always has. */
+  /** Starts phone capture from the non-exported tap activity, then opens Record. */
   fun startRecording(context: Context, appWidgetId: Int): PendingIntent =
     PendingIntent.getActivity(
       context,
       requestCode(appWidgetId, SLOT_ACTION),
-      Intent(context, MainActivity::class.java).apply {
-        action = MainActivity.ACTION_START_PHONE_RECORDING
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-          Intent.FLAG_ACTIVITY_CLEAR_TOP or
-          Intent.FLAG_ACTIVITY_SINGLE_TOP
-      },
+      tapIntent(context).putExtra(EXTRA_TAP, TAP_START),
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 

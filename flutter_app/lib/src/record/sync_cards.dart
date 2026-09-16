@@ -5,6 +5,7 @@ import '../../main_shared.dart';
 import '../../main_spacing.dart';
 import '../../main_theme.dart';
 import 'record_controls.dart';
+import '../../l10n/gen/app_l10n.dart';
 
 class ImportCard extends StatelessWidget {
   const ImportCard({super.key, required this.busy, required this.onPressed});
@@ -34,14 +35,14 @@ class ImportCard extends StatelessWidget {
       icon: busy
           ? const ButtonSpinner()
           : const Icon(Icons.folder_open_outlined, size: 18),
-      label: const Text('Choose audio'),
+      label: Text(AppL10n.of(context).importChooseAudio),
     );
     final copy = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          'Import existing audio',
+          AppL10n.of(context).importTitle,
           style: TextStyle(
             color: palette.textPrimary,
             fontSize: 15,
@@ -51,7 +52,7 @@ class ImportCard extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'WAV, MP3, M4A, and other ffmpeg-supported formats use the same private transcription pipeline.',
+          AppL10n.of(context).importDescription,
           style: TextStyle(color: palette.textSecondary, height: 1.4),
         ),
       ],
@@ -128,15 +129,20 @@ class DeviceSyncStatusView extends StatelessWidget {
     final fraction = progress?.fraction;
     final String headline;
     if (syncing && fraction != null) {
-      headline =
-          'Transferring ${(fraction * 100).round()}% · '
-          '${formatDuration(progress!.pendingSeconds)} left';
+      headline = AppL10n.of(context).syncTransferringProgress(
+        (fraction * 100).round(),
+        formatDuration(progress!.pendingSeconds),
+      );
     } else if (syncing) {
-      headline = 'Transferring from the device…';
+      headline = AppL10n.of(context).syncTransferring;
     } else if (pendingSeconds > 0) {
-      headline = '${formatDuration(pendingSeconds)} waiting on the device';
+      headline = AppL10n.of(
+        context,
+      ).syncWaitingOnDevice(formatDuration(pendingSeconds));
     } else {
-      headline = '${controller.deviceStorageSyncedCount} recording(s) synced';
+      headline = AppL10n.of(
+        context,
+      ).syncSyncedCount(controller.deviceStorageSyncedCount);
     }
 
     return Column(

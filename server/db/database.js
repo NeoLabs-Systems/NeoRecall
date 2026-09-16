@@ -1,6 +1,6 @@
 'use strict';
 
-const Database = require('better-sqlite3');
+const { Database, openKeyedDatabase } = require('./sqlite');
 const sqliteVec = require('sqlite-vec');
 const expectedVecVersion = require('../../package.json').dependencies['sqlite-vec'];
 const { ensureRuntimeDirs } = require('../../runtime/paths');
@@ -20,9 +20,20 @@ function openDatabase(filename) {
   for (;;) {
     let database;
     try {
-      database = new Database(filename, { timeout: 10_000 });
-      database.pragma('busy_timeout = 10000');
-      database.pragma('journal_mode = WAL');
+      database = openKeyedDatabase(filename, { timeout: 10_000 });
+      try {
+        database.pragma('busy_timeout = 10000');
+        database.pragma('journal_mode = WAL');
+      } catch (error) {
+        if (database.open) database.close();
+        if (error && /not a database|file is not a database|SQLITE_NOTADB|malformed/i.test(String(error.message))) {
+          throw new Error(
+            'NeoRecall could not unlock the database. The file is encrypted with the '
+            + 'installation secret.key; restore that key or restore a backup.',
+          );
+        }
+        throw error;
+      }
       database.pragma('foreign_keys = ON');
       database.pragma('synchronous = FULL');
       database.pragma('trusted_schema = OFF');
@@ -43,12 +54,36 @@ function openDatabase(filename) {
       return database;
     } catch (error) {
       if (database && database.open) database.close();
-      if (error && error.code === 'SQLITE_BUSY' && Date.now() < deadline) {
-        waitForUnlock(deadline);
-        continue;
+      if (error && error.code === 'SQLITE_BUSY') {
+        if (Date.now() < deadline) {
+          waitForUnlock(deadline);
+          continue;
+        }
+        throw new Error(
+          `Another process is still using the NeoRecall database at ${filename}. `
+          + 'Stop the running NeoRecall (neorecall stop) and try again.',
+        );
       }
       throw error;
     }
+  }
+}
+
+// Verifying that the vector extension loads needs *a* database, not *the*
+// database. Opening the runtime file contends with a running NeoRecall (and
+// fails the whole update when that install is mid-write), so probe against an
+// in-memory database, which exercises the same extension load path.
+function probeVectorExtension() {
+  const database = new Database(':memory:');
+  try {
+    sqliteVec.load(database);
+    const version = String(database.prepare('SELECT vec_version() AS version').get().version);
+    if (version.replace(/^v/, '') !== String(expectedVecVersion).replace(/^v/, '')) {
+      throw new Error(`sqlite-vec ${version} loaded, but lockfile expects ${expectedVecVersion}.`);
+    }
+    return version;
+  } finally {
+    database.close();
   }
 }
 
@@ -65,4 +100,4 @@ function closeDatabase() {
 
 function isVectorReady() { return vectorReady; }
 
-module.exports = { getDatabase, closeDatabase, openDatabase, isVectorReady, expectedVecVersion };
+module.exports = { getDatabase, closeDatabase, openDatabase, probeVectorExtension, isVectorReady, expectedVecVersion };

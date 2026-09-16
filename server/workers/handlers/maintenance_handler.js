@@ -2,7 +2,9 @@
 
 const { getDatabase } = require('../../db/database');
 const summaries = require('../../services/memories/daily_summary_service');
+const { getConfig } = require('../../config');
 const { createLogger } = require('../../utils/logger');
+const tempAudio = require('../../services/ingest/temp_audio_service');
 
 const logger = createLogger('maintenance');
 
@@ -10,7 +12,7 @@ async function handle(job) {
   const db = getDatabase();
   if (job.type === 'prune_events') {
     const changes = db.prepare('DELETE FROM event_outbox WHERE expires_at<?').run(new Date().toISOString()).changes;
-    db.prepare('DELETE FROM ask_quota_events WHERE attempted_at<?').run(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+    db.prepare('DELETE FROM ask_quota_events WHERE attempted_at<?').run(new Date(Date.now() - getConfig().askQuotaRetentionMs).toISOString());
     return { pruned: changes };
   }
   if (job.type === 'maintenance') {
@@ -25,18 +27,22 @@ async function handle(job) {
     // or quarantine policy that a real model rejection does.
     db.prepare(`UPDATE consolidation_runs SET state='failed',error_code='WORKER_INTERRUPTED',
       error_message='The worker process did not complete this run.',completed_at=?
-      WHERE state IN ('reserved','running') AND reserved_at<?`).run(new Date().toISOString(), new Date(Date.now() - 30 * 60_000).toISOString());
+      WHERE state IN ('reserved','running') AND reserved_at<?`).run(new Date().toISOString(), new Date(Date.now() - getConfig().consolidationInterruptMs).toISOString());
     const importService = require('../../services/ingest/import_service');
     const importsCompleted = importService.reconcileProcessing();
     const importOrphansRemoved = importService.sweepOrphans();
     const contextOriginalsRemoved = require('../../services/context/context_service').cleanupExpiredOriginals();
     let speakerProfilesMerged = 0;
+    let speakerConversationsQueued = 0;
+    let duplicateMemoriesMerged = 0;
     const userSettings = require('../../services/settings/settings_service');
     const speakers = require('../../services/speakers/speaker_service');
+    const memoryDedupe = require('../../services/memories/memory_dedupe_service');
     for (const user of db.prepare('SELECT id FROM users WHERE disabled_at IS NULL').all()) {
-      if (!userSettings.get(user.id).recurringSpeakerMatching) continue;
+      const settings = userSettings.get(user.id);
       try {
-        speakerProfilesMerged += speakers.reevaluate(user.id).mergedCount;
+        if (settings.recurringSpeakerMatching) speakerProfilesMerged += speakers.reevaluate(user.id).mergedCount;
+        if (settings.deferredSpeakerResolution) speakerConversationsQueued += speakers.sweepUnresolvedConversations(user.id);
       } catch (error) {
         // Profile reconciliation is derived cleanup. One malformed legacy row
         // must not prevent receipts, imports, summaries, or retention work.
@@ -44,19 +50,29 @@ async function handle(job) {
           userId: user.id, errorCode: error.code || 'SPEAKER_RECONCILIATION_FAILED', error,
         });
       }
+      // The safety net under memory generation: cards that describe one sitting
+      // but were written separately. It reports its own failures and returns
+      // rather than throwing, for the same reason as the block above.
+      duplicateMemoriesMerged += (await memoryDedupe.sweep(user.id)).merged;
     }
+    if (speakerConversationsQueued) logger.info('Queued speaker resolution for conversations that never got it', {
+      conversations: speakerConversationsQueued,
+    });
     for (const expired of db.prepare("SELECT * FROM imports WHERE state='failed' AND expires_at<?").all(new Date().toISOString())) {
-      if (expired.temporary_path) { try { require('node:fs').unlinkSync(expired.temporary_path); } catch (_) {} }
+      tempAudio.unlinkBestEffort(expired.temporary_path, { importId: expired.id, userId: expired.user_id });
       const session = db.prepare('SELECT id FROM recording_sessions WHERE user_id=? AND client_uuid=?').get(expired.user_id, `import-${expired.id}`);
       if (session) {
         for (const chunk of db.prepare('SELECT temporary_path FROM audio_chunks WHERE session_id=? AND temporary_path IS NOT NULL').all(session.id)) {
-          try { require('node:fs').unlinkSync(chunk.temporary_path); } catch (_) {}
+          tempAudio.unlinkBestEffort(chunk.temporary_path, { importId: expired.id, userId: expired.user_id });
         }
         db.prepare('DELETE FROM recording_sessions WHERE id=?').run(session.id);
       }
       db.prepare("UPDATE imports SET temporary_path=NULL,state='cancelled',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").run(expired.id);
     }
-    return { finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved, speakerProfilesMerged };
+    return {
+      finalized, importsCompleted, importOrphansRemoved, contextOriginalsRemoved,
+      speakerProfilesMerged, speakerConversationsQueued, duplicateMemoriesMerged,
+    };
   }
   return { skipped: true };
 }

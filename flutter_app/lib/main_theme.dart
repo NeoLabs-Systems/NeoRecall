@@ -259,10 +259,7 @@ ThemeData buildNeoRecallTheme(Brightness brightness) {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.input),
         ),
-        textStyle: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
     ),
     textButtonTheme: TextButtonThemeData(

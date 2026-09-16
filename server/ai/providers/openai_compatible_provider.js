@@ -7,6 +7,7 @@ const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const providerSettings = require('../../services/settings/provider_settings_service');
 const { createLogger } = require('../../utils/logger');
+const usageLimits = require('../../services/usage/usage_limit_service');
 
 const logger = createLogger('language-model');
 
@@ -184,6 +185,7 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
   if (!settings.baseUrl) throw Object.assign(new Error('The language-model API base URL is not configured.'), { code: 'AI_NOT_CONFIGURED' });
   const model = settings.model;
   if (!model) throw Object.assign(new Error('AI_API_MODEL is not configured.'), { code: 'AI_MODEL_NOT_CONFIGURED' });
+  const admission = userId ? usageLimits.enforce(userId, 'ai') : { releaseReservation: () => {} };
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const db = getDatabase();
@@ -243,6 +245,8 @@ async function sendChat({ userId, purpose, messages, responseFormat = null, maxT
     error.code = code;
     error.aiRequestId = id;
     throw error;
+  } finally {
+    admission.releaseReservation();
   }
 }
 

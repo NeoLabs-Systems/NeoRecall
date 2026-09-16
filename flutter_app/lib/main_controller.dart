@@ -1,17 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
+import 'l10n/gen/app_l10n.dart';
 import 'src/api_client.dart';
 import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/capture/capture_defaults.dart';
 import 'src/capture/capture_pipeline.dart';
+import 'src/capture/capture_coverage.dart';
 import 'src/desktop/startup.dart';
 import 'src/diagnostics/client_diagnostic_log.dart';
 import 'src/devices/audio_device_adapter.dart';
@@ -20,7 +24,10 @@ import 'src/devices/device_registry_bootstrap.dart';
 import 'src/devices/device_session_controller.dart';
 import 'src/devices/device_storage_sync_scheduler.dart';
 import 'src/devices/plaud/plaud_session.dart';
+import 'src/devices/omi/device_adapter.dart';
+import 'src/devices/omi/memoket_e2e.dart';
 import 'src/devices/omi/offline_sync.dart';
+import 'src/models/ask.dart';
 import 'src/models/chunk.dart';
 import 'src/models/memory.dart';
 import 'src/models/recording.dart';
@@ -30,6 +37,7 @@ import 'src/models/timeline_moment.dart';
 import 'src/devices/appliance/appliance_controller.dart';
 import 'src/devices/appliance/appliance_link.dart';
 import 'src/devices/ble/gatt_transport.dart';
+import 'src/l10n/app_language.dart';
 import 'src/models/transcript.dart';
 import 'src/network/network_state.dart';
 import 'src/recording/audio_frame.dart';
@@ -42,23 +50,26 @@ import 'src/sync/pending_audio_preview.dart';
 import 'src/background/home_widget_publisher.dart';
 import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
+import 'src/settings/account_export_save.dart';
+import 'src/settings/usage_section.dart';
+import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
+import 'src/watch/paired_watch.dart';
+import 'src/watch/watch_inbox_audio.dart';
+import 'src/watch/watch_digest.dart';
+import 'src/watch/watch_digest_publisher.dart';
 
 part 'src/controller/auth_controller.dart';
+part 'src/controller/ask_controller.dart';
 part 'src/controller/diagnostics_controller.dart';
 part 'src/controller/device_sync_controller.dart';
 part 'src/controller/library_controller.dart';
 part 'src/controller/context_controller.dart';
 part 'src/controller/integrations_controller.dart';
+part 'src/controller/cloud_controller.dart';
+part 'src/controller/memoket_e2e_controller.dart';
 
-enum RecallPage {
-  record,
-  library,
-  search,
-  sources,
-  devices,
-  settings,
-}
+enum RecallPage { record, library, search, sources, devices, settings }
 
 /// The three lists inside Library.
 ///
@@ -75,19 +86,24 @@ bool canRestoreSessionForBackend({
 class NeoRecallController extends ChangeNotifier
     with
         AuthController,
+        AskController,
         DeviceSyncController,
         DiagnosticsController,
         LibraryController,
         ContextController,
-        IntegrationsController {
+        IntegrationsController,
+        CloudController,
+        MemoketE2eController {
   NeoRecallController({
     NeoRecallApiClient? api,
     ChunkStore? store,
+    RetainedAudioStore? retainedAudio,
     RecallRecorder? recorder,
     AudioDeviceAdapterRegistry? audioDeviceRegistry,
     DeviceSessionController? audioDeviceSessions,
   }) : api = api ?? NeoRecallApiClient(baseUrl: _defaultBackendUrl),
        store = store ?? createChunkStore(),
+       retainedAudio = retainedAudio ?? createRetainedAudioStore(),
        recorder = recorder ?? createRecorder() {
     final mobileRecorder = this.recorder;
     if (mobileRecorder is MobileRecallRecorder) {
@@ -113,6 +129,7 @@ class NeoRecallController extends ChangeNotifier
     'effectiveConsolidationIntervalMs': 3600000,
     'timezone': 'UTC',
     'recurringSpeakerMatching': true,
+    'deferredSpeakerResolution': true,
     'diarizationEnabled': true,
     'chunkTargetMs': 30000,
     'chunkOverlapMs': 2000,
@@ -129,6 +146,7 @@ class NeoRecallController extends ChangeNotifier
     'vocabularyCorrectionEnabled': true,
     'automaticSpeakerVocabulary': <String>[],
     'contextOriginalRetentionDays': 7,
+    'keepRawAudio': true,
   };
 
   static String get _defaultBackendUrl {
@@ -163,6 +181,22 @@ class NeoRecallController extends ChangeNotifier
     ).toString().replaceFirst(RegExp(r'/$'), '');
   }
 
+  static bool _isPrivateOrLocalHost(String host) {
+    if (_isLoopbackHost(host)) return true;
+    final normalized = host.trim().toLowerCase();
+    if (normalized.endsWith('.local')) return true;
+    final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
+    final match = ipv4.firstMatch(normalized);
+    if (match == null) return false;
+    final parts = List<int>.generate(4, (i) => int.parse(match.group(i + 1)!));
+    if (parts.any((octet) => octet > 255)) return false;
+    if (parts[0] == 10) return true;
+    if (parts[0] == 192 && parts[1] == 168) return true;
+    if (parts[0] == 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] == 169 && parts[1] == 254) return true;
+    return false;
+  }
+
   static bool _isLoopbackHost(String host) {
     final normalized = host.trim().toLowerCase();
     return normalized.isEmpty ||
@@ -188,6 +222,8 @@ class NeoRecallController extends ChangeNotifier
   final NeoRecallApiClient api;
   @override
   final ChunkStore store;
+  @override
+  final RetainedAudioStore retainedAudio;
   @override
   final RecallRecorder recorder;
   @override
@@ -218,6 +254,7 @@ class NeoRecallController extends ChangeNotifier
   _mobileInterruptionSubscription;
   @override
   SharedPreferences? _preferences;
+  @override
   bool initialized = false;
   @override
   bool loading = false;
@@ -231,6 +268,20 @@ class NeoRecallController extends ChangeNotifier
   Future<bool>? _widgetPhoneRecordingOperation;
   Future<void> _watchImport = Future<void>.value();
   Timer? _mobileCaptureRecoveryTimer;
+
+  // Capture coverage for the running take. A wearable whose live stream dies
+  // keeps the session open while delivering nothing, so the only trustworthy
+  // measure of what was actually recorded is what reached durable storage.
+  DateTime? _lastCapturedAudioAt;
+  int _capturedAudioMs = 0;
+  Timer? _wearableStallTimer;
+  bool _wearableStallRestarted = false;
+
+  /// How long a stalled wearable stream is given to resume before the take is
+  /// restarted. Long enough that a brief BLE hiccup recovers on its own, short
+  /// enough that a dead stream cannot swallow a whole conversation.
+  static const Duration _wearableStallGrace = Duration(seconds: 45);
+
   Timer? _recordingScheduleTimer;
   int _mobileCaptureRecoveryAttempts = 0;
   Map<String, dynamic> _cachedSettings = Map<String, dynamic>.from(
@@ -238,6 +289,13 @@ class NeoRecallController extends ChangeNotifier
   );
   bool cachedData = false;
   bool autostartEnabled = false;
+
+  /// The language the interface is drawn in and the server writes memories in.
+  ///
+  /// Held here rather than read from settings at the point of use because it is
+  /// needed before there is an account to read settings for: the sign-in screen
+  /// and the server-setup screen are both drawn in it.
+  AppLanguage language = AppLanguage.fallback;
   bool preferBluetoothCapture = true;
   String? preferredDeviceLabel;
   // Latest battery percentage reported by the connected wearable, if any.
@@ -249,6 +307,9 @@ class NeoRecallController extends ChangeNotifier
   String? _notice;
   Timer? _noticeTimer;
   bool _liveStatusScheduled = false;
+
+  /// What the last digest sent to a paired watch was built from.
+  String? _publishedWatchFingerprint;
   bool _storageExhausted = false;
   static const Duration _noticeLifetime = Duration(seconds: 5);
 
@@ -275,9 +336,96 @@ class NeoRecallController extends ChangeNotifier
     await mobile.background.updateLiveStatus(status);
     // Home-screen widgets read the same state the ongoing notification does,
     // so the two surfaces are updated from one place and cannot disagree.
-    await mobile.background.publishWidgetSnapshot(
-      buildHomeWidgetSnapshot(status),
+    final snapshot = buildHomeWidgetSnapshot(status);
+    await mobile.background.publishWidgetSnapshot(snapshot);
+    // A paired watch is fed from the same snapshot, plus the transcript no
+    // widget shows. Encoding it costs more than a preferences write, so it is
+    // only rebuilt when something the watch actually displays has moved.
+    final fingerprint = _watchDigestFingerprint(snapshot);
+    if (fingerprint != _publishedWatchFingerprint) {
+      _publishedWatchFingerprint = fingerprint;
+      await mobile.background.publishWatchDigest(buildWatchDigest(snapshot));
+    }
+  }
+
+  /// The Wear OS devices paired with this phone, for the watch setup screen.
+  Future<List<PairedWatch>> loadPairedWatches() async {
+    final active = recorder;
+    if (active is! MobileRecallRecorder) return const <PairedWatch>[];
+    return active.background.pairedWatches();
+  }
+
+  /// Re-sends the digest even when nothing about it has changed.
+  ///
+  /// The automatic path deliberately skips unchanged content; a watch that was
+  /// just installed, or reset, has nothing to compare against and needs the
+  /// current day pushed to it once.
+  Future<void> resendWatchDigest() async {
+    final active = recorder;
+    if (active is! MobileRecallRecorder) return;
+    _publishedWatchFingerprint = null;
+    await active.background.publishWatchDigest(buildWatchDigest(), force: true);
+  }
+
+  /// The newest conversation, which is the one the watch shows.
+  TimelineMoment? get latestMoment {
+    if (moments.isEmpty) return null;
+    var newest = moments.first;
+    for (final moment in moments) {
+      if (moment.startedAt.isAfter(newest.startedAt)) newest = moment;
+    }
+    return newest;
+  }
+
+  /// The digest a paired Wear OS watch renders.
+  ///
+  /// Exposed rather than private for the same reason as
+  /// [buildHomeWidgetSnapshot]: what the watch is allowed to see, and how much
+  /// of a conversation it is given, should be readable without a running app.
+  WatchDigest buildWatchDigest([HomeWidgetSnapshot? snapshot]) {
+    final moment = latestMoment;
+    return const WatchDigestPublisher().build(
+      snapshot: snapshot ?? buildHomeWidgetSnapshot(),
+      now: DateTime.now(),
+      moment: moment,
+      fullTranscript: moment?.id == null ? null : momentTranscripts[moment!.id],
     );
+  }
+
+  /// Everything the watch draws, reduced to a string that is cheap to compare.
+  ///
+  /// Deliberately coarse: it tracks what changed, not what it changed to, so a
+  /// running clock in the capture line cannot make every frame look like new
+  /// content worth sending over a Bluetooth link.
+  String _watchDigestFingerprint(HomeWidgetSnapshot snapshot) {
+    final moment = latestMoment;
+    final transcript = moment?.id == null
+        ? null
+        : momentTranscripts[moment!.id];
+    return <Object?>[
+      snapshot.signedIn,
+      snapshot.capture.phase,
+      snapshot.capture.recording,
+      snapshot.capture.issue,
+      snapshot.today.talkSeconds,
+      snapshot.today.memories,
+      snapshot.today.highlights,
+      snapshot.today.openTasks,
+      snapshot.today.dueToday,
+      snapshot.today.overdue,
+      snapshot.dayInReview,
+      snapshot.memories.isEmpty ? null : snapshot.memories.first.id,
+      snapshot.memories.length,
+      snapshot.highlights.isEmpty ? null : snapshot.highlights.first.id,
+      snapshot.highlights.length,
+      moment?.key,
+      moment?.state,
+      moment?.titleEn,
+      moment?.summaryEn,
+      moment?.segmentCount,
+      moment?.segments.length,
+      transcript?.length,
+    ].join('|');
   }
 
   /// Today's day summary, and only today's.
@@ -308,9 +456,10 @@ class NeoRecallController extends ChangeNotifier
         (recorder is MobileRecallRecorder
             ? _buildLiveStatus(recorder as MobileRecallRecorder)
             : null);
-    if (live == null) return HomeWidgetSnapshot.signedOut;
+    if (live == null) return HomeWidgetSnapshot.signedOut(strings);
     final device = audioDeviceSessions.preferredDevice;
     return const HomeWidgetPublisher().build(
+      strings: strings,
       signedIn: authenticated,
       status: live,
       recording: isRecording,
@@ -337,7 +486,7 @@ class NeoRecallController extends ChangeNotifier
       if (processing.totalAudioDuration > Duration.zero)
         _compactDuration(processing.totalAudioDuration),
       if (etaSeconds != null && etaSeconds > 0)
-        'about ${_compactDuration(processing.eta!)} left',
+        strings.liveEtaLeft(_compactDuration(processing.eta!)),
     ];
     String detail(String fallback) =>
         facts.isEmpty ? fallback : '$fallback · ${facts.join(' · ')}';
@@ -345,24 +494,24 @@ class NeoRecallController extends ChangeNotifier
     if (_storageExhausted) {
       return BackgroundLiveStatus(
         phase: BackgroundLivePhase.storageFull,
-        title: 'Storage full — recording stopped',
-        detail: 'Free device storage, then reopen NeoRecall to resume safely.',
+        title: strings.controllerStorageFull,
+        detail: strings.liveStorageFullDetail,
         pendingBytes: processing.pendingBytes,
         pendingAudioSeconds: processing.totalAudioDuration.inSeconds,
-        issue: 'No local space remains for another durable audio block.',
+        issue: strings.liveStorageFullIssue,
       );
     }
     if (isRecording) {
       final source = capability?.sourceKind == 'wearable'
-          ? preferredDeviceLabel ?? 'Bluetooth device'
-          : 'Phone microphone';
+          ? preferredDeviceLabel ?? strings.liveSourceBluetooth
+          : strings.recordSourcePhoneMicrophone;
       return BackgroundLiveStatus(
         phase: BackgroundLivePhase.recording,
-        title: 'Recording from $source',
+        title: strings.liveRecordingFrom(source),
         detail: detail(
           processing.uploading > 0
-              ? 'Recording safely · uploading in background'
-              : 'Recording safely to this device',
+              ? strings.liveRecordingUploading
+              : strings.liveRecordingSafely,
         ),
         recordingStartedAt: recordingStartedAt,
         pendingBytes: processing.pendingBytes,
@@ -375,29 +524,29 @@ class NeoRecallController extends ChangeNotifier
     final (phase, title, fallback) = switch (processing.activeStage) {
       ProcessingPipelineStage.watchTransfer => (
         BackgroundLivePhase.watchTransfer,
-        'Downloading from watch',
-        'Audio is moving into protected phone storage',
+        strings.processingStageWatchTransfer,
+        strings.liveWatchTransferDetail,
       ),
       ProcessingPipelineStage.upload => (
         BackgroundLivePhase.uploading,
-        'Uploading recordings',
-        'Local originals stay protected until processing is verified',
+        strings.liveUploadingTitle,
+        strings.liveUploadingDetail,
       ),
       ProcessingPipelineStage.transcription => (
         BackgroundLivePhase.transcribing,
-        'Transcribing on server',
-        'Audio is safely stored while the transcript is created',
+        strings.processingStageTranscription,
+        strings.liveTranscribingDetail,
       ),
       ProcessingPipelineStage.finalizing => (
         BackgroundLivePhase.finalizing,
-        'Finalizing transcript',
-        'Waiting for verified persistence and server audio deletion',
+        strings.liveFinalizingTitle,
+        strings.liveFinalizingDetail,
       ),
       ProcessingPipelineStage.phoneQueue ||
       ProcessingPipelineStage.serverQueue => (
         BackgroundLivePhase.queued,
-        'Recordings safely queued',
-        issue ?? 'Waiting for the next processing step',
+        strings.liveQueuedTitle,
+        issue ?? strings.liveQueuedDetail,
       ),
       ProcessingPipelineStage.complete =>
         mobile.background.active.isNotEmpty
@@ -408,8 +557,8 @@ class NeoRecallController extends ChangeNotifier
               )
             : (
                 BackgroundLivePhase.idle,
-                'NeoRecall is ready',
-                'No recording or processing is active',
+                strings.liveIdleTitle,
+                strings.liveIdleDetail,
               ),
     };
     return BackgroundLiveStatus(
@@ -472,6 +621,7 @@ class NeoRecallController extends ChangeNotifier
   /// was reached by, so moving back towards today is a lookup rather than a
   /// refetch from the start of the history.
   static const int momentPageSize = 8;
+  @override
   List<TimelineMoment> moments = <TimelineMoment>[];
   final List<String?> _momentPageCursors = <String?>[null];
   String? _momentNextCursor;
@@ -482,9 +632,19 @@ class NeoRecallController extends ChangeNotifier
   /// Full transcripts for moments the reader has opened. A timeline refresh
   /// carries only a preview of each moment, so opening one fetches the rest
   /// once and keeps it for as long as the page is on screen.
+  @override
   final Map<String, List<TranscriptSegment>> momentTranscripts =
       <String, List<TranscriptSegment>>{};
   final Set<String> loadingMomentTranscripts = <String>{};
+
+  /// Moments that still have raw audio on this device.
+  final Set<String> momentsWithRetainedAudio = <String>{};
+
+  bool get keepRawAudio => _cachedSettings['keepRawAudio'] as bool? ?? true;
+
+  int get contextOriginalRetentionDays =>
+      _cachedSettings['contextOriginalRetentionDays'] as int? ?? 7;
+
   bool get hasOlderMoments => _momentNextCursor != null;
   bool get hasNewerMoments => momentPage > 0;
 
@@ -510,9 +670,8 @@ class NeoRecallController extends ChangeNotifier
   String processingSummary = '';
   int audioStillOnDevice = 0;
   List<Map<String, dynamic>> dailySummaries = <Map<String, dynamic>>[];
-  List<Map<String, dynamic>> searchResults = <Map<String, dynamic>>[];
-  String? askAnswer;
-  List<Map<String, dynamic>> askCitations = <Map<String, dynamic>>[];
+  AccountUsageSnapshot? accountUsage;
+  bool accountUsageLoading = false;
   @override
   int pendingAudioBytes = 0;
   // Recording sessions containing a chunk parked after repeated server-side
@@ -553,6 +712,7 @@ class NeoRecallController extends ChangeNotifier
       pendingSeconds: deviceStoragePendingSeconds,
       transferred: progress?.transferred ?? 0,
       total: progress?.total ?? 0,
+      completeFraction: progress?.fraction,
       issues: transferIssues,
     );
   }
@@ -636,6 +796,7 @@ class NeoRecallController extends ChangeNotifier
   @override
   Future<void> _cacheSettings(Map<String, dynamic> value) async {
     _cachedSettings = <String, dynamic>{..._fallbackSettings, ...value};
+    await _reconcileLanguage(value);
     final ownerAccountId = accountId;
     if (ownerAccountId != null && _preferences != null) {
       await _preferences!.setString(
@@ -652,6 +813,14 @@ class NeoRecallController extends ChangeNotifier
     'memoket',
     'plaud',
   };
+
+  /// True when a dropped wearable live stream should continue on the phone mic.
+  ///
+  /// Offline-first devices keep the take on flash. Switching to the microphone
+  /// sends stop, and the later Bluetooth resume sends start — one recording
+  /// becomes many, including when the app is in the background.
+  bool get shouldFailoverWearableToPhoneMicrophone =>
+      !preferredDeviceIsOfflineFirst;
 
   /// True when the connected wearable is an offline-first (button-record-on-
   /// device) type, so the UI can present "sync recordings" as the primary flow.
@@ -808,6 +977,91 @@ class NeoRecallController extends ChangeNotifier
       allowsBackendUrlConfiguration && api.baseUrl.trim().isEmpty;
   bool get initializing => _initializing;
 
+  /// The translated strings for the current language.
+  ///
+  /// Widgets should prefer `AppL10n.of(context)`; this exists for the text the
+  /// controller itself produces — errors and notices that reach the user
+  /// through fields on this object, with no BuildContext anywhere in reach.
+  @override
+  AppL10n get strings => lookupAppL10n(language.locale);
+
+  /// Reads the stored language, or picks one from the device on first launch.
+  ///
+  /// Detection happens exactly once and is then written down, so that a person
+  /// who chose English on a German phone still gets English after an update
+  /// changes what the platform reports.
+  Future<void> _loadLanguage() async {
+    _preferences ??= await SharedPreferences.getInstance();
+    final stored = AppLanguage.fromCode(_preferences!.getString(_languageKey));
+    if (stored != null) {
+      language = stored;
+      currentAppLanguage = stored;
+      return;
+    }
+    language = AppLanguage.detect(
+      PlatformDispatcher.instance.locales.isEmpty
+          ? <Locale>[PlatformDispatcher.instance.locale]
+          : PlatformDispatcher.instance.locales,
+    );
+    currentAppLanguage = language;
+    await _preferences!.setString(_languageKey, language.code);
+  }
+
+  static const String _languageKey = 'appLanguage';
+
+  /// Switches the interface and, when signed in, the language the server writes
+  /// memories, summaries and answers in.
+  ///
+  /// The local write happens first and unconditionally: the interface must
+  /// change even when the server is unreachable, and the next successful
+  /// settings read will carry the choice up.
+  Future<void> setLanguage(AppLanguage value) async {
+    if (language == value) return;
+    language = value;
+    currentAppLanguage = value;
+    _preferences ??= await SharedPreferences.getInstance();
+    await _preferences!.setString(_languageKey, value.code);
+    notifyListeners();
+    if (!authenticated || !online) return;
+    try {
+      await updateSettings(<String, dynamic>{'language': value.code});
+    } catch (_) {
+      // The interface is already in the new language and the choice is stored.
+      // A server that could not be told will be told by the next settings save.
+    }
+  }
+
+  /// Reconciles the account's language with this device's after a settings read.
+  ///
+  /// An account that has chosen is authoritative — that is how the choice
+  /// follows somebody to a second device. An account that has never chosen
+  /// adopts what this device detected, which is what makes a German phone's
+  /// first sign-in produce German memories without anyone visiting settings.
+  Future<void> _reconcileLanguage(Map<String, dynamic> settings) async {
+    if (!settings.containsKey('language')) return;
+    final stored = AppLanguage.fromCode(settings['language'] as String?);
+    if (stored == null) {
+      if (!authenticated || !online) return;
+      unawaited(
+        api
+            .request(
+              'PUT',
+              '/api/v1/settings',
+              body: <String, dynamic>{'language': language.code},
+            )
+            .catchError((Object _) => <String, dynamic>{}),
+      );
+      _cachedSettings['language'] = language.code;
+      return;
+    }
+    if (stored == language) return;
+    language = stored;
+    currentAppLanguage = stored;
+    _preferences ??= await SharedPreferences.getInstance();
+    await _preferences!.setString(_languageKey, stored.code);
+    notifyListeners();
+  }
+
   Future<void> initialize() async {
     if (_initializing) return;
     _initializing = true;
@@ -816,6 +1070,7 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
     try {
       _preferences ??= await SharedPreferences.getInstance();
+      await _loadLanguage();
       final savedBackendUrl =
           _preferences!.getString('backendUrl')?.trim() ?? '';
       if (!allowsBackendUrlConfiguration) {
@@ -860,6 +1115,7 @@ class NeoRecallController extends ChangeNotifier
       sync.pump.uploadAllowed = _uploadsAllowed;
       sync.pump.onUploadActivity = _setBackgroundUploadActive;
       sync.pump.onTerminalReceipt = _forwardWatchTerminalReceipt;
+      sync.pump.onRetainAudio = _retainProcessedChunk;
       try {
         autostartEnabled = await startupEnabled();
       } catch (_) {
@@ -868,6 +1124,8 @@ class NeoRecallController extends ChangeNotifier
       }
       if (!_syncInitialized) {
         await sync.initialize();
+        await retainedAudio.initialize();
+        await applyRawAudioRetention();
         _syncInitialized = true;
       }
       await initializeRecordingContext();
@@ -883,6 +1141,7 @@ class NeoRecallController extends ChangeNotifier
           // Databases created before account ownership was added can only be
           // claimed by the still-authenticated session present during upgrade.
           await store.claimLegacySessions(accountId!);
+          await applyRawAudioRetention();
           await _preferences!.setString('accountId', accountId!);
         } on ApiException catch (exception) {
           if (exception.status != 401 && exception.status != 403) {
@@ -992,6 +1251,8 @@ class NeoRecallController extends ChangeNotifier
                 notifyListeners();
               case BackgroundCaptureEventType.watchRecordingAvailable:
                 _queueWatchImport(mobile.background);
+              case BackgroundCaptureEventType.memoketE2eRequested:
+                unawaited(consumePendingMemoketE2eRequest());
               case BackgroundCaptureEventType.message:
                 break;
             }
@@ -1010,11 +1271,11 @@ class NeoRecallController extends ChangeNotifier
       // Automatic device-storage sync needs no user action and no open UI.
       deviceStorageSync.start();
       // Recover interrupted offline sessions/chunks before new capture starts.
-      sync.pump.pump();
+      unawaited(sync.pump.pump());
       await _refreshPending();
       if (authenticated) {
         await _settings();
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         await refreshAll(silent: true);
       }
       if (_supportsDurableMobileResume) {
@@ -1027,14 +1288,14 @@ class NeoRecallController extends ChangeNotifier
         _queueWatchImport((recorder as MobileRecallRecorder).background);
       }
     } catch (exception) {
-      initializationError =
-          'NeoRecall could not finish local startup. Your queued audio was not deleted. Retry to recover safely.';
+      initializationError = strings.controllerStartupFailed;
       error = initializationError;
       debugPrint('NeoRecall initialization failed: $exception');
     } finally {
       initialized = true;
       _initializing = false;
       notifyListeners();
+      unawaited(consumePendingMemoketE2eRequest());
     }
   }
 
@@ -1050,7 +1311,7 @@ class NeoRecallController extends ChangeNotifier
       error = exception.toString();
       _storageExhausted = isStorageCapacityError(exception);
       warning = _storageExhausted
-          ? 'Device storage is full. Recording stopped; all previously queued audio remains protected.'
+          ? strings.controllerStorageWriteFailed
           : genericWarning;
       if (recorder.isRecording) {
         unawaited(
@@ -1063,21 +1324,19 @@ class NeoRecallController extends ChangeNotifier
 
   void _attachRuntimeSubscriptions() {
     _chunkSubscription = recorder.chunks.listen((chunk) {
+      _lastCapturedAudioAt = DateTime.now();
+      _capturedAudioMs += chunk.durationMs - chunk.overlapMs;
       _chunkWrite = _chunkWrite
           .then((_) => _storeRecordedChunk(chunk))
           .catchError(
-            _onDurableWriteFailed(
-              'Local audio could not be stored. Recording is stopping without deleting queued audio.',
-            ),
+            _onDurableWriteFailed(strings.controllerAudioStoreFailed),
           );
     });
     _partialSubscription = recorder.partials.listen((partial) {
       _partialWrite = _partialWrite
           .then((_) => _storeCapturePartial(partial))
           .catchError(
-            _onDurableWriteFailed(
-              'The active audio block could not be written to durable storage.',
-            ),
+            _onDurableWriteFailed(strings.controllerPartialStoreFailed),
           );
     });
     _warningSubscription = recorder.warnings.listen((value) {
@@ -1141,10 +1400,7 @@ class NeoRecallController extends ChangeNotifier
           final durationMs = (row['durationMs'] as num).toInt();
           final isFinal = row['isFinal'] as bool;
           final digest = row['sha256'] as String;
-          final bytes = row['bytes'];
-          if (bytes is! Uint8List) {
-            throw const FormatException('Wear OS audio payload is not binary.');
-          }
+          final bytes = await readWatchInboxAudio(row);
           await store.putSession(
             LocalRecordingDeclaration(
               id: sessionId,
@@ -1200,7 +1456,7 @@ class NeoRecallController extends ChangeNotifier
           notifyListeners();
         }
         await _refreshPending();
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         if (recordings.length < 20) break;
       }
     } finally {
@@ -1238,9 +1494,12 @@ class NeoRecallController extends ChangeNotifier
     }
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
-      error = 'Enter a complete server URL including http:// or https://.';
+      error = strings.controllerIncompleteUrl;
       notifyListeners();
       return false;
+    }
+    if (uri.scheme == 'http' && !_isPrivateOrLocalHost(uri.host)) {
+      notice = strings.controllerPublicHttpWarning;
     }
     final previous = api.baseUrl;
     loading = true;
@@ -1263,8 +1522,7 @@ class NeoRecallController extends ChangeNotifier
       return false;
     } catch (_) {
       api.baseUrl = previous;
-      error =
-          'NeoRecall could not reach that server. Check the address and that the server is running.';
+      error = strings.controllerUnreachableServer;
       return false;
     } finally {
       loading = false;
@@ -1330,6 +1588,7 @@ class NeoRecallController extends ChangeNotifier
     needsAttentionCount = 0;
     failedUploadCount = 0;
     processingLedgerStatus = const ProcessingStatusSnapshot();
+    accountUsage = null;
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
@@ -1369,6 +1628,7 @@ class NeoRecallController extends ChangeNotifier
     }
     try {
       await store.purgeAll();
+      if (accountId != null) await retainedAudio.purgeAccount(accountId!);
     } catch (_) {
       // Best effort. The account is already gone; being unable to unlink one
       // spooled file is not a reason to keep the session alive.
@@ -1376,6 +1636,38 @@ class NeoRecallController extends ChangeNotifier
     await ClientDiagnosticLog.instance.clear();
     await logout();
     return null;
+  }
+
+  /// Downloads a zip of this account's readable data and offers a save location.
+  ///
+  /// Returns the chosen path or file name, or null when the person cancelled
+  /// or the request failed. Failures set [error] the usual way.
+  Future<String?> downloadAccountExport() async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      final bytes = await api.downloadAccountExport();
+      final stamp = DateTime.now().toUtc().toIso8601String().substring(0, 10);
+      final safeName = (username ?? 'account').replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
+      final saved = await saveAccountExport(
+        bytes,
+        'neorecall-$safeName-$stamp.zip',
+      );
+      return saved;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return null;
+    } catch (exception) {
+      error = exception.toString();
+      return null;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
   }
 
   /// Erases everything this account has recorded, keeping the account itself.
@@ -1400,6 +1692,7 @@ class NeoRecallController extends ChangeNotifier
     }
     try {
       await store.purgeAll();
+      if (accountId != null) await retainedAudio.purgeAccount(accountId!);
     } catch (_) {
       // Best effort: the server copy is already gone, and a spooled file that
       // cannot be unlinked must not leave the account looking un-erased.
@@ -1409,9 +1702,8 @@ class NeoRecallController extends ChangeNotifier
     miniMemories = <MiniMemory>[];
     speakers = <RecallSpeaker>[];
     dailySummaries = <Map<String, dynamic>>[];
-    searchResults = <Map<String, dynamic>>[];
-    askAnswer = null;
-    askCitations = <Map<String, dynamic>>[];
+    askTurns = <AskTurn>[];
+    askBusy = false;
     notifyListeners();
     await refreshAll();
     return null;
@@ -1428,10 +1720,15 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
     try {
       await operation();
+      needsTwoFactor = false;
       return true;
     } on ApiException catch (exception) {
-      if (exception.code == 'TWO_FACTOR_REQUIRED') onTwoFactor?.call();
-      error = exception.message;
+      if (exception.code == 'TWO_FACTOR_REQUIRED') {
+        onTwoFactor?.call();
+        error = strings.controllerTwoFactorRequired;
+      } else {
+        error = exception.message;
+      }
       return false;
     } on WebAuthnException catch (exception) {
       _securityKeyDismissed = exception.cancelled;
@@ -1522,9 +1819,15 @@ class NeoRecallController extends ChangeNotifier
   List<AudioDeviceDescriptor> discoveredWearables = <AudioDeviceDescriptor>[];
   bool scanningWearables = false;
 
+  /// Last empty-scan explanation, kept until the next scan. The shell [notice]
+  /// expires after a few seconds, which is too short if the sheet that started
+  /// the scan is still open.
+  String? wearableScanNotice;
+
   Future<void> scanForWearables({
     Duration timeout = const Duration(seconds: 10),
   }) async {
+    if (scanningWearables) return;
     if (audioDeviceRegistry.adapters.isEmpty) {
       throw StateError(
         'No validated Bluetooth device protocol is installed yet.',
@@ -1534,6 +1837,7 @@ class NeoRecallController extends ChangeNotifier
     discoveredWearables = <AudioDeviceDescriptor>[];
     // Each scan reports its own outcome; a leftover notice from the previous one
     // would otherwise stay on screen and contradict this run.
+    wearableScanNotice = null;
     notice = null;
     notifyListeners();
     final subs = <StreamSubscription<dynamic>>[];
@@ -1585,10 +1889,11 @@ class NeoRecallController extends ChangeNotifier
       // it was instead of leaving an empty list on screen. Every cause here is
       // actionable by the user.
       if (discoveredWearables.isEmpty) {
-        notice = kIsWeb
-            ? 'No device was selected in the browser chooser.'
-            : 'No supported device found. Check that the wearable is switched '
-                  'on, close by, and not already connected to another app or phone.';
+        final message = kIsWeb
+            ? strings.controllerWearableScanChooserEmpty
+            : strings.controllerWearableScanEmpty;
+        wearableScanNotice = message;
+        notice = message;
       }
       notifyListeners();
     }
@@ -1599,9 +1904,13 @@ class NeoRecallController extends ChangeNotifier
     required bool systemAudio,
     bool? bluetooth,
   }) async {
-    if (!consentAccepted) {
-      throw StateError('Recording consent must be acknowledged first.');
-    }
+    // Consent is attested per session (`consentAttestedAt`), not gated on a
+    // stored flag. Starting a take is itself the user's direct attestation —
+    // the same reading the watch already applies to its Start button — and a
+    // device, widget, or reconnect start has no UI to raise a notice on. A
+    // blocker there is silent: the recorder looks like it is running while the
+    // phone refuses every press. The in-app notice still shows on a manual
+    // start, and a recording stays visibly indicated wherever it began.
     // Stop must win: a late hardware-start or durable-resume must not reopen
     // a take the user just finalized. A second start while one is running is
     // the "Recorder is already active" loop.
@@ -1619,9 +1928,9 @@ class NeoRecallController extends ChangeNotifier
                 ? null
                 : audioDeviceRegistry[descriptor.adapterId]);
         if (descriptor == null || adapter == null) {
-          throw StateError(
-            'Connect a supported Bluetooth device before starting capture.',
-          );
+          error = strings.controllerBluetoothRequired;
+          notifyListeners();
+          return;
         }
         final transportReady =
             audioDeviceSessions.state ==
@@ -1629,9 +1938,9 @@ class NeoRecallController extends ChangeNotifier
             audioDeviceSessions.state == DeviceTransportState.recording ||
             await audioDeviceSessions.connectPreferred();
         if (!transportReady) {
-          throw StateError(
-            'The Bluetooth device could not be connected. Keep it nearby and try again.',
-          );
+          error = strings.controllerBluetoothConnectFailed;
+          notifyListeners();
+          return;
         }
         // A live capture and an offline drain must never run together (they share
         // the BLE channel/buffer on several wearables). If a device-storage sync
@@ -1650,7 +1959,9 @@ class NeoRecallController extends ChangeNotifier
         if (!useBluetooth) microphone = true;
       }
       if (!microphone && !systemAudio && externalDevice == null) {
-        throw StateError('Select at least one capture source.');
+        error = strings.controllerSelectCaptureSource;
+        notifyListeners();
+        return;
       }
       error = null;
       warning = null;
@@ -1665,19 +1976,18 @@ class NeoRecallController extends ChangeNotifier
         );
         if (!schedule.allows(DateTime.now())) {
           _armRecordingSchedule();
-          throw StateError(
-            'Recording is outside the configured daily recording window.',
-          );
+          throw StateError(strings.controllerOutsideRecordingWindow);
         }
         final recordingAccountId = accountId;
         if (recordingAccountId == null) {
-          throw StateError('Sign in before starting a recording.');
+          throw StateError(strings.controllerSignInToRecord);
         }
         final identity = await _deviceIdentity(recordingAccountId);
         final deviceId = identity.id;
         final clientUuid = identity.clientUuid;
         final now = DateTime.now().toUtc();
         recordingStartedAt = now;
+        _resetCaptureCoverage(forgetEscalation: !_switchingMobileSource);
         final sessionId = _uuid.v4();
         final sourceId = _uuid.v4();
         final requestedKind = microphone && systemAudio
@@ -1747,10 +2057,10 @@ class NeoRecallController extends ChangeNotifier
             capability!.sourceKind == 'wearable' ? 'bluetooth' : 'microphone',
           );
         }
-        sync.pump.pump();
+        unawaited(sync.pump.pump());
         _armRecordingSchedule();
       } catch (exception) {
-        error = exception.toString();
+        error = exception is StateError ? exception.message : exception.toString();
         // Capture never took the device, so release the claim — otherwise a failed
         // start would silently disable automatic sync for the rest of the session.
         _deviceClaimedForCapture = false;
@@ -1768,7 +2078,7 @@ class NeoRecallController extends ChangeNotifier
                 synced: false,
               ),
             );
-            sync.pump.pump();
+            unawaited(sync.pump.pump());
           } catch (_) {
             // Preserve the original capture failure. Startup recovery will close
             // the already-durable session on the next application launch.
@@ -1822,7 +2132,7 @@ class NeoRecallController extends ChangeNotifier
     if (!recorded.isFinal) _mobileCaptureRecoveryAttempts = 0;
     await store.clearPartial(session.sourceId);
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
   }
 
   Future<void> _storeCapturePartial(RecordedAudioChunk recorded) async {
@@ -1850,6 +2160,7 @@ class NeoRecallController extends ChangeNotifier
     await _refreshPending();
   }
 
+  @override
   Future<void> stopRecording({
     bool interrupted = false,
     bool preserveMobileIntent = false,
@@ -1882,11 +2193,18 @@ class NeoRecallController extends ChangeNotifier
       }
       _activeSession = null;
       deactivateRecordingContext();
+      // Judged before the switch flag is cleared: moving a take between sources
+      // finalizes one take and opens another, and neither half should be
+      // measured as if it were the whole recording.
+      if (!_switchingMobileSource && !interrupted) {
+        _reportCaptureCoverage(recordingStartedAt);
+      }
+      if (!_switchingMobileSource) _resetCaptureCoverage();
       recordingStartedAt = null;
       audioLevel = 0;
       // The background battery warning is only meaningful during active capture.
       backgroundCaptureAtRisk = false;
-      sync.pump.pump();
+      unawaited(sync.pump.pump());
       if (recorder is MobileRecallRecorder && !_switchingMobileSource) {
         await (recorder as MobileRecallRecorder).finishBackgroundHost();
       }
@@ -1933,9 +2251,7 @@ class NeoRecallController extends ChangeNotifier
       return;
     }
     await stopRecording(preserveMobileIntent: _supportsDurableMobileResume);
-    warning =
-        'Recording paused at the end of its daily window. Android may require '
-        'NeoRecall to be opened before phone-microphone recording resumes.';
+    warning = strings.controllerSchedulePaused;
     notifyListeners();
   }
 
@@ -1992,8 +2308,7 @@ class NeoRecallController extends ChangeNotifier
       try {
         changed = await _applyWidgetAction(action) || changed;
       } catch (exception) {
-        warning =
-            'A home-screen widget action could not be completed: $exception';
+        warning = strings.controllerWidgetActionFailed('$exception');
         ClientDiagnosticLog.instance.record(
           'widget_capture',
           'action_failed',
@@ -2013,13 +2328,13 @@ class NeoRecallController extends ChangeNotifier
       case HomeWidgetAction.stopRecording:
         if (!isRecording) return false;
         await stopRecording();
-        notice = 'Recording stopped from the home-screen widget.';
+        notice = strings.controllerWidgetStopped;
         return true;
       case HomeWidgetAction.completeHighlight:
         final id = action.targetId;
         if (id == null || id.isEmpty) return false;
         if (!authenticated) {
-          warning = 'Sign in to complete highlights from the home screen.';
+          warning = strings.controllerWidgetSignIn;
           return true;
         }
         // Answered locally first so the list is right immediately; the refresh
@@ -2108,18 +2423,10 @@ class NeoRecallController extends ChangeNotifier
     final wasAlreadyRecording = isRecording;
     try {
       if (!authenticated) {
-        warning =
-            'Sign in before starting recording from the home-screen widget.';
+        warning = strings.controllerWidgetRecordSignIn;
         notifyListeners();
         return true;
       }
-      if (!consentAccepted) {
-        warning =
-            'Accept the recording consent notice before using the home-screen widget.';
-        notifyListeners();
-        return true;
-      }
-
       await setPreferBluetoothCapture(false);
       if (isRecording) {
         if (capability?.sourceKind != 'microphone') {
@@ -2132,7 +2439,7 @@ class NeoRecallController extends ChangeNotifier
           bluetooth: false,
         );
       }
-      notice = 'Phone recording started from the home-screen widget.';
+      notice = strings.controllerWidgetStarted;
       ClientDiagnosticLog.instance.record(
         'widget_capture',
         'phone_recording_started',
@@ -2141,7 +2448,7 @@ class NeoRecallController extends ChangeNotifier
       notifyListeners();
       return true;
     } catch (exception) {
-      warning = 'The home-screen widget could not start recording: $exception';
+      warning = strings.controllerWidgetStartFailed('$exception');
       ClientDiagnosticLog.instance.record(
         'widget_capture',
         'phone_recording_failed',
@@ -2158,15 +2465,16 @@ class NeoRecallController extends ChangeNotifier
   ///
   /// Deliberately narrow, because starting a recording unprompted is not a
   /// neutral act: only on mobile (the always-on host), only when the user
-  /// already chose Bluetooth as their capture source, only once consent has been
-  /// given, and only for devices that actually stream live — an offline-first
+  /// already chose Bluetooth as their capture source, and only for devices that
+  /// actually stream live — an offline-first
   /// recorder has nothing to stream, and its sync is the whole point. Recording
   /// stays visibly indicated exactly as a manual start does. The offline drain
   /// is unaffected and keeps running alongside on devices that support it, so a
   /// reconnect resumes the present and recovers the gap at the same time.
   bool get shouldAutoStartLiveCapture {
     if (!isMobileCapturePlatform) return false;
-    if (!authenticated || !consentAccepted) return false;
+    if (_memoketHardwareProbeActive) return false;
+    if (!authenticated) return false;
     if (!preferBluetoothCapture) return false;
     if (isRecording ||
         _stoppingRecording ||
@@ -2185,6 +2493,11 @@ class NeoRecallController extends ChangeNotifier
   /// reporting isRecording: a flapping link can deliver two connectedStandby
   /// events inside it, and two concurrent starts would fight over the device.
   bool _autoStartingLiveCapture = false;
+
+  /// Last transport state already handled, so recording → standby is not treated
+  /// as a fresh link (that used to start an offline sweep on the control
+  /// characteristic the Gem had just used for stop).
+  DeviceTransportState? _lastHandledDeviceTransportState;
 
   Future<void> _startLiveCaptureOnLink() async {
     if (_autoStartingLiveCapture) return;
@@ -2212,6 +2525,12 @@ class NeoRecallController extends ChangeNotifier
         level: 'warning',
         details: <String, Object?>{'error': error.toString()},
       );
+    } finally {
+      // The flag guards the window until the recorder reports isRecording, and
+      // that window is now closed. Leaving it set latched auto-start off for
+      // the rest of the process: every later reconnect returned here and did
+      // nothing, so a device that dropped once never resumed on its own again.
+      _autoStartingLiveCapture = false;
     }
   }
 
@@ -2220,7 +2539,7 @@ class NeoRecallController extends ChangeNotifier
     final ownerAccountId = accountId;
     if (ownerAccountId == null ||
         !authenticated ||
-        !consentAccepted ||
+        _memoketHardwareProbeActive ||
         isRecording ||
         _stoppingRecording ||
         _startingRecording) {
@@ -2231,7 +2550,7 @@ class NeoRecallController extends ChangeNotifier
     );
     if (mode == null) return;
     if (!_recordingSchedule.allows(DateTime.now())) {
-      warning = 'Recording is waiting for the next configured daily window.';
+      warning = strings.controllerScheduleWaiting;
       _armRecordingSchedule();
       notifyListeners();
       return;
@@ -2239,8 +2558,7 @@ class NeoRecallController extends ChangeNotifier
     _resumingMobileCapture = true;
     try {
       if (mode == 'bluetooth' && !hasPreferredBluetoothDevice) {
-        warning =
-            'Background capture could not resume because its Bluetooth device is not configured.';
+        warning = strings.controllerBluetoothNotConfigured;
         notifyListeners();
         return;
       }
@@ -2251,9 +2569,7 @@ class NeoRecallController extends ChangeNotifier
         // restart) and denies microphone access to a process with no UI.
         // Keep the durable intent and resume when the app is opened, rather
         // than starting a capture that would record silence.
-        warning =
-            'Phone-microphone recording is waiting for NeoRecall to be opened. '
-            'Bluetooth capture and device sync continue in the background.';
+        warning = strings.controllerMicrophoneNeedsOpen;
         notifyListeners();
         return;
       }
@@ -2262,15 +2578,14 @@ class NeoRecallController extends ChangeNotifier
         systemAudio: false,
         bluetooth: mode == 'bluetooth',
       );
-      notice =
-          'Background recording recovered after the app process restarted.';
+      notice = strings.controllerBackgroundRecovered;
       if (recorder is MobileRecallRecorder) {
         _handleDeviceTransportState(
           (recorder as MobileRecallRecorder).devices.state,
         );
       }
     } catch (exception) {
-      warning = 'Background recording recovery is waiting: $exception';
+      warning = strings.controllerRecoveryWaiting('$exception');
       notifyListeners();
     } finally {
       _resumingMobileCapture = false;
@@ -2280,17 +2595,36 @@ class NeoRecallController extends ChangeNotifier
   void _handleDeviceControlEvent(DeviceControlEvent event) {
     switch (event.type) {
       case DeviceControlEventType.startRecording:
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'hardware_start_requested',
+          details: <String, Object?>{
+            'isRecording': isRecording,
+            'starting': _startingRecording,
+            'stopping': _stoppingRecording,
+          },
+        );
         if (!isRecording &&
             !_startingRecording &&
             !_stoppingRecording &&
-            authenticated &&
-            consentAccepted) {
+            !_memoketHardwareProbeActive &&
+            authenticated) {
           unawaited(_startFromDeviceControl());
         }
       case DeviceControlEventType.stopRecording:
       case DeviceControlEventType.standby:
       case DeviceControlEventType.powerOff:
-        if (isRecording) unawaited(stopRecording());
+        if (isRecording && !_memoketHardwareProbeActive) {
+          ClientDiagnosticLog.instance.record(
+            'device_capture',
+            'hardware_stop_requested',
+            details: <String, Object?>{
+              'type': event.type.name,
+              'session': _activeSession?.id,
+            },
+          );
+          unawaited(stopRecording());
+        }
       case DeviceControlEventType.powerOn:
       case DeviceControlEventType.wake:
         unawaited(audioDeviceSessions.connectPreferred());
@@ -2310,29 +2644,50 @@ class NeoRecallController extends ChangeNotifier
   }
 
   void _handleDeviceTransportState(DeviceTransportState state) {
-    ClientDiagnosticLog.instance.record(
-      'device_transport',
-      'state_changed',
-      level: state == DeviceTransportState.faulted ? 'warning' : 'info',
-      details: <String, Object?>{
-        'state': state.name,
-        'device': audioDeviceSessions.preferredDevice?.displayName,
-        'type': audioDeviceSessions.preferredDevice?.metadata['type'],
-      },
-    );
+    final previous = _lastHandledDeviceTransportState;
+    _lastHandledDeviceTransportState = state;
+    // A radio that keeps failing re-announces the state it is already in. The
+    // event is still handled — the side effects below are what keep a dropped
+    // link tidy — but recording "faulted -> faulted" over and over only pushes
+    // the entries that explain a problem out of the diagnostic ring.
+    if (previous != state) {
+      ClientDiagnosticLog.instance.record(
+        'device_transport',
+        'state_changed',
+        level: state == DeviceTransportState.faulted ? 'warning' : 'info',
+        details: <String, Object?>{
+          'state': state.name,
+          'previous': previous?.name,
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+          'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+        },
+      );
+    }
     if (state == DeviceTransportState.disconnected ||
         state == DeviceTransportState.faulted) {
-      preferredDeviceBatteryLevel = null;
+      // Keep the last percentage across a brief radio drop. The record sheet
+      // only shows it while connected, and a reconnect will refresh it.
       deviceStorageSync.onDeviceUnlinked();
     } else if (state == DeviceTransportState.connectedStandby) {
-      // §9: after each (re)connect, pull anything the device recorded offline,
-      // then keep sweeping while it stays linked so later recordings arrive on
-      // their own — with or without the app open.
-      deviceStorageSync.onDeviceLinked();
-      // Show what the device is holding as soon as it links, so the amount is
-      // known before the user decides to sync.
-      unawaited(refreshDeviceStoragePending());
-      unawaited(_startLiveCaptureOnLink());
+      // A live stop also lands here. Sweeping then writes list/delete on the
+      // same control characteristic the Gem just used for stop, and the
+      // follow-up start notify reopened a take the user did not start.
+      final becameLinked =
+          previous == null ||
+          previous == DeviceTransportState.disconnected ||
+          previous == DeviceTransportState.connecting ||
+          previous == DeviceTransportState.faulted ||
+          previous == DeviceTransportState.unknown;
+      if (becameLinked && !_memoketHardwareProbeActive) {
+        // §9: after each (re)connect, pull anything the device recorded
+        // offline, then keep sweeping while it stays linked so later
+        // recordings arrive on their own — with or without the app open.
+        deviceStorageSync.onDeviceLinked();
+        // Show what the device is holding as soon as it links, so the amount
+        // is known before the user decides to sync.
+        unawaited(refreshDeviceStoragePending());
+        unawaited(_startLiveCaptureOnLink());
+      }
     }
     final connected =
         state == DeviceTransportState.connectedStandby ||
@@ -2350,8 +2705,7 @@ class NeoRecallController extends ChangeNotifier
       if ((state == DeviceTransportState.disconnected ||
               state == DeviceTransportState.faulted) &&
           capability?.sourceKind == 'wearable') {
-        warning =
-            'The Bluetooth audio source disconnected. Reconnect the device or stop the recording to finalize it.';
+        warning = strings.controllerBluetoothDisconnected;
         notifyListeners();
       }
       return;
@@ -2360,12 +2714,121 @@ class NeoRecallController extends ChangeNotifier
     if ((state == DeviceTransportState.disconnected ||
             state == DeviceTransportState.faulted) &&
         activeKind == 'wearable') {
-      unawaited(_restartMobileCapture(useBluetooth: false));
+      if (!shouldFailoverWearableToPhoneMicrophone) {
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'wearable_link_dropped_kept_take',
+          details: <String, Object?>{
+            'device': audioDeviceSessions.preferredDevice?.displayName,
+            'type': audioDeviceSessions.preferredDevice?.metadata['type'],
+          },
+        );
+      } else {
+        unawaited(_restartMobileCapture(useBluetooth: false));
+      }
     } else if (connected &&
         preferBluetoothCapture &&
         activeKind == 'microphone') {
       unawaited(_restartMobileCapture(useBluetooth: true));
     }
+  }
+
+  /// Keeps a stalled wearable take honest.
+  ///
+  /// Holding the take is right while the device is still recording to its own
+  /// flash: the audio arrives later as a file. It is wrong when nothing arrives
+  /// at all — the session then stays open for as long as the user believes it
+  /// is recording, and everything said in that time is simply gone. So the
+  /// stall is now said out loud immediately, and if no audio has reached
+  /// storage by the end of the grace period the take is restarted (once), then
+  /// moved to the phone microphone if the user permits it.
+  void _watchWearableStall() {
+    _wearableStallTimer?.cancel();
+    final capturedAtStall = _capturedAudioMs;
+    warning = strings.controllerWearableAudioStalled;
+    notifyListeners();
+    _wearableStallTimer = Timer(_wearableStallGrace, () async {
+      _wearableStallTimer = null;
+      if (!isRecording || _switchingMobileSource || _stoppingRecording) return;
+      if (_capturedAudioMs > capturedAtStall) {
+        // Audio came back on its own; nothing was lost and nothing to say.
+        _wearableStallRestarted = false;
+        if (warning == strings.controllerWearableAudioStalled) warning = null;
+        notifyListeners();
+        return;
+      }
+      final canUseWearable = !_wearableStallRestarted;
+      if (!canUseWearable && !shouldFailoverWearableToPhoneMicrophone) {
+        // The device is unreachable and the user has asked to keep recordings
+        // on the wearable only. Nothing more can be done than to be honest.
+        warning = strings.controllerWearableAudioLost;
+        ClientDiagnosticLog.instance.record(
+          'device_capture',
+          'wearable_stall_unrecovered',
+          level: 'warn',
+          details: <String, Object?>{
+            'device': audioDeviceSessions.preferredDevice?.displayName,
+            'silentSeconds': _wearableStallGrace.inSeconds * 2,
+          },
+        );
+        notifyListeners();
+        return;
+      }
+      _wearableStallRestarted = true;
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'wearable_stall_recovering',
+        level: 'warn',
+        details: <String, Object?>{
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+          'usingBluetooth': canUseWearable,
+        },
+      );
+      await _restartMobileCapture(useBluetooth: canUseWearable);
+      // A restarted wearable take that stays silent has to be caught too.
+      if (canUseWearable && isRecording) _watchWearableStall();
+    });
+  }
+
+  /// Clears what is measured per take. The escalation memory is deliberately
+  /// not part of it: a take restarted *because* the wearable went silent must
+  /// remember that, or a dead device restarts the same doomed take every grace
+  /// period instead of moving capture to the phone.
+  void _resetCaptureCoverage({bool forgetEscalation = true}) {
+    _wearableStallTimer?.cancel();
+    _wearableStallTimer = null;
+    if (forgetEscalation) _wearableStallRestarted = false;
+    _lastCapturedAudioAt = null;
+    _capturedAudioMs = 0;
+  }
+
+  /// Reports a finished take that captured far less audio than it ran for.
+  ///
+  /// A stalled source, a device that stopped handing audio over, a link that
+  /// died mid-conversation: all of them end with a session whose transcript
+  /// covers a fraction of the time the user was recording. Saying so is the
+  /// difference between a short transcript and a silently incomplete one.
+  void _reportCaptureCoverage(DateTime? startedAt) {
+    final start = startedAt;
+    if (start == null) return;
+    final elapsedMs = DateTime.now().toUtc().difference(start).inMilliseconds;
+    final missing = captureShortfall(
+      elapsedMs: elapsedMs,
+      capturedMs: _capturedAudioMs,
+    );
+    if (missing == null) return;
+    warning = strings.controllerCaptureIncomplete(missing.inMinutes);
+    ClientDiagnosticLog.instance.record(
+      'device_capture',
+      'capture_coverage_gap',
+      level: 'warn',
+      details: <String, Object?>{
+        'elapsedMs': elapsedMs,
+        'capturedMs': _capturedAudioMs,
+        'device': audioDeviceSessions.preferredDevice?.displayName,
+        'lastAudioAt': _lastCapturedAudioAt?.toIso8601String(),
+      },
+    );
   }
 
   Future<void> _restartMobileCapture({required bool useBluetooth}) async {
@@ -2379,11 +2842,11 @@ class NeoRecallController extends ChangeNotifier
         bluetooth: useBluetooth,
       );
       notice = useBluetooth
-          ? 'Recording moved back to the reconnected Bluetooth device.'
-          : 'Bluetooth disconnected; recording continues with the phone microphone.';
+          ? strings.controllerCaptureMovedToBluetooth
+          : strings.controllerCaptureMovedToPhone;
       notifyListeners();
     } catch (exception) {
-      warning = 'Audio source recovery failed: $exception';
+      warning = strings.controllerSourceRecoveryFailed('$exception');
       notifyListeners();
       _scheduleMobileCaptureRecovery(
         useBluetooth: useBluetooth,
@@ -2400,6 +2863,21 @@ class NeoRecallController extends ChangeNotifier
     CapturePipelineInterruption interruption,
   ) async {
     if (_switchingMobileSource || _stoppingRecording || !isRecording) return;
+    // A Gem still recording on flash must not be stopped to open a new take
+    // just because the live BLE stream stalled for a few seconds.
+    if (interruption.sourceKind == 'wearable' &&
+        !shouldFailoverWearableToPhoneMicrophone) {
+      ClientDiagnosticLog.instance.record(
+        'device_capture',
+        'wearable_stall_kept_take',
+        details: <String, Object?>{
+          'reason': interruption.reason,
+          'device': audioDeviceSessions.preferredDevice?.displayName,
+        },
+      );
+      _watchWearableStall();
+      return;
+    }
     final useBluetooth = capability?.sourceKind == 'wearable';
     _switchingMobileSource = true;
     try {
@@ -2413,8 +2891,7 @@ class NeoRecallController extends ChangeNotifier
       );
     } catch (exception) {
       _switchingMobileSource = false;
-      warning =
-          'Interrupted recording could not be finalized safely: $exception';
+      warning = strings.controllerInterruptedFinalizeFailed('$exception');
       notifyListeners();
     }
   }
@@ -2428,7 +2905,6 @@ class NeoRecallController extends ChangeNotifier
         ? recorder as MobileRecallRecorder
         : null;
     if (!authenticated ||
-        !consentAccepted ||
         mobile == null ||
         mobile.backgroundPaused) {
       _switchingMobileSource = false;
@@ -2457,9 +2933,7 @@ class NeoRecallController extends ChangeNotifier
     }
     _mobileCaptureRecoveryAttempts += 1;
     final delay = Duration(milliseconds: delayMs);
-    warning =
-        'Audio capture was interrupted ($reason). The durable tail was saved; '
-        'capture will retry in ${delay.inSeconds} seconds.';
+    warning = strings.controllerCaptureRetrying(reason, delay.inSeconds);
     notifyListeners();
     _mobileCaptureRecoveryTimer = Timer(delay, () async {
       _mobileCaptureRecoveryTimer = null;
@@ -2476,7 +2950,7 @@ class NeoRecallController extends ChangeNotifier
           bluetooth: useBluetooth,
         );
         _switchingMobileSource = false;
-        notice = 'Audio capture recovered after an interruption.';
+        notice = strings.controllerCaptureRecovered;
         notifyListeners();
       } catch (exception) {
         _scheduleMobileCaptureRecovery(
@@ -2503,8 +2977,7 @@ class NeoRecallController extends ChangeNotifier
         bluetooth: true,
       );
     } catch (exception) {
-      warning =
-          'The device requested recording, but capture could not start: $exception';
+      warning = strings.controllerDeviceRecordFailed('$exception');
       notifyListeners();
     }
   }
@@ -2532,6 +3005,7 @@ class NeoRecallController extends ChangeNotifier
       needsAttentionCount = 0;
       failedUploadCount = 0;
       processingLedgerStatus = const ProcessingStatusSnapshot();
+      accountUsage = null;
       notifyListeners();
       return;
     }
@@ -2570,6 +3044,7 @@ class NeoRecallController extends ChangeNotifier
         // active network: upload policy still performs its own authoritative check.
       }
       processingLedgerStatus = ProcessingStatusSnapshot.fromChunks(
+        strings: strings,
         chunks: chunks,
         pendingBytes: pendingAudioBytes,
         localUploadBytes: localUploadBytes,
@@ -2599,7 +3074,7 @@ class NeoRecallController extends ChangeNotifier
       await sync.pump.retry(chunk);
     }
     await _refreshPending();
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
   }
 
   /// Drains only the uploadable audio that is queued at the moment of the
@@ -2622,8 +3097,8 @@ class NeoRecallController extends ChangeNotifier
               .length;
     final chunkCount = await sync.pump.uploadQueuedAudioOnMeteredOnce();
     notice = chunkCount == 0
-        ? 'There is no queued audio ready to upload.'
-        : 'Uploading $recordingCount queued recording${recordingCount == 1 ? '' : 's'} using mobile data.';
+        ? strings.controllerNoQueuedAudio
+        : strings.controllerUploadingQueuedAudio(recordingCount);
     await _refreshPending();
     notifyListeners();
   }
@@ -2708,6 +3183,136 @@ class NeoRecallController extends ChangeNotifier
     _ => 'application/octet-stream',
   };
 
+  @override
+  Future<void> retainImportedAudio({
+    required String importId,
+    required Uint8List bytes,
+    required String contentType,
+    required String filename,
+    DateTime? capturedAt,
+  }) async {
+    if (!keepRawAudio) return;
+    final owner = accountId;
+    if (owner == null) return;
+    try {
+      await retainedAudio.retain(
+        accountId: owner,
+        id: 'import-$importId',
+        bytes: bytes,
+        mimeType: contentType,
+        filename: filename,
+        capturedAt: capturedAt ?? DateTime.now().toUtc(),
+        importId: importId,
+      );
+      await _refreshRetainedAudioAvailability();
+      notifyListeners();
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'audio',
+        'retain_import_failed',
+        level: 'warning',
+        details: <String, Object?>{
+          'importId': importId,
+          'error': error.toString(),
+        },
+      );
+    }
+  }
+
+  Future<void> _retainProcessedChunk(AudioChunk chunk) async {
+    if (!keepRawAudio) return;
+    final owner = accountId;
+    if (owner == null) return;
+    final bytes = await store.readBytes(chunk);
+    await retainedAudio.retain(
+      accountId: owner,
+      id: chunk.id,
+      bytes: bytes,
+      mimeType: _audioMimeType(chunk.container),
+      filename: '${chunk.id}.${chunk.container}',
+      capturedAt: chunk.startedAt,
+      sessionId: chunk.sessionId,
+      sequence: chunk.sequence,
+      duration: Duration(milliseconds: chunk.durationMs),
+    );
+    await _refreshRetainedAudioAvailability();
+    notifyListeners();
+  }
+
+  @override
+  Future<void> applyRawAudioRetention({bool purgeAll = false}) async {
+    final owner = accountId;
+    if (owner == null) return;
+    try {
+      if (purgeAll || !keepRawAudio) {
+        await retainedAudio.purgeAccount(owner);
+      } else {
+        await retainedAudio.purgeExpired(
+          accountId: owner,
+          keep: Duration(days: contextOriginalRetentionDays),
+        );
+      }
+      await _refreshRetainedAudioAvailability();
+    } catch (error) {
+      ClientDiagnosticLog.instance.record(
+        'audio',
+        'retain_purge_failed',
+        level: 'warning',
+        details: <String, Object?>{'error': error.toString()},
+      );
+    }
+  }
+
+  Future<void> _refreshRetainedAudioAvailability() async {
+    final owner = accountId;
+    momentsWithRetainedAudio.clear();
+    if (owner == null || !keepRawAudio) return;
+    for (final moment in moments) {
+      if (await retainedAudio.hasClips(
+        accountId: owner,
+        importIds: moment.importIds,
+        sessionIds: moment.sessionIds,
+      )) {
+        momentsWithRetainedAudio.add(moment.key);
+      }
+    }
+  }
+
+  Future<List<PendingAudioPart>> loadMomentAudio(TimelineMoment moment) async {
+    final owner = accountId;
+    if (owner == null) {
+      throw StateError('Sign in to listen to a recording.');
+    }
+    final clips = await retainedAudio.lookup(
+      accountId: owner,
+      importIds: moment.importIds,
+      sessionIds: moment.sessionIds,
+    );
+    if (clips.isEmpty) {
+      throw StateError('This recording is no longer kept on this device.');
+    }
+    return [
+      for (final clip in clips)
+        PendingAudioPart(
+          id: clip.id,
+          duration: clip.duration,
+          mimeType: clip.mimeType,
+        ),
+    ];
+  }
+
+  Future<Uint8List> readRetainedAudioPart(String partId) async {
+    final owner = accountId;
+    if (owner == null) {
+      throw StateError('Sign in to listen to a recording.');
+    }
+    final match = await retainedAudio.getClip(owner, partId);
+    if (match == null) {
+      throw StateError('This recording is no longer kept on this device.');
+    }
+    return retainedAudio.readBytes(match);
+  }
+
   Future<Uint8List> readPendingAudioPart(String partId) async {
     final ownerAccountId = accountId;
     if (ownerAccountId == null) {
@@ -2746,8 +3351,7 @@ class NeoRecallController extends ChangeNotifier
       }
       await _refreshBatteryOptimizationRisk(mobile);
     } catch (error) {
-      warning =
-          'Android could not open the battery-optimization request: $error';
+      warning = strings.controllerBatteryOptimizationFailed('$error');
       notifyListeners();
     }
   }
@@ -2772,6 +3376,7 @@ class NeoRecallController extends ChangeNotifier
   /// Called when the app returns to the foreground. Proactively resumes sync and
   /// refreshes data instead of waiting for the periodic timer.
   Future<void> onAppResumed() async {
+    unawaited(consumePendingMemoketE2eRequest());
     if (recorder is MobileRecallRecorder) {
       final mobile = recorder as MobileRecallRecorder;
       // Re-arm a runtime the user released from the notification, and retry a
@@ -2783,7 +3388,7 @@ class NeoRecallController extends ChangeNotifier
       }
     }
     if (!authenticated) return;
-    sync.pump.pump();
+    unawaited(sync.pump.pump());
     await _refreshPending();
     await refreshAll(silent: true);
     // Pull anything the wearable recorded while the app was backgrounded.
@@ -2796,8 +3401,7 @@ class NeoRecallController extends ChangeNotifier
     _cancelMobileCaptureRecovery();
     if (isRecording) await stopRecording();
     await mobile.pauseBackgroundRuntime();
-    notice =
-        'Background recording and device sync are paused. Open NeoRecall to resume them.';
+    notice = strings.controllerBackgroundPaused;
     notifyListeners();
   }
 
@@ -2901,6 +3505,7 @@ class NeoRecallController extends ChangeNotifier
       if (results[5] != null) {
         moments = rows(5, 'moments').map(TimelineMoment.fromJson).toList();
         _momentNextCursor = results[5]?['nextCursor']?.toString();
+        await _refreshRetainedAudioAvailability();
       }
       if (results[6] != null) dailySummaries = rows(6, 'items');
       final processing = results[7];
@@ -2912,12 +3517,13 @@ class NeoRecallController extends ChangeNotifier
                 ?.toInt() ??
             0;
       }
+      unawaited(refreshAccountUsage(silent: true));
       cachedData = failures.isNotEmpty;
       // Only worth interrupting for when nothing at all came back. A partial
       // refresh has already shown what it could, and the status card explains
       // anything genuinely wrong far better than a failed request URL would.
       error = (!silent && failures.length == results.length)
-          ? 'Could not reach NeoRecall. Showing what was loaded last.'
+          ? strings.controllerRefreshFailed
           : null;
     } catch (exception) {
       cachedData = true;
@@ -2934,6 +3540,21 @@ class NeoRecallController extends ChangeNotifier
   /// or repeat what is on screen.
   Future<void> showOlderMoments() =>
       _switchMomentPage(momentPage + 1, _momentNextCursor);
+
+  /// Returns the timeline to its newest page.
+  ///
+  /// Called whenever the moments list is opened. Someone who left the list
+  /// three pages into last week and comes back to it is looking for what has
+  /// happened since, not for the page they stopped reading on — and a list
+  /// that silently opens in the middle of the history reads as a list that
+  /// has lost today's recordings.
+  Future<void> showNewestMoments() async {
+    if (momentPage == 0 || isPagingMoments) return;
+    _momentPageCursors
+      ..clear()
+      ..add(null);
+    await _switchMomentPage(0, null);
+  }
 
   /// Moves one page back towards today.
   Future<void> showNewerMoments() => _switchMomentPage(
@@ -2954,6 +3575,7 @@ class NeoRecallController extends ChangeNotifier
           .cast<Map>()
           .map((row) => TimelineMoment.fromJson(Map<String, dynamic>.from(row)))
           .toList();
+      await _refreshRetainedAudioAvailability();
       if (page < _momentPageCursors.length) {
         _momentPageCursors[page] = cursor;
       } else {
@@ -2964,7 +3586,7 @@ class NeoRecallController extends ChangeNotifier
     } catch (exception) {
       // Reaching further back is a convenience; losing what is already on
       // screen to fetch it would be a poor trade.
-      warning = 'That part of the timeline could not be loaded just now.';
+      warning = strings.controllerTimelineLoadFailed;
     } finally {
       isPagingMoments = false;
       notifyListeners();
@@ -2994,7 +3616,7 @@ class NeoRecallController extends ChangeNotifier
           .toList();
     } catch (exception) {
       // The preview stays on screen; only the rest is missing.
-      warning = 'The rest of this moment could not be loaded just now.';
+      warning = strings.controllerMomentLoadFailed;
     } finally {
       loadingMomentTranscripts.remove(id);
       notifyListeners();
@@ -3015,7 +3637,7 @@ class NeoRecallController extends ChangeNotifier
         '/api/v1/conversations/$conversationId/reprocess',
       );
       momentTranscripts.remove(conversationId);
-      notice = 'Writing this moment up again. It will update here when ready.';
+      notice = strings.controllerRewriteQueued;
       await refreshAll(silent: true);
     } catch (exception) {
       warning = _describeReprocessFailure(exception);
@@ -3030,49 +3652,29 @@ class NeoRecallController extends ChangeNotifier
   String _describeReprocessFailure(Object exception) {
     final detail = exception.toString();
     if (detail.contains('AI_NOT_CONFIGURED')) {
-      return 'Summaries are not available right now, so this moment was left as it is.';
+      return strings.controllerReprocessAiUnavailable;
     }
     if (detail.contains('CONVERSATION_OPEN')) {
-      return 'This conversation is still being recorded.';
+      return strings.controllerReprocessStillRecording;
     }
-    return 'This moment could not be written up again just now.';
+    return strings.controllerReprocessFailed;
   }
 
-  Future<void> search(String query) async {
-    if (query.trim().isEmpty) {
-      searchResults = <Map<String, dynamic>>[];
+  @override
+  Future<void> refreshAccountUsage({bool silent = false}) async {
+    if (api.token == null) return;
+    if (!silent) {
+      accountUsageLoading = true;
       notifyListeners();
-      return;
     }
-    final payload =
-        await api.request(
-              'GET',
-              '/api/v1/search?q=${Uri.encodeQueryComponent(query)}',
-            )
-            as Map;
-    searchResults = (payload['results'] as List)
-        .cast<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList();
-    askAnswer = null;
-    askCitations = <Map<String, dynamic>>[];
-    notifyListeners();
-  }
-
-  Future<void> ask(String question) async {
-    final payload =
-        await api.request(
-              'POST',
-              '/api/v1/search/ask',
-              body: <String, dynamic>{'question': question},
-            )
-            as Map;
-    askAnswer = payload['answer'] as String;
-    askCitations = (payload['citations'] as List)
-        .cast<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList();
-    notifyListeners();
+    try {
+      accountUsage = AccountUsageSnapshot.fromJson(await api.fetchAccountUsage());
+    } catch (_) {
+      if (!silent) accountUsage = null;
+    } finally {
+      accountUsageLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> importAudio(
@@ -3100,18 +3702,25 @@ class NeoRecallController extends ChangeNotifier
           'source': 'file',
         },
       );
+      final payload = Uint8List.fromList(bytes);
       await api.importAudio(
         importId: importId,
-        bytes: Uint8List.fromList(bytes),
+        bytes: payload,
         filename: filename,
         contentType: contentType,
+      );
+      await retainImportedAudio(
+        importId: importId,
+        bytes: payload,
+        contentType: contentType,
+        filename: filename,
       );
       ClientDiagnosticLog.instance.record(
         'file_import',
         'import_accepted',
         details: <String, Object?>{'importId': importId, 'bytes': bytes.length},
       );
-      notice = 'Import uploaded. Local transcription has been queued.';
+      notice = strings.controllerImportQueued;
     } catch (exception) {
       ClientDiagnosticLog.instance.record(
         'file_import',
@@ -3169,6 +3778,7 @@ class NeoRecallController extends ChangeNotifier
     deviceStorageSync.dispose();
     sync.close();
     disposeRecordingContext();
+    disposeCloud();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {
       unawaited(_disposeExternalDeviceRuntime());

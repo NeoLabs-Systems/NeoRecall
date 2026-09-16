@@ -6,7 +6,7 @@ const { getDatabase } = require('../../db/database');
 const { getConfig } = require('../../config');
 const { HttpError } = require('../../middleware/error_handler');
 const { pageLimit } = require('../../utils/pagination');
-const { queryBoolean, Conditions } = require('../../utils/query');
+const { queryBoolean, placeholders, Conditions } = require('../../utils/query');
 const searchIndex = require('../../embeddings/search_index_service');
 const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
@@ -25,7 +25,7 @@ const logger = createLogger('memories');
 function directContextOriginals(database, userId, memoryIds) {
   if (!memoryIds.length) return [];
   return database.prepare(`SELECT original_path FROM recording_context_items
-    WHERE user_id=? AND memory_id IN (${memoryIds.map(() => '?').join(',')}) AND original_path IS NOT NULL`)
+    WHERE user_id=? AND memory_id IN (${placeholders(memoryIds.length)}) AND original_path IS NOT NULL`)
     .all(userId, ...memoryIds).map((row) => row.original_path);
 }
 
@@ -196,7 +196,7 @@ function bulk(userId, { ids, action }) {
   }
   const uniqueIds = [...new Set(ids.map(String))];
   const db = getDatabase();
-  const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${uniqueIds.map(() => '?').join(',')})`)
+  const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${placeholders(uniqueIds.length)})`)
     .all(userId, ...uniqueIds);
   if (rows.length !== uniqueIds.length) {
     throw new HttpError(404, 'NOT_FOUND', 'One or more memories were not found.');
@@ -222,7 +222,7 @@ function bulk(userId, { ids, action }) {
     pinned=COALESCE(?,pinned),
     archived=COALESCE(?,archived),
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-    WHERE user_id=? AND public_id IN (${uniqueIds.map(() => '?').join(',')})`)
+    WHERE user_id=? AND public_id IN (${placeholders(uniqueIds.length)})`)
     .run(pinned, archived, userId, ...uniqueIds);
   return { action, count: rows.length, ids: uniqueIds };
 }
@@ -345,7 +345,7 @@ function loadMemoriesForMerge(userId, ids) {
     throw new HttpError(400, 'INVALID_MERGE', `Merge at most ${mergeMax} memories at once.`);
   }
   const db = getDatabase();
-  const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${uniqueIds.map(() => '?').join(',')})`)
+  const rows = db.prepare(`SELECT * FROM memories WHERE user_id=? AND public_id IN (${placeholders(uniqueIds.length)})`)
     .all(userId, ...uniqueIds);
   if (rows.length !== uniqueIds.length) {
     throw new HttpError(404, 'NOT_FOUND', 'One or more memories were not found.');
@@ -469,7 +469,7 @@ function applyStructuralMerge(userId, memories, prose) {
     for (const memory of absorbed) reparent.run(target.id, memory.id, userId);
 
     const contextLinks = db.prepare(`SELECT context_item_id,MAX(used_by_ai) used_by_ai
-      FROM memory_context_sources WHERE memory_id IN (${absorbed.map(() => '?').join(',')}) GROUP BY context_item_id`)
+      FROM memory_context_sources WHERE memory_id IN (${placeholders(absorbed.length)}) GROUP BY context_item_id`)
       .all(...absorbed.map((memory) => memory.id));
     const contextLink = db.prepare(`INSERT INTO memory_context_sources (memory_id,context_item_id,used_by_ai)
       VALUES (?,?,?) ON CONFLICT(memory_id,context_item_id) DO UPDATE SET used_by_ai=MAX(used_by_ai,excluded.used_by_ai)`);
@@ -592,11 +592,32 @@ async function rewriteMergedProse(userId, payload) {
 
 // Merge evidence and highlights immediately. Optional AI prose polishing is a
 // durable worker job, so a slow model never holds the user's request open.
-function merge(userId, { ids }) {
+// Merging by hand replaces the wording, because choosing to merge is choosing
+// the combined card. The duplicate sweep merges without being asked, so it must
+// not also overwrite wording someone typed themselves: when a member carries
+// prose_edited_at, that member's words survive and no rewrite is queued. This
+// is not an exception to merging — the cards are still folded into one, with
+// every highlight, topic, entity and transcript line kept.
+function editedProse(memories) {
+  const edited = memories.filter((memory) => memory.prose_edited_at)
+    .sort((left, right) => Date.parse(right.prose_edited_at) - Date.parse(left.prose_edited_at))[0];
+  if (!edited) return null;
+  return { type: edited.type, titleEn: edited.title_en, summaryEn: edited.summary_en, emoji: edited.emoji || defaultEmojiForType(edited.type) };
+}
+
+function merge(userId, { ids }, { automatic = false } = {}) {
   if (!Array.isArray(ids)) throw new HttpError(400, 'INVALID_IDS', 'Provide memory ids to merge.');
   const memories = loadMemoriesForMerge(userId, ids);
-  const structural = applyStructuralMerge(userId, memories, deterministicMergeProse(memories));
-  const rewriteJobId = queueMergedProseRewrite(userId, structural, memories);
+  const keepEdited = automatic ? editedProse(memories) : null;
+  const structural = applyStructuralMerge(userId, memories, keepEdited || deterministicMergeProse(memories));
+  // The survivor now carries wording someone typed, whichever member it came
+  // from, so it has to be marked as such — that mark is what stops later
+  // consolidation from renaming the card.
+  if (keepEdited) {
+    getDatabase().prepare(`UPDATE memories SET prose_edited_at=COALESCE(prose_edited_at,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      WHERE public_id=? AND user_id=?`).run(structural.targetPublicId, userId);
+  }
+  const rewriteJobId = keepEdited ? null : queueMergedProseRewrite(userId, structural, memories);
   const detail = memoryDetail(userId, structural.targetPublicId);
   return {
     memory: detail,

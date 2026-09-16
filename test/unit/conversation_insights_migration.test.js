@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const Database = require('better-sqlite3');
+const Database = require('better-sqlite3-multiple-ciphers');
 const migration = require('../../server/db/migrations/012_conversation_insights');
 
 test('conversation insight migration backfills existing consolidated memories without another LLM call', () => {

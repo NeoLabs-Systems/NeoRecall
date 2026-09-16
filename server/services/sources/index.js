@@ -6,6 +6,7 @@ const path = require('node:path');
 const { getDatabase } = require('../../db/database');
 const { paths } = require('../../../runtime/paths');
 const { createLogger } = require('../../utils/logger');
+const { placeholders } = require('../../utils/query');
 
 const logger = createLogger('sources');
 
@@ -87,8 +88,7 @@ const sourcesService = {
     try {
       const db = getDatabase();
       try {
-        const placeholders = RETIRED_SOURCE_TYPES.map(() => '?').join(',');
-        const removed = db.prepare(`DELETE FROM sources WHERE type IN (${placeholders})`).run(...RETIRED_SOURCE_TYPES);
+        const removed = db.prepare(`DELETE FROM sources WHERE type IN (${placeholders(RETIRED_SOURCE_TYPES.length)})`).run(...RETIRED_SOURCE_TYPES);
         if (removed.changes > 0) {
           logger.info('Removed retired sources', { removed: removed.changes });
         }

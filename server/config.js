@@ -1,6 +1,6 @@
 'use strict';
 
-const { integer, number, boolean, jsonObject } = require('./config/env');
+const { integer, number, boolean, enumeration, jsonObject } = require('./config/env');
 const { validateConfig } = require('./config/validate');
 
 
@@ -82,6 +82,12 @@ function buildConfig() {
     // stream, so erring long is the safe direction.
     importSessionContinuityMs: integer('NEORECALL_IMPORT_SESSION_CONTINUITY_MS', 600_000, { min: 0 }),
     importFailedTtlHours: integer('NEORECALL_IMPORT_FAILED_TTL_HOURS', 24, { min: 1 }),
+    // How long a file in a work directory may go unreferenced before a sweep
+    // treats it as leaked rather than mid-write. Every orphan sweep — temporary
+    // audio, import parts, cloud staging — shares this one grace period, because
+    // they are all answering the same question about the same kind of file.
+    // Raise it on a filesystem slow enough that a large write outlives it.
+    orphanFileGraceMs: integer('NEORECALL_ORPHAN_FILE_GRACE_MS', 60_000, { min: 1_000 }),
     transcriptionProvider: process.env.TRANSCRIPTION_PROVIDER || 'openai-compatible',
     transcriptionApiBaseUrl: (process.env.TRANSCRIPTION_API_BASE_URL || '').replace(/\/+$/, '') || null,
     transcriptionApiKey: process.env.TRANSCRIPTION_API_KEY || null,
@@ -90,6 +96,66 @@ function buildConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
+    // Audio conditioning before inference. A short ffmpeg filter chain that
+    // levels and cleans a chunk so the transcription service hears the same
+    // recording under better conditions. Pure signal processing: no language is
+    // assumed anywhere in it, so it helps every language the same way.
+    //
+    // Every stage is sample-count exact. That is not a preference but the
+    // condition the rest of the pipeline rests on: diarization turns, segment
+    // timestamps and the speaker previews cut from the original chunk all
+    // describe one timeline, and a filter that added or removed samples would
+    // shift them apart silently. Nothing that trims, gates or stretches belongs
+    // in this chain.
+    audioPreprocessEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_ENABLED', true),
+    // Which passes read the conditioned audio. The transcription service only,
+    // by default, and that default is measured rather than cautious: the
+    // segmentation and speaker-embedding models were trained on unprocessed
+    // recordings, and on the two-speaker fixture in test/fixtures every
+    // conditioned variant separated the voices worse than the raw audio did —
+    // the high-pass alone merged both people into one speaker, because a voice's
+    // identity partly lives in the low frequencies it removes. 'stt+analysis'
+    // feeds them the conditioned audio too; see docs/docs/configuration.md
+    // before setting it.
+    audioPreprocessTarget: enumeration('NEORECALL_AUDIO_PREPROCESS_TARGET', 'stt', ['stt', 'stt+analysis']),
+    // Rumble, handling noise and mains hum live below speech. No language
+    // carries meaning down there, so removing it is free accuracy; it also
+    // removes any DC offset the capture device introduced. 0 disables the stage.
+    audioPreprocessHighpassHz: integer('NEORECALL_AUDIO_PREPROCESS_HIGHPASS_HZ', 70, { min: 0, max: 300 }),
+    // Spectral denoising, deliberately gentle. Aggressive noise reduction
+    // smooths the onset of plosives and fricatives, which is exactly the detail
+    // an acoustic model reads; 6 dB against a low noise floor cleans a hissy
+    // room without eroding consonants. Raise it only for consistently noisy
+    // recordings, and measure the transcripts afterwards.
+    audioPreprocessDenoiseEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_DENOISE_ENABLED', true),
+    audioPreprocessDenoiseDb: number('NEORECALL_AUDIO_PREPROCESS_DENOISE_DB', 6, { min: 0.01, max: 97 }),
+    audioPreprocessDenoiseFloorDb: number('NEORECALL_AUDIO_PREPROCESS_DENOISE_FLOOR_DB', -40, { min: -80, max: -20 }),
+    // Level normalization. A pocket wearable and a desk microphone arrive tens
+    // of decibels apart, and quiet audio is where transcription degrades first.
+    // 'dynaudnorm' is the default because it costs almost nothing; 'loudnorm'
+    // is the broadcast-correct answer at roughly ten times the CPU, since it
+    // upsamples internally for true-peak measurement.
+    audioPreprocessNormalizer: enumeration('NEORECALL_AUDIO_PREPROCESS_NORMALIZER', 'dynaudnorm', ['dynaudnorm', 'loudnorm', 'speechnorm', 'off']),
+    // Ceiling on how much a quiet passage may be lifted, so a near-silent room's
+    // noise floor is never amplified into something that looks like speech.
+    audioPreprocessMaxGain: number('NEORECALL_AUDIO_PREPROCESS_MAX_GAIN', 8, { min: 1, max: 100 }),
+    // Only read when the normalizer is 'loudnorm'.
+    audioPreprocessTargetLufs: number('NEORECALL_AUDIO_PREPROCESS_TARGET_LUFS', -18, { min: -40, max: -5 }),
+    audioPreprocessTruePeakDb: number('NEORECALL_AUDIO_PREPROCESS_TRUE_PEAK_DB', -2, { min: -9, max: 0 }),
+    // Clipping is the one way normalization can make transcription worse, so
+    // the chain ends behind a limiter.
+    audioPreprocessLimiterEnabled: boolean('NEORECALL_AUDIO_PREPROCESS_LIMITER_ENABLED', true),
+    audioPreprocessLimiterPeak: number('NEORECALL_AUDIO_PREPROCESS_LIMITER_PEAK', 0.95, { min: 0.0625, max: 1 }),
+    // Every transcription service resamples to 16 kHz internally, so arriving
+    // there already is not a loss, and it makes the upload predictable.
+    audioPreprocessSampleRate: integer('NEORECALL_AUDIO_PREPROCESS_SAMPLE_RATE', 16_000, { min: 8_000, max: 48_000 }),
+    // 'flac' is lossless at roughly half the bytes, for a metered uplink.
+    audioPreprocessFormat: enumeration('NEORECALL_AUDIO_PREPROCESS_FORMAT', 'wav', ['wav', 'flac']),
+    audioPreprocessTimeoutMs: integer('NEORECALL_AUDIO_PREPROCESS_TIMEOUT_MS', 120_000, { min: 1_000, max: 600_000 }),
+    // Conditioning is proportional to length, and an unexpectedly long import
+    // should reach the transcription service rather than sit in ffmpeg. 0 lifts
+    // the cap.
+    audioPreprocessMaxDurationMs: integer('NEORECALL_AUDIO_PREPROCESS_MAX_DURATION_MS', 1_800_000, { min: 0, max: 86_400_000 }),
     customVocabularyMaxTerms: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS', 100, { min: 1, max: 1_000 }),
     customVocabularyMaxTermLength: integer('NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH', 120, { min: 1, max: 500 }),
     vocabularyCorrectionMinimumLength: integer('NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH', 8, { min: 4, max: 100 }),
@@ -102,6 +168,14 @@ function buildConfig() {
     backupDestination: process.env.NEORECALL_BACKUP_DESTINATION || 'local',
     backupIntervalHours: integer('NEORECALL_BACKUP_INTERVAL_HOURS', 24, { min: 1, max: 24 * 30 }),
     backupRetain: integer('NEORECALL_BACKUP_RETAIN', 3, { min: 1, max: 365 }),
+    // Per-user Nextcloud copies. Interval and age are host-wide; whether a
+    // given account actually uploads is the user's own toggle.
+    cloudUserBackupIntervalHours: integer('NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS', 24, { min: 1, max: 24 * 30 }),
+    cloudPendingMaxAgeMs: integer('NEORECALL_CLOUD_PENDING_MAX_AGE_MS', 7 * 24 * 60 * 60_000, { min: 60_000 }),
+    cloudLoginTimeoutMs: integer('NEORECALL_CLOUD_LOGIN_TIMEOUT_MS', 20 * 60_000, { min: 30_000, max: 60 * 60_000 }),
+    cloudHttpTimeoutMs: integer('NEORECALL_CLOUD_HTTP_TIMEOUT_MS', 120_000, { min: 5_000, max: 1_800_000 }),
+    cloudPutMaxAttempts: integer('NEORECALL_CLOUD_PUT_MAX_ATTEMPTS', 8, { min: 1, max: 50 }),
+    cloudConcatTimeoutMs: integer('NEORECALL_CLOUD_CONCAT_TIMEOUT_MS', 10 * 60_000, { min: 10_000, max: 60 * 60_000 }),
     // VAD and diarization run locally; see docs/docs/configuration.md.
     diarizationEnabled: boolean('NEORECALL_DIARIZATION_ENABLED', true),
     // Native threads for the audio models.
@@ -116,6 +190,27 @@ function buildConfig() {
     // inside one, since merging two people is harder to undo than leaving them apart.
     voiceMatchThreshold: number('NEORECALL_VOICE_MATCH_THRESHOLD', 0.62, { min: -1, max: 1 }),
     voiceMatchMargin: number('NEORECALL_VOICE_MATCH_MARGIN', 0.05, { min: 0, max: 2 }),
+    // Enrolling a person is the only speaker decision more evidence cannot undo,
+    // so it takes more than failing to match. A voice must score below this to
+    // count as somebody new; between here and voiceMatchThreshold is the grey
+    // band where it resembles someone already enrolled without confirming it,
+    // and the turn is left unattributed rather than becoming their duplicate.
+    voiceEnrollFloor: number('NEORECALL_VOICE_ENROLL_FLOOR', 0.45, { min: -1, max: 1 }),
+    // Pooled speech a fingerprint must be measured from before it may found a
+    // new person. Below this, a low score says the measurement was poor, not
+    // that the voice is unknown.
+    voiceEnrollMinimumMs: integer('NEORECALL_VOICE_ENROLL_MIN_MS', 3_000, { min: 0, max: 120_000 }),
+    // The bar for folding two enrolled profiles back together when each is the
+    // other's closest match and neither has a competing candidate nearby. Mutual
+    // exclusivity is far stronger evidence than a one-sided score, so this sits
+    // below voiceMatchThreshold — it is what lets the Speakers screen's re-detect
+    // repair duplicates that ordinary matching can never reach.
+    voiceRepairThreshold: number('NEORECALL_VOICE_REPAIR_THRESHOLD', 0.50, { min: -1, max: 1 }),
+    // How far back the Speakers screen's re-detect re-resolves conversations.
+    // Bounded because the user is waiting on the response: a year of recordings
+    // would be a request that never returns, and the recent past is where a
+    // wrongly split speaker is still worth correcting on screen.
+    speakerRedetectDays: integer('NEORECALL_SPEAKER_REDETECT_DAYS', 30, { min: 1, max: 3650 }),
     // Distance for grouping voices inside one chunk; a larger value merges more.
     // A separate setting from speakerClusterThreshold below: this is a distance
     // (higher = fewer speakers), that is a similarity (higher = more speakers).
@@ -155,6 +250,11 @@ function buildConfig() {
     speakerPreviewMaxBytes: integer('NEORECALL_SPEAKER_PREVIEW_MAX_BYTES', 1024 * 1024, { min: 320_044 }),
     dedupeTokenSimilarity: number('NEORECALL_DEDUPE_TOKEN_SIMILARITY', 0.82, { min: 0, max: 1 }),
     dedupeTimeToleranceMs: integer('NEORECALL_DEDUPE_TIME_TOLERANCE_MS', 2500, { min: 0 }),
+    // Live capture and a later drain of the same wearable share one device id,
+    // so cross-device exact-utterance dedupe never sees them. If this fraction
+    // of an incoming chunk's timeline is already present on another source of
+    // that device, transcription is skipped.
+    sameDeviceCoverageRatio: number('NEORECALL_SAME_DEVICE_COVERAGE_RATIO', 0.5, { min: 0, max: 1 }),
     // ASR services occasionally fill a short timestamp with the same token
     // template dozens of times. Detect that structurally and only when the
     // resulting speaking rate is implausible; no vocabulary or phrase list is
@@ -163,10 +263,32 @@ function buildConfig() {
     transcriptRepetitionMaximumPatternWords: integer('NEORECALL_TRANSCRIPT_REPETITION_MAX_PATTERN_WORDS', 8, { min: 1, max: 32 }),
     transcriptRepetitionMinimumCoverage: number('NEORECALL_TRANSCRIPT_REPETITION_MIN_COVERAGE', 0.8, { min: 0.5, max: 1 }),
     transcriptMaximumWordsPerSecond: number('NEORECALL_TRANSCRIPT_MAX_WORDS_PER_SECOND', 5, { min: 1, max: 50 }),
-    conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 180_000, { min: 1_000 }),
-    conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 60_000, { min: 1_000 }),
-    conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 30_000, { min: 1_000 }),
-    conversationQuietCloseMs: integer('NEORECALL_CONVERSATION_QUIET_CLOSE_MS', 300_000, { min: 1_000 }),
+    // The pause that separates two sittings. Time is allowed to decide nothing
+    // finer than this: below it a boundary needs evidence that the subject
+    // actually changed.
+    //
+    // At three minutes this was the wrong instrument for the job. Three minutes
+    // of quiet is a coffee, a phone call, a walk between rooms — ordinary inside
+    // one occasion — so an hour of continuous recording arrived as a handful of
+    // conversations minutes apart, each its own memory card, none of them cut
+    // where the subject had moved on. Ten minutes is long enough that a pause
+    // that reaches it really was the end of the sitting, and it stays under the
+    // occasion gap, so two fragments either side of it are still consolidated
+    // into one memory.
+    conversationHardGapMs: integer('NEORECALL_CONVERSATION_HARD_GAP_MS', 600_000, { min: 1_000 }),
+    // A pause that only splits when the speech after it is also about something
+    // else. Neither half is a boundary on its own.
+    conversationSoftGapMs: integer('NEORECALL_CONVERSATION_SOFT_GAP_MS', 300_000, { min: 1_000 }),
+    // Below this, a conversation is folded back into the neighbour it resembles
+    // most rather than surviving as its own card. It is the deliberate bias
+    // towards under-splitting: several subjects in one memory read far better
+    // than one subject scattered over several.
+    conversationMinimumMs: integer('NEORECALL_CONVERSATION_MINIMUM_MS', 300_000, { min: 1_000 }),
+    // How long a conversation stays open with nothing added to it. It must not
+    // be shorter than the hard gap: a conversation that closes while a pause is
+    // still short enough to continue it forces the next word into a new
+    // conversation, which is the very split the hard gap says not to make.
+    conversationQuietCloseMs: integer('NEORECALL_CONVERSATION_QUIET_CLOSE_MS', 600_000, { min: 1_000 }),
     conversationValleyQuantile: number('NEORECALL_CONVERSATION_VALLEY_QUANTILE', 0.25, { min: 0, max: 1 }),
     conversationSemanticSimilarityThreshold: number('NEORECALL_CONVERSATION_SEMANTIC_SIMILARITY_THRESHOLD', 0.58, { min: -1, max: 1 }),
     conversationSemanticValleyProminence: number('NEORECALL_CONVERSATION_SEMANTIC_VALLEY_PROMINENCE', 0.1, { min: 0, max: 2 }),
@@ -199,6 +321,55 @@ function buildConfig() {
     embeddingDimensions: integer('NEORECALL_EMBEDDING_DIMENSIONS', 384, { min: 1 }),
     requireVector: boolean('NEORECALL_REQUIRE_VECTOR', process.env.NODE_ENV === 'production'),
     rrfK: integer('NEORECALL_RRF_K', 60, { min: 1 }),
+    // A nearest neighbour is not the same thing as a match. The vector index
+    // returns the k closest embeddings whatever their distance, so on a small
+    // archive every query "matches" every document — which is how unrelated
+    // transcript segments ended up ranked as evidence. Embeddings are unit
+    // length, so this floor is plain cosine similarity: below it a neighbour is
+    // dropped before fusion rather than fused with a rank it did not earn.
+    semanticSimilarityFloor: number('NEORECALL_SEMANTIC_SIMILARITY_FLOOR', 0.62, { min: 0, max: 1 }),
+    // How many restatements of one question Ask may retrieve for. A question
+    // and its paraphrase reach different documents; beyond a handful the extra
+    // queries return what the earlier ones already found.
+    askMaxSearchQueries: integer('NEORECALL_ASK_MAX_SEARCH_QUERIES', 3, { min: 1, max: 8 }),
+    // A question about a period ("what did I do today") is answered from the
+    // period, not from whatever happens to resemble the words in it. This caps
+    // how many documents such a question may read out of its time window.
+    askTimeWindowLimit: integer('NEORECALL_ASK_TIME_WINDOW_LIMIT', 40, { min: 1, max: 200 }),
+    // Ask reads the written record first. Memories, their details and daily
+    // summaries are what consolidation already sorted, dated and titled;
+    // transcript segments are the raw speech behind them, worth a few slots for
+    // exact wording but not worth crowding out the layer written from them.
+    askMemoryContextLimit: integer('NEORECALL_ASK_MEMORY_CONTEXT_LIMIT', 12, { min: 1, max: 100 }),
+    askTranscriptContextLimit: integer('NEORECALL_ASK_TRANSCRIPT_CONTEXT_LIMIT', 4, { min: 0, max: 100 }),
+    askQuotaWindowMs: integer('NEORECALL_ASK_QUOTA_WINDOW_MS', 60 * 60_000, { min: 60_000 }),
+    askCitationExcerptChars: integer('NEORECALL_ASK_CITATION_EXCERPT_CHARS', 240, { min: 40, max: 4_000 }),
+    askPromptReserveCharacters: integer('NEORECALL_ASK_PROMPT_RESERVE_CHARACTERS', 1_000, { min: 100 }),
+    eventOutboxPollLimit: integer('NEORECALL_EVENT_OUTBOX_POLL_LIMIT', 100, { min: 1, max: 1_000 }),
+    eventOutboxKeepaliveMs: integer('NEORECALL_EVENT_OUTBOX_KEEPALIVE_MS', 15_000, { min: 1_000 }),
+    oauthPendingTwoFactorTtlMs: integer('NEORECALL_OAUTH_PENDING_2FA_TTL_MS', 5 * 60_000, { min: 30_000 }),
+    oauthBrowserGrantTtlMs: integer('NEORECALL_OAUTH_BROWSER_GRANT_TTL_MS', 15 * 60_000, { min: 30_000 }),
+    twoFactorLockAfterFailures: integer('NEORECALL_TWO_FACTOR_LOCK_AFTER_FAILURES', 5, { min: 1, max: 50 }),
+    twoFactorLockMs: integer('NEORECALL_TWO_FACTOR_LOCK_MS', 5 * 60_000, { min: 1_000 }),
+    twoFactorRecoveryCodeCount: integer('NEORECALL_TWO_FACTOR_RECOVERY_CODE_COUNT', 10, { min: 1, max: 50 }),
+    ftsMaxTerms: integer('NEORECALL_FTS_MAX_TERMS', 30, { min: 1, max: 200 }),
+    jobRetryBaseMs: integer('NEORECALL_JOB_RETRY_BASE_MS', 5_000, { min: 100 }),
+    jobRetryMaxMs: integer('NEORECALL_JOB_RETRY_MAX_MS', 15 * 60_000, { min: 1_000 }),
+    workerHeartbeatMs: integer('NEORECALL_WORKER_HEARTBEAT_MS', 5_000, { min: 500 }),
+    workerLeaseRenewMs: integer('NEORECALL_WORKER_LEASE_RENEW_MS', 30_000, { min: 1_000 }),
+    workerIdlePollMs: integer('NEORECALL_WORKER_IDLE_POLL_MS', 500, { min: 50 }),
+    askQuotaRetentionMs: integer('NEORECALL_ASK_QUOTA_RETENTION_MS', 2 * 60 * 60_000, { min: 60_000 }),
+    consolidationInterruptMs: integer('NEORECALL_CONSOLIDATION_INTERRUPT_MS', 30 * 60_000, { min: 1_000 }),
+    processingStalledQueueMs: integer('NEORECALL_PROCESSING_STALLED_QUEUE_MS', 30 * 60_000, { min: 1_000 }),
+    processingWorkerSilentMs: integer('NEORECALL_PROCESSING_WORKER_SILENT_MS', 5 * 60_000, { min: 1_000 }),
+    usageReservationTtlMs: integer('NEORECALL_USAGE_RESERVATION_TTL_MS', 15 * 60_000, { min: 5_000 }),
+    usageMaxReservationTokens: integer('NEORECALL_USAGE_MAX_RESERVATION_TOKENS', 100_000, { min: 1 }),
+    consolidationFailureBackoffBaseMs: integer('NEORECALL_CONSOLIDATION_FAILURE_BACKOFF_BASE_MS', 60_000, { min: 1_000 }),
+    consolidationFailureBackoffMaxMs: integer('NEORECALL_CONSOLIDATION_FAILURE_BACKOFF_MAX_MS', 30 * 60_000, { min: 1_000 }),
+    // Standing instructions an account owner may give the model, per area. Long
+    // enough for a paragraph of preferences on each; short enough that four of
+    // them plus the global one cannot crowd the evidence out of a request.
+    customInstructionsMaxCharacters: integer('NEORECALL_CUSTOM_INSTRUCTIONS_MAX_CHARACTERS', 2_000, { min: 0, max: 20_000 }),
     searchWeights: {
       relevance: relevanceWeight / searchWeightTotal,
       recency: recencyWeight / searchWeightTotal,
@@ -287,13 +458,52 @@ function buildConfig() {
     minMemoryEvidenceMs: integer('NEORECALL_MIN_MEMORY_EVIDENCE_MS', 120_000, { min: 0 }),
     minMemoryEvidenceChars: integer('NEORECALL_MIN_MEMORY_EVIDENCE_CHARS', 400, { min: 0 }),
     maxConsolidationInputChars: integer('NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS', 250_000, { min: 1000 }),
-    // How many conversations one run may carry. Batching several into a single
-    // request used to amortize a per-request price; it also asked the model to
-    // hold several unrelated occasions in mind at once, which is the harder job
-    // and the one it does worse. One conversation per run is the accurate unit —
-    // it is what a memory is anchored to — and the scheduler starts the next run
-    // on its next tick, so a backlog still drains continuously.
-    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 1, { min: 1, max: 200 }),
+    // How many conversations one run may carry.
+    //
+    // Batching several into a single request used to amortize a per-request
+    // price; it also asked the model to hold several unrelated occasions in mind
+    // at once, which is the harder job and the one it does worse. That objection
+    // still stands and is why a run never carries an arbitrary batch: what it
+    // carries is one *occasion* — a chain of consecutive conversations from the
+    // same recording, none separated from the next by more than
+    // NEORECALL_MEMORY_OCCASION_GAP_MS. Those are fragments of one sitting rather
+    // than unrelated material, and showing them together is what lets the model
+    // write one memory instead of one per fragment.
+    //
+    // This is the ceiling on that chain, not a batch size. A pause every few
+    // minutes through a long meeting is ordinary, so it has to be comfortably
+    // above the handful of fragments an hour of speech produces; the character
+    // and duration limits below are what actually bound the request.
+    maxConsolidationConversations: integer('NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS', 12, { min: 1, max: 200 }),
+    // Up to this gap, two consecutive conversations from one recording are read
+    // as the same real-world occasion and consolidated together.
+    //
+    // Conversation boundaries are provisional: NEORECALL_CONVERSATION_HARD_GAP_MS
+    // cuts the stream after three minutes of quiet, which is a normal pause in a
+    // meeting, a lesson or a meal. Left alone, each piece became its own memory
+    // card minutes apart. This is the wider, occasion-sized gap that decides
+    // whether those pieces are shown to the model as one thing.
+    memoryOccasionGapMs: integer('NEORECALL_MEMORY_OCCASION_GAP_MS', 15 * 60_000, { min: 0 }),
+    // How long an occasion must have been quiet before it is written up, while
+    // its recording is still running.
+    //
+    // A conversation that just ended is exactly the one someone is about to look
+    // for, so nothing waits once the recording has stopped — a stopped recording
+    // is proof the occasion is over. While it is still running there is no such
+    // proof, and writing up the first fragment immediately is what produced three
+    // cards for one meeting. Sized at the hard gap, so a pause short enough to
+    // continue the conversation can never beat it to the write-up. It also sets
+    // the window `receivingAudio` reads: no chunk uploaded in this long is what
+    // "the recording stopped" means, so raising it delays the last memory of a
+    // finished recording by the same amount.
+    memorySettleMs: integer('NEORECALL_MEMORY_SETTLE_MS', 10 * 60_000, { min: 0 }),
+    // The longest a fragment may be held back waiting for its occasion to end.
+    //
+    // An always-on recording never stops, and a chain that keeps growing would
+    // otherwise postpone every memory for as long as someone keeps talking. At
+    // this age the chain is written up with whatever it has; the continuation
+    // mechanism folds later fragments into that card.
+    memoryOccasionMaxWaitMs: integer('NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS', 60 * 60_000, { min: 60_000 }),
     // Recent cards shown to the consolidation model as possible fragments of
     // the same real-world occasion. This bounds context only: timestamps,
     // recording continuity and transcript meaning still decide whether the
@@ -309,11 +519,46 @@ function buildConfig() {
     // rewrite second. Keep the request bounded for database/query safety while
     // allowing a person to clean up a substantial backlog in one operation.
     memoryMergeMaxItems: integer('NEORECALL_MEMORY_MERGE_MAX_ITEMS', 100, { min: 2, max: 500 }),
+    // The safety net under memory generation: a sweep that finds cards which
+    // describe the same occasion and folds them together.
+    //
+    // Consolidating a whole occasion at once is the real fix and handles the
+    // ordinary case. It cannot handle every case: a device that reconnects
+    // starts a new recording stream, an occasion longer than
+    // NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS is written up before it ends, and a
+    // fragment that finished transcribing late arrives after its neighbours were
+    // already written. Each leaves two cards for one sitting.
+    //
+    // Retrieval is the memory search index that already exists, so nothing is
+    // embedded twice. The numeric score only decides which pairs are worth
+    // asking about; the model makes the actual same-occasion decision, exactly as
+    // it does for continuation.
+    memoryDedupeEnabled: boolean('NEORECALL_MEMORY_DEDUPE_ENABLED', true),
+    // How alike two cards must read before the model is asked about them at all.
+    // Cosine over multilingual-e5 embeddings, whose similarities sit high even
+    // for unrelated text, so this is deliberately close to 1. Lower it and the
+    // sweep asks more questions; it never merges anything on this number alone.
+    memoryDedupeSimilarityThreshold: number('NEORECALL_MEMORY_DEDUPE_SIMILARITY_THRESHOLD', 0.88, { min: 0, max: 1 }),
+    // How far apart two cards may sit and still be candidates. Two lessons of the
+    // same course on different days are two occasions and must stay two cards;
+    // this is what keeps the sweep from ever considering them.
+    memoryDedupeWindowMs: integer('NEORECALL_MEMORY_DEDUPE_WINDOW_MS', 6 * 60 * 60_000, { min: 0 }),
+    // Model requests one sweep may make. Bounds what a backlog can cost.
+    memoryDedupeMaxPairsPerRun: integer('NEORECALL_MEMORY_DEDUPE_MAX_PAIRS_PER_RUN', 20, { min: 0, max: 500 }),
+    // Nearest neighbours considered per card before filtering.
+    memoryDedupeNeighbours: integer('NEORECALL_MEMORY_DEDUPE_NEIGHBOURS', 5, { min: 1, max: 50 }),
     // Ask is answered by the same external provider. These limits keep one
     // client from queueing more generation than the provider can work through
     // while recordings are still arriving.
     askMaxPerHour: integer('NEORECALL_ASK_MAX_PER_HOUR', 240, { min: 0 }),
     askBurstPerMinute: integer('NEORECALL_ASK_BURST_PER_MINUTE', 20, { min: 0 }),
+    // Rolling per-user provider budgets. 0 means unlimited so a self-hosted
+    // install is unchanged until the operator sets a positive cap. Admin
+    // app_settings and per-user columns can override these later.
+    aiTokens4h: integer('NEORECALL_AI_TOKENS_4H', 0, { min: 0 }),
+    aiTokensWeekly: integer('NEORECALL_AI_TOKENS_WEEKLY', 0, { min: 0 }),
+    transcriptionSeconds4h: integer('NEORECALL_TRANSCRIPTION_SECONDS_4H', 0, { min: 0 }),
+    transcriptionSecondsWeekly: integer('NEORECALL_TRANSCRIPTION_SECONDS_WEEKLY', 0, { min: 0 }),
     // How often the worker looks for conversations to preview, boundaries to
     // redetect and material to consolidate. It bounds how long after crossing a
     // threshold a result appears, so it is the coarsest term in the latency a

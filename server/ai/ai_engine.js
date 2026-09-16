@@ -3,19 +3,44 @@
 const { provider } = require('./provider_registry');
 const { consolidationSchema, consolidationJsonSchemaFor, normalizeConsolidationTimestamps } = require('./schemas/consolidation_schema');
 const { conversationPreviewSchema, conversationPreviewJsonSchema } = require('./schemas/conversation_preview_schema');
-const { answerSchema } = require('./schemas/answer_schema');
+const { answerSchema, answerJsonSchema } = require('./schemas/answer_schema');
+const { queryPlanSchema, queryPlanJsonSchema } = require('./schemas/query_plan_schema');
 const { memoryMergeSchema, memoryMergeJsonSchema } = require('./schemas/memory_merge_schema');
+const { memoryDedupeSchema, memoryDedupeJsonSchema } = require('./schemas/memory_dedupe_schema');
 const { dailySummarySchema, dailySummaryJsonSchema } = require('./schemas/daily_summary_schema');
 const { prepareConsolidationRequest, restoreReferenceIds, carryOverFor } = require('./prompts/consolidate_memories');
 const { conversationPreviewMessages } = require('./prompts/preview_conversation');
 const { dailySummaryMessages } = require('./prompts/daily_summary');
 const { answerMessages } = require('./prompts/answer_question');
+const { planQueryMessages } = require('./prompts/plan_query');
 const { mergeMemoryMessages } = require('./prompts/merge_memories');
+const { dedupeMemoryMessages } = require('./prompts/dedupe_memories');
 const contextAnalysis = require('./prompts/analyze_context');
 const memoryContextRewrite = require('./prompts/rewrite_memory_context');
+const { withInstructions } = require('./prompts/custom_instructions');
+const { withOutputLanguage } = require('./prompts/output_language');
 const { inputBudgetCharacters } = require('./context_budget');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
+const settingsService = require('../services/settings/settings_service');
+
+// The account owner's standing instructions for one area of the product, read
+// per request so a change takes effect on the next one rather than on restart.
+//
+// The output language rides along because it is the same kind of thing — a
+// preference the owner set that every request has to carry — and because both
+// come from the one settings read. Language goes in first so that a standing
+// instruction saying something more specific about language is read last.
+function ownerInstructions(userId, area, messages) {
+  const settings = settingsService.get(userId);
+  return withInstructions(withOutputLanguage(messages, settings.language), settings, area);
+}
+
+// The language alone, for work that writes prose the user reads but has no area
+// of its own for standing instructions.
+function inOwnerLanguage(userId, messages) {
+  return withOutputLanguage(messages, settingsService.outputLanguage(userId));
+}
 
 function markValidationFailed(requestId, code) {
   getDatabase().prepare("UPDATE ai_requests SET state='failed',error_code=? WHERE id=?").run(code, requestId);
@@ -53,7 +78,7 @@ async function withRetries(work) {
 async function consolidateWindowOnce(userId, window, carryOver) {
   const config = getConfig();
   const response = await provider().chatJSON({
-    userId, purpose: 'consolidation', messages: window.messages(carryOver),
+    userId, purpose: 'consolidation', messages: ownerInstructions(userId, 'memories', window.messages(carryOver)),
     maxTokens: config.aiConsolidationMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
       schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
@@ -172,11 +197,11 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
       userId, purpose: 'consolidation',
       // A long recording is read in many windows and yields many sections, so
       // this grows with the day rather than staying the size of one request.
-      messages: dailySummaryMessages({
+      messages: ownerInstructions(userId, 'summaries', dailySummaryMessages({
         sections: contextWithinBudget(sections, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000),
         previousDailySummary,
         timezone,
-      }),
+      })),
       maxTokens: config.aiPreviewMaxOutputTokens,
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
@@ -238,7 +263,7 @@ async function previewConversation(userId, { conversation, previousInsight = nul
   const config = getConfig();
   const response = await provider().chatJSON({
     userId, purpose: 'conversation_preview',
-    messages: conversationPreviewMessages({ conversation, previousInsight, timezone }),
+    messages: ownerInstructions(userId, 'summaries', conversationPreviewMessages({ conversation, previousInsight, timezone })),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_conversation_preview', strict: true,
       schema: conversationPreviewJsonSchema } },
@@ -272,16 +297,44 @@ function contextWithinBudget(context, budgetCharacters) {
   return kept;
 }
 
-async function answer(userId, question, context, beforeAttempt) {
+// Reads a question as a retrieval instruction: what to look for, and over which
+// stretch of the user's life.
+//
+// Shares the 'ask' purpose because it is the first half of one Ask, and it is
+// small — a question in, a plan out — so it costs a fraction of the answer that
+// follows it.
+async function planQuery(userId, { question, nowLocal, timezone }) {
+  const config = getConfig();
+  return withRetries(async () => {
+    const response = await provider().chatJSON({
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      messages: planQueryMessages({ question, nowLocal, timezone }),
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_query_plan', strict: true, schema: queryPlanJsonSchema } },
+    });
+    const parsed = queryPlanSchema.safeParse(response.value);
+    if (!parsed.success) {
+      markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+      throw Object.assign(new Error('Query plan did not match the required schema.'), {
+        code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
+      });
+    }
+    return { value: parsed.data, requestId: response.requestId };
+  });
+}
+
+async function answer(userId, question, context, beforeAttempt, frame = {}) {
   const config = getConfig();
   // The question and the instructions ride along with the evidence, so they come
   // out of the same budget before it is spent.
-  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - 1_000;
-  const bounded = contextWithinBudget(context, Math.max(1_000, budget));
+  const reserve = config.askPromptReserveCharacters;
+  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - reserve;
+  const bounded = contextWithinBudget(context, Math.max(reserve, budget));
+  if (beforeAttempt) beforeAttempt();
   return withRetries(async () => {
-    if (beforeAttempt) beforeAttempt();
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens, messages: answerMessages(question, bounded),
+      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      messages: ownerInstructions(userId, 'ask', answerMessages(question, bounded, frame)),
+      responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_answer', strict: true, schema: answerJsonSchema } },
     });
     const parsed = answerSchema.safeParse(response.value);
     if (!parsed.success) {
@@ -292,33 +345,35 @@ async function answer(userId, question, context, beforeAttempt) {
   });
 }
 
-async function analyzeContextText(userId, { name, content }) {
+async function analyzeContextChat(userId, messages, emptyMessage) {
   const config = getConfig();
-  const maximum = Math.max(1, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000);
   const response = await provider().chatJSON({
     userId,
     purpose: 'context_analysis',
-    messages: contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    messages: inOwnerLanguage(userId, messages),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: contextAnalysis.responseFormat,
   });
   const description = String(response.value?.descriptionEn || '').trim();
-  if (!description) throw Object.assign(new Error('Context analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
+  if (!description) throw Object.assign(new Error(emptyMessage), { code: 'AI_SCHEMA_INVALID' });
   return { description, requestId: response.requestId };
 }
 
-async function analyzeContextImage(userId, { name, mediaType, data }) {
-  const config = getConfig();
-  const response = await provider().chatJSON({
+async function analyzeContextText(userId, { name, content }) {
+  const maximum = Math.max(1, inputBudgetCharacters(getConfig().aiPreviewMaxOutputTokens) - 2_000);
+  return analyzeContextChat(
     userId,
-    purpose: 'context_analysis',
-    messages: contextAnalysis.imageMessages({ name, mediaType, data }),
-    maxTokens: config.aiPreviewMaxOutputTokens,
-    responseFormat: contextAnalysis.responseFormat,
-  });
-  const description = String(response.value?.descriptionEn || '').trim();
-  if (!description) throw Object.assign(new Error('Image analysis returned no description.'), { code: 'AI_SCHEMA_INVALID' });
-  return { description, requestId: response.requestId };
+    contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
+    'Context analysis returned no description.',
+  );
+}
+
+async function analyzeContextImage(userId, { name, mediaType, data }) {
+  return analyzeContextChat(
+    userId,
+    contextAnalysis.imageMessages({ name, mediaType, data }),
+    'Image analysis returned no description.',
+  );
 }
 
 async function rewriteMemoryWithContext(userId, { memory, segments, contextItems }) {
@@ -331,7 +386,7 @@ async function rewriteMemoryWithContext(userId, { memory, segments, contextItems
   const boundedSegments = contextWithinBudget(segments, Math.max(1_000, budget - contextCharacters));
   const response = await provider().chatJSON({
     userId, purpose: 'memory_context_rewrite',
-    messages: memoryContextRewrite.messages(memory, boundedSegments, boundedContext),
+    messages: ownerInstructions(userId, 'memories', memoryContextRewrite.messages(memory, boundedSegments, boundedContext)),
     maxTokens: config.aiPreviewMaxOutputTokens,
     responseFormat: { type: 'json_schema', json_schema: {
       name: 'neorecall_memory_context_rewrite', strict: true, schema: memoryContextRewrite.jsonSchema,
@@ -370,7 +425,7 @@ async function rewriteMergedMemory(userId, memories) {
     const response = await provider().chatJSON({
       userId,
       purpose: 'memory_merge',
-      messages: mergeMemoryMessages(memories),
+      messages: ownerInstructions(userId, 'memories', mergeMemoryMessages(memories)),
       maxTokens: config.aiPreviewMaxOutputTokens,
       responseFormat: {
         type: 'json_schema',
@@ -394,7 +449,44 @@ async function rewriteMergedMemory(userId, memories) {
   });
 }
 
+// Decides whether two finished cards describe the same occasion.
+//
+// Shares the merge purpose because it is the same piece of work seen one step
+// earlier: this asks whether to merge, rewriteMergedMemory writes the result.
+// The answer is a sentence and a boolean, so it costs a fraction of the cards
+// it reads — which is what makes running it over a backlog affordable.
+async function judgeDuplicateMemories(userId, left, right, evidence) {
+  const config = getConfig();
+  return withRetries(async () => {
+    const response = await provider().chatJSON({
+      userId,
+      purpose: 'memory_merge',
+      messages: dedupeMemoryMessages(left, right, evidence),
+      maxTokens: config.aiPreviewMaxOutputTokens,
+      responseFormat: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'neorecall_memory_dedupe',
+          strict: true,
+          schema: memoryDedupeJsonSchema,
+        },
+      },
+    });
+    const parsed = memoryDedupeSchema.safeParse(response.value);
+    if (!parsed.success) {
+      markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
+      throw Object.assign(new Error('Duplicate-memory output did not match the required schema.'), {
+        code: 'AI_SCHEMA_INVALID',
+        details: parsed.error.flatten(),
+        aiRequestId: response.requestId,
+      });
+    }
+    return { value: parsed.data, requestId: response.requestId };
+  });
+}
+
 module.exports = {
-  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, rewriteMergedMemory,
+  consolidate, previewConversation, analyzeContextText, analyzeContextImage, rewriteMemoryWithContext, answer, planQuery, rewriteMergedMemory,
+  judgeDuplicateMemories,
   writeDailySummary, mergeWindow, completeCoverage, contextWithinBudget, TRANSIENT_AI_CODES,
 };

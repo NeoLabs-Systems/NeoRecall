@@ -15,6 +15,7 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `NEORECALL_PORT` | HTTP port | `4500` |
 | `NEORECALL_TRUST_PROXY` | Trust one reverse-proxy hop | `false` |
 | `MAX_UPLOAD_BYTES` | Maximum live chunk upload | `33554432` |
+| `NEORECALL_SAME_DEVICE_COVERAGE_RATIO` | Skip transcription when this fraction of a chunk's timeline already exists on another source of the same device (live take plus later device-file import) | `0.5` |
 | `NEORECALL_CONTEXT_MAX_FILE_BYTES` | Maximum original context-file upload | `33554432` |
 | `NEORECALL_CONTEXT_MAX_ITEMS` | Maximum context items per recording or memory | `200` |
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
@@ -26,17 +27,21 @@ NeoRecall does not install or run a transcription or language model. Provider se
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
+Each account chooses a language under **Settings → General**, which sets both the language of the app and the language the model writes memories, summaries and answers in. On a fresh installation it is taken from the device's own language and stored; after that only the picker changes it, and the choice follows the account to other devices. English and German are supported. Recordings are still transcribed in whatever language was actually spoken, and search stays multilingual.
+
 Each account can add custom vocabulary under **Settings → Recording → Transcription**, one word or phrase per line. NeoRecall also includes speaker names the user has explicitly confirmed and shows those names separately in Settings. Names inferred by the language model remain available as display metadata but are deliberately excluded from transcription vocabulary, preventing an incorrect inferred name from biasing later recordings and creating a feedback loop. Existing names are treated as unconfirmed when this provenance tracking is introduced; saving a speaker name in the Speakers screen confirms it. The combined trusted list is sent as an OpenAI-compatible prompt, Deepgram keywords/keyterms, or AssemblyAI keyterms according to the selected provider. For prompt-only OpenAI-compatible providers, an account-level switch controls an additional conservative correction: NeoRecall rewrites a returned word only when it is a long, close, unambiguous match for one single-word vocabulary entry; multi-word phrases are never rewritten. Applied corrections are counted in server logs without logging transcript text or vocabulary. `NEORECALL_CUSTOM_VOCABULARY_MAX_TERMS` and `NEORECALL_CUSTOM_VOCABULARY_MAX_TERM_LENGTH` control the list limits. The conservative fallback is configured with `NEORECALL_VOCABULARY_CORRECTION_MIN_LENGTH`, `NEORECALL_VOCABULARY_CORRECTION_MAX_DISTANCE`, `NEORECALL_VOCABULARY_CORRECTION_SIMILARITY`, and `NEORECALL_VOCABULARY_CORRECTION_AMBIGUITY_MARGIN`.
 
 For generation, choose `openai`, `anthropic`, `google`, `groq`, `mistral`, `xai`, `deepseek`, `openrouter`, `together`, or `openai_compatible`. Set `AI_API_MODEL` and either the provider-specific key from `.env.example` or `AI_API_KEY`. Custom OpenAI-compatible endpoints also require `AI_API_BASE_URL`.
 
 ## Backups
 
-NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts it with the installation key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
+The live database file is page-encrypted with the installation key (`data/secret.key`). A first start on an older plaintext file encrypts that file in place. NeoRecall takes a scheduled snapshot of its database using SQLite's online backup API, encrypts that snapshot again with the same key, and writes it to the configured destination. Backups are on by default, run every `NEORECALL_BACKUP_INTERVAL_HOURS` (default 24), and `NEORECALL_BACKUP_RETAIN` (default 3) artifacts are kept — older ones are pruned automatically. Files in the backup directory that NeoRecall did not write are never touched.
 
 `NEORECALL_BACKUP_DESTINATION` selects where artifacts land. `local` (the default) writes to `~/.neorecall/backups`. Artifacts are encrypted before they leave the process, so a destination never handles plaintext.
 
 The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
+
+Each account can also copy *its own* data to a self-hosted Nextcloud instance under **Settings → Integrations**. That path is write-only (MKCOL and PUT): it is not a restore source and it is not the admin database backup. Audio copies wait until a recording ends, then upload one joined file rather than each ingest chunk. `NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS` (default 24) is how often an account with the data-backup toggle on is offered a dump. Pending audio copies older than `NEORECALL_CLOUD_PENDING_MAX_AGE_MS` are dropped.
 
 From the command line:
 
@@ -58,17 +63,42 @@ Processing gates are off by default and remain available when an external deploy
 
 `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` defaults to `0`, so a conversation is consolidated on the scheduler tick after it closes. `NEORECALL_MIN_AI_AUDIO_MS` and `NEORECALL_MIN_NEW_MATERIAL_CHARS` default to `0` and `1`: a thirty-second exchange is worth describing as soon as it ends. `NEORECALL_MAX_CONSOLIDATION_LATENCY_MS` defaults to `0`, so nothing waits for a batch to fill. Raising any of them restores the old behaviour exactly — `NEORECALL_MIN_AI_AUDIO_MS` in particular is still a hard floor rather than a heuristic: at one minute, a recording of a minute or less reaches no model at all, not through consolidation, not through a live preview, and not by asking for one by hand.
 
-`NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS` defaults to `1`. Batching several conversations into one request used to amortize a per-request price; it also asked the model to hold several unrelated occasions in mind at once, which is the harder job and the one it does worse. One conversation per run is the accurate unit — it is what a memory is anchored to — and the next run starts on the next tick, so a backlog still drains continuously.
+### One occasion, one card
+
+A conversation boundary is a provisional grouping of speech, not an occasion. `NEORECALL_CONVERSATION_HARD_GAP_MS` cuts the stream after ten minutes of quiet — long enough that a pause reaching it really was the end of the sitting, where the earlier three minutes cut a meeting at every coffee. Shorter pauses only cut where the speech after them is also about something else, so a sitting still arrives as more than one conversation when the subject genuinely moved on. A run therefore carries one *occasion*: the oldest conversation still waiting, plus every conversation that follows it on the same recording without a longer break.
+
+`NEORECALL_MEMORY_OCCASION_GAP_MS` defaults to fifteen minutes and is what "without a longer break" means. Below it, two consecutive conversations of one recording are read as one sitting and consolidated together; above it, the later one starts its own occasion. It is never an arbitrary batch: the chain stops at the first conversation from another recording or beyond this gap, so the model is not asked to hold two unrelated occasions in mind at once.
+
+`NEORECALL_MEMORY_SETTLE_MS` defaults to ten minutes and decides when a sitting is over. While the recording is still running, an occasion is written up only once it has been quiet this long — writing up the first fragment immediately is what produced several cards, minutes apart, for one meeting. Once the recording has stopped nothing waits at all: a stopped recording is proof the occasion ended, and a conversation that just finished is the one you are about to look for. Asking by hand also skips the wait. Both this and the occasion gap must be at least `NEORECALL_CONVERSATION_HARD_GAP_MS`, as must `NEORECALL_CONVERSATION_QUIET_CLOSE_MS`; the server refuses to start otherwise.
+
+`NEORECALL_MEMORY_OCCASION_MAX_WAIT_MS` defaults to one hour and bounds the wait. An always-on recording never stops, so at this age an occasion is written up with what it has, and later fragments reach the continuation mechanism below.
+
+`NEORECALL_MAX_CONSOLIDATION_CONVERSATIONS` defaults to `12` and is the ceiling on one chain, not a batch size. What actually bounds a request is `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS` and `NEORECALL_CONVERSATION_MAXIMUM_MS`; a chain cut by any of them is finished by the continuation mechanism instead. After a validation failure the next run carries a single conversation regardless, so the cause can be attributed.
 
 `NEORECALL_MAX_MEMORY_CONTINUATION_CANDIDATES` defaults to `8`. A run still reads one new provisional conversation, but it also shows the model a bounded set of recent or same-recording memory cards. The model must explicitly identify which, if any, are fragments of the same real-world occasion. Claimed fragments are updated or absorbed into one card while their transcript sources and existing highlights remain attached. Time and recording continuity only narrow the candidates; matching titles, keywords, or a similarity threshold never decide a merge, and a recurring lesson or meeting remains separate unless the model identifies it as the same continuous occasion.
 
 `NEORECALL_MEMORY_CONTINUATION_LOOKBACK_MS` defaults to two hours. It controls how far back cards from a different recording session remain available for that decision, covering recorder restarts, reconnects, and delayed sync without treating a three-minute conversation boundary as a merge horizon. Same-stream cards remain eligible independently of this window. The prompt also receives recurring-speaker overlap when it is available; neither overlap nor time performs a merge on its own.
+
+### Merging duplicates that got through
+
+Consolidating a whole occasion at once handles the ordinary case, but it can only join what it can see. A device that reconnects starts a new recording stream, an occasion longer than the maximum wait is written up before it ends, and a fragment whose transcription finished late arrives after its neighbours were already written. Each leaves two cards for one sitting, so a sweep in the maintenance job looks for them.
+
+`NEORECALL_MEMORY_DEDUPE_ENABLED` defaults to `true`. Each pass reads the cards written since the last pass, finds those close enough in time and alike enough in wording to be worth a question, and asks the model whether they describe the same occasion. Cards it says are the same are folded into one, keeping every highlight, topic, entity and transcript line; a card whose wording you edited yourself keeps your words and is not rewritten.
+
+`NEORECALL_MEMORY_DEDUPE_WINDOW_MS` defaults to six hours and is the guard that matters most: two lessons of one course or two calls about one project read almost identically, and only time separates them, so nothing outside this window is ever considered. `NEORECALL_MEMORY_DEDUPE_SIMILARITY_THRESHOLD` defaults to `0.88` and decides which pairs inside it are worth asking about — nothing is merged on this number alone. Multilingual-e5 similarities sit high even between unrelated text, so set it against your own recordings rather than by intuition: `node scripts/memory_dedupe_report.js` prints the pairs and where their scores fall without asking the model anything or changing a card. `NEORECALL_MEMORY_DEDUPE_MAX_PAIRS_PER_RUN` (default `20`) and `NEORECALL_MEMORY_DEDUPE_NEIGHBOURS` (default `5`) bound what one sweep can cost.
 
 `NEORECALL_MEMORY_MERGE_MAX_ITEMS` defaults to `100` and bounds a manual merge request. The server advertises the effective value to clients, combines the selected evidence immediately, and leaves the optional title and summary rewrite to a background job.
 
 `NEORECALL_MIN_MEMORY_EVIDENCE_MS` and `NEORECALL_MIN_MEMORY_EVIDENCE_CHARS` are unchanged and are what keeps short speech off the timeline as a memory *card* (defaults: two minutes of speech **and** 400 transcript characters). Below either floor the section still receives a title and summary, but it is not memory-worthy. Mini-memories under a larger worthy occasion are reserved for concrete, still-open action items with an identifiable owner; facts, observations, suggestions and unaccepted requests stay in the memory summary instead. The consolidation prompt states the same bar; the floors enforce it when the model over-promotes short speech.
 
 A consolidation retries only failures that say nothing about its input — no message content, a timeout, a transport error — bounded by `AI_MAX_RETRIES`. An answer that violates the contract is never resent unchanged, because resending reproduces it; narrowing and quarantine handle that case instead. Ask uses its own `NEORECALL_ASK_MAX_PER_HOUR` database quota and minute burst limiter so one client cannot overwhelm the configured provider while recordings are still arriving.
+
+Rolling per-user provider budgets sit beside those Ask counters. They are off by default (`0` = unlimited) so a self-hosted install does not suddenly stop processing:
+
+- `NEORECALL_AI_TOKENS_4H` / `NEORECALL_AI_TOKENS_WEEKLY` — language-model tokens over a rolling 4-hour and 7-day window
+- `NEORECALL_TRANSCRIPTION_SECONDS_4H` / `NEORECALL_TRANSCRIPTION_SECONDS_WEEKLY` — audio seconds that actually went to the transcription service (local silence detection does not count)
+
+Admin › Users can set the same four install defaults without writing `.env`, and a Limits control on each account can inherit them, replace them, or set `0` for unlimited. When a cap is reached, Ask returns `429 USAGE_LIMIT_EXCEEDED`, memory writing and previews wait, and transcription of speech is deferred. The job is not failed: attempts are not burned, the server keeps its temporary audio, and no terminal receipt is issued, so the recording device keeps the original until the window opens.
 
 ### The day's summary
 
@@ -127,6 +157,85 @@ Previews never create memories; consolidation replaces the insight and marks it 
 `NEORECALL_SCHEDULER_INTERVAL_MS` is how often the worker looks for work, and therefore the coarsest term in how long after crossing a threshold a result appears.
 
 `NEORECALL_IMPORT_SESSION_CONTINUITY_MS` is how large a gap may be between two imports from one device before they stop counting as the same recording stream. It has to comfortably exceed the client's device-sync poll and its failure backoff.
+
+## Audio conditioning
+
+Recordings reach the server from pocket wearables with millimetre microphones,
+from meeting bots, from Discord and from files somebody imported, and they
+arrive tens of decibels apart with whatever rumble and hiss the room
+contributed. Before anything listens to a chunk, a short ffmpeg filter chain
+levels and cleans it. It is ordinary signal processing — a high-pass, gentle
+spectral denoising, level normalization, a limiter — and none of it knows which
+language is being spoken, so it helps every language the same way.
+
+Nothing in the chain changes how long the recording is. That is not a
+preference: speaker turns, transcript timestamps and the voice previews cut
+later from the original chunk all describe one timeline, and a stage that added
+or removed audio would slide them apart silently. Nothing that trims, gates or
+stretches belongs here.
+
+If conditioning fails for any reason — an unreadable chunk, a missing filter, a
+deadline — the original recording is transcribed instead and a warning is
+logged. The worst this feature can do is nothing.
+
+`NEORECALL_AUDIO_PREPROCESS_ENABLED=false` turns it off entirely.
+
+`NEORECALL_AUDIO_PREPROCESS_HIGHPASS_HZ` (70 Hz) removes rumble, handling noise
+and any DC offset the capture device introduced; no language carries meaning
+that low. 0 disables the stage.
+
+`NEORECALL_AUDIO_PREPROCESS_DENOISE_DB` (6 dB) is deliberately gentle. Strong
+noise reduction smooths the onset of plosives and fricatives, which is exactly
+the detail an acoustic model reads, so it can cost more accuracy than the noise
+did. Raise it only for consistently noisy recordings, and compare the
+transcripts afterwards. `NEORECALL_AUDIO_PREPROCESS_DENOISE_ENABLED=false`
+removes the stage.
+
+`NEORECALL_AUDIO_PREPROCESS_NORMALIZER` decides how the level is evened out.
+`dynaudnorm` is the default and costs almost nothing. `loudnorm` is the
+broadcast-correct answer and roughly ten times more expensive, because it
+resamples internally to measure true peaks; it is also the only mode that
+reports the loudness it measured, which the log then carries.
+`speechnorm` is more aggressive and lifts the noise between words along with the
+speech. `off` leaves levels alone. `NEORECALL_AUDIO_PREPROCESS_MAX_GAIN` caps
+how far a quiet passage may be lifted, so a near-silent room's noise floor is
+never amplified into something that looks like speech.
+
+`NEORECALL_AUDIO_PREPROCESS_FORMAT=flac` roughly halves what is uploaded, at no
+loss, for a metered connection — conditioned audio is uncompressed by default,
+which is several times the size of the Opus a wearable sends.
+`NEORECALL_AUDIO_PREPROCESS_MAX_DURATION_MS` sends unusually long recordings
+straight to the service instead of holding them in ffmpeg.
+
+`audioPreprocessEnabled`, `audioPreprocessHighpassHz`, `audioPreprocessDenoiseDb`
+and `audioPreprocessMaxGain` are also processing settings, so they can be
+changed on a running server without a restart.
+
+### Speaker detection reads the original recording
+
+`NEORECALL_AUDIO_PREPROCESS_TARGET` decides which passes hear the conditioned
+audio. The default, `stt`, gives it only to the transcription service; speech
+detection and speaker identity keep reading the recording as it arrived.
+
+That default is a measurement, not caution. The segmentation and
+speaker-embedding models were trained on unprocessed speech, and on the
+two-speaker test fixture every conditioned variant separated the voices worse
+than the raw audio did. The high-pass on its own was the most damaging: it
+merged both people into a single speaker, because part of what distinguishes one
+voice from another lives in exactly the low frequencies it removes. Conditioning
+helps a transcription service and hurts these models, so each gets the audio it
+does better with — which is safe only because conditioning does not move the
+timeline, so both passes still describe the same recording.
+
+`stt+analysis` gives the conditioned audio to all of them. There is a second
+cost to it beyond the above: a voice fingerprint is only comparable to one taken
+under the same conditions, so people enrolled before the switch can start reading
+as somebody new. The server says so once at start-up when it finds enrolled
+voices, and the Speakers screen's re-detect re-resolves recent recordings under
+the current conditions and folds duplicate profiles back together.
+
+If you do try it, compare the speaker labels on a recording you know before
+leaving it on.
 
 ## Speech detection and speaker identity
 
@@ -266,11 +375,45 @@ where its last known turn ended, that cluster may be kept at the relaxed
 `NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD`. That only ever breaks a near-tie,
 so a genuine speaker change at the boundary still resolves on its own.
 
+Enrolling a durable voice — a person recognised across recordings, rather than a
+cluster inside one — is the only speaker decision more evidence cannot undo. A
+spurious profile is permanent, appears as its own unnamed person, and then
+competes for every later match, so it takes more than merely failing to match a
+known one. A voice must score below `NEORECALL_VOICE_ENROLL_FLOOR` (default
+`0.45`) to count as somebody new, and its fingerprint must be pooled from at
+least `NEORECALL_VOICE_ENROLL_MIN_MS` of speech (default `3000`) — below that, a
+low score says the measurement was poor, not that the voice is unknown. Between
+the floor and `NEORECALL_VOICE_MATCH_THRESHOLD` lies a grey band where a voice
+resembles someone enrolled without confirming it; there, and where a match over
+the bar is within `NEORECALL_VOICE_MATCH_MARGIN` of a candidate below it, the
+turn is attributed to nobody and left for a later chunk with better evidence. It
+still carries its conversation-local speaker label throughout. Two profiles that
+both clear the bar are one person already split rather than an unclear reading,
+so the stronger wins — the same correction the cluster layer describes above, for
+the same reason: refusing both used to mint a third copy, which made the next
+turn more ambiguous still.
+
+Speaker embeddings are not unit vectors, and their magnitude tracks loudness and
+turn length rather than who was talking, so every sample folded into a profile is
+normalized to a direction first. Left raw, one loud or long sample drags a
+profile off the voice it stands for until the person stops matching themselves
+and a duplicate is minted. The weight of a profile's accumulated history is
+capped, so a voice first enrolled through one microphone can still migrate toward
+the same person heard through another instead of freezing around whatever the
+first conversation sounded like.
+
 Recurring matching also reconciles duplicate profiles automatically after new
 speech is persisted and during hourly maintenance, so profiles already present
 when a server is upgraded are cleaned up as well. Mutually nearest profiles above the configured voice-match
 threshold are folded together unless their explicit names or linked person
-entities conflict. Inside one recording, session clusters that resolve to the
+entities conflict. The Speakers screen's re-detect goes further, because there
+the user has looked at the list and asked for the duplicates to be sorted out: it
+also folds together a pair below the match threshold but above
+`NEORECALL_VOICE_REPAIR_THRESHOLD` (default `0.50`) when each profile is the
+other's closest match *and* stands clear of its own runner-up by the voice-match
+margin. Mutual exclusivity is far stronger evidence than a one-sided score; mere
+adjacency in a crowd of profiles is not, and is refused. The automatic pass after
+each chunk stays at the strict bar. Inside one recording, session clusters that resolve to the
 same recurring voiceprint are collapsed immediately; while that derived cleanup
 runs, all such clusters already share one conversation-local label. Cluster
 cleanup is best-effort and never delays transcript persistence, server-side
@@ -281,6 +424,114 @@ if different people are being merged, raise it. Note that
 `NEORECALL_DIARIZATION_CLUSTER_DISTANCE`, which groups voices *inside* a chunk,
 points the other way — it is a distance, so raising it yields fewer speakers. They
 were one setting until they were found to be pulling in opposite directions.
+
+### When the recording already knows who is speaking
+
+Everything above is inference, and inference is what produces the same person
+twice. Some recordings never needed it. A capture path that receives a separate
+stream per participant is *told* whose stream it is, and working that out again
+from the sound of the voice is both slower and worse than the fact it was handed.
+
+Any source can say so, in the metadata it already sends when it registers:
+
+```json
+{ "speaker": { "key": "chat:1234", "name": "Mara" } }
+```
+
+`key` is opaque and scoped to the user — namespace it (`"<source>:<id>"`) so two
+sources cannot collide. Nothing in the server knows what produced a key, and no
+integration is named anywhere in that path: a source that knows, says so, and one
+that does not says nothing and is matched acoustically exactly as before. This is
+why it works the same for a chat bot, a per-participant recorder, or a client
+that simply knows it is one person's headset.
+
+A declared stream skips voice matching entirely. The person is resolved first and
+the recording-local voice follows from them, which prevents two failures rather
+than repairing them: one person cannot split into several labels however badly a
+fingerprint was measured, and two people who happen to sound alike cannot collapse
+into one. `name` only ever fills a gap — it is stored as `inferred`, so a name the
+user sets, or one consolidation reads out of a self-introduction, always wins.
+
+The second benefit is larger than the first. A declared stream is *labelled
+speech*, which acoustic matching never gets, so the profile it builds is correct
+by construction — and that profile is then what recognises the same person on a
+room microphone or a pendant, where nothing is declared. Fingerprinting is
+withheld for any chunk that turned out to carry more than one voice: the stream
+still belongs to the person it names, so their label stands, but a second person
+audible behind an open microphone must not be learned as them.
+
+`npm run speakers:report` shows how many profiles were identified this way rather
+than by voice. A high share is the cheapest accuracy an installation can have.
+
+### Looking again once the conversation ends
+
+Everything above decides who is speaking from one chunk of audio at a time,
+because while a recording is running that is all there is. Two costs follow. A
+voice re-segmented at a chunk boundary can drift below the matching bar and start
+a second identity; and a fingerprint pooled from a few seconds is often too
+little speech to enroll anyone at all, so its turns attach to no durable person —
+and with nothing to group them by, each cluster keeps its own `Speaker N`. That
+is the "one person, three labels" complaint, and neither cost is a threshold that
+could be tuned away. Both are consequences of having to decide early.
+
+When a conversation closes, that constraint is gone: every voice in it is on the
+table, and the speech behind each one is conversation-scale rather than
+chunk-scale, which clears the enrollment floor per-chunk speech usually cannot.
+Closing therefore queues one pass that re-asks the question with the whole
+conversation in view. It groups the conversation's voices by average-linkage
+similarity at `NEORECALL_SPEAKER_CLUSTER_MERGE_THRESHOLD`, refusing any pair
+heard speaking over each other on the same recording — the one thing that proves
+two voices are two people — and any pair already carrying different names the
+user set. Then it resolves each group to a person once, with all of its speech
+behind the decision. Turned off per user with **Review speakers when a
+conversation ends**; `NEORECALL_SPEAKER_REDETECT_DAYS` (default `30`) bounds how
+far back the Speakers screen's re-detect re-runs it.
+
+Labels can therefore change shortly after a recording finishes. That is safe
+because of when it happens: consolidation only ever reads conversations that have
+closed, and is held back from any conversation still waiting on this pass, so
+corrections land before the model reads a speaker label rather than contradicting
+something already written. Clusters are folded together only within one
+recording session — `speaker_clusters` is unique on its session and the live
+resolver looks a cluster up by session, so a row moved out of its own session
+would become invisible to the recording still producing it, which would mint a
+replacement every chunk. The same voice heard in two sessions is given the same
+voiceprint instead, which collapses the label just as well and destroys nothing.
+
+Reconciling duplicate profiles is queued rather than run inline for the same
+reason it exists at all: it compares every enrolled voice against every other one
+inside a transaction, and doing that once per chunk put the cost on the path that
+has audio waiting to be deleted and a receipt waiting to be issued.
+
+A conversation queues its own resolution when it closes, so on a healthy server
+nothing else is needed. Because nothing otherwise ever revisits a closed
+conversation, hourly maintenance also sweeps for conversations that finished but
+still contain speech belonging to no durable person — the state this pass exists
+to correct — and queues those. That covers a worker that was down at the wrong
+moment, a job that ran out of attempts, and conversations recorded before any of
+this existed. Both the sweep and re-detect are capped per run so an upgrade turns
+into a steady backlog rather than a stall; whatever is not queued this hour is
+queued the next.
+
+Speech belonging to nobody is not on its own proof that the pass has not run.
+Speech far too short to found a person enrolls nobody, and a voice that resembles
+an enrolled one without clearing the bar is left alone rather than guessed at —
+both are finished answers that leave the speech unattached. The pass therefore
+records what it concluded about each conversation, and the sweep skips a
+conversation while that answer still applies; without it the sweep would queue
+the same unresolvable conversation on every maintenance tick forever, each job
+completing without changing anything. The answer stops applying, and the
+conversation is looked at again, as soon as something that could change it has:
+a voice enrolled, deleted, merged, renamed or re-enabled, one of the thresholds
+above moved, a new version of the pass shipped, or more speech landing in the
+conversation itself.
+
+`npm run speakers:report` prints what this actually looks like on an
+installation — how many profiles are duplicates of each other, how much speech
+carries no durable identity, and where the similarity scores really fall.
+Thresholds here were chosen against a two-speaker measurement, which is a guess
+about anybody else's recordings; run the report before changing one and again
+afterwards.
 
 Consolidation then identifies people from the transcript — a self-introduction,
 or another speaker naming them — and names that speaker's voiceprint from the

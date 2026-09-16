@@ -35,6 +35,18 @@ function jsonObject(name) {
   return parsed;
 }
 
+// A value from a fixed set. Kept here with the numeric readers so an unknown
+// value fails at startup naming both the variable and what it accepts, rather
+// than silently selecting a fallback behaviour nobody asked for.
+function enumeration(name, fallback, values) {
+  const raw = process.env[name];
+  const value = raw === undefined || raw === '' ? fallback : raw.trim().toLowerCase();
+  if (!values.includes(value)) {
+    throw new Error(`${name} must be one of ${values.join(', ')}.`);
+  }
+  return value;
+}
+
 function boolean(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -43,4 +55,4 @@ function boolean(name, fallback) {
   throw new Error(`${name} must be true or false.`);
 }
 
-module.exports = { integer, number, boolean, jsonObject };
+module.exports = { integer, number, boolean, enumeration, jsonObject };

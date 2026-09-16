@@ -315,10 +315,7 @@ class HairlineRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          if (leading != null) ...<Widget>[
-            leading!,
-            const SizedBox(width: 13),
-          ],
+          if (leading != null) ...<Widget>[leading!, const SizedBox(width: 13)],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -610,7 +607,9 @@ class MetaPill extends StatelessWidget {
         color: active ? palette.accentMuted : palette.bgTertiary,
         borderRadius: BorderRadius.circular(AppRadius.pill),
         border: Border.all(
-          color: active ? palette.accent.withValues(alpha: 0.3) : palette.border,
+          color: active
+              ? palette.accent.withValues(alpha: 0.3)
+              : palette.border,
         ),
       ),
       child: Row(

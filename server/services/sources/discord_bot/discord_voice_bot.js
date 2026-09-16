@@ -307,14 +307,26 @@ class DiscordVoiceBot {
     let ingestSource = this.ingestSources.get(discordUserId);
     if (!ingestSource) {
       const id = crypto.randomUUID();
+      const username = this._resolveUsername(discordUserId);
       ingest.addSource(this.ownerUserId, this.sessionId, {
         id,
         clientUuid: id,
         kind: 'microphone',
+        // Two channels, because the decoded audio really has two. How many
+        // people are on it is a different fact and is declared below: one source
+        // is opened per speaking user, so this stream is one person start to
+        // finish. Saying so is worth more than anything the server could work
+        // out from the sound — it gives that person a name and a correct profile
+        // immediately, and that profile is what then recognises them on a room
+        // microphone or a pendant, where nothing declares anything.
         channelLayout: 'stereo',
         sampleRate: SAMPLE_RATE,
         sampleFormat: 's16le',
-        metadata: { discordUserId, discordUsername: this._resolveUsername(discordUserId) },
+        metadata: {
+          discordUserId,
+          discordUsername: username,
+          speaker: { key: `discord:${discordUserId}`, name: username },
+        },
       });
       ingestSource = { id, sequence: 0 };
       this.ingestSources.set(discordUserId, ingestSource);
