@@ -394,9 +394,9 @@ class _CopyLine extends StatelessWidget {
             icon: const Icon(Icons.copy_all_outlined, size: 16),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: value));
-              ScaffoldMessenger.maybeOf(
-                context,
-              )?.showSnackBar(SnackBar(content: Text(AppL10n.of(context).watchCopied(label))));
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(content: Text(AppL10n.of(context).watchCopied(label))),
+              );
             },
           ),
         ],

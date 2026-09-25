@@ -15,7 +15,9 @@ class AccountUsageSnapshot {
   factory AccountUsageSnapshot.fromJson(Map<String, dynamic> json) {
     return AccountUsageSnapshot(
       ai: UsageMeterSnapshot.fromJson(
-        Map<String, dynamic>.from(json['ai'] as Map? ?? const <String, dynamic>{}),
+        Map<String, dynamic>.from(
+          json['ai'] as Map? ?? const <String, dynamic>{},
+        ),
       ),
       transcription: UsageMeterSnapshot.fromJson(
         Map<String, dynamic>.from(
@@ -27,10 +29,7 @@ class AccountUsageSnapshot {
 }
 
 class UsageMeterSnapshot {
-  const UsageMeterSnapshot({
-    required this.fourHour,
-    required this.weekly,
-  });
+  const UsageMeterSnapshot({required this.fourHour, required this.weekly});
 
   final UsageWindowSnapshot fourHour;
   final UsageWindowSnapshot weekly;

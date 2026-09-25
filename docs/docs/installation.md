@@ -32,8 +32,9 @@ The install then creates `~/.neorecall`, runs database migrations, downloads and
 verifies the small models NeoRecall runs itself — multilingual search embeddings,
 a voice-activity detector, and speaker diarization, about 165 MB in total — and
 probes ffmpeg and sqlite-vec. Speech recognition and language models are never
-downloaded or started; configure those services through `.env` or the admin
-dashboard after installation.
+downloaded or started; configure those services through `.env`, or in the app
+under **Admin › Providers** after installation. The first account created on a
+server is its admin.
 
 Open `http://localhost:4500` after `neorecall status` reports a running service.
 Use a reverse proxy with TLS before exposing the server outside a trusted
@@ -48,23 +49,49 @@ dependencies, links the CLI, starts the service, and connects to it — showing
 each step as it runs. If a prerequisite is missing, the app names it and links to
 the download instead of failing silently.
 
-It then asks for the two services NeoRecall does not run itself: the
-transcription service and the language model that writes memories. Pick a
-provider, paste a key, let the app list the available models, and press **Save
-and test** — the test transcribes a bundled sample recording and asks the model
-for a one-word answer, reporting each leg separately. These settings are stored
-encrypted in the database and can be changed later under **Settings → Services**.
+Next it asks you to create your account. The first account on a server is its
+admin, so right after signing up the app opens **Admin › Providers** for the two
+services NeoRecall does not run itself: the transcription service and the
+language model that writes memories. Pick a provider, paste a key, let the app
+list the available models, and press **Save and test** — the test transcribes a
+bundled sample recording and asks the model for a one-word answer, reporting
+each leg separately. These settings are stored encrypted in the database and can
+be changed later on the same page.
 
-That step works because the install creates an administrator API key in
-`~/.neorecall/.env` and keeps it in the app's secure storage. To read or create
-that key yourself:
+## Admins
+
+Admin is a role on an ordinary account, not a separate login. The first account
+created on a server becomes its admin and sees an **Admin** page in the app:
+overview, users and usage limits, jobs, AI requests, the audit log, backups,
+providers and processing thresholds, with a search box across all of them.
+Admin routes accept only a signed-in session — API keys and OAuth tokens never
+reach them — and the role is re-read on every request, so a change applies at
+once.
 
 ```bash
-neorecall admin-key
+neorecall admin                   # list admin accounts
+neorecall admin grant <username>  # make an account an admin
+neorecall admin revoke <username> # remove admin from an account
 ```
 
-Servers this app did not install have no stored key; configure their providers
-from the admin dashboard at `/admin` instead.
+`NEORECALL_ADMIN_USERS` (comma-separated usernames) grants admin to those
+accounts on every start, which suits Docker deployments. Register the accounts
+first, then list them: the list only grants admin to accounts that already
+exist, and a listed name that has no account yet is reserved — nobody can
+register it until it is removed from the list. The list is additive: removing a
+name does not revoke it, and an account revoked with the CLI stays revoked.
+Every start logs which accounts are admins.
+
+Admin accounts can't delete themselves or be disabled from the app; revoke
+admin first. Installs from before this change keep their first account as
+admin — check the start-up log or `neorecall status` after upgrading. The old
+`ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ADMIN_API_KEY` values grant nothing and
+are removed from `~/.neorecall/.env` on the next start. Scripts that called the
+old admin API with `ADMIN_API_KEY` sign in as an admin account instead
+(`POST /api/v1/auth/login`) and send its session token to `/api/v1/admin/*`;
+API keys and OAuth tokens are refused there. Because an admin session can
+change where recordings are sent for transcription, turn on two-factor
+authentication for admin accounts.
 
 ## Manual checkout
 

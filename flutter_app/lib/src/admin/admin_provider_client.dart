@@ -1,6 +1,4 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
+import '../api_client.dart';
 
 /// One provider the server supports for a workload.
 class ProviderCatalogEntry {
@@ -12,6 +10,7 @@ class ProviderCatalogEntry {
     required this.defaultModel,
     required this.apiKeyRequired,
     required this.modelOptional,
+    this.defaultResponseFormat,
   });
 
   final String id;
@@ -21,6 +20,7 @@ class ProviderCatalogEntry {
   final String? defaultModel;
   final bool apiKeyRequired;
   final bool modelOptional;
+  final String? defaultResponseFormat;
 
   /// Providers without a fixed endpoint need the operator to supply one.
   bool get baseUrlRequired => defaultBaseUrl == null;
@@ -34,6 +34,7 @@ class ProviderCatalogEntry {
         defaultModel: _trimmedOrNull(json['defaultModel']),
         apiKeyRequired: json['apiKeyRequired'] == true,
         modelOptional: json['modelOptional'] == true,
+        defaultResponseFormat: _trimmedOrNull(json['defaultResponseFormat']),
       );
 }
 
@@ -46,6 +47,11 @@ class ProviderWorkloadSettings {
     required this.baseUrl,
     required this.apiKeyConfigured,
     required this.apiKeySource,
+    this.environmentApiKeyConfigured = false,
+    this.language,
+    this.responseFormat,
+    this.extraBody,
+    this.sources = const <String, String>{},
   });
 
   final String provider;
@@ -53,17 +59,52 @@ class ProviderWorkloadSettings {
   final String? model;
   final String? baseUrl;
   final bool apiKeyConfigured;
+
+  /// `admin` (saved from this app), `environment` (the server's `.env`) or
+  /// `none`.
   final String apiKeySource;
 
-  factory ProviderWorkloadSettings.fromJson(Map<String, dynamic> json) =>
-      ProviderWorkloadSettings(
-        provider: json['provider']?.toString() ?? '',
-        label: json['label']?.toString() ?? '',
-        model: _trimmedOrNull(json['model']),
-        baseUrl: _trimmedOrNull(json['baseUrl']),
-        apiKeyConfigured: json['apiKeyConfigured'] == true,
-        apiKeySource: json['apiKeySource']?.toString() ?? 'none',
-      );
+  /// Whether the server's own configuration has a key, so removing the one
+  /// saved from the app still leaves the service usable.
+  final bool environmentApiKeyConfigured;
+
+  /// Transcription only.
+  final String? language;
+  final String? responseFormat;
+
+  /// Language model only: extra fields merged into every request.
+  final Map<String, dynamic>? extraBody;
+
+  /// Where each value comes from, per field: `admin`, `environment`,
+  /// `default` or `none`.
+  final Map<String, String> sources;
+
+  /// True when any value is an override saved from the app rather than the
+  /// server's own configuration.
+  bool get hasOverrides =>
+      apiKeySource == 'admin' || sources.values.contains('admin');
+
+  factory ProviderWorkloadSettings.fromJson(Map<String, dynamic> json) {
+    final extraBody = json['extraBody'];
+    final sources = json['sources'];
+    return ProviderWorkloadSettings(
+      provider: json['provider']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      model: _trimmedOrNull(json['model']),
+      baseUrl: _trimmedOrNull(json['baseUrl']),
+      apiKeyConfigured: json['apiKeyConfigured'] == true,
+      apiKeySource: json['apiKeySource']?.toString() ?? 'none',
+      environmentApiKeyConfigured: json['environmentApiKeyConfigured'] == true,
+      language: _trimmedOrNull(json['language']),
+      responseFormat: _trimmedOrNull(json['responseFormat']),
+      extraBody: extraBody is Map ? Map<String, dynamic>.from(extraBody) : null,
+      sources: sources is Map
+          ? sources.map(
+              (key, value) => MapEntry(key.toString(), value.toString()),
+            )
+          : const <String, String>{},
+    );
+  }
 }
 
 class ProviderSettingsSnapshot {
@@ -166,65 +207,64 @@ class ProviderTestReport {
 }
 
 /// What to write for one workload.
+///
+/// The server stores a workload as a whole, so a selection carries every
+/// value saved from the app — including the ones a form left folded away — or
+/// saving would quietly reset them. A value that comes from the server's own
+/// configuration is sent as null instead, so saving never freezes it.
 class ProviderSelection {
   const ProviderSelection({
     required this.provider,
     this.model,
     this.baseUrl,
     this.apiKey,
+    this.clearApiKey = false,
+    this.language,
+    this.responseFormat,
+    this.extraBody,
   });
 
   final String provider;
   final String? model;
   final String? baseUrl;
   final String? apiKey;
+  final bool clearApiKey;
+  final String? language;
+  final String? responseFormat;
+  final Map<String, dynamic>? extraBody;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
+  Map<String, dynamic> toJson(String workload) => <String, dynamic>{
     'provider': provider,
     if (model != null && model!.isNotEmpty) 'model': model,
     if (baseUrl != null && baseUrl!.isNotEmpty) 'baseUrl': baseUrl,
     if (apiKey != null && apiKey!.isNotEmpty) 'apiKey': apiKey,
+    // A typed key replaces the saved one; only an empty field removes it.
+    if (clearApiKey && (apiKey?.isEmpty ?? true)) 'clearApiKey': true,
+    if (workload == 'transcription') ...<String, dynamic>{
+      'language': (language?.isEmpty ?? true) ? null : language,
+      'responseFormat': (responseFormat?.isEmpty ?? true)
+          ? null
+          : responseFormat,
+    } else
+      'extraBody': (extraBody?.isEmpty ?? true) ? null : extraBody,
   };
 }
 
-class AdminProviderException implements Exception {
-  const AdminProviderException(this.message, {this.code});
-
-  final String message;
-  final String? code;
-
-  @override
-  String toString() => message;
-}
-
-/// Talks to the admin provider endpoints with the server's `ADMIN_API_KEY`, so
-/// transcription and language-model setup can happen in this app instead of the
-/// admin web dashboard.
+/// The provider endpoints of the admin API, called with the signed-in admin's
+/// own session.
 class AdminProviderClient {
-  AdminProviderClient({
-    required String backendUrl,
-    required this.apiKey,
-    http.Client? client,
-  }) : backendUrl = backendUrl.replaceFirst(RegExp(r'/$'), ''),
-       _client = client ?? http.Client(),
-       _ownsClient = client == null;
+  const AdminProviderClient(this.api);
 
-  final String backendUrl;
-  final String apiKey;
-  final http.Client _client;
-  final bool _ownsClient;
+  final NeoRecallApiClient api;
 
-  Uri _uri(String path) => Uri.parse('$backendUrl/admin/api/v1$path');
+  static const String _base = '/api/v1/admin/provider-settings';
 
-  Map<String, String> get _headers => <String, String>{
-    'Authorization': 'Bearer $apiKey',
-    'Content-Type': 'application/json',
-  };
+  /// A real transcription of the bundled sample plus a model round trip takes
+  /// far longer than an ordinary request.
+  static const Duration _testTimeout = Duration(minutes: 3);
 
   Future<ProviderSettingsSnapshot> load() async {
-    final body = await _send(
-      () => _client.get(_uri('/provider-settings'), headers: _headers),
-    );
+    final body = await api.request('GET', _base) as Map;
     return ProviderSettingsSnapshot.fromJson(
       Map<String, dynamic>.from(body['settings'] as Map? ?? const {}),
     );
@@ -234,17 +274,26 @@ class AdminProviderClient {
     ProviderSelection? transcription,
     ProviderSelection? llm,
   }) async {
-    final payload = <String, dynamic>{
-      if (transcription != null) 'transcription': transcription.toJson(),
-      if (llm != null) 'llm': llm.toJson(),
-    };
-    final body = await _send(
-      () => _client.put(
-        _uri('/provider-settings'),
-        headers: _headers,
-        body: jsonEncode(payload),
-      ),
+    final body =
+        await api.request(
+              'PUT',
+              _base,
+              body: <String, dynamic>{
+                if (transcription != null)
+                  'transcription': transcription.toJson('transcription'),
+                if (llm != null) 'llm': llm.toJson('llm'),
+              },
+            )
+            as Map;
+    return ProviderSettingsSnapshot.fromJson(
+      Map<String, dynamic>.from(body['settings'] as Map? ?? const {}),
     );
+  }
+
+  /// Drops every value saved from the app, so the server's own configuration
+  /// applies again.
+  Future<ProviderSettingsSnapshot> reset() async {
+    final body = await api.request('DELETE', _base) as Map;
     return ProviderSettingsSnapshot.fromJson(
       Map<String, dynamic>.from(body['settings'] as Map? ?? const {}),
     );
@@ -258,18 +307,18 @@ class AdminProviderClient {
     String? baseUrl,
     String? apiKey,
   }) async {
-    final body = await _send(
-      () => _client.post(
-        _uri('/provider-settings/models'),
-        headers: _headers,
-        body: jsonEncode(<String, dynamic>{
-          'workload': workload,
-          'provider': provider,
-          if (baseUrl != null && baseUrl.isNotEmpty) 'baseUrl': baseUrl,
-          if (apiKey != null && apiKey.isNotEmpty) 'apiKey': apiKey,
-        }),
-      ),
-    );
+    final body =
+        await api.request(
+              'POST',
+              '$_base/models',
+              body: <String, dynamic>{
+                'workload': workload,
+                'provider': provider,
+                if (baseUrl != null && baseUrl.isNotEmpty) 'baseUrl': baseUrl,
+                if (apiKey != null && apiKey.isNotEmpty) 'apiKey': apiKey,
+              },
+            )
+            as Map;
     final models = body['models'];
     if (models is! List) return const <String>[];
     return models
@@ -281,48 +330,9 @@ class AdminProviderClient {
   /// Runs the server's own end-to-end probe: a real transcription of the
   /// bundled sample recording and a real generation request.
   Future<ProviderTestReport> test() async {
-    final body = await _send(
-      () => _client.post(_uri('/provider-settings/test'), headers: _headers),
-    );
-    return ProviderTestReport.fromJson(body);
-  }
-
-  Future<Map<String, dynamic>> _send(
-    Future<http.Response> Function() request,
-  ) async {
-    http.Response response;
-    try {
-      response = await request().timeout(const Duration(minutes: 3));
-    } on Object catch (error) {
-      throw AdminProviderException(
-        'Could not reach the NeoRecall server: $error',
-      );
-    }
-    Map<String, dynamic> body;
-    try {
-      final decoded = jsonDecode(response.body);
-      body = decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : <String, dynamic>{};
-    } on Object {
-      body = <String, dynamic>{};
-    }
-    if (response.statusCode >= 400) {
-      final error = body['error'];
-      final message = error is Map
-          ? (error['message']?.toString() ?? error['code']?.toString())
-          : body['message']?.toString();
-      throw AdminProviderException(
-        message ??
-            'The server rejected the request (HTTP ${response.statusCode}).',
-        code: error is Map ? error['code']?.toString() : null,
-      );
-    }
-    return body;
-  }
-
-  void dispose() {
-    if (_ownsClient) _client.close();
+    final body =
+        await api.request('POST', '$_base/test', timeout: _testTimeout) as Map;
+    return ProviderTestReport.fromJson(Map<String, dynamic>.from(body));
   }
 }
 

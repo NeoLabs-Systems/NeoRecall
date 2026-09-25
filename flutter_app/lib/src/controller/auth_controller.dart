@@ -35,6 +35,10 @@ mixin AuthController on ChangeNotifier {
 
   String? accountId;
   String? username;
+
+  /// Mirrors the account's role as the server last reported it; only decides
+  /// what the app shows. Every admin endpoint re-checks it server-side.
+  bool isAdmin = false;
   bool isConfiguringTwoFactor = false;
   Map<String, dynamic> accountTwoFactor = const <String, dynamic>{};
   List<Map<String, dynamic>> securityKeys = const <Map<String, dynamic>>[];
@@ -217,6 +221,7 @@ mixin AuthController on ChangeNotifier {
     error = null;
     notifyListeners();
   }
+
   Future<bool> register(String usernameValue, String? email, String password) =>
       _run(() async {
         final payload =

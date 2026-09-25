@@ -363,6 +363,7 @@ class WebChunkStore implements ChunkStore, RecordingContextStore {
     if (bytes == null) throw StateError('Chunk has no browser audio bytes.');
     return (await LedgerSeal.instance()).unseal(bytes);
   }
+
   @override
   Future<int> storedBytes(AudioChunk chunk) async => chunk.bytes?.length ?? 0;
   @override

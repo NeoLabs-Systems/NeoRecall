@@ -7,7 +7,7 @@ const { createLocalDestination } = require('./local_destination');
 // To add a remote target: implement the BackupDestination contract in a sibling
 // file, register the factory here, and document the new
 // `NEORECALL_BACKUP_DESTINATION` value. Nothing else needs to change — the
-// service, scheduler, admin dashboard and restore command all address
+// service, scheduler, Admin page and restore command all address
 // destinations only through this map.
 const FACTORIES = Object.freeze({
   local: createLocalDestination,

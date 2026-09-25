@@ -23,7 +23,7 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 
 ## External inference providers
 
-NeoRecall does not install or run a transcription or language model. Provider settings can come from `.env` or from encrypted live overrides on the admin **Providers** page. Admin API keys are never returned to the browser, and resetting the page restores `.env` as the source of truth.
+NeoRecall does not install or run a transcription or language model. Provider settings can come from `.env` or from encrypted live overrides on the app's **Admin › Providers** page. Keys saved there are never returned to the app, and **Use the server’s own configuration** restores `.env` as the source of truth.
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
@@ -39,7 +39,7 @@ The live database file is page-encrypted with the installation key (`data/secret
 
 `NEORECALL_BACKUP_DESTINATION` selects where artifacts land. `local` (the default) writes to `~/.neorecall/backups`. Artifacts are encrypted before they leave the process, so a destination never handles plaintext.
 
-The **Backups** page in the admin dashboard shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
+**Admin › Backups** in the app shows the schedule, the last run, retention, and every past run including failures, and offers a **Back up now** button.
 
 Each account can also copy *its own* data to a self-hosted Nextcloud instance under **Settings → Integrations**. That path is write-only (MKCOL and PUT): it is not a restore source and it is not the admin database backup. Audio copies wait until a recording ends, then upload one joined file rather than each ingest chunk. `NEORECALL_CLOUD_USER_BACKUP_INTERVAL_HOURS` (default 24) is how often an account with the data-backup toggle on is offered a dump. Pending audio copies older than `NEORECALL_CLOUD_PENDING_MAX_AGE_MS` are dropped.
 
@@ -53,7 +53,7 @@ neorecall restore <key>   # decrypt one artifact beside the live database
 
 `restore` refuses to run while NeoRecall is up, and never writes over the live database. It decrypts the artifact next to the original, runs an integrity check, reports the account count and checksum, and prints the two `mv` commands to put it into service. Verify a restore periodically — a backup that has never been restored is an assumption, not a control.
 
-The admin dashboard fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
+**Admin › Providers** fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
 
 `LLM_CONTEXT_SIZE` describes how much the configured external model can read at once. Consolidation splits longer transcripts to fit it, so raising it buys fewer and wider passes rather than deciding what can be processed at all. The embedding model used for local semantic search remains pinned and verified by `neorecall setup`; it is not a generation model.
 
@@ -98,7 +98,7 @@ Rolling per-user provider budgets sit beside those Ask counters. They are off by
 - `NEORECALL_AI_TOKENS_4H` / `NEORECALL_AI_TOKENS_WEEKLY` — language-model tokens over a rolling 4-hour and 7-day window
 - `NEORECALL_TRANSCRIPTION_SECONDS_4H` / `NEORECALL_TRANSCRIPTION_SECONDS_WEEKLY` — audio seconds that actually went to the transcription service (local silence detection does not count)
 
-Admin › Users can set the same four install defaults without writing `.env`, and a Limits control on each account can inherit them, replace them, or set `0` for unlimited. When a cap is reached, Ask returns `429 USAGE_LIMIT_EXCEEDED`, memory writing and previews wait, and transcription of speech is deferred. The job is not failed: attempts are not burned, the server keeps its temporary audio, and no terminal receipt is issued, so the recording device keeps the original until the window opens.
+**Admin › Users** in the app can set the same four install defaults without writing `.env`, and a **Limits** control on each account can inherit them, replace them, or set `0` for unlimited. When a cap is reached, Ask returns `429 USAGE_LIMIT_EXCEEDED`, memory writing and previews wait, and transcription of speech is deferred. The job is not failed: attempts are not burned, the server keeps its temporary audio, and no terminal receipt is issued, so the recording device keeps the original until the window opens.
 
 ### The day's summary
 
@@ -266,7 +266,7 @@ a handful of seconds of audio, so the default of two is deliberate.
 
 ### Testing it end to end
 
-The admin **Providers** page has a **Test end to end** button. It sends a bundled
+**Admin › Providers** has a **Save and test** button. It sends a bundled
 eighteen-second sample of real two-speaker speech to the configured transcription
 service, runs the local speech-detection and diarization pass over the same
 sample, and makes one structured request to the language model — then reports the
@@ -303,11 +303,12 @@ Qwen-family servers accept that spelling; others differ, which is why this is a
 passthrough rather than a setting per vendor. It merges last, so it can override
 anything NeoRecall sets.
 
-The admin **Providers** page carries the same thing without the typing: a **Skip
-the model's thinking step** checkbox that writes exactly that payload into the
-**Extra request JSON** field under Advanced. The checkbox is a view of one key
-rather than a separate setting — ticking it alongside JSON you wrote yourself adds
-the key, and clearing it removes only that key. Saved there it is stored with the
+**Admin › Providers** carries the same thing without the typing: under the
+language model's **Advanced**, a **Skip the model’s thinking step** switch that
+writes exactly that payload into the **Extra request JSON** field beside it. The
+switch is a view of one key rather than a separate setting — turning it on
+alongside JSON you wrote yourself adds the key, and turning it off removes only
+that key. Saved there it is stored with the
 rest of the provider settings and takes effect without a restart.
 
 You should rarely need it, because a truncated completion rescues itself: when a
@@ -549,7 +550,7 @@ would change nothing.
 
 ## Operational thresholds
 
-The admin dashboard can safely tune boundary, deduplication, speaker matching, and consolidation material thresholds. Values are validated and stored in SQLite. Environment defaults remain the source of truth until an administrator explicitly overrides a value.
+**Admin › Processing** in the app can safely tune boundary, deduplication, speaker matching, and consolidation material thresholds; only changed values are saved as overrides. Values are validated and stored in SQLite. Environment defaults remain the source of truth until an administrator explicitly overrides a value.
 
 Conversation boundaries expose separate controls for hard and soft silence gaps, contextual embedding similarity and valley prominence, the number of neighboring segments used as semantic context, and maximum duration/character safety ceilings. `NEORECALL_CONVERSATION_MAXIMUM_CHARACTERS` must not exceed `NEORECALL_MAX_CONSOLIDATION_INPUT_CHARS`, ensuring one provisional conversation always fits in a bounded consolidation request.
 

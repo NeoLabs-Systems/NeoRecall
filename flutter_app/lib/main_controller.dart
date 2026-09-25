@@ -69,7 +69,7 @@ part 'src/controller/integrations_controller.dart';
 part 'src/controller/cloud_controller.dart';
 part 'src/controller/memoket_e2e_controller.dart';
 
-enum RecallPage { record, library, search, sources, devices, settings }
+enum RecallPage { record, library, search, sources, devices, settings, admin }
 
 /// The three lists inside Library.
 ///
@@ -77,6 +77,19 @@ enum RecallPage { record, library, search, sources, devices, settings }
 /// that already shared a shape. They are one page with a segmented control now,
 /// so the section a deep link wants is a tab, not a page.
 enum LibraryTab { moments, memories, highlights, speakers }
+
+/// The areas of the Admin page. Held by the controller, like [LibraryTab], so
+/// something outside the page (the end of a local install) can open one.
+enum AdminArea {
+  overview,
+  users,
+  jobs,
+  aiRequests,
+  audit,
+  backups,
+  providers,
+  processing,
+}
 
 bool canRestoreSessionForBackend({
   required bool web,
@@ -610,6 +623,10 @@ class NeoRecallController extends ChangeNotifier
   String? warning;
   RecallPage page = RecallPage.record;
 
+  /// Which area the Admin page shows.
+  AdminArea adminArea = AdminArea.overview;
+  bool _openProvidersAfterSignIn = false;
+
   /// Which list Library opens on. Deep links and home-screen widgets set this
   /// alongside [page]; the screen itself keeps it in step when the reader taps
   /// a segment, so returning to Library lands where they left it.
@@ -1102,12 +1119,14 @@ class NeoRecallController extends ChangeNotifier
         api.token = await _secureStorage.read(key: 'sessionToken');
         accountId = _preferences!.getString('accountId');
         username = _preferences!.getString('username');
+        isAdmin = _preferences!.getBool('isAdmin') ?? false;
       } else {
         // A token is valid only for the server that issued it. Never attach a
         // cached native session to a backend selected later by the user.
         api.token = null;
         accountId = null;
         username = null;
+        isAdmin = false;
       }
       consentAccepted =
           _preferences!.getBool('recordingConsentAccepted') ?? false;
@@ -1135,6 +1154,8 @@ class NeoRecallController extends ChangeNotifier
           final user = payload['user'] as Map;
           accountId = user['id'] as String;
           username = user['username'] as String;
+          isAdmin = user['role'] == 'admin';
+          await _preferences!.setBool('isAdmin', isAdmin);
           await api.discoverServerCapabilities();
           await _loadCachedSettings(accountId);
           sync.pump.accountId = accountId;
@@ -1151,10 +1172,12 @@ class NeoRecallController extends ChangeNotifier
             api.token = null;
             accountId = null;
             username = null;
+            isAdmin = false;
             sync.pump.accountId = null;
             await _secureStorage.delete(key: 'sessionToken');
             await _preferences!.remove('accountId');
             await _preferences!.remove('username');
+            await _preferences!.remove('isAdmin');
           }
         } catch (_) {
           // Offline startup keeps the last server-proven account binding. The
@@ -1166,10 +1189,12 @@ class NeoRecallController extends ChangeNotifier
         if (accountId == null) {
           api.token = null;
           username = null;
+          isAdmin = false;
           sync.pump.accountId = null;
           await _secureStorage.delete(key: 'sessionToken');
           await _preferences!.remove('accountId');
           await _preferences!.remove('username');
+          await _preferences!.remove('isAdmin');
         }
       }
       await ClientDiagnosticLog.instance.bindAccount(accountId);
@@ -1537,6 +1562,7 @@ class NeoRecallController extends ChangeNotifier
     api.token = session['token'] as String;
     accountId = user['id'] as String;
     username = user['username'] as String;
+    adoptSignedInRole(user['role']);
     await api.discoverServerCapabilities();
     await _loadCachedSettings(accountId);
     sync.pump.accountId = accountId;
@@ -1553,6 +1579,7 @@ class NeoRecallController extends ChangeNotifier
     await _secureStorage.write(key: 'sessionToken', value: api.token);
     await _preferences?.setString('accountId', accountId!);
     await _preferences?.setString('username', username!);
+    await _preferences?.setBool('isAdmin', isAdmin);
     await _settings();
     sync.pump.start();
     await _refreshPending();
@@ -1583,6 +1610,8 @@ class NeoRecallController extends ChangeNotifier
     api.token = null;
     accountId = null;
     username = null;
+    isAdmin = false;
+    if (page == RecallPage.admin) page = RecallPage.record;
     _cachedSettings = Map<String, dynamic>.from(_fallbackSettings);
     pendingAudioBytes = 0;
     needsAttentionCount = 0;
@@ -1592,6 +1621,7 @@ class NeoRecallController extends ChangeNotifier
     await _secureStorage.delete(key: 'sessionToken');
     await _preferences?.remove('accountId');
     await _preferences?.remove('username');
+    await _preferences?.remove('isAdmin');
     accountTwoFactor = const <String, dynamic>{};
     securityKeys = const <Map<String, dynamic>>[];
     integrations = const <Map<String, dynamic>>[];
@@ -2060,7 +2090,9 @@ class NeoRecallController extends ChangeNotifier
         unawaited(sync.pump.pump());
         _armRecordingSchedule();
       } catch (exception) {
-        error = exception is StateError ? exception.message : exception.toString();
+        error = exception is StateError
+            ? exception.message
+            : exception.toString();
         // Capture never took the device, so release the claim — otherwise a failed
         // start would silently disable automatic sync for the rest of the session.
         _deviceClaimedForCapture = false;
@@ -2904,9 +2936,7 @@ class NeoRecallController extends ChangeNotifier
     final mobile = recorder is MobileRecallRecorder
         ? recorder as MobileRecallRecorder
         : null;
-    if (!authenticated ||
-        mobile == null ||
-        mobile.backgroundPaused) {
+    if (!authenticated || mobile == null || mobile.backgroundPaused) {
       _switchingMobileSource = false;
       return;
     }
@@ -3481,6 +3511,9 @@ class NeoRecallController extends ChangeNotifier
           section(_momentPath(_momentPageCursors[momentPage])),
           section('/api/v1/daily-summaries?limit=100'),
           section('/api/v1/processing-status'),
+          // The account's role, so admin granted or revoked by the operator
+          // shows up without signing in again.
+          section('/api/v1/auth/me'),
         ],
       );
       List<Map<String, dynamic>> rows(int index, String key) =>
@@ -3517,6 +3550,8 @@ class NeoRecallController extends ChangeNotifier
                 ?.toInt() ??
             0;
       }
+      final me = results[8]?['user'];
+      if (me is Map) _applyRole(me['role']);
       unawaited(refreshAccountUsage(silent: true));
       cachedData = failures.isNotEmpty;
       // Only worth interrupting for when nothing at all came back. A partial
@@ -3668,7 +3703,9 @@ class NeoRecallController extends ChangeNotifier
       notifyListeners();
     }
     try {
-      accountUsage = AccountUsageSnapshot.fromJson(await api.fetchAccountUsage());
+      accountUsage = AccountUsageSnapshot.fromJson(
+        await api.fetchAccountUsage(),
+      );
     } catch (_) {
       if (!silent) accountUsage = null;
     } finally {
@@ -3743,6 +3780,50 @@ class NeoRecallController extends ChangeNotifier
   void selectPage(RecallPage value) {
     page = value;
     notifyListeners();
+  }
+
+  /// Opens the Admin page on [area].
+  void selectAdminArea(AdminArea area) {
+    adminArea = area;
+    page = RecallPage.admin;
+    notifyListeners();
+  }
+
+  /// Asks for Admin › Providers once the next account signs in, if that
+  /// account is the admin. Set when this app has just installed the server.
+  void openProvidersAfterSignIn() => _openProvidersAfterSignIn = true;
+
+  /// Takes the role of an account that just signed in or registered. The first
+  /// account on a server this app just installed is its admin, and the
+  /// services that server transcribes and writes with are still unset, so it
+  /// lands on Admin › Providers. The request lasts for one sign-in only.
+  @visibleForTesting
+  void adoptSignedInRole(Object? role) {
+    isAdmin = role == 'admin';
+    if (_openProvidersAfterSignIn && isAdmin) {
+      adminArea = AdminArea.providers;
+      page = RecallPage.admin;
+    }
+    _openProvidersAfterSignIn = false;
+  }
+
+  /// The server said this account is no longer an admin (revoked while the
+  /// page was open). The flag only decides what the app shows; the server has
+  /// already refused the request.
+  void adminAccessRevoked() {
+    if (!isAdmin) return;
+    _applyRole('user');
+    notifyListeners();
+  }
+
+  /// Follows the role the server reported. Leaving the Admin page when admin
+  /// is gone keeps the app from showing a page every request would refuse.
+  void _applyRole(Object? role) {
+    final admin = role == 'admin';
+    if (admin == isAdmin) return;
+    isAdmin = admin;
+    unawaited(_preferences?.setBool('isAdmin', admin));
+    if (!admin && page == RecallPage.admin) page = RecallPage.settings;
   }
 
   /// Moves Library to one of its lists, selecting the page if it is not the

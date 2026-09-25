@@ -68,15 +68,6 @@
   "settingsDevicesTitle": "Signed-in devices",
   "settingsDevicesDescription": "Review access or revoke an old client. Set up, connect, and control capture hardware from Record.",
   "settingsOpenRecord": "Open Record",
-  "settingsServicesNoAdminKey": "These services are set on the server itself. This app has no administrator key for {backendUrl}, so ask whoever runs that server to configure transcription and memory writing there.",
-  "@settingsServicesNoAdminKey": {
-    "placeholders": {
-      "backendUrl": {
-        "type": "String"
-      }
-    }
-  },
-  "settingsServicesTitle": "Services",
   "settingsSectionGeneral": "GENERAL",
   "settingsTimeLocaleTitle": "Time and locale",
   "settingsTimeLocaleDescription": "Used to place recordings and generated memories on your local timeline.",
@@ -273,8 +264,6 @@
   "settingsNavWatchDescription": "Wear OS setup and digest",
   "settingsNavDevices": "Account devices",
   "settingsNavDevicesDescription": "Sessions and access",
-  "settingsNavServices": "Services",
-  "settingsNavServicesDescription": "Transcription and memory writing",
   "settingsNavIntegrations": "Integrations",
   "settingsNavIntegrationsDescription": "NeoAgent and MCP",
   "settingsNavAreaLabel": "Settings area",
@@ -1707,7 +1696,6 @@
   "watchStep4Title": "Open it once on the watch",
   "watchStep4Detail": "Allow the microphone, and this page turns to Installed. Add the NeoRecall tiles by long-pressing the watch face, and the complications from the watch face editor.",
   "watchInstallFootnote": "Developer options can be turned back off afterwards — the app stays installed and keeps working.",
-  "providerContinue": "Continue",
   "providerChoose": "Choose a {workload} provider.",
   "@providerChoose": {
     "placeholders": {
@@ -1732,7 +1720,6 @@
   "providerSaving": "Saving…",
   "providerSaveAndTest": "Save and test",
   "providerSaveOnly": "Save only",
-  "providerSetUpLater": "Set these up later",
   "providerKeyStored": "key stored",
   "providerServiceLabel": "Service",
   "providerBaseUrlLabel": "Base URL",
@@ -1784,14 +1771,6 @@
   "installPreparing": "Preparing NeoRecall…",
   "installModelsNote": "The first install downloads about 165 MB of local models, so this can take a few minutes.",
   "installDetails": "Setup details",
-  "installRunning": "NeoRecall is running{location}. One step left: choose the services that transcribe your recordings and write your memories.",
-  "@installRunning": {
-    "placeholders": {
-      "location": {
-        "type": "String"
-      }
-    }
-  },
   "installLocationAt": " at {url}",
   "@installLocationAt": {
     "placeholders": {
@@ -1800,7 +1779,6 @@
       }
     }
   },
-  "installNoAdminKey": "This computer would not store the administrator key, so these services can be set up now but not changed from Settings later. The admin dashboard at /admin can still change them.",
   "installCreateAccount": "Create your account",
   "installDone": "NeoRecall is installed and running{version}.",
   "@installDone": {
@@ -1826,7 +1804,6 @@
       }
     }
   },
-  "installChooseServices": "Choose transcription and memory services",
   "actionRetry": "Retry",
   "installChangeOptions": "Change options",
   "installTitle": "Set up NeoRecall on this computer",
@@ -2037,5 +2014,555 @@
         "type": "int"
       }
     }
-  }
+  },
+  "navAdmin": "Admin",
+  "adminTitle": "Admin",
+  "adminDescription": "Run this server: accounts, processing, backups and the services it transcribes and writes with.",
+  "adminAreaOverview": "Overview",
+  "adminAreaUsers": "Users",
+  "adminAreaJobs": "Jobs",
+  "adminAreaAiRequests": "AI requests",
+  "adminAreaAudit": "Audit log",
+  "adminAreaBackups": "Backups",
+  "adminAreaProviders": "Providers",
+  "adminAreaProcessing": "Processing",
+  "adminSearchHint": "Search admin",
+  "adminSearchClear": "Clear",
+  "adminSearchNothing": "Nothing matches",
+  "adminSearchNothingHint": "Try a service name, “limits”, “backup”, “jobs” or “speakers”.",
+  "adminSearchWhere": "Admin › {area}",
+  "@adminSearchWhere": {
+    "placeholders": {
+      "area": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSearchStatus": "Server status",
+  "adminSearchStatusKeywords": "version queue queued recordings users devices vector search index tokens temporary audio cleanup health",
+  "adminSearchWorkers": "Workers and processing times",
+  "adminSearchWorkersKeywords": "worker heartbeat model metrics throughput speed",
+  "adminSearchAccounts": "Accounts",
+  "adminSearchAccountsKeywords": "users people email username devices recordings",
+  "adminSearchDisable": "Disable or enable an account",
+  "adminSearchDisableKeywords": "block lock suspend sign out enable",
+  "adminSearchAccountLimits": "Usage limits for one account",
+  "adminSearchAccountLimitsKeywords": "limits quota tokens transcription seconds override user",
+  "adminSearchAdmins": "Add or remove an admin",
+  "adminSearchAdminsKeywords": "admin grant revoke role cli operator",
+  "adminSearchInstallLimits": "Usage limits for everyone",
+  "adminSearchInstallLimitsKeywords": "default limits quota tokens transcription 4 hours weekly unlimited",
+  "adminSearchJobs": "Processing jobs",
+  "adminSearchJobsKeywords": "queue retry cancel failed stuck job",
+  "adminSearchAiRequests": "AI requests",
+  "adminSearchAiRequestsKeywords": "language model llm tokens usage failures",
+  "adminSearchAudit": "Audit log",
+  "adminSearchAuditKeywords": "history security changes who changed login",
+  "adminSearchBackUpNow": "Back up now",
+  "adminSearchBackUpNowKeywords": "backup snapshot database copy",
+  "adminSearchBackupSchedule": "Backup schedule and destination",
+  "adminSearchBackupScheduleKeywords": "interval retention destination next last",
+  "adminSearchBackupHistory": "Backup history",
+  "adminSearchBackupHistoryKeywords": "failures artifacts pruned runs",
+  "adminSearchTranscription": "Transcription service",
+  "adminSearchTranscriptionKeywords": "speech to text whisper deepgram assemblyai api key model language",
+  "adminSearchLanguageModel": "Language model",
+  "adminSearchLanguageModelKeywords": "llm openai anthropic gemini ollama memory writing api key model",
+  "adminSearchTestServices": "Test the services end to end",
+  "adminSearchTestServicesKeywords": "test sample check works",
+  "adminSearchSkipThinking": "Skip the model’s thinking step",
+  "adminSearchSkipThinkingKeywords": "reasoning thinking truncated extra json request",
+  "adminSearchProviderReset": "Use the server’s own configuration",
+  "adminSearchProviderResetKeywords": "reset env environment overrides",
+  "adminSearchSpeakersKeywords": "voice diarization speakers threshold match enroll",
+  "adminSearchAudioKeywords": "noise denoise high-pass gain filter",
+  "adminSearchTranscriptKeywords": "dedupe duplicate repetition words per second",
+  "adminSearchConversationsKeywords": "gap split conversation length preview boundary",
+  "adminSearchMemoriesKeywords": "consolidation memories evidence occasion duplicates merge",
+  "adminRefresh": "Refresh",
+  "adminRetry": "Try again",
+  "adminLoadFailed": "This could not be loaded.",
+  "adminLoadFailedBecause": "This could not be loaded: {reason}",
+  "@adminLoadFailedBecause": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNone": "None",
+  "adminNever": "Never",
+  "adminReserved": "Reserved",
+  "adminUnlimited": "unlimited",
+  "adminWhyItFailed": "Why it failed: {reason}",
+  "@adminWhyItFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "adminOverviewStatus": "Server status",
+  "adminOverviewWorkers": "Workers and processing",
+  "adminStatVersion": "Version",
+  "adminStatUsers": "Accounts",
+  "adminStatDevices": "Devices",
+  "adminStatRecordings": "Recordings",
+  "adminStatQueued": "Queued work",
+  "adminStatOldestQueued": "Oldest queued",
+  "adminStatTemporaryAudio": "Temporary audio",
+  "adminStatCleanupPending": "Cleanup pending",
+  "adminStatSearchIndex": "Search index",
+  "adminStatAiTokens": "AI tokens",
+  "adminSearchIndexReady": "Ready · {version}",
+  "@adminSearchIndexReady": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSearchIndexUnavailable": "Unavailable",
+  "adminNoWorkers": "No worker has reported in. Recordings wait until one does.",
+  "adminWorkerHeartbeat": "Last seen {time}",
+  "@adminWorkerHeartbeat": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "adminProcessingLastDay": "Processing times, last 24 hours",
+  "adminNoProcessingSamples": "Nothing was processed in the last 24 hours.",
+  "adminProcessingMetric": "{metric}: {average} {unit} on average, {maximum} at most",
+  "@adminProcessingMetric": {
+    "placeholders": {
+      "metric": {
+        "type": "String"
+      },
+      "average": {
+        "type": "String"
+      },
+      "maximum": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAccounts": "Accounts",
+  "adminAccountsDescription": "Everyone with an account on this server. Each account only ever sees its own recordings.",
+  "adminFilterAccounts": "Filter by name or email",
+  "adminNoAccounts": "No account matches.",
+  "adminRoleAdmin": "Admin",
+  "adminYou": "You",
+  "adminAccountDisabled": "Disabled",
+  "adminAccountActivity": "{devices, plural, =1{1 device} other{{devices} devices}} · {recordings, plural, =1{1 recording} other{{recordings} recordings}}",
+  "@adminAccountActivity": {
+    "placeholders": {
+      "devices": {
+        "type": "int"
+      },
+      "recordings": {
+        "type": "int"
+      }
+    }
+  },
+  "adminAccountDates": "Joined {joined} · last sign-in {lastLogin}",
+  "@adminAccountDates": {
+    "placeholders": {
+      "joined": {
+        "type": "String"
+      },
+      "lastLogin": {
+        "type": "String"
+      }
+    }
+  },
+  "adminLimits": "Limits",
+  "adminDisable": "Disable",
+  "adminEnable": "Enable",
+  "adminCannotDisableAdmin": "Admin accounts can’t be disabled here. Revoke admin on the server first.",
+  "adminDisableTitle": "Disable {username}?",
+  "@adminDisableTitle": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDisableBody": "The account is signed out everywhere and can’t sign in until it is enabled again. Its recordings and memories are kept.",
+  "adminDisabledNotice": "{username} is disabled.",
+  "@adminDisabledNotice": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminEnabledNotice": "{username} can sign in again.",
+  "@adminEnabledNotice": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminGrantHint": "The first account on a server is its admin. Whoever runs the server adds or removes admins with “neorecall admin grant <username>” and “neorecall admin revoke <username>”, or lists them in NEORECALL_ADMIN_USERS.",
+  "adminInstallLimits": "Usage limits for everyone",
+  "adminInstallLimitsDescription": "Rolling caps over the last 4 hours and 7 days. 0 means unlimited. An account’s own limits replace these.",
+  "adminLimitAi4h": "AI tokens per 4 hours",
+  "adminLimitAiWeek": "AI tokens per 7 days",
+  "adminLimitSpeech4h": "Transcription seconds per 4 hours",
+  "adminLimitSpeechWeek": "Transcription seconds per 7 days",
+  "adminSaveInstallLimits": "Save limits",
+  "adminInstallLimitsSaved": "Usage limits saved.",
+  "adminUserLimitsTitle": "Limits for {username}",
+  "@adminUserLimitsTitle": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminUserLimitsHelp": "Leave a field empty to use the limit for everyone. 0 means unlimited.",
+  "adminInheritDefault": "Same as everyone",
+  "adminUsageWindow": "{used} of {limit}",
+  "@adminUsageWindow": {
+    "placeholders": {
+      "used": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "adminUsageAi": "AI tokens: {fourHour} in 4 hours, {weekly} in 7 days",
+  "@adminUsageAi": {
+    "placeholders": {
+      "fourHour": {
+        "type": "String"
+      },
+      "weekly": {
+        "type": "String"
+      }
+    }
+  },
+  "adminUsageSpeech": "Transcription seconds: {fourHour} in 4 hours, {weekly} in 7 days",
+  "@adminUsageSpeech": {
+    "placeholders": {
+      "fourHour": {
+        "type": "String"
+      },
+      "weekly": {
+        "type": "String"
+      }
+    }
+  },
+  "adminLimitsSaved": "Limits for {username} saved.",
+  "@adminLimitsSaved": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminJobs": "Processing jobs",
+  "adminJobsDescription": "The latest {count} jobs. Run a failed one again, or stop one that should not continue.",
+  "@adminJobsDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminNoJobs": "No jobs yet.",
+  "adminJobAttempts": "{attempts} of {maxAttempts} attempts · created {created}",
+  "@adminJobAttempts": {
+    "placeholders": {
+      "attempts": {
+        "type": "int"
+      },
+      "maxAttempts": {
+        "type": "int"
+      },
+      "created": {
+        "type": "String"
+      }
+    }
+  },
+  "adminRetryJob": "Retry",
+  "adminCancelJob": "Cancel",
+  "adminJobRetried": "The job is queued again.",
+  "adminJobCancelled": "The job is cancelled.",
+  "adminAiRequests": "AI requests",
+  "adminAiRequestsDescription": "The latest {count} requests to the language model.",
+  "@adminAiRequestsDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminNoAiRequests": "No requests yet.",
+  "adminAiRequestDetail": "{model} · {tokens} tokens · {sent}",
+  "@adminAiRequestDetail": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "tokens": {
+        "type": "String"
+      },
+      "sent": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAudit": "Audit log",
+  "adminAuditDescription": "The latest {count} administrative and security-sensitive changes.",
+  "@adminAuditDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminNoAudit": "Nothing recorded yet.",
+  "adminAuditBy": "{actor} · {time}",
+  "@adminAuditBy": {
+    "placeholders": {
+      "actor": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAuditAffected": "Affects {username}",
+  "@adminAuditAffected": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "adminActorSystem": "The server",
+  "adminActorApiKey": "An API key",
+  "adminActorDeleted": "A deleted account",
+  "adminBackups": "Backups",
+  "adminBackupsDescription": "Encrypted snapshots of the database, written to the configured destination.",
+  "adminBackupSchedule": "Schedule",
+  "adminBackupEvery": "{hours, plural, =1{Every hour} other{Every {hours} hours}}",
+  "@adminBackupEvery": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "adminBackupDisabled": "Off",
+  "adminBackupLast": "Last backup",
+  "adminBackupNext": "Next due",
+  "adminBackupRunningNow": "Running now",
+  "adminBackupNextWorker": "As soon as a worker runs",
+  "adminBackupRetained": "Kept",
+  "adminBackupRetainedValue": "{count} of {retain} · {size}",
+  "@adminBackupRetainedValue": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "retain": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBackupDestination": "Written to {destination} · {location}. Encrypted with this server’s key before it is written.",
+  "@adminBackupDestination": {
+    "placeholders": {
+      "destination": {
+        "type": "String"
+      },
+      "location": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBackupUnreachable": "The backup destination {destination} can’t be reached: {reason}",
+  "@adminBackupUnreachable": {
+    "placeholders": {
+      "destination": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBackUpNow": "Back up now",
+  "adminBackingUp": "Backing up…",
+  "adminBackupAlreadyRunning": "A backup is already running.",
+  "adminBackupDone": "Backup complete · {size}",
+  "@adminBackupDone": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBackupHistory": "History",
+  "adminNoBackups": "No backup has run yet.",
+  "adminBackupPruned": "{key} · removed after the retention limit",
+  "@adminBackupPruned": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "adminServices": "Services",
+  "adminProcessingDescription": "How recordings are split into conversations, matched to speakers and written up. The server checks every value; until one is saved here, its own configuration applies.",
+  "adminSettingsGroupOther": "Other",
+  "adminSettingNotANumber": "Enter a number.",
+  "adminSaveProcessing": "Save changes",
+  "adminSettingsUnchanged": "Nothing has changed.",
+  "adminSettingsSaved": "{count, plural, =1{1 setting saved.} other{{count} settings saved.}}",
+  "@adminSettingsSaved": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "providerNeedsApiKey": "{provider} needs an API key.",
+  "@providerNeedsApiKey": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "providerNeedsModel": "{provider} needs a model.",
+  "@providerNeedsModel": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "providerAdvanced": "Advanced",
+  "providerTranscriptionEndpointLabel": "Base URL or full transcription endpoint",
+  "providerLanguageLabel": "Language (optional)",
+  "providerLanguageHelp": "A language code the service understands, such as de or en.",
+  "providerResponseFormatLabel": "Response format",
+  "providerSkipThinking": "Skip the model’s thinking step",
+  "providerSkipThinkingHelp": "Faster, and avoids a reply cut off before it starts.",
+  "providerExtraBodyLabel": "Extra request JSON",
+  "providerExtraBodyHelp": "Merged into every request, for provider fields NeoRecall does not set itself.",
+  "providerExtraBodyInvalid": "This must be a JSON object.",
+  "providerClearKey": "Remove the key saved here",
+  "providerKeySourceSaved": "The key was saved here and is stored encrypted on the server.",
+  "providerKeySourceServer": "A key is set in the server’s own configuration. One entered here is used instead.",
+  "providerReset": "Use the server’s own configuration",
+  "providerResetTitle": "Use the server’s own configuration?",
+  "providerResetBody": "Everything saved here — services, models, addresses and keys — is removed, and the server goes back to what its .env file says.",
+  "providerResetConfirm": "Remove and use .env",
+  "providerResetDone": "The server uses its own configuration again.",
+  "installNextAccount": "Next, create your account. The first account on this server is its admin, and the app then asks which services transcribe your recordings and write your memories.",
+  "securityDeleteAdminBlocked": "Admin accounts can’t delete themselves, so this server always has someone who can run it. Whoever runs the server revokes admin first with “neorecall admin revoke <username>”.",
+  "adminSettingVoiceMatchThreshold": "Voice match threshold",
+  "adminSettingVoiceMatchMargin": "Voice runner-up margin",
+  "adminSettingVoiceEnrollFloor": "New-person enrollment floor",
+  "adminSettingVoiceEnrollMinimumMs": "Speech required to enroll a person (ms)",
+  "adminSettingVoiceRepairThreshold": "Duplicate-repair threshold (re-detect)",
+  "adminSettingSpeakerClusterThreshold": "Speaker match threshold (higher = more speakers)",
+  "adminSettingSpeakerClusterMergeThreshold": "Merge two speakers when this alike",
+  "adminSettingSpeakerMinimumTurnMs": "Shortest speech that may create a speaker (ms)",
+  "adminSettingDiarizationClusterDistance": "Diarization grouping distance (higher = fewer speakers)",
+  "adminSettingSpeakerClusterMargin": "Speaker cluster runner-up margin",
+  "adminSettingSpeakerContinuityGapMs": "Speaker continuity gap (ms)",
+  "adminSettingSpeakerClusterContinuityThreshold": "Speaker continuity threshold",
+  "adminSettingAudioPreprocessEnabled": "Condition audio before transcription",
+  "adminSettingAudioPreprocessHighpassHz": "High-pass filter (Hz, 0 = off)",
+  "adminSettingAudioPreprocessDenoiseDb": "Noise reduction (dB)",
+  "adminSettingAudioPreprocessMaxGain": "Maximum level gain",
+  "adminSettingDedupeTokenSimilarity": "Token dedupe similarity",
+  "adminSettingDedupeTimeToleranceMs": "Dedupe time tolerance (ms)",
+  "adminSettingTranscriptRepetitionMinimumRepeats": "ASR repetition minimum repeats",
+  "adminSettingTranscriptRepetitionMaximumPatternWords": "ASR repetition maximum pattern words",
+  "adminSettingTranscriptRepetitionMinimumCoverage": "ASR repetition minimum coverage",
+  "adminSettingTranscriptMaximumWordsPerSecond": "ASR maximum credible words per second",
+  "adminSettingConversationHardGapMs": "Conversation hard gap (ms)",
+  "adminSettingConversationSoftGapMs": "Conversation soft gap (ms)",
+  "adminSettingConversationMinimumMs": "Minimum conversation (ms)",
+  "adminSettingConversationQuietCloseMs": "Quiet close delay (ms)",
+  "adminSettingConversationValleyQuantile": "Embedding valley quantile",
+  "adminSettingConversationSemanticSimilarityThreshold": "Semantic similarity threshold",
+  "adminSettingConversationSemanticValleyProminence": "Semantic valley prominence",
+  "adminSettingConversationSemanticContextSegments": "Semantic context segments",
+  "adminSettingConversationMaximumMs": "Maximum conversation duration (ms)",
+  "adminSettingConversationMaximumCharacters": "Maximum conversation characters",
+  "adminSettingConversationPreviewMinCharacters": "Characters before a live preview",
+  "adminSettingConversationPreviewRefreshCharacters": "New characters before a preview refresh",
+  "adminSettingConversationPreviewMinIntervalMs": "Minimum time between previews (ms)",
+  "adminSettingConversationPreviewFullCharacters": "Characters read in full for a preview",
+  "adminSettingMinAiAudioMs": "Shortest recording sent to the model (ms)",
+  "adminSettingMinNewMaterialChars": "Minimum new characters",
+  "adminSettingMinMemoryEvidenceMs": "Minimum memory evidence (ms)",
+  "adminSettingMinMemoryEvidenceChars": "Minimum memory evidence characters",
+  "adminSettingMaxConsolidationInputChars": "Maximum consolidation characters",
+  "adminSettingMaxConsolidationConversations": "Maximum conversations per occasion",
+  "adminSettingMaxMemoryContinuationCandidates": "Earlier memories considered for continuing",
+  "adminSettingMemoryContinuationLookbackMs": "Cross-recording memory continuation lookback (ms)",
+  "adminSettingMaxConsolidationLatencyMs": "Longest wait before writing a memory (ms)",
+  "adminSettingMemoryOccasionGapMs": "Occasion gap (ms)",
+  "adminSettingMemorySettleMs": "Occasion settle delay (ms)",
+  "adminSettingMemoryOccasionMaxWaitMs": "Maximum occasion wait (ms)",
+  "adminSettingMemoryDedupeEnabled": "Merge duplicate memories automatically",
+  "adminSettingMemoryDedupeSimilarityThreshold": "Duplicate memory similarity threshold",
+  "adminSettingMemoryDedupeWindowMs": "Duplicate memory time window (ms)",
+  "adminSettingMemoryDedupeMaxPairsPerRun": "Duplicate memory questions per sweep",
+  "adminSettingMemoryDedupeNeighbours": "Duplicate memory neighbours considered",
+  "adminSettingConsolidationMaxFailures": "Attempts before giving up on a memory",
+  "adminSettingsGroupSpeakers": "Speakers and voices",
+  "adminSettingsGroupAudio": "Audio conditioning",
+  "adminSettingsGroupTranscript": "Transcript clean-up",
+  "adminSettingsGroupConversations": "Conversation boundaries",
+  "adminSettingsGroupMemories": "Memory writing",
+  "adminServerTooOld": "This server is older than the app and has no Admin page yet. Update the server, then open Admin again.",
+  "adminAccountJoined": "Joined {joined}",
+  "@adminAccountJoined": {
+    "placeholders": {
+      "joined": {
+        "type": "String"
+      }
+    }
+  },
+  "adminStateQueued": "waiting",
+  "adminStateRunning": "running",
+  "adminStateDone": "done",
+  "adminStateFailed": "failed",
+  "adminStateCancelled": "cancelled",
+  "adminStateReserved": "reserved",
+  "adminStateSent": "sent",
+  "adminStateStarting": "starting",
+  "adminStateReady": "ready",
+  "adminStateNotReady": "not ready",
+  "adminTriggerManual": "manual",
+  "adminTriggerScheduled": "scheduled",
+  "adminJobsFilterFailed": "Failed",
+  "adminJobsFilterQueued": "Waiting",
+  "adminJobsFilterAll": "All",
+  "adminNoFailedJobs": "No failed jobs.",
+  "adminNoQueuedJobs": "Nothing is waiting.",
+  "adminStatFailedJobs": "Failed jobs",
+  "adminActorEarlierAdmin": "An earlier admin",
+  "providerLanguageInvalid": "Use a language code of at least two letters, such as de or en."
 }

@@ -113,6 +113,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
           localInstall = false;
           serverSetup = false;
           registerMode = true;
+          widget.controller.openProvidersAfterSignIn();
         }),
       );
     }

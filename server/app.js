@@ -43,10 +43,14 @@ function createApp() {
   }));
   app.use(require('./routes/oauth'));
   app.use(require('./routes/mcp'));
-  app.use(['/api/v1', '/admin/api/v1'], slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
+  app.use('/api/v1', slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
   app.use('/api/v1', require('./routes'));
-  app.use('/admin/api/v1', require('./routes/admin'));
-  app.use('/admin', express.static(path.join(__dirname, 'admin'), { extensions: ['html'] }));
+  // The admin dashboard that lived here is the app's Admin page now. Its API
+  // answers in JSON so an older app says why instead of failing to parse a
+  // page; old bookmarks land in the app rather than on a bare 404.
+  app.use('/admin/api', (_req, _res, next) => next(new HttpError(410, 'ADMIN_API_MOVED',
+    'The admin API moved to /api/v1/admin and needs a signed-in admin account. Update the NeoRecall app.')));
+  app.get(/^\/admin(\/.*)?$/, (_req, res) => res.redirect(302, '/app/'));
   const appWebRoot = WEB_CLIENT_DIR;
   app.use('/app', express.static(appWebRoot, { extensions: ['html'], fallthrough: true }));
   app.use('/app', (req, res, next) => {

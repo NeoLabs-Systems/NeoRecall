@@ -667,7 +667,6 @@ void main() {
     },
   );
 
-
   // The failure this guards: the Gem answers ordinary control traffic with a
   // start notify. When that echo lands inside the holdoff a stop just armed,
   // the connector marked the device live and then had nothing left to clear
@@ -709,10 +708,12 @@ void main() {
       var count = 0;
       Object? error;
       unawaited(
-        connector.drainStoredAudio((_) async {}).then(
-          (value) => count = value,
-          onError: (Object e, StackTrace _) => error = e,
-        ),
+        connector
+            .drainStoredAudio((_) async {})
+            .then(
+              (value) => count = value,
+              onError: (Object e, StackTrace _) => error = e,
+            ),
       );
       async.elapse(const Duration(seconds: 30));
       expect(error, isNull, reason: error?.toString());
@@ -725,7 +726,6 @@ void main() {
       async.flushTimers();
     });
   });
-
 
   // The holdoff's original job: the Gem answers the post-stop list/delete
   // traffic with start notifies. Audio confirmation must not let trailing
@@ -776,7 +776,6 @@ void main() {
     );
     await connector.dispose();
   });
-
 
   // The failure this guards, seen on a real Gem: the app was force-stopped
   // while the device kept recording. On reopen it joined the take already in

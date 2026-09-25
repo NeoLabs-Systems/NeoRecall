@@ -11,8 +11,32 @@ if (!process.env.NEORECALL_ROLE) {
   const { getConfig } = require('./config');
   const { createApp } = require('./app');
   const { createLogger } = require('./utils/logger');
-  const adminAuth = require('./services/auth/admin_auth_service');
+  const adminAccess = require('./services/auth/admin_access_service');
+  const { reportRetiredCredentials } = require('./services/auth/retired_admin_report');
   const logger = createLogger('server');
+  // NEORECALL_ADMIN_USERS grants admin on every start, and who the admins are is
+  // logged each time, so an upgrade that turned the first account into the admin
+  // is visible in the log. An install whose accounts include no admin gets a
+  // pointer to the CLI rather than a silently unreachable Admin page. Under the
+  // supervisor the old dashboard's credentials are already retired; this covers
+  // an HTTP process started on its own.
+  const applyStartupAdminAccess = () => {
+    reportRetiredCredentials(logger);
+    const { granted, missing, revoked } = adminAccess.applyEnvAdminGrants();
+    if (granted.length) logger.info('Granted admin from NEORECALL_ADMIN_USERS', { usernames: granted });
+    if (missing.length) {
+      logger.warn('NEORECALL_ADMIN_USERS names accounts that do not exist; those names are reserved until removed from the list', { usernames: missing });
+    }
+    if (revoked.length) {
+      logger.warn('NEORECALL_ADMIN_USERS lists accounts revoked with the CLI, left as they are; use `neorecall admin grant <username>` to restore them', { usernames: revoked });
+    }
+    if (adminAccess.needsAdminGrant()) {
+      logger.warn('No account is an admin, so nobody can open the Admin page. Run `neorecall admin grant <username>`.');
+    } else {
+      const admins = adminAccess.listAdmins().map((admin) => admin.username);
+      if (admins.length) logger.info('Admin accounts', { usernames: admins });
+    }
+  };
   // Make silent deaths visible: an async error escaping a wrapped path (or a
   // process-level crash) otherwise leaves no trace and just returns a prompt.
   process.on('uncaughtException', (err) => {
@@ -25,7 +49,7 @@ if (!process.env.NEORECALL_ROLE) {
   process.on('exit', (code) => { if (code !== 0) console.error(`[server] HTTP process exiting with code ${code}`); });
   Promise.resolve()
     .then(() => require('./db/migrate').migrate())
-    .then(() => adminAuth.bootstrap())
+    .then(applyStartupAdminAccess)
     .then(() => {
       require('./services/sources').init();
       const config = getConfig();

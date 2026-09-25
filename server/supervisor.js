@@ -3,6 +3,8 @@
 const path = require('node:path');
 const { fork } = require('node:child_process');
 const { createLogger } = require('./utils/logger');
+const { reportRetiredCredentials } = require('./services/auth/retired_admin_report');
+const { withoutRetiredCredentials } = require('./services/auth/retired_admin_credentials');
 
 const logger = createLogger('supervisor');
 
@@ -11,12 +13,15 @@ const RESTART_MAX_MS = 30_000;      // ceiling for exponential backoff
 const HEALTHY_UPTIME_MS = 60_000;   // uptime that proves a clean start and resets backoff
 
 function start() {
+  // Before any child starts, so none inherits the old dashboard's credentials
+  // and a restarted child does not report keys the file no longer has.
+  reportRetiredCredentials(logger);
   let stopping = false;
   const children = new Map();
   const backoff = new Map(); // role -> current restart delay in ms
   function spawn(role, script) {
     const startedAt = Date.now();
-    const child = fork(script, [], { env: { ...process.env, NEORECALL_ROLE: role }, stdio: 'inherit' });
+    const child = fork(script, [], { env: { ...withoutRetiredCredentials(process.env), NEORECALL_ROLE: role }, stdio: 'inherit' });
     children.set(role, child);
     child.on('exit', (code, signal) => {
       children.delete(role);

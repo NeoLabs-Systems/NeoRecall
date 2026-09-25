@@ -16,6 +16,12 @@ test.after(() => { closeDatabase(); fs.rmSync(process.env.NEORECALL_HOME, { recu
 
 const PASSWORD = 'a long and unique password';
 
+// The first account on an install is its admin, and admins cannot delete
+// themselves; every account these tests delete comes after it.
+test.before(async () => {
+  await request(app).post('/api/v1/auth/register').send({ username: 'server-admin', password: PASSWORD }).expect(201);
+});
+
 async function accountWithData(username) {
   const registered = await request(app).post('/api/v1/auth/register').send({ username, password: PASSWORD }).expect(201);
   const userId = registered.body.user.id;

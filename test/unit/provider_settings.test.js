@@ -334,3 +334,35 @@ test('a refusal that is not about the schema is not papered over', async () => {
   }));
   assert.equal(chatRequests.length, 1, 'no pointless second attempt');
 });
+
+test('saving a workload without a response format leaves the environment in charge of it', () => {
+  settings.clearOverrides();
+  process.env.TRANSCRIPTION_API_RESPONSE_FORMAT = 'json';
+  try {
+    const saved = settings.update({ transcription: { provider: 'openai-compatible', model: 'asr', baseUrl: 'http://speech.internal/v1' } });
+    assert.equal(saved.transcription.responseFormat, 'json');
+    assert.equal(saved.transcription.sources.responseFormat, 'environment');
+    process.env.TRANSCRIPTION_API_RESPONSE_FORMAT = 'text';
+    assert.equal(settings.getAdmin().transcription.responseFormat, 'text',
+      'a later change to the environment still applies after a save from the app');
+  } finally {
+    delete process.env.TRANSCRIPTION_API_RESPONSE_FORMAT;
+    settings.clearOverrides();
+  }
+});
+
+test('the admin payload says whether an environment key is there to fall back to', () => {
+  settings.clearOverrides();
+  process.env.AI_API_KEY = 'environment-key';
+  try {
+    settings.update({ llm: { provider: 'openai_compatible', model: 'm', baseUrl: 'http://llm.internal/v1', apiKey: 'saved-key' } });
+    const llm = settings.getAdmin().llm;
+    assert.equal(llm.apiKeySource, 'admin');
+    assert.equal(llm.environmentApiKeyConfigured, true);
+    assert.equal(JSON.stringify(settings.getAdmin()).includes('environment-key'), false);
+  } finally {
+    delete process.env.AI_API_KEY;
+    settings.clearOverrides();
+  }
+  assert.equal(settings.getAdmin().llm.environmentApiKeyConfigured, false);
+});

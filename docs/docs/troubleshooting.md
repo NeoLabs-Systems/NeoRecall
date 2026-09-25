@@ -7,7 +7,7 @@ title: Troubleshooting
 
 ## `/ready` reports providers unavailable
 
-Inspect the admin **Providers** page and `neorecall logs`. Both transcription and language generation require an external provider, endpoint, and any credentials that provider needs. Use **Fetch models** to verify credentials and select a current model.
+Inspect **Admin › Providers** in the app and `neorecall logs`. Both transcription and language generation require an external provider, endpoint, and any credentials that provider needs. Use **Find models** to verify credentials and select a current model.
 
 The response separates them: `models` covers the configured transcription provider and `languageModel` the provider that writes memories, previews, and Ask answers. Both gate readiness. Readiness checks configuration locally; model discovery is the explicit network check.
 
@@ -15,7 +15,7 @@ The response separates them: `models` covers the configured transcription provid
 
 ## Memory generation is slow or falls behind
 
-Check the admin dashboard for queue depth and provider failures. Choose a faster external model or deployment, or raise `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` and `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` so the provider receives less work. `NEORECALL_MIN_AI_AUDIO_MS` keeps short recordings away from the model entirely.
+Check **Admin › Overview** and **Admin › Jobs** in the app for queue depth and provider failures. Choose a faster external model or deployment, or raise `NEORECALL_CONVERSATION_PREVIEW_MIN_INTERVAL_MS` and `NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS` so the provider receives less work. `NEORECALL_MIN_AI_AUDIO_MS` keeps short recordings away from the model entirely.
 
 ## `AI_CONTEXT_EXCEEDED`
 
@@ -29,7 +29,7 @@ NeoRecall recovers on its own: it retries the same request asking for plain JSON
 
 ## Responses stop halfway
 
-A reasoning model spends the output budget on its thinking block and the JSON never closes. NeoRecall retries once with thinking disabled, and the admin **Providers** page exposes the same switch as **Skip the model's thinking step**. If it still truncates, raise `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` and `AI_PREVIEW_MAX_OUTPUT_TOKENS`.
+A reasoning model spends the output budget on its thinking block and the JSON never closes. NeoRecall retries once with thinking disabled, and **Admin › Providers** exposes the same switch as **Skip the model’s thinking step** under **Advanced**. If it still truncates, raise `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` and `AI_PREVIEW_MAX_OUTPUT_TOKENS`.
 
 ## A request fails after about five minutes with no reason given
 
@@ -75,7 +75,7 @@ Free local space, reopen NeoRecall, and let the upload queue drain. Pending chun
 
 ## Search misses semantic matches
 
-Confirm `/ready` reports the vector extension and models ready. Newly transcribed segments are indexed by a worker job, so a large backlog may delay embeddings while exact FTS results remain available. The admin dashboard shows queue depth and oldest job age.
+Confirm `/ready` reports the vector extension and models ready. Newly transcribed segments are indexed by a worker job, so a large backlog may delay embeddings while exact FTS results remain available. **Admin › Overview** shows queue depth and oldest job age.
 
 ## Logs differ from the running deployment
 

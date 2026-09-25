@@ -32,7 +32,13 @@ async function main() {
       NEORECALL_MIN_MEMORY_EVIDENCE_MS: '0',
       NEORECALL_MIN_MEMORY_EVIDENCE_CHARS: '0',
       NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS: '3600000',
-      NEORECALL_CONVERSATION_QUIET_CLOSE_MS: '1000',
+      // A conversation may only close once the hard gap has passed, and the
+      // soft gap and minimum length must sit below it; all four are shortened
+      // together so the finished recording closes in seconds.
+      NEORECALL_CONVERSATION_HARD_GAP_MS: '4000',
+      NEORECALL_CONVERSATION_SOFT_GAP_MS: '2000',
+      NEORECALL_CONVERSATION_MINIMUM_MS: '2000',
+      NEORECALL_CONVERSATION_QUIET_CLOSE_MS: '4000',
       // A finished-recording run must not race a live preview for the same
       // conversation, so the preview threshold is put out of reach of this
       // fixture; the live run covers that path.

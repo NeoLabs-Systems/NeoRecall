@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'main_admin.dart';
 import 'main_controller.dart';
 import 'main_library.dart';
 import 'main_navigation.dart';
@@ -49,7 +50,7 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
   }
 
   NeoRecallNavigationGroup? _groupFor(RecallPage page) {
-    for (final group in neoRecallNavigationGroups) {
+    for (final group in neoRecallNavigationGroupsFor(controller)) {
       if (group.destinations.any((d) => d.page == page)) return group;
     }
     return null;
@@ -65,6 +66,12 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
       initialSection: SettingsSection.devices,
     ),
     RecallPage.settings => SettingsScreen(controller: controller),
+    // Offered to admin accounts only; an account that lost admin lands in
+    // Settings rather than on a page the server would refuse.
+    RecallPage.admin =>
+      controller.isAdmin
+          ? AdminScreen(controller: controller)
+          : SettingsScreen(controller: controller),
   };
 
   void _selectGroup(NeoRecallNavigationGroup group) {
@@ -161,9 +168,9 @@ class _TabBar extends StatelessWidget {
       child: NavigationBar(
         selectedIndex: neoRecallTabIndex(controller),
         onDestinationSelected: (index) =>
-            neoRecallTabDestinations[index].select(controller),
+            neoRecallTabDestinationsFor(controller)[index].select(controller),
         destinations: <Widget>[
-          for (final destination in neoRecallTabDestinations)
+          for (final destination in neoRecallTabDestinationsFor(controller))
             NavigationDestination(
               icon: Icon(destination.icon),
               label: destination.label(AppL10n.of(context)),
@@ -247,7 +254,9 @@ class _Sidebar extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               children: <Widget>[
-                for (final group in neoRecallNavigationGroups) ...<Widget>[
+                for (final group in neoRecallNavigationGroupsFor(
+                  controller,
+                )) ...<Widget>[
                   _SidebarButton(
                     selected: group.isCurrent(controller),
                     icon: group.icon,

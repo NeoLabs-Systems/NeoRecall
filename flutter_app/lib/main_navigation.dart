@@ -119,6 +119,18 @@ final NeoRecallDestination settingsDestination = NeoRecallDestination(
   label: (l10n) => l10n.navSettings,
 );
 
+final NeoRecallDestination adminDestination = NeoRecallDestination(
+  page: RecallPage.admin,
+  icon: Icons.admin_panel_settings_outlined,
+  label: (l10n) => l10n.navAdmin,
+);
+
+final NeoRecallNavigationGroup _adminGroup = NeoRecallNavigationGroup(
+  label: (l10n) => l10n.navAdmin,
+  icon: Icons.admin_panel_settings_outlined,
+  destinations: <NeoRecallDestination>[adminDestination],
+);
+
 /// Canonical product structure. The desktop sidebar and the mobile tab bar are
 /// both rendered from this, so the two can never drift apart.
 // `final`, not `const`: every label is a function of the active translations,
@@ -155,6 +167,16 @@ final List<NeoRecallNavigationGroup> neoRecallNavigationGroups =
       ),
     ];
 
+/// The sidebar groups [controller]'s account can see: Admin is there for admin
+/// accounts only. The server enforces it on every request; this only decides
+/// what is offered.
+List<NeoRecallNavigationGroup> neoRecallNavigationGroupsFor(
+  NeoRecallController controller,
+) => <NeoRecallNavigationGroup>[
+  ...neoRecallNavigationGroups,
+  if (controller.isAdmin) _adminGroup,
+];
+
 /// The four tabs on a phone. Sources is reached from the Record screen's source
 /// sheet rather than the bar: it is somewhere you go to set things up, not one
 /// of the four places you live in.
@@ -172,6 +194,15 @@ final List<NeoRecallDestination> neoRecallTabDestinations =
       settingsDestination,
     ];
 
+/// The tabs [controller]'s account can see: the four above, plus Admin for an
+/// admin account.
+List<NeoRecallDestination> neoRecallTabDestinationsFor(
+  NeoRecallController controller,
+) => <NeoRecallDestination>[
+  ...neoRecallTabDestinations,
+  if (controller.isAdmin) adminDestination,
+];
+
 /// Which tab is lit for [page]. Pages that are not tabs of their own belong to
 /// the tab they are reached from, so the bar never goes blank.
 int neoRecallTabIndex(NeoRecallController controller) =>
@@ -180,6 +211,7 @@ int neoRecallTabIndex(NeoRecallController controller) =>
       RecallPage.library => 1,
       RecallPage.search => 2,
       RecallPage.settings || RecallPage.devices => 3,
+      RecallPage.admin => controller.isAdmin ? 4 : 3,
     };
 
 String neoRecallPageTitle(NeoRecallController controller, AppL10n l10n) =>
@@ -189,4 +221,5 @@ String neoRecallPageTitle(NeoRecallController controller, AppL10n l10n) =>
       RecallPage.search => l10n.navAsk,
       RecallPage.sources => l10n.navSources,
       RecallPage.devices || RecallPage.settings => l10n.navSettings,
+      RecallPage.admin => l10n.navAdmin,
     };

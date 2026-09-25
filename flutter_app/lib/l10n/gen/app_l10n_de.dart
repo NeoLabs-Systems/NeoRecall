@@ -101,14 +101,6 @@ class AppL10nDe extends AppL10n {
   String get settingsOpenRecord => 'Aufnahme öffnen';
 
   @override
-  String settingsServicesNoAdminKey(String backendUrl) {
-    return 'Diese Dienste werden auf dem Server selbst eingestellt. Diese App hat keinen Administratorschlüssel für $backendUrl – bitten Sie die Person, die diesen Server betreibt, Transkription und Erinnerungserstellung dort einzurichten.';
-  }
-
-  @override
-  String get settingsServicesTitle => 'Dienste';
-
-  @override
   String get settingsSectionGeneral => 'ALLGEMEIN';
 
   @override
@@ -491,13 +483,6 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get settingsNavDevicesDescription => 'Sitzungen und Zugriff';
-
-  @override
-  String get settingsNavServices => 'Dienste';
-
-  @override
-  String get settingsNavServicesDescription =>
-      'Transkription und Erinnerungserstellung';
 
   @override
   String get settingsNavIntegrations => 'Integrationen';
@@ -3057,9 +3042,6 @@ class AppL10nDe extends AppL10n {
       'Die Entwickleroptionen können danach wieder ausgeschaltet werden – die App bleibt installiert und funktioniert weiter.';
 
   @override
-  String get providerContinue => 'Weiter';
-
-  @override
   String providerChoose(String workload) {
     return 'Wählen Sie einen Anbieter für $workload.';
   }
@@ -3095,9 +3077,6 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get providerSaveOnly => 'Nur speichern';
-
-  @override
-  String get providerSetUpLater => 'Später einrichten';
 
   @override
   String get providerKeyStored => 'Schlüssel gespeichert';
@@ -3204,18 +3183,9 @@ class AppL10nDe extends AppL10n {
   String get installDetails => 'Details zur Einrichtung';
 
   @override
-  String installRunning(String location) {
-    return 'NeoRecall läuft$location. Ein Schritt fehlt noch: Wählen Sie die Dienste, die Ihre Aufnahmen transkribieren und Ihre Erinnerungen schreiben.';
-  }
-
-  @override
   String installLocationAt(String url) {
     return ' unter $url';
   }
-
-  @override
-  String get installNoAdminKey =>
-      'Dieser Computer konnte den Administratorschlüssel nicht speichern; diese Dienste lassen sich daher jetzt einrichten, später aber nicht mehr über die Einstellungen ändern. Über das Admin-Dashboard unter /admin sind sie weiterhin änderbar.';
 
   @override
   String get installCreateAccount => 'Konto erstellen';
@@ -3234,10 +3204,6 @@ class AppL10nDe extends AppL10n {
   String installCliNotLinked(String directory) {
     return 'Der Terminalbefehl „neorecall“ wurde nicht verknüpft. NeoRecall läuft trotzdem; führen Sie „npm link“ in $directory aus, wenn Sie den Befehl möchten.';
   }
-
-  @override
-  String get installChooseServices =>
-      'Dienste für Transkription und Erinnerungen wählen';
 
   @override
   String get actionRetry => 'Erneut versuchen';
@@ -3599,4 +3565,996 @@ class AppL10nDe extends AppL10n {
   String controllerCaptureIncomplete(int minutes) {
     return 'Von dieser Aufnahme wurde nur ein Teil erfasst; rund $minutes Minuten Ton sind nie vom Aufnahmegerät angekommen.';
   }
+
+  @override
+  String get navAdmin => 'Admin';
+
+  @override
+  String get adminTitle => 'Admin';
+
+  @override
+  String get adminDescription =>
+      'Diesen Server betreiben: Konten, Verarbeitung, Backups und die Dienste, mit denen er transkribiert und schreibt.';
+
+  @override
+  String get adminAreaOverview => 'Übersicht';
+
+  @override
+  String get adminAreaUsers => 'Benutzer';
+
+  @override
+  String get adminAreaJobs => 'Aufträge';
+
+  @override
+  String get adminAreaAiRequests => 'KI-Anfragen';
+
+  @override
+  String get adminAreaAudit => 'Protokoll';
+
+  @override
+  String get adminAreaBackups => 'Backups';
+
+  @override
+  String get adminAreaProviders => 'Dienste';
+
+  @override
+  String get adminAreaProcessing => 'Verarbeitung';
+
+  @override
+  String get adminSearchHint => 'Admin durchsuchen';
+
+  @override
+  String get adminSearchClear => 'Leeren';
+
+  @override
+  String get adminSearchNothing => 'Keine Treffer';
+
+  @override
+  String get adminSearchNothingHint =>
+      'Versuchen Sie einen Dienstnamen, „Grenzen“, „Backup“, „Aufträge“ oder „Sprecher“.';
+
+  @override
+  String adminSearchWhere(String area) {
+    return 'Admin › $area';
+  }
+
+  @override
+  String get adminSearchStatus => 'Serverstatus';
+
+  @override
+  String get adminSearchStatusKeywords =>
+      'version warteschlange aufnahmen benutzer geräte suchindex tokens temporäres audio aufräumen zustand';
+
+  @override
+  String get adminSearchWorkers => 'Worker und Verarbeitungszeiten';
+
+  @override
+  String get adminSearchWorkersKeywords =>
+      'worker lebenszeichen modell messwerte durchsatz geschwindigkeit';
+
+  @override
+  String get adminSearchAccounts => 'Konten';
+
+  @override
+  String get adminSearchAccountsKeywords =>
+      'benutzer personen e-mail benutzername geräte aufnahmen';
+
+  @override
+  String get adminSearchDisable => 'Konto sperren oder entsperren';
+
+  @override
+  String get adminSearchDisableKeywords =>
+      'sperren blockieren abmelden entsperren';
+
+  @override
+  String get adminSearchAccountLimits => 'Nutzungsgrenzen für ein Konto';
+
+  @override
+  String get adminSearchAccountLimitsKeywords =>
+      'grenzen kontingent tokens transkription sekunden benutzer';
+
+  @override
+  String get adminSearchAdmins => 'Admin hinzufügen oder entfernen';
+
+  @override
+  String get adminSearchAdminsKeywords =>
+      'admin vergeben entziehen rolle cli betreiber';
+
+  @override
+  String get adminSearchInstallLimits => 'Nutzungsgrenzen für alle';
+
+  @override
+  String get adminSearchInstallLimitsKeywords =>
+      'standard grenzen kontingent tokens transkription 4 stunden woche unbegrenzt';
+
+  @override
+  String get adminSearchJobs => 'Verarbeitungsaufträge';
+
+  @override
+  String get adminSearchJobsKeywords =>
+      'warteschlange wiederholen abbrechen fehlgeschlagen hängt auftrag';
+
+  @override
+  String get adminSearchAiRequests => 'KI-Anfragen';
+
+  @override
+  String get adminSearchAiRequestsKeywords =>
+      'sprachmodell llm tokens nutzung fehler';
+
+  @override
+  String get adminSearchAudit => 'Protokoll';
+
+  @override
+  String get adminSearchAuditKeywords =>
+      'verlauf sicherheit änderungen wer geändert anmeldung';
+
+  @override
+  String get adminSearchBackUpNow => 'Jetzt sichern';
+
+  @override
+  String get adminSearchBackUpNowKeywords => 'backup sicherung datenbank kopie';
+
+  @override
+  String get adminSearchBackupSchedule => 'Backup-Zeitplan und Ziel';
+
+  @override
+  String get adminSearchBackupScheduleKeywords =>
+      'intervall aufbewahrung ziel nächstes letztes';
+
+  @override
+  String get adminSearchBackupHistory => 'Backup-Verlauf';
+
+  @override
+  String get adminSearchBackupHistoryKeywords =>
+      'fehler dateien entfernt durchläufe';
+
+  @override
+  String get adminSearchTranscription => 'Transkriptionsdienst';
+
+  @override
+  String get adminSearchTranscriptionKeywords =>
+      'sprache zu text whisper deepgram assemblyai api-schlüssel modell sprache';
+
+  @override
+  String get adminSearchLanguageModel => 'Sprachmodell';
+
+  @override
+  String get adminSearchLanguageModelKeywords =>
+      'llm openai anthropic gemini ollama erinnerungen schreiben api-schlüssel modell';
+
+  @override
+  String get adminSearchTestServices => 'Dienste vollständig testen';
+
+  @override
+  String get adminSearchTestServicesKeywords =>
+      'test probe prüfen funktioniert';
+
+  @override
+  String get adminSearchSkipThinking => 'Denkschritt des Modells überspringen';
+
+  @override
+  String get adminSearchSkipThinkingKeywords =>
+      'reasoning denken abgeschnitten zusätzliches json anfrage';
+
+  @override
+  String get adminSearchProviderReset =>
+      'Eigene Konfiguration des Servers verwenden';
+
+  @override
+  String get adminSearchProviderResetKeywords =>
+      'zurücksetzen env umgebung überschreibungen';
+
+  @override
+  String get adminSearchSpeakersKeywords =>
+      'stimme sprechertrennung sprecher schwelle erkennung';
+
+  @override
+  String get adminSearchAudioKeywords =>
+      'rauschen entrauschen hochpass verstärkung filter';
+
+  @override
+  String get adminSearchTranscriptKeywords =>
+      'doppelungen wiederholung wörter pro sekunde';
+
+  @override
+  String get adminSearchConversationsKeywords =>
+      'pause trennen gespräch länge vorschau grenze';
+
+  @override
+  String get adminSearchMemoriesKeywords =>
+      'zusammenfassung erinnerungen beleg anlass doppelte zusammenführen';
+
+  @override
+  String get adminRefresh => 'Aktualisieren';
+
+  @override
+  String get adminRetry => 'Erneut versuchen';
+
+  @override
+  String get adminLoadFailed => 'Das konnte nicht geladen werden.';
+
+  @override
+  String adminLoadFailedBecause(String reason) {
+    return 'Das konnte nicht geladen werden: $reason';
+  }
+
+  @override
+  String get adminNone => 'Keine';
+
+  @override
+  String get adminNever => 'Nie';
+
+  @override
+  String get adminReserved => 'Reserviert';
+
+  @override
+  String get adminUnlimited => 'unbegrenzt';
+
+  @override
+  String adminWhyItFailed(String reason) {
+    return 'Grund: $reason';
+  }
+
+  @override
+  String get adminOverviewStatus => 'Serverstatus';
+
+  @override
+  String get adminOverviewWorkers => 'Worker und Verarbeitung';
+
+  @override
+  String get adminStatVersion => 'Version';
+
+  @override
+  String get adminStatUsers => 'Konten';
+
+  @override
+  String get adminStatDevices => 'Geräte';
+
+  @override
+  String get adminStatRecordings => 'Aufnahmen';
+
+  @override
+  String get adminStatQueued => 'Wartende Arbeit';
+
+  @override
+  String get adminStatOldestQueued => 'Ältester Auftrag';
+
+  @override
+  String get adminStatTemporaryAudio => 'Temporäres Audio';
+
+  @override
+  String get adminStatCleanupPending => 'Ausstehende Bereinigung';
+
+  @override
+  String get adminStatSearchIndex => 'Suchindex';
+
+  @override
+  String get adminStatAiTokens => 'KI-Tokens';
+
+  @override
+  String adminSearchIndexReady(String version) {
+    return 'Bereit · $version';
+  }
+
+  @override
+  String get adminSearchIndexUnavailable => 'Nicht verfügbar';
+
+  @override
+  String get adminNoWorkers =>
+      'Kein Worker hat sich gemeldet. Aufnahmen warten, bis einer läuft.';
+
+  @override
+  String adminWorkerHeartbeat(String time) {
+    return 'Zuletzt gesehen $time';
+  }
+
+  @override
+  String get adminProcessingLastDay =>
+      'Verarbeitungszeiten der letzten 24 Stunden';
+
+  @override
+  String get adminNoProcessingSamples =>
+      'In den letzten 24 Stunden wurde nichts verarbeitet.';
+
+  @override
+  String adminProcessingMetric(
+    String metric,
+    String average,
+    String maximum,
+    String unit,
+  ) {
+    return '$metric: durchschnittlich $average $unit, höchstens $maximum';
+  }
+
+  @override
+  String get adminAccounts => 'Konten';
+
+  @override
+  String get adminAccountsDescription =>
+      'Alle mit einem Konto auf diesem Server. Jedes Konto sieht nur seine eigenen Aufnahmen.';
+
+  @override
+  String get adminFilterAccounts => 'Nach Name oder E-Mail filtern';
+
+  @override
+  String get adminNoAccounts => 'Kein Konto passt.';
+
+  @override
+  String get adminRoleAdmin => 'Admin';
+
+  @override
+  String get adminYou => 'Sie';
+
+  @override
+  String get adminAccountDisabled => 'Gesperrt';
+
+  @override
+  String adminAccountActivity(int devices, int recordings) {
+    String _temp0 = intl.Intl.pluralLogic(
+      devices,
+      locale: localeName,
+      other: '$devices Geräte',
+      one: '1 Gerät',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      recordings,
+      locale: localeName,
+      other: '$recordings Aufnahmen',
+      one: '1 Aufnahme',
+    );
+    return '$_temp0 · $_temp1';
+  }
+
+  @override
+  String adminAccountDates(String joined, String lastLogin) {
+    return 'Dabei seit $joined · zuletzt angemeldet $lastLogin';
+  }
+
+  @override
+  String get adminLimits => 'Grenzen';
+
+  @override
+  String get adminDisable => 'Sperren';
+
+  @override
+  String get adminEnable => 'Entsperren';
+
+  @override
+  String get adminCannotDisableAdmin =>
+      'Admin-Konten lassen sich hier nicht sperren. Entziehen Sie zuerst auf dem Server die Admin-Rechte.';
+
+  @override
+  String adminDisableTitle(String username) {
+    return '$username sperren?';
+  }
+
+  @override
+  String get adminDisableBody =>
+      'Das Konto wird überall abgemeldet und kann sich erst wieder anmelden, wenn es entsperrt wird. Aufnahmen und Erinnerungen bleiben erhalten.';
+
+  @override
+  String adminDisabledNotice(String username) {
+    return '$username ist gesperrt.';
+  }
+
+  @override
+  String adminEnabledNotice(String username) {
+    return '$username kann sich wieder anmelden.';
+  }
+
+  @override
+  String get adminGrantHint =>
+      'Das erste Konto auf einem Server ist dessen Admin. Wer den Server betreibt, vergibt oder entzieht Admin-Rechte mit „neorecall admin grant <Benutzername>“ und „neorecall admin revoke <Benutzername>“ oder trägt Konten in NEORECALL_ADMIN_USERS ein.';
+
+  @override
+  String get adminInstallLimits => 'Nutzungsgrenzen für alle';
+
+  @override
+  String get adminInstallLimitsDescription =>
+      'Gleitende Grenzen über die letzten 4 Stunden und 7 Tage. 0 bedeutet unbegrenzt. Die eigenen Grenzen eines Kontos ersetzen diese.';
+
+  @override
+  String get adminLimitAi4h => 'KI-Tokens pro 4 Stunden';
+
+  @override
+  String get adminLimitAiWeek => 'KI-Tokens pro 7 Tage';
+
+  @override
+  String get adminLimitSpeech4h => 'Transkriptionssekunden pro 4 Stunden';
+
+  @override
+  String get adminLimitSpeechWeek => 'Transkriptionssekunden pro 7 Tage';
+
+  @override
+  String get adminSaveInstallLimits => 'Grenzen speichern';
+
+  @override
+  String get adminInstallLimitsSaved => 'Nutzungsgrenzen gespeichert.';
+
+  @override
+  String adminUserLimitsTitle(String username) {
+    return 'Grenzen für $username';
+  }
+
+  @override
+  String get adminUserLimitsHelp =>
+      'Leer lassen, um die Grenze für alle zu verwenden. 0 bedeutet unbegrenzt.';
+
+  @override
+  String get adminInheritDefault => 'Wie für alle';
+
+  @override
+  String adminUsageWindow(String used, String limit) {
+    return '$used von $limit';
+  }
+
+  @override
+  String adminUsageAi(String fourHour, String weekly) {
+    return 'KI-Tokens: $fourHour in 4 Stunden, $weekly in 7 Tagen';
+  }
+
+  @override
+  String adminUsageSpeech(String fourHour, String weekly) {
+    return 'Transkriptionssekunden: $fourHour in 4 Stunden, $weekly in 7 Tagen';
+  }
+
+  @override
+  String adminLimitsSaved(String username) {
+    return 'Grenzen für $username gespeichert.';
+  }
+
+  @override
+  String get adminJobs => 'Verarbeitungsaufträge';
+
+  @override
+  String adminJobsDescription(int count) {
+    return 'Die letzten $count Aufträge. Einen fehlgeschlagenen erneut ausführen oder einen stoppen, der nicht weiterlaufen soll.';
+  }
+
+  @override
+  String get adminNoJobs => 'Noch keine Aufträge.';
+
+  @override
+  String adminJobAttempts(int attempts, int maxAttempts, String created) {
+    return '$attempts von $maxAttempts Versuchen · erstellt $created';
+  }
+
+  @override
+  String get adminRetryJob => 'Wiederholen';
+
+  @override
+  String get adminCancelJob => 'Abbrechen';
+
+  @override
+  String get adminJobRetried =>
+      'Der Auftrag steht wieder in der Warteschlange.';
+
+  @override
+  String get adminJobCancelled => 'Der Auftrag ist abgebrochen.';
+
+  @override
+  String get adminAiRequests => 'KI-Anfragen';
+
+  @override
+  String adminAiRequestsDescription(int count) {
+    return 'Die letzten $count Anfragen an das Sprachmodell.';
+  }
+
+  @override
+  String get adminNoAiRequests => 'Noch keine Anfragen.';
+
+  @override
+  String adminAiRequestDetail(String model, String tokens, String sent) {
+    return '$model · $tokens Tokens · $sent';
+  }
+
+  @override
+  String get adminAudit => 'Protokoll';
+
+  @override
+  String adminAuditDescription(int count) {
+    return 'Die letzten $count administrativen und sicherheitsrelevanten Änderungen.';
+  }
+
+  @override
+  String get adminNoAudit => 'Noch nichts protokolliert.';
+
+  @override
+  String adminAuditBy(String actor, String time) {
+    return '$actor · $time';
+  }
+
+  @override
+  String adminAuditAffected(String username) {
+    return 'Betrifft $username';
+  }
+
+  @override
+  String get adminActorSystem => 'Der Server';
+
+  @override
+  String get adminActorApiKey => 'Ein API-Schlüssel';
+
+  @override
+  String get adminActorDeleted => 'Ein gelöschtes Konto';
+
+  @override
+  String get adminBackups => 'Backups';
+
+  @override
+  String get adminBackupsDescription =>
+      'Verschlüsselte Sicherungen der Datenbank, geschrieben an das eingestellte Ziel.';
+
+  @override
+  String get adminBackupSchedule => 'Zeitplan';
+
+  @override
+  String adminBackupEvery(int hours) {
+    String _temp0 = intl.Intl.pluralLogic(
+      hours,
+      locale: localeName,
+      other: 'Alle $hours Stunden',
+      one: 'Stündlich',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get adminBackupDisabled => 'Aus';
+
+  @override
+  String get adminBackupLast => 'Letztes Backup';
+
+  @override
+  String get adminBackupNext => 'Nächstes fällig';
+
+  @override
+  String get adminBackupRunningNow => 'Läuft gerade';
+
+  @override
+  String get adminBackupNextWorker => 'Sobald ein Worker läuft';
+
+  @override
+  String get adminBackupRetained => 'Aufbewahrt';
+
+  @override
+  String adminBackupRetainedValue(int count, int retain, String size) {
+    return '$count von $retain · $size';
+  }
+
+  @override
+  String adminBackupDestination(String destination, String location) {
+    return 'Geschrieben nach $destination · $location. Vor dem Schreiben mit dem Schlüssel dieses Servers verschlüsselt.';
+  }
+
+  @override
+  String adminBackupUnreachable(String destination, String reason) {
+    return 'Das Backup-Ziel $destination ist nicht erreichbar: $reason';
+  }
+
+  @override
+  String get adminBackUpNow => 'Jetzt sichern';
+
+  @override
+  String get adminBackingUp => 'Wird gesichert…';
+
+  @override
+  String get adminBackupAlreadyRunning => 'Es läuft bereits ein Backup.';
+
+  @override
+  String adminBackupDone(String size) {
+    return 'Backup fertig · $size';
+  }
+
+  @override
+  String get adminBackupHistory => 'Verlauf';
+
+  @override
+  String get adminNoBackups => 'Es wurde noch kein Backup erstellt.';
+
+  @override
+  String adminBackupPruned(String key) {
+    return '$key · nach Ablauf der Aufbewahrung entfernt';
+  }
+
+  @override
+  String get adminServices => 'Dienste';
+
+  @override
+  String get adminProcessingDescription =>
+      'Wie Aufnahmen in Gespräche geteilt, Sprechern zugeordnet und zusammengefasst werden. Der Server prüft jeden Wert; bis hier einer gespeichert wird, gilt seine eigene Konfiguration.';
+
+  @override
+  String get adminSettingsGroupOther => 'Sonstiges';
+
+  @override
+  String get adminSettingNotANumber => 'Geben Sie eine Zahl ein.';
+
+  @override
+  String get adminSaveProcessing => 'Änderungen speichern';
+
+  @override
+  String get adminSettingsUnchanged => 'Es hat sich nichts geändert.';
+
+  @override
+  String adminSettingsSaved(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Einstellungen gespeichert.',
+      one: '1 Einstellung gespeichert.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String providerNeedsApiKey(String provider) {
+    return '$provider braucht einen API-Schlüssel.';
+  }
+
+  @override
+  String providerNeedsModel(String provider) {
+    return '$provider braucht ein Modell.';
+  }
+
+  @override
+  String get providerAdvanced => 'Erweitert';
+
+  @override
+  String get providerTranscriptionEndpointLabel =>
+      'Basis-URL oder vollständiger Transkriptions-Endpunkt';
+
+  @override
+  String get providerLanguageLabel => 'Sprache (optional)';
+
+  @override
+  String get providerLanguageHelp =>
+      'Ein Sprachcode, den der Dienst versteht, etwa de oder en.';
+
+  @override
+  String get providerResponseFormatLabel => 'Antwortformat';
+
+  @override
+  String get providerSkipThinking => 'Denkschritt des Modells überspringen';
+
+  @override
+  String get providerSkipThinkingHelp =>
+      'Schneller, und die Antwort wird nicht abgeschnitten, bevor sie beginnt.';
+
+  @override
+  String get providerExtraBodyLabel => 'Zusätzliches Anfrage-JSON';
+
+  @override
+  String get providerExtraBodyHelp =>
+      'Wird in jede Anfrage übernommen, für Felder des Anbieters, die NeoRecall nicht selbst setzt.';
+
+  @override
+  String get providerExtraBodyInvalid => 'Das muss ein JSON-Objekt sein.';
+
+  @override
+  String get providerClearKey => 'Hier gespeicherten Schlüssel entfernen';
+
+  @override
+  String get providerKeySourceSaved =>
+      'Der Schlüssel wurde hier gespeichert und liegt verschlüsselt auf dem Server.';
+
+  @override
+  String get providerKeySourceServer =>
+      'In der Konfiguration des Servers ist ein Schlüssel hinterlegt. Ein hier eingegebener wird stattdessen verwendet.';
+
+  @override
+  String get providerReset => 'Eigene Konfiguration des Servers verwenden';
+
+  @override
+  String get providerResetTitle =>
+      'Eigene Konfiguration des Servers verwenden?';
+
+  @override
+  String get providerResetBody =>
+      'Alles, was hier gespeichert wurde — Dienste, Modelle, Adressen und Schlüssel — wird entfernt, und der Server verwendet wieder, was in seiner .env-Datei steht.';
+
+  @override
+  String get providerResetConfirm => 'Entfernen und .env verwenden';
+
+  @override
+  String get providerResetDone =>
+      'Der Server verwendet wieder seine eigene Konfiguration.';
+
+  @override
+  String get installNextAccount =>
+      'Legen Sie als Nächstes Ihr Konto an. Das erste Konto auf diesem Server ist dessen Admin, und die App fragt danach, welche Dienste Ihre Aufnahmen transkribieren und Ihre Erinnerungen schreiben.';
+
+  @override
+  String get securityDeleteAdminBlocked =>
+      'Admin-Konten können sich nicht selbst löschen, damit dieser Server immer jemanden hat, der ihn betreibt. Wer den Server betreibt, entzieht zuerst die Admin-Rechte mit „neorecall admin revoke <Benutzername>“.';
+
+  @override
+  String get adminSettingVoiceMatchThreshold => 'Schwelle für Stimmerkennung';
+
+  @override
+  String get adminSettingVoiceMatchMargin => 'Abstand zur zweitbesten Stimme';
+
+  @override
+  String get adminSettingVoiceEnrollFloor => 'Untergrenze für eine neue Person';
+
+  @override
+  String get adminSettingVoiceEnrollMinimumMs =>
+      'Nötige Sprechzeit für eine neue Person (ms)';
+
+  @override
+  String get adminSettingVoiceRepairThreshold =>
+      'Schwelle für das Zusammenführen doppelter Stimmen';
+
+  @override
+  String get adminSettingSpeakerClusterThreshold =>
+      'Schwelle für Sprecherzuordnung (höher = mehr Sprecher)';
+
+  @override
+  String get adminSettingSpeakerClusterMergeThreshold =>
+      'Zwei Sprecher ab dieser Ähnlichkeit zusammenführen';
+
+  @override
+  String get adminSettingSpeakerMinimumTurnMs =>
+      'Kürzeste Rede, die einen Sprecher anlegen darf (ms)';
+
+  @override
+  String get adminSettingDiarizationClusterDistance =>
+      'Gruppierungsabstand der Sprechertrennung (höher = weniger Sprecher)';
+
+  @override
+  String get adminSettingSpeakerClusterMargin =>
+      'Abstand zum zweitbesten Sprecher';
+
+  @override
+  String get adminSettingSpeakerContinuityGapMs =>
+      'Pause, über die ein Sprecher weiterläuft (ms)';
+
+  @override
+  String get adminSettingSpeakerClusterContinuityThreshold =>
+      'Schwelle für Sprecherkontinuität';
+
+  @override
+  String get adminSettingAudioPreprocessEnabled =>
+      'Audio vor der Transkription aufbereiten';
+
+  @override
+  String get adminSettingAudioPreprocessHighpassHz =>
+      'Hochpassfilter (Hz, 0 = aus)';
+
+  @override
+  String get adminSettingAudioPreprocessDenoiseDb => 'Rauschunterdrückung (dB)';
+
+  @override
+  String get adminSettingAudioPreprocessMaxGain => 'Maximale Pegelanhebung';
+
+  @override
+  String get adminSettingDedupeTokenSimilarity =>
+      'Ähnlichkeit für doppelte Wörter';
+
+  @override
+  String get adminSettingDedupeTimeToleranceMs =>
+      'Zeittoleranz für Doppelungen (ms)';
+
+  @override
+  String get adminSettingTranscriptRepetitionMinimumRepeats =>
+      'Mindestanzahl Wiederholungen der Spracherkennung';
+
+  @override
+  String get adminSettingTranscriptRepetitionMaximumPatternWords =>
+      'Höchstzahl Wörter eines Wiederholungsmusters';
+
+  @override
+  String get adminSettingTranscriptRepetitionMinimumCoverage =>
+      'Mindestanteil der Wiederholung';
+
+  @override
+  String get adminSettingTranscriptMaximumWordsPerSecond =>
+      'Höchstens glaubwürdige Wörter pro Sekunde';
+
+  @override
+  String get adminSettingConversationHardGapMs => 'Harte Gesprächspause (ms)';
+
+  @override
+  String get adminSettingConversationSoftGapMs => 'Weiche Gesprächspause (ms)';
+
+  @override
+  String get adminSettingConversationMinimumMs => 'Kürzestes Gespräch (ms)';
+
+  @override
+  String get adminSettingConversationQuietCloseMs =>
+      'Abschluss nach Stille (ms)';
+
+  @override
+  String get adminSettingConversationValleyQuantile =>
+      'Quantil für Themenwechsel';
+
+  @override
+  String get adminSettingConversationSemanticSimilarityThreshold =>
+      'Schwelle für inhaltliche Ähnlichkeit';
+
+  @override
+  String get adminSettingConversationSemanticValleyProminence =>
+      'Deutlichkeit eines Themenwechsels';
+
+  @override
+  String get adminSettingConversationSemanticContextSegments =>
+      'Abschnitte als inhaltlicher Kontext';
+
+  @override
+  String get adminSettingConversationMaximumMs => 'Längstes Gespräch (ms)';
+
+  @override
+  String get adminSettingConversationMaximumCharacters =>
+      'Höchstzahl Zeichen je Gespräch';
+
+  @override
+  String get adminSettingConversationPreviewMinCharacters =>
+      'Zeichen bis zur ersten Live-Vorschau';
+
+  @override
+  String get adminSettingConversationPreviewRefreshCharacters =>
+      'Neue Zeichen bis zur Aktualisierung der Vorschau';
+
+  @override
+  String get adminSettingConversationPreviewMinIntervalMs =>
+      'Mindestabstand zwischen Vorschauen (ms)';
+
+  @override
+  String get adminSettingConversationPreviewFullCharacters =>
+      'Zeichen, die eine Vorschau vollständig liest';
+
+  @override
+  String get adminSettingMinAiAudioMs =>
+      'Kürzeste Aufnahme für das Modell (ms)';
+
+  @override
+  String get adminSettingMinNewMaterialChars => 'Mindestanzahl neuer Zeichen';
+
+  @override
+  String get adminSettingMinMemoryEvidenceMs =>
+      'Mindestbeleg für eine Erinnerung (ms)';
+
+  @override
+  String get adminSettingMinMemoryEvidenceChars =>
+      'Mindestbeleg für eine Erinnerung (Zeichen)';
+
+  @override
+  String get adminSettingMaxConsolidationInputChars =>
+      'Höchstzahl Zeichen je Zusammenfassung';
+
+  @override
+  String get adminSettingMaxConsolidationConversations =>
+      'Höchstzahl Gespräche je Anlass';
+
+  @override
+  String get adminSettingMaxMemoryContinuationCandidates =>
+      'Frühere Erinnerungen, die fortgesetzt werden können';
+
+  @override
+  String get adminSettingMemoryContinuationLookbackMs =>
+      'Rückblick für aufnahmeübergreifende Fortsetzung (ms)';
+
+  @override
+  String get adminSettingMaxConsolidationLatencyMs =>
+      'Längste Wartezeit bis zum Schreiben einer Erinnerung (ms)';
+
+  @override
+  String get adminSettingMemoryOccasionGapMs => 'Pause zwischen Anlässen (ms)';
+
+  @override
+  String get adminSettingMemorySettleMs =>
+      'Wartezeit, bis ein Anlass abgeschlossen ist (ms)';
+
+  @override
+  String get adminSettingMemoryOccasionMaxWaitMs =>
+      'Längste Wartezeit je Anlass (ms)';
+
+  @override
+  String get adminSettingMemoryDedupeEnabled =>
+      'Doppelte Erinnerungen automatisch zusammenführen';
+
+  @override
+  String get adminSettingMemoryDedupeSimilarityThreshold =>
+      'Ähnlichkeitsschwelle für doppelte Erinnerungen';
+
+  @override
+  String get adminSettingMemoryDedupeWindowMs =>
+      'Zeitfenster für doppelte Erinnerungen (ms)';
+
+  @override
+  String get adminSettingMemoryDedupeMaxPairsPerRun =>
+      'Prüfungen auf Doppelungen je Durchlauf';
+
+  @override
+  String get adminSettingMemoryDedupeNeighbours =>
+      'Berücksichtigte ähnliche Erinnerungen';
+
+  @override
+  String get adminSettingConsolidationMaxFailures =>
+      'Versuche, bevor eine Erinnerung aufgegeben wird';
+
+  @override
+  String get adminSettingsGroupSpeakers => 'Sprecher und Stimmen';
+
+  @override
+  String get adminSettingsGroupAudio => 'Audioaufbereitung';
+
+  @override
+  String get adminSettingsGroupTranscript => 'Transkript bereinigen';
+
+  @override
+  String get adminSettingsGroupConversations => 'Gesprächsgrenzen';
+
+  @override
+  String get adminSettingsGroupMemories => 'Erinnerungen schreiben';
+
+  @override
+  String get adminServerTooOld =>
+      'Dieser Server ist älter als die App und hat noch keine Admin-Seite. Aktualisieren Sie den Server und öffnen Sie Admin dann erneut.';
+
+  @override
+  String adminAccountJoined(String joined) {
+    return 'Dabei seit $joined';
+  }
+
+  @override
+  String get adminStateQueued => 'wartet';
+
+  @override
+  String get adminStateRunning => 'läuft';
+
+  @override
+  String get adminStateDone => 'erledigt';
+
+  @override
+  String get adminStateFailed => 'fehlgeschlagen';
+
+  @override
+  String get adminStateCancelled => 'abgebrochen';
+
+  @override
+  String get adminStateReserved => 'reserviert';
+
+  @override
+  String get adminStateSent => 'gesendet';
+
+  @override
+  String get adminStateStarting => 'startet';
+
+  @override
+  String get adminStateReady => 'bereit';
+
+  @override
+  String get adminStateNotReady => 'nicht bereit';
+
+  @override
+  String get adminTriggerManual => 'manuell';
+
+  @override
+  String get adminTriggerScheduled => 'geplant';
+
+  @override
+  String get adminJobsFilterFailed => 'Fehlgeschlagen';
+
+  @override
+  String get adminJobsFilterQueued => 'Wartend';
+
+  @override
+  String get adminJobsFilterAll => 'Alle';
+
+  @override
+  String get adminNoFailedJobs => 'Keine fehlgeschlagenen Aufträge.';
+
+  @override
+  String get adminNoQueuedJobs => 'Es wartet nichts.';
+
+  @override
+  String get adminStatFailedJobs => 'Fehlgeschlagene Aufträge';
+
+  @override
+  String get adminActorEarlierAdmin => 'Ein früherer Admin';
+
+  @override
+  String get providerLanguageInvalid =>
+      'Verwenden Sie einen Sprachcode mit mindestens zwei Buchstaben, etwa de oder en.';
 }

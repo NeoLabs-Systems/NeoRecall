@@ -7,10 +7,7 @@ import 'package:neorecall/src/capture/capture_coverage.dart';
 /// short conversation, so this comparison is the last line of defence.
 void main() {
   test('a take that captured what it ran for is not flagged', () {
-    expect(
-      captureShortfall(elapsedMs: 600000, capturedMs: 588000),
-      isNull,
-    );
+    expect(captureShortfall(elapsedMs: 600000, capturedMs: 588000), isNull);
   });
 
   test('a wearable that died after 32 seconds of a 19-minute take is', () {

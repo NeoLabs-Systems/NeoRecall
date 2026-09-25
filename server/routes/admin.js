@@ -1,33 +1,28 @@
 'use strict';
 
+// Admin API, under /api/v1/admin. Every route needs an interactive session for
+// an account whose role is admin; the role is re-read on each request, so
+// revoking it applies at once. Admin itself is granted and revoked by the
+// operator (`neorecall admin`), never through this API.
+
 const express = require('express');
 const { z } = require('zod');
-const auth = require('../services/auth/admin_auth_service');
 const admin = require('../services/admin/admin_service');
-const adminTwoFactor = require('../services/auth/admin_two_factor_service');
 const audit = require('../services/audit/audit_service');
 const processingSettings = require('../services/settings/processing_settings_service');
 const providerSettings = require('../services/settings/provider_settings_service');
 const backups = require('../services/backup/backup_service');
 const usageLimits = require('../services/usage/usage_limit_service');
-const { requireAdmin } = require('../middleware/admin_auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { asyncRoute } = require('../middleware/async_route');
-const { slidingWindow } = require('../middleware/rate_limit');
 
 const router = express.Router();
-router.post('/login', slidingWindow({ windowMs: 60_000, limit: 10 }), validate(z.object({ username: z.string().min(1), password: z.string().min(1) })),
-  asyncRoute(async (req, res) => res.json(await auth.login(req.body.username, req.body.password, { ipAddress: req.ip, userAgent: req.get('User-Agent') }))));
-router.post('/2fa/verify', slidingWindow({ windowMs: 60_000, limit: 10 }), validate(z.object({ username: z.string().min(1), password: z.string().min(1), code: z.string().min(1) })),
-  asyncRoute(async (req, res) => res.json(await auth.verifyTwoFactorLogin(req.body.username, req.body.password, req.body.code, { ipAddress: req.ip, userAgent: req.get('User-Agent') }))));
-router.post('/login/2fa/setup/enable', slidingWindow({ windowMs: 60_000, limit: 10 }), validate(z.object({ username: z.string().min(1), password: z.string().min(1), code: z.string().min(1) })),
-  asyncRoute(async (req, res) => res.json(await auth.setupTwoFactorLogin(req.body.username, req.body.password, req.body.code, { ipAddress: req.ip, userAgent: req.get('User-Agent') }))));
-router.use(requireAdmin);
-router.post('/logout', (req, res) => { if (req.adminAuth.adminSessionId) auth.logout(req.adminAuth.adminSessionId); res.status(204).end(); });
+router.use(requireAuth, requireAdmin);
 router.get('/stats', (req, res) => res.json(admin.stats()));
 router.get('/users', (req, res) => res.json({ users: admin.users(req.query.limit) }));
 router.patch('/users/:id', validate(z.object({ disabled: z.boolean() })), (req, res) => {
-  admin.setUserDisabled(req.params.id, req.body.disabled); audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, affectedUserId: req.params.id, action: req.body.disabled ? 'user_disabled' : 'user_enabled', ipAddress: req.ip }); res.status(204).end();
+  admin.setUserDisabled(req.params.id, req.body.disabled); audit.record({ actorType: 'admin', actorId: req.auth.userId, affectedUserId: req.params.id, action: req.body.disabled ? 'user_disabled' : 'user_enabled', ipAddress: req.ip }); res.status(204).end();
 });
 const usageOverride = z.number().int().min(0).nullable();
 router.get('/users/:id/usage-limits', (req, res) => res.json(usageLimits.getUserLimits(req.params.id)));
@@ -38,7 +33,7 @@ router.put('/users/:id/usage-limits', validate(z.object({
   transcriptionLimitWeekly: usageOverride.optional(),
 })), (req, res) => {
   const limits = usageLimits.setUserLimits(req.params.id, req.body);
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, affectedUserId: req.params.id, action: 'user_usage_limits_updated', ipAddress: req.ip, metadata: req.body });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, affectedUserId: req.params.id, action: 'user_usage_limits_updated', ipAddress: req.ip, metadata: req.body });
   res.json(limits);
 });
 router.get('/config/usage-limits', (req, res) => res.json({ limits: usageLimits.getInstallDefaults() }));
@@ -49,7 +44,7 @@ router.put('/config/usage-limits', validate(z.object({
   transcriptionSecondsWeekly: z.number().int().min(0).optional(),
 })), (req, res) => {
   const limits = usageLimits.setInstallDefaults(req.body);
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'usage_limits_updated', ipAddress: req.ip, metadata: req.body });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'usage_limits_updated', ipAddress: req.ip, metadata: req.body });
   res.json({ limits });
 });
 router.get('/jobs', (req, res) => res.json({ jobs: admin.listJobs(req.query) }));
@@ -60,13 +55,13 @@ router.get('/audit', (req, res) => res.json({ entries: admin.audit(req.query.lim
 router.get('/backups', asyncRoute(async (req, res) => res.json({ status: await backups.status(), history: backups.history(req.query.limit) })));
 router.post('/backups/run', asyncRoute(async (req, res) => {
   const result = await backups.run({ triggerKind: 'manual' });
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'backup_run', resourceType: 'backup', resourceId: result.key || null, ipAddress: req.ip });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'backup_run', resourceType: 'backup', resourceId: result.key || null, ipAddress: req.ip });
   res.json(result);
 }));
 router.get('/processing-settings', (req, res) => res.json({ settings: processingSettings.get() }));
 router.put('/processing-settings', (req, res) => {
   const settings = processingSettings.update(req.body);
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'processing_settings_updated', ipAddress: req.ip, metadata: req.body });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'processing_settings_updated', ipAddress: req.ip, metadata: req.body });
   res.json({ settings });
 });
 router.get('/provider-settings', (req, res) => res.json({ settings: providerSettings.getAdmin() }));
@@ -75,7 +70,7 @@ router.post('/provider-settings/models', asyncRoute(async (req, res) => res.json
 // button rather than something the dashboard does on load.
 router.post('/provider-settings/test', asyncRoute(async (req, res) => {
   const result = await providerSettings.testProviders();
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider.test',
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'provider.test',
     metadata: { transcription: result.transcription.ok, llm: result.llm.ok } });
   res.json(result);
 }));
@@ -89,19 +84,13 @@ router.put('/provider-settings', (req, res) => {
     responseFormat: value.responseFormat || null,
     apiKeyChanged: Boolean(value.apiKey || value.clearApiKey),
   }]));
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider_settings_updated', ipAddress: req.ip, metadata });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'provider_settings_updated', ipAddress: req.ip, metadata });
   res.json({ settings });
 });
 router.delete('/provider-settings', (req, res) => {
   const settings = providerSettings.clearOverrides();
-  audit.record({ actorType: 'admin', actorId: req.adminAuth.adminId, action: 'provider_settings_reset', ipAddress: req.ip });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'provider_settings_reset', ipAddress: req.ip });
   res.json({ settings });
 });
-
-router.get('/settings/2fa', (req, res) => res.json(adminTwoFactor.getStatus(req.adminAuth.adminId)));
-router.post('/settings/2fa/setup', (req, res) => res.json(adminTwoFactor.beginSetup(req.adminAuth.adminId, req.adminAuth.username)));
-router.post('/settings/2fa/enable', validate(z.object({ code: z.string().min(1) })), (req, res) => res.json({ ok: true, recoveryCodes: adminTwoFactor.activateTwoFactor(req.adminAuth.adminId, req.body.code) }));
-router.delete('/settings/2fa', validate(z.object({ code: z.string().min(1) })), (req, res) => { adminTwoFactor.disableTwoFactor(req.adminAuth.adminId, req.body.code); res.json({ ok: true }); });
-router.post('/settings/2fa/recovery-codes', validate(z.object({ code: z.string().min(1) })), (req, res) => res.json({ ok: true, recoveryCodes: adminTwoFactor.regenerateRecoveryCodes(req.adminAuth.adminId, req.body.code) }));
 
 module.exports = router;

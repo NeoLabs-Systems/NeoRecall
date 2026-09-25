@@ -235,18 +235,6 @@ abstract class AppL10n {
   /// **'Open Record'**
   String get settingsOpenRecord;
 
-  /// No description provided for @settingsServicesNoAdminKey.
-  ///
-  /// In en, this message translates to:
-  /// **'These services are set on the server itself. This app has no administrator key for {backendUrl}, so ask whoever runs that server to configure transcription and memory writing there.'**
-  String settingsServicesNoAdminKey(String backendUrl);
-
-  /// No description provided for @settingsServicesTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Services'**
-  String get settingsServicesTitle;
-
   /// No description provided for @settingsSectionGeneral.
   ///
   /// In en, this message translates to:
@@ -834,18 +822,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Sessions and access'**
   String get settingsNavDevicesDescription;
-
-  /// No description provided for @settingsNavServices.
-  ///
-  /// In en, this message translates to:
-  /// **'Services'**
-  String get settingsNavServices;
-
-  /// No description provided for @settingsNavServicesDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Transcription and memory writing'**
-  String get settingsNavServicesDescription;
 
   /// No description provided for @settingsNavIntegrations.
   ///
@@ -4867,12 +4843,6 @@ abstract class AppL10n {
   /// **'Developer options can be turned back off afterwards — the app stays installed and keeps working.'**
   String get watchInstallFootnote;
 
-  /// No description provided for @providerContinue.
-  ///
-  /// In en, this message translates to:
-  /// **'Continue'**
-  String get providerContinue;
-
   /// No description provided for @providerChoose.
   ///
   /// In en, this message translates to:
@@ -4932,12 +4902,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Save only'**
   String get providerSaveOnly;
-
-  /// No description provided for @providerSetUpLater.
-  ///
-  /// In en, this message translates to:
-  /// **'Set these up later'**
-  String get providerSetUpLater;
 
   /// No description provided for @providerKeyStored.
   ///
@@ -5119,23 +5083,11 @@ abstract class AppL10n {
   /// **'Setup details'**
   String get installDetails;
 
-  /// No description provided for @installRunning.
-  ///
-  /// In en, this message translates to:
-  /// **'NeoRecall is running{location}. One step left: choose the services that transcribe your recordings and write your memories.'**
-  String installRunning(String location);
-
   /// No description provided for @installLocationAt.
   ///
   /// In en, this message translates to:
   /// **' at {url}'**
   String installLocationAt(String url);
-
-  /// No description provided for @installNoAdminKey.
-  ///
-  /// In en, this message translates to:
-  /// **'This computer would not store the administrator key, so these services can be set up now but not changed from Settings later. The admin dashboard at /admin can still change them.'**
-  String get installNoAdminKey;
 
   /// No description provided for @installCreateAccount.
   ///
@@ -5160,12 +5112,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'The neorecall terminal command was not linked. NeoRecall runs anyway; run \"npm link\" in {directory} if you want the command.'**
   String installCliNotLinked(String directory);
-
-  /// No description provided for @installChooseServices.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose transcription and memory services'**
-  String get installChooseServices;
 
   /// No description provided for @actionRetry.
   ///
@@ -5718,6 +5664,1619 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Only part of this recording was captured; about {minutes} minutes of audio never arrived from the recording device.'**
   String controllerCaptureIncomplete(int minutes);
+
+  /// No description provided for @navAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin'**
+  String get navAdmin;
+
+  /// No description provided for @adminTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin'**
+  String get adminTitle;
+
+  /// No description provided for @adminDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Run this server: accounts, processing, backups and the services it transcribes and writes with.'**
+  String get adminDescription;
+
+  /// No description provided for @adminAreaOverview.
+  ///
+  /// In en, this message translates to:
+  /// **'Overview'**
+  String get adminAreaOverview;
+
+  /// No description provided for @adminAreaUsers.
+  ///
+  /// In en, this message translates to:
+  /// **'Users'**
+  String get adminAreaUsers;
+
+  /// No description provided for @adminAreaJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'Jobs'**
+  String get adminAreaJobs;
+
+  /// No description provided for @adminAreaAiRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'AI requests'**
+  String get adminAreaAiRequests;
+
+  /// No description provided for @adminAreaAudit.
+  ///
+  /// In en, this message translates to:
+  /// **'Audit log'**
+  String get adminAreaAudit;
+
+  /// No description provided for @adminAreaBackups.
+  ///
+  /// In en, this message translates to:
+  /// **'Backups'**
+  String get adminAreaBackups;
+
+  /// No description provided for @adminAreaProviders.
+  ///
+  /// In en, this message translates to:
+  /// **'Providers'**
+  String get adminAreaProviders;
+
+  /// No description provided for @adminAreaProcessing.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing'**
+  String get adminAreaProcessing;
+
+  /// No description provided for @adminSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search admin'**
+  String get adminSearchHint;
+
+  /// No description provided for @adminSearchClear.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get adminSearchClear;
+
+  /// No description provided for @adminSearchNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing matches'**
+  String get adminSearchNothing;
+
+  /// No description provided for @adminSearchNothingHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Try a service name, “limits”, “backup”, “jobs” or “speakers”.'**
+  String get adminSearchNothingHint;
+
+  /// No description provided for @adminSearchWhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin › {area}'**
+  String adminSearchWhere(String area);
+
+  /// No description provided for @adminSearchStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Server status'**
+  String get adminSearchStatus;
+
+  /// No description provided for @adminSearchStatusKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'version queue queued recordings users devices vector search index tokens temporary audio cleanup health'**
+  String get adminSearchStatusKeywords;
+
+  /// No description provided for @adminSearchWorkers.
+  ///
+  /// In en, this message translates to:
+  /// **'Workers and processing times'**
+  String get adminSearchWorkers;
+
+  /// No description provided for @adminSearchWorkersKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'worker heartbeat model metrics throughput speed'**
+  String get adminSearchWorkersKeywords;
+
+  /// No description provided for @adminSearchAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Accounts'**
+  String get adminSearchAccounts;
+
+  /// No description provided for @adminSearchAccountsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'users people email username devices recordings'**
+  String get adminSearchAccountsKeywords;
+
+  /// No description provided for @adminSearchDisable.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable or enable an account'**
+  String get adminSearchDisable;
+
+  /// No description provided for @adminSearchDisableKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'block lock suspend sign out enable'**
+  String get adminSearchDisableKeywords;
+
+  /// No description provided for @adminSearchAccountLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage limits for one account'**
+  String get adminSearchAccountLimits;
+
+  /// No description provided for @adminSearchAccountLimitsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'limits quota tokens transcription seconds override user'**
+  String get adminSearchAccountLimitsKeywords;
+
+  /// No description provided for @adminSearchAdmins.
+  ///
+  /// In en, this message translates to:
+  /// **'Add or remove an admin'**
+  String get adminSearchAdmins;
+
+  /// No description provided for @adminSearchAdminsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'admin grant revoke role cli operator'**
+  String get adminSearchAdminsKeywords;
+
+  /// No description provided for @adminSearchInstallLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage limits for everyone'**
+  String get adminSearchInstallLimits;
+
+  /// No description provided for @adminSearchInstallLimitsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'default limits quota tokens transcription 4 hours weekly unlimited'**
+  String get adminSearchInstallLimitsKeywords;
+
+  /// No description provided for @adminSearchJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing jobs'**
+  String get adminSearchJobs;
+
+  /// No description provided for @adminSearchJobsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'queue retry cancel failed stuck job'**
+  String get adminSearchJobsKeywords;
+
+  /// No description provided for @adminSearchAiRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'AI requests'**
+  String get adminSearchAiRequests;
+
+  /// No description provided for @adminSearchAiRequestsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'language model llm tokens usage failures'**
+  String get adminSearchAiRequestsKeywords;
+
+  /// No description provided for @adminSearchAudit.
+  ///
+  /// In en, this message translates to:
+  /// **'Audit log'**
+  String get adminSearchAudit;
+
+  /// No description provided for @adminSearchAuditKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'history security changes who changed login'**
+  String get adminSearchAuditKeywords;
+
+  /// No description provided for @adminSearchBackUpNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up now'**
+  String get adminSearchBackUpNow;
+
+  /// No description provided for @adminSearchBackUpNowKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'backup snapshot database copy'**
+  String get adminSearchBackUpNowKeywords;
+
+  /// No description provided for @adminSearchBackupSchedule.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup schedule and destination'**
+  String get adminSearchBackupSchedule;
+
+  /// No description provided for @adminSearchBackupScheduleKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'interval retention destination next last'**
+  String get adminSearchBackupScheduleKeywords;
+
+  /// No description provided for @adminSearchBackupHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup history'**
+  String get adminSearchBackupHistory;
+
+  /// No description provided for @adminSearchBackupHistoryKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'failures artifacts pruned runs'**
+  String get adminSearchBackupHistoryKeywords;
+
+  /// No description provided for @adminSearchTranscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription service'**
+  String get adminSearchTranscription;
+
+  /// No description provided for @adminSearchTranscriptionKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'speech to text whisper deepgram assemblyai api key model language'**
+  String get adminSearchTranscriptionKeywords;
+
+  /// No description provided for @adminSearchLanguageModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Language model'**
+  String get adminSearchLanguageModel;
+
+  /// No description provided for @adminSearchLanguageModelKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'llm openai anthropic gemini ollama memory writing api key model'**
+  String get adminSearchLanguageModelKeywords;
+
+  /// No description provided for @adminSearchTestServices.
+  ///
+  /// In en, this message translates to:
+  /// **'Test the services end to end'**
+  String get adminSearchTestServices;
+
+  /// No description provided for @adminSearchTestServicesKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'test sample check works'**
+  String get adminSearchTestServicesKeywords;
+
+  /// No description provided for @adminSearchSkipThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip the model’s thinking step'**
+  String get adminSearchSkipThinking;
+
+  /// No description provided for @adminSearchSkipThinkingKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning thinking truncated extra json request'**
+  String get adminSearchSkipThinkingKeywords;
+
+  /// No description provided for @adminSearchProviderReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the server’s own configuration'**
+  String get adminSearchProviderReset;
+
+  /// No description provided for @adminSearchProviderResetKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'reset env environment overrides'**
+  String get adminSearchProviderResetKeywords;
+
+  /// No description provided for @adminSearchSpeakersKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'voice diarization speakers threshold match enroll'**
+  String get adminSearchSpeakersKeywords;
+
+  /// No description provided for @adminSearchAudioKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'noise denoise high-pass gain filter'**
+  String get adminSearchAudioKeywords;
+
+  /// No description provided for @adminSearchTranscriptKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'dedupe duplicate repetition words per second'**
+  String get adminSearchTranscriptKeywords;
+
+  /// No description provided for @adminSearchConversationsKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'gap split conversation length preview boundary'**
+  String get adminSearchConversationsKeywords;
+
+  /// No description provided for @adminSearchMemoriesKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'consolidation memories evidence occasion duplicates merge'**
+  String get adminSearchMemoriesKeywords;
+
+  /// No description provided for @adminRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get adminRefresh;
+
+  /// No description provided for @adminRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get adminRetry;
+
+  /// No description provided for @adminLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This could not be loaded.'**
+  String get adminLoadFailed;
+
+  /// No description provided for @adminLoadFailedBecause.
+  ///
+  /// In en, this message translates to:
+  /// **'This could not be loaded: {reason}'**
+  String adminLoadFailedBecause(String reason);
+
+  /// No description provided for @adminNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get adminNone;
+
+  /// No description provided for @adminNever.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get adminNever;
+
+  /// No description provided for @adminReserved.
+  ///
+  /// In en, this message translates to:
+  /// **'Reserved'**
+  String get adminReserved;
+
+  /// No description provided for @adminUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'unlimited'**
+  String get adminUnlimited;
+
+  /// No description provided for @adminWhyItFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Why it failed: {reason}'**
+  String adminWhyItFailed(String reason);
+
+  /// No description provided for @adminOverviewStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Server status'**
+  String get adminOverviewStatus;
+
+  /// No description provided for @adminOverviewWorkers.
+  ///
+  /// In en, this message translates to:
+  /// **'Workers and processing'**
+  String get adminOverviewWorkers;
+
+  /// No description provided for @adminStatVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Version'**
+  String get adminStatVersion;
+
+  /// No description provided for @adminStatUsers.
+  ///
+  /// In en, this message translates to:
+  /// **'Accounts'**
+  String get adminStatUsers;
+
+  /// No description provided for @adminStatDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'Devices'**
+  String get adminStatDevices;
+
+  /// No description provided for @adminStatRecordings.
+  ///
+  /// In en, this message translates to:
+  /// **'Recordings'**
+  String get adminStatRecordings;
+
+  /// No description provided for @adminStatQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued work'**
+  String get adminStatQueued;
+
+  /// No description provided for @adminStatOldestQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest queued'**
+  String get adminStatOldestQueued;
+
+  /// No description provided for @adminStatTemporaryAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Temporary audio'**
+  String get adminStatTemporaryAudio;
+
+  /// No description provided for @adminStatCleanupPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleanup pending'**
+  String get adminStatCleanupPending;
+
+  /// No description provided for @adminStatSearchIndex.
+  ///
+  /// In en, this message translates to:
+  /// **'Search index'**
+  String get adminStatSearchIndex;
+
+  /// No description provided for @adminStatAiTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tokens'**
+  String get adminStatAiTokens;
+
+  /// No description provided for @adminSearchIndexReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready · {version}'**
+  String adminSearchIndexReady(String version);
+
+  /// No description provided for @adminSearchIndexUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get adminSearchIndexUnavailable;
+
+  /// No description provided for @adminNoWorkers.
+  ///
+  /// In en, this message translates to:
+  /// **'No worker has reported in. Recordings wait until one does.'**
+  String get adminNoWorkers;
+
+  /// No description provided for @adminWorkerHeartbeat.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen {time}'**
+  String adminWorkerHeartbeat(String time);
+
+  /// No description provided for @adminProcessingLastDay.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing times, last 24 hours'**
+  String get adminProcessingLastDay;
+
+  /// No description provided for @adminNoProcessingSamples.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was processed in the last 24 hours.'**
+  String get adminNoProcessingSamples;
+
+  /// No description provided for @adminProcessingMetric.
+  ///
+  /// In en, this message translates to:
+  /// **'{metric}: {average} {unit} on average, {maximum} at most'**
+  String adminProcessingMetric(
+    String metric,
+    String average,
+    String maximum,
+    String unit,
+  );
+
+  /// No description provided for @adminAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Accounts'**
+  String get adminAccounts;
+
+  /// No description provided for @adminAccountsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Everyone with an account on this server. Each account only ever sees its own recordings.'**
+  String get adminAccountsDescription;
+
+  /// No description provided for @adminFilterAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter by name or email'**
+  String get adminFilterAccounts;
+
+  /// No description provided for @adminNoAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'No account matches.'**
+  String get adminNoAccounts;
+
+  /// No description provided for @adminRoleAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin'**
+  String get adminRoleAdmin;
+
+  /// No description provided for @adminYou.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get adminYou;
+
+  /// No description provided for @adminAccountDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get adminAccountDisabled;
+
+  /// No description provided for @adminAccountActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'{devices, plural, =1{1 device} other{{devices} devices}} · {recordings, plural, =1{1 recording} other{{recordings} recordings}}'**
+  String adminAccountActivity(int devices, int recordings);
+
+  /// No description provided for @adminAccountDates.
+  ///
+  /// In en, this message translates to:
+  /// **'Joined {joined} · last sign-in {lastLogin}'**
+  String adminAccountDates(String joined, String lastLogin);
+
+  /// No description provided for @adminLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Limits'**
+  String get adminLimits;
+
+  /// No description provided for @adminDisable.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable'**
+  String get adminDisable;
+
+  /// No description provided for @adminEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable'**
+  String get adminEnable;
+
+  /// No description provided for @adminCannotDisableAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin accounts can’t be disabled here. Revoke admin on the server first.'**
+  String get adminCannotDisableAdmin;
+
+  /// No description provided for @adminDisableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable {username}?'**
+  String adminDisableTitle(String username);
+
+  /// No description provided for @adminDisableBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The account is signed out everywhere and can’t sign in until it is enabled again. Its recordings and memories are kept.'**
+  String get adminDisableBody;
+
+  /// No description provided for @adminDisabledNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'{username} is disabled.'**
+  String adminDisabledNotice(String username);
+
+  /// No description provided for @adminEnabledNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'{username} can sign in again.'**
+  String adminEnabledNotice(String username);
+
+  /// No description provided for @adminGrantHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The first account on a server is its admin. Whoever runs the server adds or removes admins with “neorecall admin grant <username>” and “neorecall admin revoke <username>”, or lists them in NEORECALL_ADMIN_USERS.'**
+  String get adminGrantHint;
+
+  /// No description provided for @adminInstallLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage limits for everyone'**
+  String get adminInstallLimits;
+
+  /// No description provided for @adminInstallLimitsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Rolling caps over the last 4 hours and 7 days. 0 means unlimited. An account’s own limits replace these.'**
+  String get adminInstallLimitsDescription;
+
+  /// No description provided for @adminLimitAi4h.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tokens per 4 hours'**
+  String get adminLimitAi4h;
+
+  /// No description provided for @adminLimitAiWeek.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tokens per 7 days'**
+  String get adminLimitAiWeek;
+
+  /// No description provided for @adminLimitSpeech4h.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription seconds per 4 hours'**
+  String get adminLimitSpeech4h;
+
+  /// No description provided for @adminLimitSpeechWeek.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription seconds per 7 days'**
+  String get adminLimitSpeechWeek;
+
+  /// No description provided for @adminSaveInstallLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Save limits'**
+  String get adminSaveInstallLimits;
+
+  /// No description provided for @adminInstallLimitsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage limits saved.'**
+  String get adminInstallLimitsSaved;
+
+  /// No description provided for @adminUserLimitsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Limits for {username}'**
+  String adminUserLimitsTitle(String username);
+
+  /// No description provided for @adminUserLimitsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave a field empty to use the limit for everyone. 0 means unlimited.'**
+  String get adminUserLimitsHelp;
+
+  /// No description provided for @adminInheritDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Same as everyone'**
+  String get adminInheritDefault;
+
+  /// No description provided for @adminUsageWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} of {limit}'**
+  String adminUsageWindow(String used, String limit);
+
+  /// No description provided for @adminUsageAi.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tokens: {fourHour} in 4 hours, {weekly} in 7 days'**
+  String adminUsageAi(String fourHour, String weekly);
+
+  /// No description provided for @adminUsageSpeech.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription seconds: {fourHour} in 4 hours, {weekly} in 7 days'**
+  String adminUsageSpeech(String fourHour, String weekly);
+
+  /// No description provided for @adminLimitsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Limits for {username} saved.'**
+  String adminLimitsSaved(String username);
+
+  /// No description provided for @adminJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing jobs'**
+  String get adminJobs;
+
+  /// No description provided for @adminJobsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'The latest {count} jobs. Run a failed one again, or stop one that should not continue.'**
+  String adminJobsDescription(int count);
+
+  /// No description provided for @adminNoJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'No jobs yet.'**
+  String get adminNoJobs;
+
+  /// No description provided for @adminJobAttempts.
+  ///
+  /// In en, this message translates to:
+  /// **'{attempts} of {maxAttempts} attempts · created {created}'**
+  String adminJobAttempts(int attempts, int maxAttempts, String created);
+
+  /// No description provided for @adminRetryJob.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get adminRetryJob;
+
+  /// No description provided for @adminCancelJob.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get adminCancelJob;
+
+  /// No description provided for @adminJobRetried.
+  ///
+  /// In en, this message translates to:
+  /// **'The job is queued again.'**
+  String get adminJobRetried;
+
+  /// No description provided for @adminJobCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'The job is cancelled.'**
+  String get adminJobCancelled;
+
+  /// No description provided for @adminAiRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'AI requests'**
+  String get adminAiRequests;
+
+  /// No description provided for @adminAiRequestsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'The latest {count} requests to the language model.'**
+  String adminAiRequestsDescription(int count);
+
+  /// No description provided for @adminNoAiRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'No requests yet.'**
+  String get adminNoAiRequests;
+
+  /// No description provided for @adminAiRequestDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'{model} · {tokens} tokens · {sent}'**
+  String adminAiRequestDetail(String model, String tokens, String sent);
+
+  /// No description provided for @adminAudit.
+  ///
+  /// In en, this message translates to:
+  /// **'Audit log'**
+  String get adminAudit;
+
+  /// No description provided for @adminAuditDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'The latest {count} administrative and security-sensitive changes.'**
+  String adminAuditDescription(int count);
+
+  /// No description provided for @adminNoAudit.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recorded yet.'**
+  String get adminNoAudit;
+
+  /// No description provided for @adminAuditBy.
+  ///
+  /// In en, this message translates to:
+  /// **'{actor} · {time}'**
+  String adminAuditBy(String actor, String time);
+
+  /// No description provided for @adminAuditAffected.
+  ///
+  /// In en, this message translates to:
+  /// **'Affects {username}'**
+  String adminAuditAffected(String username);
+
+  /// No description provided for @adminActorSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'The server'**
+  String get adminActorSystem;
+
+  /// No description provided for @adminActorApiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'An API key'**
+  String get adminActorApiKey;
+
+  /// No description provided for @adminActorDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'A deleted account'**
+  String get adminActorDeleted;
+
+  /// No description provided for @adminBackups.
+  ///
+  /// In en, this message translates to:
+  /// **'Backups'**
+  String get adminBackups;
+
+  /// No description provided for @adminBackupsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted snapshots of the database, written to the configured destination.'**
+  String get adminBackupsDescription;
+
+  /// No description provided for @adminBackupSchedule.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule'**
+  String get adminBackupSchedule;
+
+  /// No description provided for @adminBackupEvery.
+  ///
+  /// In en, this message translates to:
+  /// **'{hours, plural, =1{Every hour} other{Every {hours} hours}}'**
+  String adminBackupEvery(int hours);
+
+  /// No description provided for @adminBackupDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get adminBackupDisabled;
+
+  /// No description provided for @adminBackupLast.
+  ///
+  /// In en, this message translates to:
+  /// **'Last backup'**
+  String get adminBackupLast;
+
+  /// No description provided for @adminBackupNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next due'**
+  String get adminBackupNext;
+
+  /// No description provided for @adminBackupRunningNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Running now'**
+  String get adminBackupRunningNow;
+
+  /// No description provided for @adminBackupNextWorker.
+  ///
+  /// In en, this message translates to:
+  /// **'As soon as a worker runs'**
+  String get adminBackupNextWorker;
+
+  /// No description provided for @adminBackupRetained.
+  ///
+  /// In en, this message translates to:
+  /// **'Kept'**
+  String get adminBackupRetained;
+
+  /// No description provided for @adminBackupRetainedValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} of {retain} · {size}'**
+  String adminBackupRetainedValue(int count, int retain, String size);
+
+  /// No description provided for @adminBackupDestination.
+  ///
+  /// In en, this message translates to:
+  /// **'Written to {destination} · {location}. Encrypted with this server’s key before it is written.'**
+  String adminBackupDestination(String destination, String location);
+
+  /// No description provided for @adminBackupUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'The backup destination {destination} can’t be reached: {reason}'**
+  String adminBackupUnreachable(String destination, String reason);
+
+  /// No description provided for @adminBackUpNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up now'**
+  String get adminBackUpNow;
+
+  /// No description provided for @adminBackingUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Backing up…'**
+  String get adminBackingUp;
+
+  /// No description provided for @adminBackupAlreadyRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'A backup is already running.'**
+  String get adminBackupAlreadyRunning;
+
+  /// No description provided for @adminBackupDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup complete · {size}'**
+  String adminBackupDone(String size);
+
+  /// No description provided for @adminBackupHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get adminBackupHistory;
+
+  /// No description provided for @adminNoBackups.
+  ///
+  /// In en, this message translates to:
+  /// **'No backup has run yet.'**
+  String get adminNoBackups;
+
+  /// No description provided for @adminBackupPruned.
+  ///
+  /// In en, this message translates to:
+  /// **'{key} · removed after the retention limit'**
+  String adminBackupPruned(String key);
+
+  /// No description provided for @adminServices.
+  ///
+  /// In en, this message translates to:
+  /// **'Services'**
+  String get adminServices;
+
+  /// No description provided for @adminProcessingDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'How recordings are split into conversations, matched to speakers and written up. The server checks every value; until one is saved here, its own configuration applies.'**
+  String get adminProcessingDescription;
+
+  /// No description provided for @adminSettingsGroupOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get adminSettingsGroupOther;
+
+  /// No description provided for @adminSettingNotANumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a number.'**
+  String get adminSettingNotANumber;
+
+  /// No description provided for @adminSaveProcessing.
+  ///
+  /// In en, this message translates to:
+  /// **'Save changes'**
+  String get adminSaveProcessing;
+
+  /// No description provided for @adminSettingsUnchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing has changed.'**
+  String get adminSettingsUnchanged;
+
+  /// No description provided for @adminSettingsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 setting saved.} other{{count} settings saved.}}'**
+  String adminSettingsSaved(int count);
+
+  /// No description provided for @providerNeedsApiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'{provider} needs an API key.'**
+  String providerNeedsApiKey(String provider);
+
+  /// No description provided for @providerNeedsModel.
+  ///
+  /// In en, this message translates to:
+  /// **'{provider} needs a model.'**
+  String providerNeedsModel(String provider);
+
+  /// No description provided for @providerAdvanced.
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced'**
+  String get providerAdvanced;
+
+  /// No description provided for @providerTranscriptionEndpointLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Base URL or full transcription endpoint'**
+  String get providerTranscriptionEndpointLabel;
+
+  /// No description provided for @providerLanguageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Language (optional)'**
+  String get providerLanguageLabel;
+
+  /// No description provided for @providerLanguageHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'A language code the service understands, such as de or en.'**
+  String get providerLanguageHelp;
+
+  /// No description provided for @providerResponseFormatLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Response format'**
+  String get providerResponseFormatLabel;
+
+  /// No description provided for @providerSkipThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip the model’s thinking step'**
+  String get providerSkipThinking;
+
+  /// No description provided for @providerSkipThinkingHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Faster, and avoids a reply cut off before it starts.'**
+  String get providerSkipThinkingHelp;
+
+  /// No description provided for @providerExtraBodyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra request JSON'**
+  String get providerExtraBodyLabel;
+
+  /// No description provided for @providerExtraBodyHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Merged into every request, for provider fields NeoRecall does not set itself.'**
+  String get providerExtraBodyHelp;
+
+  /// No description provided for @providerExtraBodyInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'This must be a JSON object.'**
+  String get providerExtraBodyInvalid;
+
+  /// No description provided for @providerClearKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove the key saved here'**
+  String get providerClearKey;
+
+  /// No description provided for @providerKeySourceSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'The key was saved here and is stored encrypted on the server.'**
+  String get providerKeySourceSaved;
+
+  /// No description provided for @providerKeySourceServer.
+  ///
+  /// In en, this message translates to:
+  /// **'A key is set in the server’s own configuration. One entered here is used instead.'**
+  String get providerKeySourceServer;
+
+  /// No description provided for @providerReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the server’s own configuration'**
+  String get providerReset;
+
+  /// No description provided for @providerResetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the server’s own configuration?'**
+  String get providerResetTitle;
+
+  /// No description provided for @providerResetBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Everything saved here — services, models, addresses and keys — is removed, and the server goes back to what its .env file says.'**
+  String get providerResetBody;
+
+  /// No description provided for @providerResetConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove and use .env'**
+  String get providerResetConfirm;
+
+  /// No description provided for @providerResetDone.
+  ///
+  /// In en, this message translates to:
+  /// **'The server uses its own configuration again.'**
+  String get providerResetDone;
+
+  /// No description provided for @installNextAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Next, create your account. The first account on this server is its admin, and the app then asks which services transcribe your recordings and write your memories.'**
+  String get installNextAccount;
+
+  /// No description provided for @securityDeleteAdminBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin accounts can’t delete themselves, so this server always has someone who can run it. Whoever runs the server revokes admin first with “neorecall admin revoke <username>”.'**
+  String get securityDeleteAdminBlocked;
+
+  /// No description provided for @adminSettingVoiceMatchThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice match threshold'**
+  String get adminSettingVoiceMatchThreshold;
+
+  /// No description provided for @adminSettingVoiceMatchMargin.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice runner-up margin'**
+  String get adminSettingVoiceMatchMargin;
+
+  /// No description provided for @adminSettingVoiceEnrollFloor.
+  ///
+  /// In en, this message translates to:
+  /// **'New-person enrollment floor'**
+  String get adminSettingVoiceEnrollFloor;
+
+  /// No description provided for @adminSettingVoiceEnrollMinimumMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Speech required to enroll a person (ms)'**
+  String get adminSettingVoiceEnrollMinimumMs;
+
+  /// No description provided for @adminSettingVoiceRepairThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate-repair threshold (re-detect)'**
+  String get adminSettingVoiceRepairThreshold;
+
+  /// No description provided for @adminSettingSpeakerClusterThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker match threshold (higher = more speakers)'**
+  String get adminSettingSpeakerClusterThreshold;
+
+  /// No description provided for @adminSettingSpeakerClusterMergeThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge two speakers when this alike'**
+  String get adminSettingSpeakerClusterMergeThreshold;
+
+  /// No description provided for @adminSettingSpeakerMinimumTurnMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Shortest speech that may create a speaker (ms)'**
+  String get adminSettingSpeakerMinimumTurnMs;
+
+  /// No description provided for @adminSettingDiarizationClusterDistance.
+  ///
+  /// In en, this message translates to:
+  /// **'Diarization grouping distance (higher = fewer speakers)'**
+  String get adminSettingDiarizationClusterDistance;
+
+  /// No description provided for @adminSettingSpeakerClusterMargin.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker cluster runner-up margin'**
+  String get adminSettingSpeakerClusterMargin;
+
+  /// No description provided for @adminSettingSpeakerContinuityGapMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker continuity gap (ms)'**
+  String get adminSettingSpeakerContinuityGapMs;
+
+  /// No description provided for @adminSettingSpeakerClusterContinuityThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker continuity threshold'**
+  String get adminSettingSpeakerClusterContinuityThreshold;
+
+  /// No description provided for @adminSettingAudioPreprocessEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Condition audio before transcription'**
+  String get adminSettingAudioPreprocessEnabled;
+
+  /// No description provided for @adminSettingAudioPreprocessHighpassHz.
+  ///
+  /// In en, this message translates to:
+  /// **'High-pass filter (Hz, 0 = off)'**
+  String get adminSettingAudioPreprocessHighpassHz;
+
+  /// No description provided for @adminSettingAudioPreprocessDenoiseDb.
+  ///
+  /// In en, this message translates to:
+  /// **'Noise reduction (dB)'**
+  String get adminSettingAudioPreprocessDenoiseDb;
+
+  /// No description provided for @adminSettingAudioPreprocessMaxGain.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum level gain'**
+  String get adminSettingAudioPreprocessMaxGain;
+
+  /// No description provided for @adminSettingDedupeTokenSimilarity.
+  ///
+  /// In en, this message translates to:
+  /// **'Token dedupe similarity'**
+  String get adminSettingDedupeTokenSimilarity;
+
+  /// No description provided for @adminSettingDedupeTimeToleranceMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Dedupe time tolerance (ms)'**
+  String get adminSettingDedupeTimeToleranceMs;
+
+  /// No description provided for @adminSettingTranscriptRepetitionMinimumRepeats.
+  ///
+  /// In en, this message translates to:
+  /// **'ASR repetition minimum repeats'**
+  String get adminSettingTranscriptRepetitionMinimumRepeats;
+
+  /// No description provided for @adminSettingTranscriptRepetitionMaximumPatternWords.
+  ///
+  /// In en, this message translates to:
+  /// **'ASR repetition maximum pattern words'**
+  String get adminSettingTranscriptRepetitionMaximumPatternWords;
+
+  /// No description provided for @adminSettingTranscriptRepetitionMinimumCoverage.
+  ///
+  /// In en, this message translates to:
+  /// **'ASR repetition minimum coverage'**
+  String get adminSettingTranscriptRepetitionMinimumCoverage;
+
+  /// No description provided for @adminSettingTranscriptMaximumWordsPerSecond.
+  ///
+  /// In en, this message translates to:
+  /// **'ASR maximum credible words per second'**
+  String get adminSettingTranscriptMaximumWordsPerSecond;
+
+  /// No description provided for @adminSettingConversationHardGapMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation hard gap (ms)'**
+  String get adminSettingConversationHardGapMs;
+
+  /// No description provided for @adminSettingConversationSoftGapMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation soft gap (ms)'**
+  String get adminSettingConversationSoftGapMs;
+
+  /// No description provided for @adminSettingConversationMinimumMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum conversation (ms)'**
+  String get adminSettingConversationMinimumMs;
+
+  /// No description provided for @adminSettingConversationQuietCloseMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Quiet close delay (ms)'**
+  String get adminSettingConversationQuietCloseMs;
+
+  /// No description provided for @adminSettingConversationValleyQuantile.
+  ///
+  /// In en, this message translates to:
+  /// **'Embedding valley quantile'**
+  String get adminSettingConversationValleyQuantile;
+
+  /// No description provided for @adminSettingConversationSemanticSimilarityThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Semantic similarity threshold'**
+  String get adminSettingConversationSemanticSimilarityThreshold;
+
+  /// No description provided for @adminSettingConversationSemanticValleyProminence.
+  ///
+  /// In en, this message translates to:
+  /// **'Semantic valley prominence'**
+  String get adminSettingConversationSemanticValleyProminence;
+
+  /// No description provided for @adminSettingConversationSemanticContextSegments.
+  ///
+  /// In en, this message translates to:
+  /// **'Semantic context segments'**
+  String get adminSettingConversationSemanticContextSegments;
+
+  /// No description provided for @adminSettingConversationMaximumMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum conversation duration (ms)'**
+  String get adminSettingConversationMaximumMs;
+
+  /// No description provided for @adminSettingConversationMaximumCharacters.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum conversation characters'**
+  String get adminSettingConversationMaximumCharacters;
+
+  /// No description provided for @adminSettingConversationPreviewMinCharacters.
+  ///
+  /// In en, this message translates to:
+  /// **'Characters before a live preview'**
+  String get adminSettingConversationPreviewMinCharacters;
+
+  /// No description provided for @adminSettingConversationPreviewRefreshCharacters.
+  ///
+  /// In en, this message translates to:
+  /// **'New characters before a preview refresh'**
+  String get adminSettingConversationPreviewRefreshCharacters;
+
+  /// No description provided for @adminSettingConversationPreviewMinIntervalMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum time between previews (ms)'**
+  String get adminSettingConversationPreviewMinIntervalMs;
+
+  /// No description provided for @adminSettingConversationPreviewFullCharacters.
+  ///
+  /// In en, this message translates to:
+  /// **'Characters read in full for a preview'**
+  String get adminSettingConversationPreviewFullCharacters;
+
+  /// No description provided for @adminSettingMinAiAudioMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Shortest recording sent to the model (ms)'**
+  String get adminSettingMinAiAudioMs;
+
+  /// No description provided for @adminSettingMinNewMaterialChars.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum new characters'**
+  String get adminSettingMinNewMaterialChars;
+
+  /// No description provided for @adminSettingMinMemoryEvidenceMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum memory evidence (ms)'**
+  String get adminSettingMinMemoryEvidenceMs;
+
+  /// No description provided for @adminSettingMinMemoryEvidenceChars.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum memory evidence characters'**
+  String get adminSettingMinMemoryEvidenceChars;
+
+  /// No description provided for @adminSettingMaxConsolidationInputChars.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum consolidation characters'**
+  String get adminSettingMaxConsolidationInputChars;
+
+  /// No description provided for @adminSettingMaxConsolidationConversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum conversations per occasion'**
+  String get adminSettingMaxConsolidationConversations;
+
+  /// No description provided for @adminSettingMaxMemoryContinuationCandidates.
+  ///
+  /// In en, this message translates to:
+  /// **'Earlier memories considered for continuing'**
+  String get adminSettingMaxMemoryContinuationCandidates;
+
+  /// No description provided for @adminSettingMemoryContinuationLookbackMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Cross-recording memory continuation lookback (ms)'**
+  String get adminSettingMemoryContinuationLookbackMs;
+
+  /// No description provided for @adminSettingMaxConsolidationLatencyMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Longest wait before writing a memory (ms)'**
+  String get adminSettingMaxConsolidationLatencyMs;
+
+  /// No description provided for @adminSettingMemoryOccasionGapMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Occasion gap (ms)'**
+  String get adminSettingMemoryOccasionGapMs;
+
+  /// No description provided for @adminSettingMemorySettleMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Occasion settle delay (ms)'**
+  String get adminSettingMemorySettleMs;
+
+  /// No description provided for @adminSettingMemoryOccasionMaxWaitMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum occasion wait (ms)'**
+  String get adminSettingMemoryOccasionMaxWaitMs;
+
+  /// No description provided for @adminSettingMemoryDedupeEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge duplicate memories automatically'**
+  String get adminSettingMemoryDedupeEnabled;
+
+  /// No description provided for @adminSettingMemoryDedupeSimilarityThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate memory similarity threshold'**
+  String get adminSettingMemoryDedupeSimilarityThreshold;
+
+  /// No description provided for @adminSettingMemoryDedupeWindowMs.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate memory time window (ms)'**
+  String get adminSettingMemoryDedupeWindowMs;
+
+  /// No description provided for @adminSettingMemoryDedupeMaxPairsPerRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate memory questions per sweep'**
+  String get adminSettingMemoryDedupeMaxPairsPerRun;
+
+  /// No description provided for @adminSettingMemoryDedupeNeighbours.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate memory neighbours considered'**
+  String get adminSettingMemoryDedupeNeighbours;
+
+  /// No description provided for @adminSettingConsolidationMaxFailures.
+  ///
+  /// In en, this message translates to:
+  /// **'Attempts before giving up on a memory'**
+  String get adminSettingConsolidationMaxFailures;
+
+  /// No description provided for @adminSettingsGroupSpeakers.
+  ///
+  /// In en, this message translates to:
+  /// **'Speakers and voices'**
+  String get adminSettingsGroupSpeakers;
+
+  /// No description provided for @adminSettingsGroupAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio conditioning'**
+  String get adminSettingsGroupAudio;
+
+  /// No description provided for @adminSettingsGroupTranscript.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcript clean-up'**
+  String get adminSettingsGroupTranscript;
+
+  /// No description provided for @adminSettingsGroupConversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation boundaries'**
+  String get adminSettingsGroupConversations;
+
+  /// No description provided for @adminSettingsGroupMemories.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory writing'**
+  String get adminSettingsGroupMemories;
+
+  /// No description provided for @adminServerTooOld.
+  ///
+  /// In en, this message translates to:
+  /// **'This server is older than the app and has no Admin page yet. Update the server, then open Admin again.'**
+  String get adminServerTooOld;
+
+  /// No description provided for @adminAccountJoined.
+  ///
+  /// In en, this message translates to:
+  /// **'Joined {joined}'**
+  String adminAccountJoined(String joined);
+
+  /// No description provided for @adminStateQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'waiting'**
+  String get adminStateQueued;
+
+  /// No description provided for @adminStateRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'running'**
+  String get adminStateRunning;
+
+  /// No description provided for @adminStateDone.
+  ///
+  /// In en, this message translates to:
+  /// **'done'**
+  String get adminStateDone;
+
+  /// No description provided for @adminStateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'failed'**
+  String get adminStateFailed;
+
+  /// No description provided for @adminStateCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'cancelled'**
+  String get adminStateCancelled;
+
+  /// No description provided for @adminStateReserved.
+  ///
+  /// In en, this message translates to:
+  /// **'reserved'**
+  String get adminStateReserved;
+
+  /// No description provided for @adminStateSent.
+  ///
+  /// In en, this message translates to:
+  /// **'sent'**
+  String get adminStateSent;
+
+  /// No description provided for @adminStateStarting.
+  ///
+  /// In en, this message translates to:
+  /// **'starting'**
+  String get adminStateStarting;
+
+  /// No description provided for @adminStateReady.
+  ///
+  /// In en, this message translates to:
+  /// **'ready'**
+  String get adminStateReady;
+
+  /// No description provided for @adminStateNotReady.
+  ///
+  /// In en, this message translates to:
+  /// **'not ready'**
+  String get adminStateNotReady;
+
+  /// No description provided for @adminTriggerManual.
+  ///
+  /// In en, this message translates to:
+  /// **'manual'**
+  String get adminTriggerManual;
+
+  /// No description provided for @adminTriggerScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'scheduled'**
+  String get adminTriggerScheduled;
+
+  /// No description provided for @adminJobsFilterFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get adminJobsFilterFailed;
+
+  /// No description provided for @adminJobsFilterQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting'**
+  String get adminJobsFilterQueued;
+
+  /// No description provided for @adminJobsFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get adminJobsFilterAll;
+
+  /// No description provided for @adminNoFailedJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'No failed jobs.'**
+  String get adminNoFailedJobs;
+
+  /// No description provided for @adminNoQueuedJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing is waiting.'**
+  String get adminNoQueuedJobs;
+
+  /// No description provided for @adminStatFailedJobs.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed jobs'**
+  String get adminStatFailedJobs;
+
+  /// No description provided for @adminActorEarlierAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'An earlier admin'**
+  String get adminActorEarlierAdmin;
+
+  /// No description provided for @providerLanguageInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a language code of at least two letters, such as de or en.'**
+  String get providerLanguageInvalid;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

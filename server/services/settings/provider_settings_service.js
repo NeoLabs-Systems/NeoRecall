@@ -129,6 +129,8 @@ function resolveWorkload(workload) {
     extraBody,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
+    // Whether removing a key saved from the app leaves one to fall back to.
+    environmentApiKeyConfigured: Boolean(environmentApiKey),
     sources: {
       provider: source(override.provider, environmentProvider, fallbackProvider),
       model: source(override.model, environmentModel, definition.defaultModel),
@@ -199,9 +201,12 @@ function writeWorkload(workload, value, statement) {
     provider: value.provider,
     model: value.model ?? definition.defaultModel ?? null,
     baseUrl: withoutTrailingSlash(value.baseUrl ?? definition.baseUrl),
+    // Null when not given, so the environment and the provider default keep
+    // applying; storing the default here froze it as an override and hid any
+    // later TRANSCRIPTION_API_RESPONSE_FORMAT.
     ...(workload === 'transcription' ? {
       language: value.language ?? null,
-      responseFormat: value.responseFormat ?? definition.responseFormat ?? 'verbose_json',
+      responseFormat: value.responseFormat ?? null,
     } : { extraBody: value.extraBody ?? null }),
   };
   statement.run(SETTINGS_KEYS[workload], JSON.stringify(stored));
