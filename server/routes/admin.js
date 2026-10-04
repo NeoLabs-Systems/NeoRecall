@@ -11,6 +11,7 @@ const admin = require('../services/admin/admin_service');
 const audit = require('../services/audit/audit_service');
 const processingSettings = require('../services/settings/processing_settings_service');
 const providerSettings = require('../services/settings/provider_settings_service');
+const localModels = require('../services/settings/local_models_service');
 const backups = require('../services/backup/backup_service');
 const usageLimits = require('../services/usage/usage_limit_service');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
@@ -74,8 +75,17 @@ router.post('/provider-settings/test', asyncRoute(async (req, res) => {
     metadata: { transcription: result.transcription.ok, llm: result.llm.ok } });
   res.json(result);
 }));
+router.get('/local-models', (req, res) => res.json({ models: localModels.status() }));
+// Starts (or retries) the download in the background; the client polls the
+// status above. 202 because the work outlives the request.
+router.post('/local-models/:id/install', (req, res) => {
+  const result = localModels.install(req.params.id, { force: true });
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'local_model_install', resourceType: 'local_model', resourceId: req.params.id, ipAddress: req.ip });
+  res.status(202).json({ model: result });
+});
 router.put('/provider-settings', (req, res) => {
   const settings = providerSettings.update(req.body);
+  localModels.resumeSelected();
   const metadata = Object.fromEntries(Object.entries(req.body).map(([workload, value]) => [workload, {
     provider: value.provider,
     model: value.model || null,

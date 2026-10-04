@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 2,
+  "components": [
+    {
+      "id": "whistle",
+      "kind": "speech",
+      "label": "Whistle",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Cactus-Compute/whistle/blob/main/LICENSE",
+      "languages": [
+        "en",
+        "de",
+        "fr",
+        "es",
+        "it",
+        "nl",
+        "pl"
+      ],
+      "files": [
+        {
+          "id": "weights",
+          "type": "file",
+          "path": "weights/whistle.cact",
+          "url": "https://huggingface.co/Cactus-Compute/whistle/resolve/b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact",
+          "size": 16919407,
+          "sha256": "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
+        }
+      ],
+      "platforms": {
+        "darwin-arm64": {
+          "artifacts": [
+            {
+              "id": "python",
+              "type": "tar-archive",
+              "filename": "cpython-3.12.15+20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+              "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+              "size": 25013243,
+              "sha256": "ad8d0c637c0a36b967b310e2c07254f4d2ca8cabaa7699e55ed6290aceb481a2",
+              "stripComponents": 1,
+              "extractTo": "python",
+              "check": "python/bin/python3"
+            },
+            {
+              "id": "engine",
+              "type": "zip-member",
+              "filename": "cactus_needle-3.1.0-py3-none-macosx_11_0_arm64.whl",
+              "url": "https://huggingface.co/Cactus-Compute/needle3/resolve/c7c415a3d1b3d929014bc6e866d51ebb971f7089/python/cactus_needle-3.1.0-py3-none-macosx_11_0_arm64.whl",
+              "size": 523657,
+              "sha256": "ad1cba80ede4c058692370964eec4d881a1fdc80014f7210b2d13891bad7d1c6",
+              "member": "needle/libneedle3.dylib",
+              "path": "engine/libneedle.dylib",
+              "fileSize": 1053712,
+              "fileSha256": "6c3d79e04c48656b275feb9b4157b43fc20a6efbb5993d0aff9e6414eaef21be"
+            }
+          ]
+        },
+        "darwin-x64": {
+          "artifacts": [
+            {
+              "id": "python",
+              "type": "tar-archive",
+              "filename": "cpython-3.12.15+20261003-x86_64-apple-darwin-install_only_stripped.tar.gz",
+              "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-apple-darwin-install_only_stripped.tar.gz",
+              "size": 24733148,
+              "sha256": "562c30864ece2cb1d3e0ad66a1acd498611a47e5a10ce81b99158bef1ccbd355",
+              "stripComponents": 1,
+              "extractTo": "python",
+              "check": "python/bin/python3"
+            },
+            {
+              "id": "engine",
+              "type": "zip-member",
+              "filename": "cactus_needle-3.1.0-py3-none-macosx_11_0_x86_64.whl",
+              "url": "https://huggingface.co/Cactus-Compute/needle3/resolve/c7c415a3d1b3d929014bc6e866d51ebb971f7089/python/cactus_needle-3.1.0-py3-none-macosx_11_0_x86_64.whl",
+              "size": 575529,
+              "sha256": "31a90adbaa898ea65e92b370e80ba5830a346348022a913a8bb254ab7d20bad6",
+              "member": "needle/libneedle3.dylib",
+              "path": "engine/libneedle.dylib",
+              "fileSize": 1223984,
+              "fileSha256": "e5077b70576281ca39c08acd07e30e819ec61d74df4d3193b9a92c225e4f7cab"
+            }
+          ]
+        },
+        "linux-x64": {
+          "artifacts": [
+            {
+              "id": "python",
+              "type": "tar-archive",
+              "filename": "cpython-3.12.15+20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+              "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+              "size": 34285590,
+              "sha256": "731af898886c5f821890dc901eca3c651cca8e51fa7308c159d12a1194aeac91",
+              "stripComponents": 1,
+              "extractTo": "python",
+              "check": "python/bin/python3"
+            },
+            {
+              "id": "engine",
+              "type": "zip-member",
+              "filename": "cactus_needle-3.1.0-py3-none-manylinux2014_x86_64.whl",
+              "url": "https://huggingface.co/Cactus-Compute/needle3/resolve/c7c415a3d1b3d929014bc6e866d51ebb971f7089/python/cactus_needle-3.1.0-py3-none-manylinux2014_x86_64.whl",
+              "size": 671203,
+              "sha256": "a0fc2f682ef18525d4d18583081ac31c1f6f211abe6c0b3bee44811ed7e0347e",
+              "member": "needle/libneedle3.so",
+              "path": "engine/libneedle.so",
+              "fileSize": 1557896,
+              "fileSha256": "8a73ef74e895d3d8f5b1ef64667fb24874b16aab53d599a2071b7e4647b1d116"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gemma-2-2b-it",
+      "kind": "language",
+      "label": "Gemma 2 2B",
+      "license": "Gemma Terms of Use",
+      "licenseUrl": "https://ai.google.dev/gemma/terms",
+      "profile": {
+        "contextSize": 8192,
+        "consolidationOutputTokens": 2500,
+        "previewOutputTokens": 1024
+      },
+      "files": [
+        {
+          "id": "weights",
+          "type": "file",
+          "path": "weights/gemma-2-2b-it-Q4_K_M.gguf",
+          "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/855f67caed130e1befc571b52bd181be2e858883/gemma-2-2b-it-Q4_K_M.gguf",
+          "size": 1708582752,
+          "sha256": "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787"
+        }
+      ],
+      "platforms": {
+        "darwin-arm64": {
+          "artifacts": [
+            {
+              "id": "server",
+              "type": "tar-archive",
+              "filename": "llama-b11380-bin-macos-arm64.tar.gz",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11380/llama-b11380-bin-macos-arm64.tar.gz",
+              "size": 11925859,
+              "sha256": "22991ccd0373b40cd758f90f3115522c4c4399e5c93e018285c2b95126aa5ebc",
+              "stripComponents": 1,
+              "extractTo": "llama",
+              "check": "llama/llama-server"
+            }
+          ]
+        },
+        "darwin-x64": {
+          "artifacts": [
+            {
+              "id": "server",
+              "type": "tar-archive",
+              "filename": "llama-b11380-bin-macos-x64.tar.gz",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11380/llama-b11380-bin-macos-x64.tar.gz",
+              "size": 11477169,
+              "sha256": "869d2223a7b11701560d97b92bc26a907f33d4fe48220e28b8599601a713a253",
+              "stripComponents": 1,
+              "extractTo": "llama",
+              "check": "llama/llama-server"
+            }
+          ]
+        },
+        "linux-x64": {
+          "artifacts": [
+            {
+              "id": "server",
+              "type": "tar-archive",
+              "filename": "llama-b11380-bin-ubuntu-x64.tar.gz",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11380/llama-b11380-bin-ubuntu-x64.tar.gz",
+              "size": 17669515,
+              "sha256": "466b3378de0e510cc1656c86a75e7908fbf5d23695b9e6179f7303df2bad332d",
+              "stripComponents": 1,
+              "extractTo": "llama",
+              "check": "llama/llama-server"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

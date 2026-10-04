@@ -69,7 +69,23 @@ part 'src/controller/integrations_controller.dart';
 part 'src/controller/cloud_controller.dart';
 part 'src/controller/memoket_e2e_controller.dart';
 
-enum RecallPage { record, library, search, sources, devices, settings, admin }
+enum RecallPage { record, library, search, sources, settings, admin }
+
+/// The pages of Settings. Held by the controller, like [LibraryTab], so the page
+/// on screen survives the shell rebuilding Settings and something outside it
+/// (the devices widget) can open one.
+enum SettingsSection {
+  general,
+  security,
+  usage,
+  recording,
+  speakers,
+  devices,
+  watch,
+  memory,
+  instructions,
+  integrations,
+}
 
 /// The three lists inside Library.
 ///
@@ -622,6 +638,10 @@ class NeoRecallController extends ChangeNotifier
 
   String? warning;
   RecallPage page = RecallPage.record;
+
+  /// The open Settings page. Null on a phone means the page list is showing;
+  /// wider layouts show General in its place.
+  SettingsSection? settingsSection;
 
   /// Which area the Admin page shows.
   AdminArea adminArea = AdminArea.overview;
@@ -2406,6 +2426,11 @@ class NeoRecallController extends ChangeNotifier
         pendingWidgetHighlightId = action.targetId;
         return true;
       case HomeWidgetAction.openPage:
+        if (action.targetId == 'devices') {
+          settingsSection = SettingsSection.devices;
+          page = RecallPage.settings;
+          return true;
+        }
         final target = _widgetPage(action.targetId);
         if (target == null) return false;
         page = target;
@@ -2422,7 +2447,6 @@ class NeoRecallController extends ChangeNotifier
     'record' => RecallPage.record,
     'timeline' || 'memories' || 'highlights' => RecallPage.library,
     'search' => RecallPage.search,
-    'devices' => RecallPage.devices,
     _ => null,
   };
 
@@ -3779,6 +3803,19 @@ class NeoRecallController extends ChangeNotifier
 
   void selectPage(RecallPage value) {
     page = value;
+    notifyListeners();
+  }
+
+  /// Opens Settings on [section].
+  void openSettings(SettingsSection section) {
+    settingsSection = section;
+    page = RecallPage.settings;
+    notifyListeners();
+  }
+
+  void selectSettingsSection(SettingsSection? section) {
+    if (settingsSection == section) return;
+    settingsSection = section;
     notifyListeners();
   }
 

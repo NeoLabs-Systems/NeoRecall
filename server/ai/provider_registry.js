@@ -5,11 +5,12 @@ const providerSettings = require('../services/settings/provider_settings_service
 const PROVIDERS = Object.freeze({
   anthropic: './providers/anthropic_provider',
   openai: './providers/openai_compatible_provider',
+  local: './providers/local_provider',
 });
 
 function provider() {
   const settings = providerSettings.getRuntime().llm;
-  const module = settings.protocol === 'anthropic' ? PROVIDERS.anthropic : PROVIDERS.openai;
+  const module = PROVIDERS[settings.protocol] || PROVIDERS.openai;
   if (!module) throw new Error(`Unsupported AI_PROVIDER: ${settings.provider}.`);
   return require(module);
 }

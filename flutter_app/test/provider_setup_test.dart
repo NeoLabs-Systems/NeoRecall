@@ -80,6 +80,13 @@ void main() {
           // The signed-in admin's own session, not a separate admin key.
           expect(request.headers['Authorization'], 'Bearer session-token');
           final path = request.url.path;
+          if (path == '/api/v1/admin/local-models') {
+            return http.Response(
+              jsonEncode(<String, dynamic>{'models': <dynamic>[]}),
+              200,
+              headers: <String, String>{'content-type': 'application/json'},
+            );
+          }
           expect(path, startsWith('/api/v1/admin/provider-settings'));
           if (request.method == 'GET' && path.endsWith('/provider-settings')) {
             return http.Response(
@@ -403,6 +410,141 @@ void main() {
       await tester.pumpAndSettle();
       expect(put!['llm']['apiKey'], 'sk-new');
       expect(put!['llm'].containsKey('clearApiKey'), isFalse);
+    },
+  );
+
+  testWidgets(
+    'a local provider needs no endpoint or key, shows its download, and saves as chosen',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 3200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      var polls = 0;
+      var installs = 0;
+      Map<String, dynamic>? put;
+      Map<String, dynamic> model(String phase, {int? percent}) =>
+          <String, dynamic>{
+            'id': 'whistle',
+            'label': 'Whistle',
+            'phase': phase,
+            'license': 'Apache-2.0',
+            'languages': <String>['en', 'de'],
+            'downloadBytes': 42500000,
+            'selected': true,
+            'progress': percent == null
+                ? null
+                : <String, dynamic>{'percent': percent},
+            'error': phase == 'failed'
+                ? <String, dynamic>{'message': 'no network'}
+                : null,
+          };
+      final local = <String, dynamic>{
+        'id': 'whistle-local',
+        'label': 'Whistle (runs on this server)',
+        'protocol': 'local',
+        'defaultBaseUrl': null,
+        'defaultModel': 'whistle',
+        'apiKeyRequired': false,
+        'modelOptional': true,
+        'local': true,
+        'component': 'whistle',
+      };
+      final settings = _settings(transcriptionProvider: 'whistle-local');
+      (settings['transcription'] as Map<String, dynamic>)
+        ..['baseUrl'] = null
+        ..['model'] = 'whistle'
+        ..['label'] = 'Whistle (runs on this server)';
+      (settings['catalogs'] as Map<String, dynamic>)['transcription'] =
+          <dynamic>[local];
+      final client = AdminProviderClient(
+        NeoRecallApiClient(
+          baseUrl: 'http://server.test',
+          token: 'session-token',
+          client: MockClient((request) async {
+            final path = request.url.path;
+            Map<String, dynamic> json(Map<String, dynamic> body) => body;
+            http.Response ok(Map<String, dynamic> body) => http.Response(
+              jsonEncode(json(body)),
+              200,
+              headers: <String, String>{'content-type': 'application/json'},
+            );
+            if (path == '/api/v1/admin/local-models/whistle/install') {
+              installs += 1;
+              return ok(<String, dynamic>{
+                'model': model('installing', percent: 0),
+              });
+            }
+            if (path == '/api/v1/admin/local-models') {
+              polls += 1;
+              return ok(<String, dynamic>{
+                'models': <dynamic>[
+                  polls == 1
+                      ? model('installing', percent: 42)
+                      : model('installed'),
+                ],
+              });
+            }
+            if (request.method == 'PUT') {
+              put = jsonDecode(request.body) as Map<String, dynamic>;
+            }
+            return ok(<String, dynamic>{'settings': settings});
+          }),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppL10n.localizationsDelegates,
+          supportedLocales: AppL10n.supportedLocales,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ProviderSetupPanel(client: client),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The download is followed while it runs.
+      expect(find.textContaining('Downloading… 42%'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      // No endpoint and no key: neither is something an operator chooses here.
+      expect(
+        find.widgetWithText(
+          TextField,
+          'Base URL or full transcription endpoint',
+        ),
+        findsNothing,
+      );
+      // Only memory writing, which is not local here, still has a key field.
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField &&
+              (widget.decoration?.labelText ?? '').startsWith('API key'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('transcribed on this server'), findsOneWidget);
+      expect(find.textContaining('Apache-2.0'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Installed. It runs on this server'),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+
+      // Saving needs no endpoint or key, and sends the local provider.
+      await tester.ensureVisible(find.text('Save only'));
+      await tester.tap(find.text('Save only'));
+      await tester.pumpAndSettle();
+      expect(put!['transcription']['provider'], 'whistle-local');
+      expect(put!['transcription'].containsKey('baseUrl'), isFalse);
+      expect(put!['transcription'].containsKey('apiKey'), isFalse);
+      expect(installs, 0, reason: 'the server starts the download on save');
     },
   );
 }

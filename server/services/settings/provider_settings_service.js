@@ -19,6 +19,10 @@ const LLM_PROVIDERS = Object.freeze({
   openrouter: { label: 'OpenRouter', protocol: 'openai', baseUrl: 'https://openrouter.ai/api/v1', keyEnvironment: ['OPENROUTER_API_KEY'], requiresApiKey: true },
   together: { label: 'Together AI', protocol: 'openai', baseUrl: 'https://api.together.xyz/v1', keyEnvironment: ['TOGETHER_API_KEY'], requiresApiKey: true },
   openai_compatible: { label: 'Custom OpenAI-compatible', protocol: 'openai', baseUrl: null, keyEnvironment: ['AI_API_KEY'] },
+  // Runs on this server: llama.cpp serving Gemma on loopback, installed and kept
+  // running by NeoRecall (see server/ai/local_llm). The address, key and model are
+  // fixed, so there is nothing for the operator to enter.
+  'gemma-local': { label: 'Gemma 2 2B (runs on this server)', protocol: 'local', baseUrl: null, defaultModel: 'gemma-2-2b-it', keyEnvironment: [], local: true, component: 'gemma-2-2b-it' },
 });
 
 const TRANSCRIPTION_PROVIDERS = Object.freeze({
@@ -27,6 +31,10 @@ const TRANSCRIPTION_PROVIDERS = Object.freeze({
   deepgram: { label: 'Deepgram', protocol: 'deepgram', baseUrl: 'https://api.deepgram.com', defaultModel: null, keyEnvironment: ['DEEPGRAM_API_KEY'], requiresApiKey: true },
   assemblyai: { label: 'AssemblyAI', protocol: 'assemblyai', baseUrl: 'https://api.assemblyai.com', defaultModel: null, modelOptional: true, keyEnvironment: ['ASSEMBLYAI_API_KEY'], requiresApiKey: true },
   'openai-compatible': { label: 'Custom OpenAI-compatible', protocol: 'openai', baseUrl: null, defaultModel: null, modelOptional: true, keyEnvironment: ['TRANSCRIPTION_API_KEY'] },
+  // Runs on this server. There is no endpoint, key or model to choose: the
+  // runtime and the model are downloaded and kept running by NeoRecall itself
+  // (see server/transcription/local_asr). `languages` is what the model reads.
+  'whistle-local': { label: 'Whistle (runs on this server)', protocol: 'local', baseUrl: null, defaultModel: 'whistle', modelOptional: true, keyEnvironment: [], local: true, component: 'whistle' },
 });
 
 const SETTINGS_KEYS = Object.freeze({
@@ -117,18 +125,21 @@ function resolveWorkload(workload) {
   const environmentExtraBody = isLlm ? config.aiApiExtraBody : null;
   const extraBody = override.extraBody ?? environmentExtraBody ?? null;
 
+  // The local language model has a fixed address and a key both server processes
+  // derive; neither is configurable, so neither comes from settings.
+  const local = isLlm && definition.local ? require('../../ai/local_llm/endpoint') : null;
   return {
     provider,
     label: definition.label,
     protocol: definition.protocol,
     model,
-    baseUrl,
-    apiKey,
+    baseUrl: local ? local.baseUrl(config) : baseUrl,
+    apiKey: local ? local.apiKey() : apiKey,
     language: isLlm ? null : override.language ?? environmentLanguage ?? null,
     responseFormat: isLlm ? null : (override.responseFormat ?? environmentResponseFormat ?? definition.responseFormat ?? 'verbose_json'),
     extraBody,
-    apiKeyConfigured: Boolean(apiKey),
-    apiKeySource: adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
+    apiKeyConfigured: Boolean(apiKey) || Boolean(local),
+    apiKeySource: local ? 'none' : adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
     // Whether removing a key saved from the app leaves one to fall back to.
     environmentApiKeyConfigured: Boolean(environmentApiKey),
     sources: {
@@ -163,6 +174,10 @@ function catalogForAdmin(catalog) {
     defaultResponseFormat: value.responseFormat ?? 'verbose_json',
     apiKeyRequired: Boolean(value.requiresApiKey),
     modelOptional: Boolean(value.modelOptional),
+    // True when the provider runs on this server and has to be installed first.
+    local: Boolean(value.local),
+    // The manifest id to ask /admin/local-models about when `local` is true.
+    component: value.component || null,
   }));
 }
 
@@ -188,9 +203,24 @@ function validateSelection(workload, value) {
   if (definition.protocol !== 'local' && !value.baseUrl && !definition.baseUrl) {
     throw new HttpError(400, 'PROVIDER_BASE_URL_REQUIRED', `A base URL is required for ${definition.label}.`);
   }
+  if (definition.local) assertLocalSelection(workload, value, definition);
   if (value.baseUrl) {
     const protocol = new URL(value.baseUrl).protocol;
     if (!['http:', 'https:'].includes(protocol)) throw new HttpError(400, 'INVALID_PROVIDER_URL', 'Provider base URLs must use HTTP or HTTPS.');
+  }
+}
+
+// A local provider can only be chosen where its runtime exists, and only with a
+// language its model reads — saying so here beats a recording that fails later.
+function assertLocalSelection(workload, value, definition) {
+  const installer = require('../../local_runtime/registry').installerFor(definition.component);
+  if (!installer.supported) {
+    throw new HttpError(400, 'LOCAL_PROVIDER_UNSUPPORTED', `${definition.label} is not available on this server (${installer.platformKey}).`);
+  }
+  const language = String(value.language || '').toLowerCase().split(/[-_]/)[0];
+  if (workload === 'transcription' && language && !installer.languages().includes(language)) {
+    throw new HttpError(400, 'LOCAL_PROVIDER_LANGUAGE_UNSUPPORTED',
+      `${definition.label} reads ${installer.languages().join(', ')}. Leave the language empty to detect it.`);
   }
 }
 
@@ -349,7 +379,7 @@ async function testTranscription() {
     }
     const provider = require('../../transcription/provider_registry').getProvider();
     if (!(await provider.ready())) {
-      return { ok: false, provider: settings.provider, model: settings.model, error: 'Not fully configured: a base URL, a model, or an API key is still missing.' };
+      return { ok: false, provider: settings.provider, model: settings.model, error: provider.notReadyReason() };
     }
     const segments = await provider.transcribe({ filename: PROBE_AUDIO, channelLayout: 'mono' });
     const text = summarize(segments.map((segment) => segment.text).join(' '));
@@ -388,12 +418,13 @@ async function testLlm() {
   try {
     const provider = require('../../ai/provider_registry').provider();
     if (!provider.ready()) {
-      return { ok: false, provider: settings.provider, model: settings.model, error: 'Not fully configured: a base URL, a model, or an API key is still missing.' };
+      return { ok: false, provider: settings.provider, model: settings.model,
+        error: provider.describeNotReady?.() || 'Not fully configured: a base URL, a model, or an API key is still missing.' };
     }
     const response = await provider.chatJSON({
       userId: null,
       purpose: 'ask',
-      maxTokens: getConfig().aiPreviewMaxOutputTokens,
+      maxTokens: require('../../ai/model_limits').previewOutputTokens(),
       messages: [
         { role: 'system', content: 'You answer with one JSON object matching the supplied contract and no prose outside it.' },
         { role: 'user', content: JSON.stringify({ question: 'Reply with the single word "ready".', outputContract: { answer: 'ready' } }) },
@@ -405,7 +436,7 @@ async function testLlm() {
     return { ok: true, provider: settings.provider, model: settings.model, ms: Date.now() - started, answer: summarize(response.value?.answer, 120) };
   } catch (error) {
     const advice = error.code === 'AI_OUTPUT_TRUNCATED'
-      ? ` This model needs a larger budget than it was given: raise AI_PREVIEW_MAX_OUTPUT_TOKENS (now ${getConfig().aiPreviewMaxOutputTokens}) and AI_CONSOLIDATION_MAX_OUTPUT_TOKENS, or turn off the model's thinking mode. Memory generation would hit the same limit.`
+      ? ` This model needs a larger budget than it was given: raise AI_PREVIEW_MAX_OUTPUT_TOKENS (now ${require('../../ai/model_limits').previewOutputTokens()}) and AI_CONSOLIDATION_MAX_OUTPUT_TOKENS, or turn off the model's thinking mode. Memory generation would hit the same limit.`
       : '';
     return { ok: false, provider: settings.provider, model: settings.model, ms: Date.now() - started,
       error: `${describeError(error)}${advice}`, code: error.code || null };

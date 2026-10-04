@@ -210,7 +210,7 @@ int neoRecallTabIndex(NeoRecallController controller) =>
       RecallPage.record || RecallPage.sources => 0,
       RecallPage.library => 1,
       RecallPage.search => 2,
-      RecallPage.settings || RecallPage.devices => 3,
+      RecallPage.settings => 3,
       RecallPage.admin => controller.isAdmin ? 4 : 3,
     };
 
@@ -220,6 +220,6 @@ String neoRecallPageTitle(NeoRecallController controller, AppL10n l10n) =>
       RecallPage.library => l10n.navLibrary,
       RecallPage.search => l10n.navAsk,
       RecallPage.sources => l10n.navSources,
-      RecallPage.devices || RecallPage.settings => l10n.navSettings,
+      RecallPage.settings => l10n.navSettings,
       RecallPage.admin => l10n.navAdmin,
     };

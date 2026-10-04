@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
@@ -13,28 +15,21 @@ import 'src/settings/usage_section.dart';
 import 'src/settings/watch_section.dart';
 import 'src/settings/settings_navigation.dart';
 
-enum SettingsSection {
-  general,
-  security,
-  usage,
-  recording,
-  memory,
-  instructions,
-  speakers,
-  watch,
-  devices,
-  integrations,
-}
+export 'main_controller.dart' show SettingsSection;
 
+/// Settings: one list of pages, grouped by what they affect. Every page is a
+/// tap from the list, and every change saves as it is made.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.controller,
-    this.initialSection = SettingsSection.general,
+    this.initialSection,
   });
 
   final NeoRecallController controller;
-  final SettingsSection initialSection;
+
+  /// Opens on this page instead of the one the controller remembers.
+  final SettingsSection? initialSection;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -51,11 +46,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final instructionsMemories = TextEditingController();
   final instructionsSummaries = TextEditingController();
   final instructionsAsk = TextEditingController();
-  late SettingsSection selectedSection = widget.initialSection;
+  final _search = TextEditingController();
+
+  /// The open page. Null on a phone while the page list is showing.
+  late SettingsSection? _section =
+      widget.initialSection ?? widget.controller.settingsSection;
+
+  /// Saves still in flight, shown in the page header.
+  int _saving = 0;
   bool _savingUploadPolicy = false;
   bool _changingLanguage = false;
   bool _savingKeepRawAudio = false;
   int _loadedContextRetentionDays = 7;
+
+  /// Text settings save shortly after typing stops and when the field loses
+  /// focus, each only when its text differs from what was last saved.
+  late final Map<String, _TextAutosave> _textAutosaves =
+      <String, _TextAutosave>{
+        'timezone': _TextAutosave(_saveTimezone),
+        'customVocabulary': _TextAutosave(_saveVocabulary),
+        'instructionsGlobal': _TextAutosave(
+          () => _saveInstruction('instructionsGlobal', instructionsGlobal),
+        ),
+        'instructionsMemories': _TextAutosave(
+          () => _saveInstruction('instructionsMemories', instructionsMemories),
+        ),
+        'instructionsSummaries': _TextAutosave(
+          () =>
+              _saveInstruction('instructionsSummaries', instructionsSummaries),
+        ),
+        'instructionsAsk': _TextAutosave(
+          () => _saveInstruction('instructionsAsk', instructionsAsk),
+        ),
+      };
 
   List<String> get _customVocabularyTerms {
     final unique = <String, String>{};
@@ -108,6 +131,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       instructionsAsk.text = value['instructionsAsk'] as String? ?? '';
       setState(() => settings = value);
     });
+    for (final autosave in _textAutosaves.values) {
+      autosave.attach();
+    }
     // fetchTwoFactorStatus flips a flag and notifies synchronously; deferring to
     // after this frame avoids "setState during build" when the screen is first
     // inflated in response to a navigation rebuild.
@@ -120,6 +146,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    // Leaving the page with an edit still waiting saves it. The save runs after
+    // this frame: the tree is locked while widgets are being disposed.
+    for (final autosave in _textAutosaves.values) {
+      autosave.dispose();
+    }
+    _search.dispose();
     timezone.dispose();
     customVocabulary.dispose();
     instructionsGlobal.dispose();
@@ -129,21 +161,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> save() async {
+  /// Sends [changes] to the server now. [onFailed] puts the page back the way
+  /// it was if the save does not go through.
+  Future<void> _apply(
+    Map<String, dynamic> changes, {
+    VoidCallback? onFailed,
+  }) async {
+    if (mounted) setState(() => _saving++);
+    try {
+      await widget.controller.updateSettings(changes);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => onFailed?.call());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppL10n.of(context).settingsSaveFailed(error.toString()),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving--);
+    }
+  }
+
+  /// Saves one value of [settings] that a control has just changed.
+  void _set(String key, Object? value) {
     final current = settings;
-    if (current == null ||
-        _customVocabularyError != null ||
-        _instructionsError != null) {
+    if (current == null) return;
+    final previous = current[key];
+    current[key] = value;
+    // A text field can save as the page closes, after this state is gone.
+    if (mounted) setState(() {});
+    unawaited(
+      _apply(<String, dynamic>{
+        key: value,
+      }, onFailed: () => current[key] = previous),
+    );
+  }
+
+  void _saveTimezone() {
+    final value = timezone.text.trim();
+    if (value.isEmpty || value == settings?['timezone']) return;
+    _set('timezone', value);
+  }
+
+  void _saveVocabulary() {
+    final current = settings;
+    if (current == null) return;
+    final terms = _customVocabularyTerms;
+    // The same limits _customVocabularyError reports, checked without a
+    // BuildContext because this can run as the page closes.
+    final maximumTerms = current['customVocabularyMaxTerms'] as int? ?? 100;
+    final maximumLength =
+        current['customVocabularyMaxTermLength'] as int? ?? 120;
+    if (terms.length > maximumTerms ||
+        terms.any((term) => term.runes.length > maximumLength)) {
       return;
     }
-    final strings = AppL10n.of(context);
-    final retention = current['contextOriginalRetentionDays'] as int? ?? 7;
-    if (retention < _loadedContextRetentionDays) {
+    final saved = (current['customVocabulary'] as List<dynamic>? ?? const [])
+        .map((term) => term.toString())
+        .toList();
+    if (terms.join('\n') == saved.join('\n')) return;
+    _set('customVocabulary', terms);
+  }
+
+  void _saveInstruction(String key, TextEditingController field) {
+    final current = settings;
+    if (current == null) return;
+    if (field.text.runes.length > _instructionsLimit) return;
+    final value = field.text.trim();
+    if (value == (current[key] as String? ?? '')) return;
+    _set(key, value);
+  }
+
+  /// A shorter retention deletes recordings already past it, so it is
+  /// confirmed before it is saved. A longer one saves straight away.
+  Future<void> _commitRetention(int days) async {
+    final current = settings;
+    if (current == null) return;
+    if (days < _loadedContextRetentionDays) {
+      final strings = AppL10n.of(context);
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: Text(strings.settingsShortenRetentionTitle),
-          content: Text(strings.settingsShortenRetentionBody(retention)),
+          content: Text(strings.settingsShortenRetentionBody(days)),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
@@ -156,35 +259,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       );
-      if (confirmed != true) return;
+      if (!mounted) return;
+      if (confirmed != true) {
+        setState(
+          () => current['contextOriginalRetentionDays'] =
+              _loadedContextRetentionDays,
+        );
+        return;
+      }
     }
-    await widget.controller.updateSettings(<String, dynamic>{
-      'consolidationIntervalMs': current['consolidationIntervalMs'],
-      'timezone': current['timezone'],
-      'recurringSpeakerMatching': current['recurringSpeakerMatching'],
-      'deferredSpeakerResolution': current['deferredSpeakerResolution'],
-      'diarizationEnabled': current['diarizationEnabled'],
-      'chunkTargetMs': current['chunkTargetMs'],
-      'chunkOverlapMs': current['chunkOverlapMs'],
-      'uploadOnlyOnUnmetered': current['uploadOnlyOnUnmetered'],
-      'recordingScheduleEnabled': current['recordingScheduleEnabled'],
-      'recordingStartMinute': current['recordingStartMinute'],
-      'recordingEndMinute': current['recordingEndMinute'],
-      'customVocabulary': _customVocabularyTerms,
-      'instructionsGlobal': instructionsGlobal.text.trim(),
-      'instructionsMemories': instructionsMemories.text.trim(),
-      'instructionsSummaries': instructionsSummaries.text.trim(),
-      'instructionsAsk': instructionsAsk.text.trim(),
-      'vocabularyCorrectionEnabled':
-          current['vocabularyCorrectionEnabled'] as bool? ?? true,
-      'contextOriginalRetentionDays': retention,
-      'keepRawAudio': current['keepRawAudio'] as bool? ?? true,
-    });
-    _loadedContextRetentionDays = retention;
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(strings.settingsSaved)));
+    final previous = _loadedContextRetentionDays;
+    _loadedContextRetentionDays = days;
+    setState(() => current['contextOriginalRetentionDays'] = days);
+    await _apply(
+      <String, dynamic>{'contextOriginalRetentionDays': days},
+      onFailed: () {
+        _loadedContextRetentionDays = previous;
+        current['contextOriginalRetentionDays'] = previous;
+      },
+    );
   }
 
   Future<void> _setUploadOnlyOnUnmetered(bool value) async {
@@ -196,21 +289,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _savingUploadPolicy = true;
     });
     try {
-      // Network policy affects a running background queue, so it is applied
-      // immediately instead of waiting for the page-level Save button.
-      await widget.controller.updateSettings(<String, dynamic>{
+      await _apply(<String, dynamic>{
         'uploadOnlyOnUnmetered': value,
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => current['uploadOnlyOnUnmetered'] = previous);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppL10n.of(context).settingsUploadPolicyFailed(error.toString()),
-          ),
-        ),
-      );
+      }, onFailed: () => current['uploadOnlyOnUnmetered'] = previous);
     } finally {
       if (mounted) setState(() => _savingUploadPolicy = false);
     }
@@ -245,22 +326,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _savingKeepRawAudio = true;
     });
     try {
-      await widget.controller.updateSettings(<String, dynamic>{
+      await _apply(<String, dynamic>{
         'keepRawAudio': value,
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => current['keepRawAudio'] = previous);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppL10n.of(context).settingsRawAudioFailed(error.toString()),
-          ),
-        ),
-      );
+      }, onFailed: () => current['keepRawAudio'] = previous);
     } finally {
       if (mounted) setState(() => _savingKeepRawAudio = false);
     }
+  }
+
+  void _select(SettingsSection section) {
+    _search.clear();
+    setState(() => _section = section);
+    widget.controller.selectSettingsSection(section);
+  }
+
+  void _showList() {
+    setState(() => _section = null);
+    widget.controller.selectSettingsSection(null);
   }
 
   @override
@@ -268,96 +350,181 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final strings = AppL10n.of(context);
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < AppBreakpoints.rail;
-    // The same gutter every other page uses. Settings had its own 28, which is
-    // why it never quite lined up with the rest of the app.
+    // The same gutter every other page uses.
     final gutter = width < AppBreakpoints.mobile
         ? AppSpacing.lg - 4
         : AppSpacing.lg;
+    final padding = EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 0);
+    final watchSupported = widget.controller.isMobileCapturePlatform;
+    final query = _search.text.trim();
+    final section = _section;
+
+    if (compact && (section == null || query.isNotEmpty)) {
+      return Padding(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            ScreenHeader(title: strings.settingsTitle),
+            Expanded(
+              child: SettingsNavigation(
+                selected: null,
+                compact: true,
+                onSelected: _select,
+                searchController: _search,
+                onSearchChanged: () => setState(() {}),
+                watchSupported: watchSupported,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (compact) {
+      // On a phone a page sits on top of the list: back returns to it.
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _showList();
+        },
+        child: Padding(
+          padding: padding.copyWith(top: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _showList,
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                  label: Text(strings.settingsTitle),
+                ),
+              ),
+              _pageHeader(section!, compact: true),
+              Expanded(child: _content(section)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final shown = section ?? SettingsSection.general;
     return Padding(
-      padding: EdgeInsets.fromLTRB(gutter, compact ? 20 : 28, gutter, 0),
-      child: Column(
+      padding: padding,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          ScreenHeader(
-            title: strings.settingsTitle,
-            description: strings.settingsDescription,
-            trailing: FilledButton.icon(
-              onPressed:
-                  widget.controller.loading ||
-                      _savingUploadPolicy ||
-                      settings == null ||
-                      _customVocabularyError != null ||
-                      _instructionsError != null ||
-                      selectedSection == SettingsSection.watch ||
-                      selectedSection == SettingsSection.devices ||
-                      selectedSection == SettingsSection.integrations ||
-                      selectedSection == SettingsSection.usage
-                  ? null
-                  : save,
-              icon: const Icon(Icons.save_outlined, size: 18),
-              label: Text(strings.actionSave),
+          SizedBox(
+            width: 240,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ScreenHeader(title: strings.settingsTitle),
+                Expanded(
+                  child: SettingsNavigation(
+                    selected: query.isEmpty ? shown : null,
+                    compact: false,
+                    onSelected: _select,
+                    searchController: _search,
+                    onSearchChanged: () => setState(() {}),
+                    watchSupported: watchSupported,
+                  ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(width: AppSpacing.xl),
+          // Capped, not stretched: a settings row spanning a 2000px window is
+          // unreadable.
           Expanded(
-            child: compact
-                ? Column(
-                    children: <Widget>[
-                      SettingsNavigation(
-                        selected: selectedSection,
-                        compact: true,
-                        onSelected: _select,
-                        watchSupported:
-                            widget.controller.isMobileCapturePlatform,
-                      ),
-                      const SizedBox(height: AppSpacing.md + 2),
-                      Expanded(child: _content()),
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SizedBox(
-                        width: 240,
-                        child: SettingsNavigation(
-                          selected: selectedSection,
-                          compact: false,
-                          onSelected: _select,
-                          watchSupported:
-                              widget.controller.isMobileCapturePlatform,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.lg),
-                      // Capped, not stretched: a settings row spanning a
-                      // 2000px window is unreadable.
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 720),
-                            child: _content(),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: query.isNotEmpty
+                    ? ListView(
+                        children: <Widget>[
+                          SettingsSearchResults(
+                            query: query,
+                            watchSupported: watchSupported,
+                            onSelected: _select,
                           ),
-                        ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _pageHeader(shown, compact: false),
+                          Expanded(child: _content(shown)),
+                        ],
                       ),
-                    ],
-                  ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _select(SettingsSection section) {
-    setState(() => selectedSection = section);
+  /// The page's group, title and description, and whether a change is still
+  /// being saved.
+  Widget _pageHeader(SettingsSection section, {required bool compact}) {
+    final strings = AppL10n.of(context);
+    final palette = neoRecallPaletteOf(context);
+    final saving = _saving > 0;
+    final status = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (saving)
+          SizedBox.square(
+            dimension: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.6,
+              color: palette.textMuted,
+            ),
+          )
+        else
+          Icon(Icons.check_rounded, size: 15, color: palette.success),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            saving
+                ? strings.settingsSaving
+                : strings.settingsSavedAutomatically,
+            style: TextStyle(color: palette.textMuted, fontSize: 12.5),
+          ),
+        ),
+      ],
+    );
+    final header = ScreenHeader(
+      eyebrow: section.group.label(strings),
+      title: section.label(strings),
+      description: section.description(strings),
+      trailing: compact
+          ? null
+          : Padding(padding: const EdgeInsets.only(top: 4), child: status),
+    );
+    if (!compact) return header;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        header,
+        Padding(padding: const EdgeInsets.only(bottom: 12), child: status),
+      ],
+    );
   }
 
-  Widget _content() {
+  Widget _content(SettingsSection section) {
     if (settings == null &&
-        selectedSection != SettingsSection.watch &&
-        selectedSection != SettingsSection.devices &&
-        selectedSection != SettingsSection.integrations &&
-        selectedSection != SettingsSection.usage) {
+        section != SettingsSection.watch &&
+        section != SettingsSection.devices &&
+        section != SettingsSection.integrations &&
+        section != SettingsSection.security &&
+        section != SettingsSection.usage) {
       return const Center(child: CircularProgressIndicator());
     }
-    return switch (selectedSection) {
+    return switch (section) {
       SettingsSection.general => _generalSettings(),
       SettingsSection.security => SecuritySection(
         controller: widget.controller,
@@ -376,43 +543,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _devicesSettings() {
-    final palette = neoRecallPaletteOf(context);
     final strings = AppL10n.of(context);
     return _sectionList(<Widget>[
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  strings.settingsDevicesTitle,
-                  style: TextStyle(
-                    color: palette.textPrimary,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  strings.settingsDevicesDescription,
-                  style: TextStyle(
-                    color: palette.textMuted,
-                    fontSize: 12.5,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          TextButton.icon(
-            onPressed: () => widget.controller.selectPage(RecallPage.record),
-            icon: const Icon(Icons.mic_none_rounded, size: 18),
-            label: Text(strings.settingsOpenRecord),
-          ),
-        ],
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => widget.controller.selectPage(RecallPage.record),
+          icon: const Icon(Icons.mic_none_rounded, size: 18),
+          label: Text(strings.settingsOpenRecord),
+        ),
       ),
       const SizedBox(height: AppSpacing.md),
       DevicesPanel(controller: widget.controller, scrollable: false),
@@ -464,11 +603,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 18),
             TextField(
               controller: timezone,
+              focusNode: _textAutosaves['timezone']!.focus,
               decoration: InputDecoration(
                 labelText: strings.settingsTimezoneLabel,
                 prefixIcon: const Icon(Icons.public_outlined),
               ),
-              onChanged: (value) => settings!['timezone'] = value,
+              onChanged: (_) => _textAutosaves['timezone']!.changed(),
+              onSubmitted: (_) => _textAutosaves['timezone']!.flush(),
             ),
             const Divider(height: 32),
             Text(
@@ -552,8 +693,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: current['recordingScheduleEnabled'] as bool? ?? false,
-              onChanged: (value) =>
-                  setState(() => current['recordingScheduleEnabled'] = value),
+              onChanged: (value) => _set('recordingScheduleEnabled', value),
               title: Text(strings.settingsScheduleTitle),
               subtitle: Text(strings.settingsScheduleDescription),
             ),
@@ -635,6 +775,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(
                 () => current['chunkTargetMs'] = value.round() * 1000,
               ),
+              onChangeEnd: (value) =>
+                  _set('chunkTargetMs', value.round() * 1000),
             ),
             const SizedBox(height: 8),
             Text(
@@ -656,6 +798,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(
                 () => current['chunkOverlapMs'] = (value * 1000).round(),
               ),
+              onChangeEnd: (value) =>
+                  _set('chunkOverlapMs', (value * 1000).round()),
             ),
           ],
         ),
@@ -667,7 +811,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: <Widget>[
             TextField(
               controller: customVocabulary,
-              onChanged: (_) => setState(() {}),
+              focusNode: _textAutosaves['customVocabulary']!.focus,
+              onChanged: (_) {
+                setState(() {});
+                _textAutosaves['customVocabulary']!.changed();
+              },
               minLines: 4,
               maxLines: 10,
               decoration: InputDecoration(
@@ -684,9 +832,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: current['vocabularyCorrectionEnabled'] as bool? ?? true,
-              onChanged: (value) => setState(
-                () => current['vocabularyCorrectionEnabled'] = value,
-              ),
+              onChanged: (value) => _set('vocabularyCorrectionEnabled', value),
               title: Text(strings.settingsVocabularyCorrectionTitle),
               subtitle: Text(
                 strings.settingsVocabularyCorrectionDescription(
@@ -766,6 +912,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(
                 () => current['contextOriginalRetentionDays'] = value.round(),
               ),
+              onChangeEnd: (value) => _commitRetention(value.round()),
             ),
             Wrap(
               spacing: 8,
@@ -782,9 +929,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           (current['contextOriginalRetentionDays'] as int? ??
                               7) ==
                           days,
-                      onSelected: (_) => setState(
-                        () => current['contextOriginalRetentionDays'] = days,
-                      ),
+                      onSelected: (_) => _commitRetention(days),
                     ),
                   )
                   .toList(),
@@ -819,7 +964,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (selected == null || !mounted) return;
-    setState(() => settings![key] = selected.hour * 60 + selected.minute);
+    _set(key, selected.hour * 60 + selected.minute);
   }
 
   /// How long finished material waits before it is written up.
@@ -885,6 +1030,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(
                 () => current['consolidationIntervalMs'] = value.round() * hour,
               ),
+              onChangeEnd: (value) =>
+                  _set('consolidationIntervalMs', value.round() * hour),
             ),
             Text(
               floorHours == 0
@@ -920,15 +1067,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _instructionField({
+    required String key,
     required TextEditingController controller,
     required String label,
     required String hint,
     required String helper,
   }) {
     final tooLong = controller.text.runes.length > _instructionsLimit;
+    final autosave = _textAutosaves[key]!;
     return TextField(
       controller: controller,
-      onChanged: (_) => setState(() {}),
+      focusNode: autosave.focus,
+      onChanged: (_) {
+        setState(() {});
+        autosave.changed();
+      },
       minLines: 3,
       maxLines: 8,
       decoration: InputDecoration(
@@ -962,6 +1115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SectionCard(
         eyebrow: strings.settingsSectionEverywhere,
         child: _instructionField(
+          key: 'instructionsGlobal',
           controller: instructionsGlobal,
           label: strings.settingsInstructionsGlobalLabel,
           hint: strings.settingsInstructionsGlobalHint,
@@ -971,6 +1125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SectionCard(
         eyebrow: strings.settingsSectionMemories,
         child: _instructionField(
+          key: 'instructionsMemories',
           controller: instructionsMemories,
           label: strings.settingsInstructionsMemoriesLabel,
           hint: strings.settingsInstructionsMemoriesHint,
@@ -980,6 +1135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SectionCard(
         eyebrow: strings.settingsSectionSummaries,
         child: _instructionField(
+          key: 'instructionsSummaries',
           controller: instructionsSummaries,
           label: strings.settingsInstructionsSummariesLabel,
           hint: strings.settingsInstructionsSummariesHint,
@@ -989,6 +1145,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SectionCard(
         eyebrow: strings.settingsSectionAsk,
         child: _instructionField(
+          key: 'instructionsAsk',
           controller: instructionsAsk,
           label: strings.settingsInstructionsAskLabel,
           hint: strings.settingsInstructionsAskHint,
@@ -1024,8 +1181,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value:
                   available && (current['diarizationEnabled'] as bool? ?? true),
               onChanged: available
-                  ? (value) =>
-                        setState(() => current['diarizationEnabled'] = value)
+                  ? (value) => _set('diarizationEnabled', value)
                   : null,
               title: Text(strings.settingsDiarizationTitle),
               subtitle: Text(strings.settingsDiarizationDescription),
@@ -1037,9 +1193,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   available &&
                   (current['recurringSpeakerMatching'] as bool? ?? true),
               onChanged: available
-                  ? (value) => setState(
-                      () => current['recurringSpeakerMatching'] = value,
-                    )
+                  ? (value) => _set('recurringSpeakerMatching', value)
                   : null,
               title: Text(strings.settingsRecurringSpeakerTitle),
               subtitle: Text(strings.settingsRecurringSpeakerDescription),
@@ -1051,9 +1205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   available &&
                   (current['deferredSpeakerResolution'] as bool? ?? true),
               onChanged: available
-                  ? (value) => setState(
-                      () => current['deferredSpeakerResolution'] = value,
-                    )
+                  ? (value) => _set('deferredSpeakerResolution', value)
                   : null,
               title: Text(strings.settingsDeferredSpeakerTitle),
               subtitle: Text(strings.settingsDeferredSpeakerDescription),
@@ -1062,5 +1214,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ]);
+  }
+}
+
+/// Saves one text setting shortly after typing stops, when the field loses
+/// focus, and when the page closes with an edit still waiting. The save itself
+/// decides whether anything changed.
+class _TextAutosave {
+  _TextAutosave(this._save);
+
+  final VoidCallback _save;
+  final FocusNode focus = FocusNode();
+  Timer? _timer;
+
+  void attach() {
+    focus.addListener(() {
+      if (!focus.hasFocus) flush();
+    });
+  }
+
+  void changed() {
+    _timer?.cancel();
+    _timer = Timer(const Duration(milliseconds: 1200), _save);
+  }
+
+  void flush() {
+    _timer?.cancel();
+    _save();
+  }
+
+  void dispose() {
+    final pending = _timer?.isActive ?? false;
+    _timer?.cancel();
+    if (pending) scheduleMicrotask(_save);
+    focus.dispose();
   }
 }

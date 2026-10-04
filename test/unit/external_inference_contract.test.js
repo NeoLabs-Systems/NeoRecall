@@ -9,14 +9,34 @@ const providerSettings = require('../../server/services/settings/provider_settin
 require('../../server/speakers/identity_engine');
 const { transcriptionEndpoint } = require('../../server/transcription/providers/openai_compatible_provider');
 
-test('NeoRecall exposes no in-process LLM or transcription provider', () => {
-  assert.equal(Object.values(providerSettings.LLM_PROVIDERS).some((provider) => provider.protocol === 'local'), false);
-  assert.equal(Object.values(providerSettings.TRANSCRIPTION_PROVIDERS).some((provider) => provider.protocol === 'local'), false);
+test('a model that runs on this host does so as a supervised child process, never inside Node', () => {
+  const manifest = require('../../models/local_runtimes.json');
+  const local = [...Object.values(providerSettings.LLM_PROVIDERS), ...Object.values(providerSettings.TRANSCRIPTION_PROVIDERS)]
+    .filter((provider) => provider.protocol === 'local');
+  assert.ok(local.length >= 2, 'both workloads offer a local provider');
+  for (const provider of local) {
+    assert.equal(provider.local, true);
+    assert.ok(manifest.components.some((component) => component.id === provider.component), `${provider.label} is pinned in models/local_runtimes.json`);
+  }
   // sherpa-onnx-node is optional so a platform without a build still transcribes, just without speaker labels.
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json')));
   assert.deepEqual(Object.keys(packageJson.optionalDependencies || {}), ['sherpa-onnx-node']);
-  assert.equal(Object.keys(packageJson.dependencies).some((name) => /llama|whisper|onnxruntime/.test(name)), false,
-    'nothing that recognizes speech or generates text may be a hard dependency');
+  assert.equal(Object.keys(packageJson.dependencies).some((name) => /llama|whisper|onnxruntime|needle|cactus/.test(name)), false,
+    'nothing that recognizes speech or generates text may be a dependency: a native crash in one would take the server with it');
+});
+
+test('the code that runs local models reaches for no native package of its own', () => {
+  // Each model is a separate program (a Python worker, llama-server) so that a
+  // crash, a hang or a leak in one is a restart rather than an outage. A native
+  // Node addon would put it back in this process.
+  const roots = ['server/local_runtime', 'server/ai/local_llm', 'server/transcription/local_asr'].map((dir) => path.join(__dirname, '../..', dir));
+  for (const root of roots) {
+    for (const file of fs.readdirSync(root).filter((name) => name.endsWith('.js'))) {
+      const source = fs.readFileSync(path.join(root, file), 'utf8');
+      const required = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]);
+      assert.deepEqual(required.filter((name) => !name.startsWith('node:') && !name.startsWith('.')), [], `${file} may only use node built-ins and local modules`);
+    }
+  }
 });
 
 test('audio conditioning stays inside what already ships', () => {

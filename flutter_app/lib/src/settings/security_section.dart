@@ -129,6 +129,27 @@ class _SecuritySectionState extends State<SecuritySection> {
           eyebrow: strings.securityExportEyebrow,
           child: _exportCard(palette, ctrl),
         ),
+        // The only sign-out on a phone; on desktop it replaces the icon that
+        // sat next to the Settings button in the rail.
+        SectionCard(
+          eyebrow: strings.shellSignOut,
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  strings.settingsSignOutDescription,
+                  style: TextStyle(color: palette.textSecondary, height: 1.45),
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: () async => ctrl.logout(),
+                icon: const Icon(Icons.logout, size: 18),
+                label: Text(strings.shellSignOut),
+              ),
+            ],
+          ),
+        ),
         _dangerZone(ctrl),
       ],
     );

@@ -11,6 +11,8 @@ class ProviderCatalogEntry {
     required this.apiKeyRequired,
     required this.modelOptional,
     this.defaultResponseFormat,
+    this.local = false,
+    this.component,
   });
 
   final String id;
@@ -22,8 +24,16 @@ class ProviderCatalogEntry {
   final bool modelOptional;
   final String? defaultResponseFormat;
 
-  /// Providers without a fixed endpoint need the operator to supply one.
-  bool get baseUrlRequired => defaultBaseUrl == null;
+  /// True when the provider runs on the server itself: there is no endpoint or
+  /// key to enter, and the model has to be downloaded first.
+  final bool local;
+
+  /// The local model's id, for looking up its install state.
+  final String? component;
+
+  /// Providers without a fixed endpoint need the operator to supply one. A local
+  /// one has no endpoint at all.
+  bool get baseUrlRequired => defaultBaseUrl == null && !local;
 
   factory ProviderCatalogEntry.fromJson(Map<String, dynamic> json) =>
       ProviderCatalogEntry(
@@ -35,7 +45,69 @@ class ProviderCatalogEntry {
         apiKeyRequired: json['apiKeyRequired'] == true,
         modelOptional: json['modelOptional'] == true,
         defaultResponseFormat: _trimmedOrNull(json['defaultResponseFormat']),
+        local: json['local'] == true,
+        component: _trimmedOrNull(json['component']),
       );
+}
+
+/// How far a model that runs on the server has got: `unsupported`,
+/// `not_installed`, `installing`, `installed` or `failed`.
+class LocalModelStatus {
+  const LocalModelStatus({
+    required this.id,
+    required this.label,
+    required this.phase,
+    required this.license,
+    this.licenseUrl,
+    this.languages = const <String>[],
+    this.percent,
+    this.error,
+    this.reason,
+    this.downloadBytes = 0,
+    this.selected = false,
+  });
+
+  final String id;
+  final String label;
+  final String phase;
+  final String license;
+  final String? licenseUrl;
+  final List<String> languages;
+
+  /// Overall download progress while installing.
+  final int? percent;
+
+  /// Why the last install failed, or why this server cannot run it.
+  final String? error;
+  final String? reason;
+  final int downloadBytes;
+
+  /// Whether its workload is currently pointed at it.
+  final bool selected;
+
+  bool get installing => phase == 'installing';
+  bool get installed => phase == 'installed';
+
+  factory LocalModelStatus.fromJson(Map<String, dynamic> json) {
+    final progress = json['progress'];
+    final error = json['error'];
+    final languages = json['languages'];
+    return LocalModelStatus(
+      id: json['id']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      phase: json['phase']?.toString() ?? 'not_installed',
+      license: json['license']?.toString() ?? '',
+      licenseUrl: _trimmedOrNull(json['licenseUrl']),
+      languages: languages is List
+          ? languages.map((entry) => entry.toString()).toList(growable: false)
+          : const <String>[],
+      percent: progress is Map ? int.tryParse('${progress['percent']}') : null,
+      error: error is Map ? _trimmedOrNull(error['message']) : null,
+      reason: _trimmedOrNull(json['reason']),
+      downloadBytes: int.tryParse('${json['downloadBytes']}') ?? 0,
+      selected: json['selected'] == true,
+    );
+  }
 }
 
 /// What the server is currently pointed at for one workload.
@@ -258,6 +330,7 @@ class AdminProviderClient {
   final NeoRecallApiClient api;
 
   static const String _base = '/api/v1/admin/provider-settings';
+  static const String _localModels = '/api/v1/admin/local-models';
 
   /// A real transcription of the bundled sample plus a model round trip takes
   /// far longer than an ordinary request.
@@ -325,6 +398,29 @@ class AdminProviderClient {
         .map((entry) => entry.toString())
         .where((entry) => entry.isNotEmpty)
         .toList(growable: false);
+  }
+
+  /// Every model that can run on the server, with how far its download has got.
+  Future<List<LocalModelStatus>> localModels() async {
+    final body = await api.request('GET', _localModels) as Map;
+    final models = body['models'];
+    if (models is! List) return const <LocalModelStatus>[];
+    return models
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              LocalModelStatus.fromJson(Map<String, dynamic>.from(entry)),
+        )
+        .toList(growable: false);
+  }
+
+  /// Starts (or retries) a model's download. The server keeps going without
+  /// this connection, so the caller polls [localModels] for progress.
+  Future<LocalModelStatus> installLocalModel(String id) async {
+    final body = await api.request('POST', '$_localModels/$id/install') as Map;
+    return LocalModelStatus.fromJson(
+      Map<String, dynamic>.from(body['model'] as Map? ?? const {}),
+    );
   }
 
   /// Runs the server's own end-to-end probe: a real transcription of the

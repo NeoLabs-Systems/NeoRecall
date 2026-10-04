@@ -29,7 +29,7 @@ Future<void> pumpInstructions(
 }
 
 void main() {
-  testWidgets('stored instructions load into their areas and save back', (
+  testWidgets('stored instructions load into their areas and save as edited', (
     tester,
   ) async {
     final controller = _InstructionsController();
@@ -43,18 +43,13 @@ void main() {
       find.widgetWithText(TextField, 'When answering questions'),
       'Answer in two sentences.',
     );
-    await tester.pump();
-    final save = find.text('Save');
-    await tester.ensureVisible(save);
-    await tester.tap(save);
+    await tester.pump(const Duration(milliseconds: 1300));
     await tester.pumpAndSettle();
 
-    expect(controller.lastUpdate?['instructionsGlobal'], 'Write in German.');
-    expect(
-      controller.lastUpdate?['instructionsAsk'],
-      'Answer in two sentences.',
-    );
-    expect(controller.lastUpdate?['instructionsMemories'], '');
+    // Only the edited area is sent, once typing pauses.
+    expect(controller.lastUpdate, <String, dynamic>{
+      'instructionsAsk': 'Answer in two sentences.',
+    });
     expect(tester.takeException(), isNull);
   });
 
@@ -72,9 +67,7 @@ void main() {
       await tester.pump();
       expect(find.text('At most 2000 characters.'), findsOneWidget);
 
-      final save = find.text('Save');
-      await tester.ensureVisible(save);
-      await tester.tap(save);
+      await tester.pump(const Duration(milliseconds: 1300));
       await tester.pumpAndSettle();
       expect(controller.lastUpdate, isNull);
     },

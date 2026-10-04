@@ -6696,6 +6696,72 @@ abstract class AppL10n {
   /// **'A language code the service understands, such as de or en.'**
   String get providerLanguageHelp;
 
+  /// No description provided for @providerLocalInstalled.
+  ///
+  /// In en, this message translates to:
+  /// **'Installed. It runs on this server, so nothing is sent to an outside service.'**
+  String get providerLocalInstalled;
+
+  /// No description provided for @providerLocalNotInstalled.
+  ///
+  /// In en, this message translates to:
+  /// **'Not downloaded yet. It downloads automatically when you save, about {size}.'**
+  String providerLocalNotInstalled(String size);
+
+  /// No description provided for @providerLocalDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading… {percent}%'**
+  String providerLocalDownloading(String percent);
+
+  /// No description provided for @providerLocalDownloadNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Download now'**
+  String get providerLocalDownloadNow;
+
+  /// No description provided for @providerLocalFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The download failed: {message}'**
+  String providerLocalFailed(String message);
+
+  /// No description provided for @providerLocalRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get providerLocalRetry;
+
+  /// No description provided for @providerLocalUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This server cannot run it: {reason}'**
+  String providerLocalUnsupported(String reason);
+
+  /// No description provided for @providerLocalLicense.
+  ///
+  /// In en, this message translates to:
+  /// **'License: {license}'**
+  String providerLocalLicense(String license);
+
+  /// No description provided for @providerLocalLanguages.
+  ///
+  /// In en, this message translates to:
+  /// **'Reads {languages}. Leave the language empty to detect it.'**
+  String providerLocalLanguages(String languages);
+
+  /// No description provided for @providerLocalSpeechNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Recordings are transcribed on this server and never leave it. Fast and free to run, but it reads fewer languages than hosted services.'**
+  String get providerLocalSpeechNote;
+
+  /// No description provided for @providerLocalLlmNote.
+  ///
+  /// In en, this message translates to:
+  /// **'A small model: memories and answers will be simpler than with a hosted model. It frees its memory when it has been idle for a while and loads again when needed.'**
+  String get providerLocalLlmNote;
+
   /// No description provided for @providerResponseFormatLabel.
   ///
   /// In en, this message translates to:
@@ -7277,6 +7343,72 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Use a language code of at least two letters, such as de or en.'**
   String get providerLanguageInvalid;
+
+  /// No description provided for @settingsGroupAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Account'**
+  String get settingsGroupAccount;
+
+  /// No description provided for @settingsGroupCapture.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture'**
+  String get settingsGroupCapture;
+
+  /// No description provided for @settingsGroupMemory.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory & AI'**
+  String get settingsGroupMemory;
+
+  /// No description provided for @settingsGroupConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Connections'**
+  String get settingsGroupConnections;
+
+  /// No description provided for @settingsSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search all settings'**
+  String get settingsSearchHint;
+
+  /// No description provided for @settingsSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving…'**
+  String get settingsSaving;
+
+  /// No description provided for @settingsSavedAutomatically.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes save automatically'**
+  String get settingsSavedAutomatically;
+
+  /// No description provided for @settingsSignOutDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Signs you out of NeoRecall on this device only.'**
+  String get settingsSignOutDescription;
+
+  /// No description provided for @settingsSearchNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No setting matches “{query}”.'**
+  String settingsSearchNoMatch(String query);
+
+  /// No description provided for @settingsSearchResultCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 match} other{{count} matches}}'**
+  String settingsSearchResultCount(int count);
+
+  /// No description provided for @settingsSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save the change: {error}'**
+  String settingsSaveFailed(String error);
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

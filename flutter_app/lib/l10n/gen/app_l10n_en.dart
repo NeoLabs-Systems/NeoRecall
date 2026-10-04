@@ -4173,6 +4173,54 @@ class AppL10nEn extends AppL10n {
       'A language code the service understands, such as de or en.';
 
   @override
+  String get providerLocalInstalled =>
+      'Installed. It runs on this server, so nothing is sent to an outside service.';
+
+  @override
+  String providerLocalNotInstalled(String size) {
+    return 'Not downloaded yet. It downloads automatically when you save, about $size.';
+  }
+
+  @override
+  String providerLocalDownloading(String percent) {
+    return 'Downloading… $percent%';
+  }
+
+  @override
+  String get providerLocalDownloadNow => 'Download now';
+
+  @override
+  String providerLocalFailed(String message) {
+    return 'The download failed: $message';
+  }
+
+  @override
+  String get providerLocalRetry => 'Try again';
+
+  @override
+  String providerLocalUnsupported(String reason) {
+    return 'This server cannot run it: $reason';
+  }
+
+  @override
+  String providerLocalLicense(String license) {
+    return 'License: $license';
+  }
+
+  @override
+  String providerLocalLanguages(String languages) {
+    return 'Reads $languages. Leave the language empty to detect it.';
+  }
+
+  @override
+  String get providerLocalSpeechNote =>
+      'Recordings are transcribed on this server and never leave it. Fast and free to run, but it reads fewer languages than hosted services.';
+
+  @override
+  String get providerLocalLlmNote =>
+      'A small model: memories and answers will be simpler than with a hosted model. It frees its memory when it has been idle for a while and loads again when needed.';
+
+  @override
   String get providerResponseFormatLabel => 'Response format';
 
   @override
@@ -4513,4 +4561,50 @@ class AppL10nEn extends AppL10n {
   @override
   String get providerLanguageInvalid =>
       'Use a language code of at least two letters, such as de or en.';
+
+  @override
+  String get settingsGroupAccount => 'Account';
+
+  @override
+  String get settingsGroupCapture => 'Capture';
+
+  @override
+  String get settingsGroupMemory => 'Memory & AI';
+
+  @override
+  String get settingsGroupConnections => 'Connections';
+
+  @override
+  String get settingsSearchHint => 'Search all settings';
+
+  @override
+  String get settingsSaving => 'Saving…';
+
+  @override
+  String get settingsSavedAutomatically => 'Changes save automatically';
+
+  @override
+  String get settingsSignOutDescription =>
+      'Signs you out of NeoRecall on this device only.';
+
+  @override
+  String settingsSearchNoMatch(String query) {
+    return 'No setting matches “$query”.';
+  }
+
+  @override
+  String settingsSearchResultCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count matches',
+      one: '1 match',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsSaveFailed(String error) {
+    return 'Could not save the change: $error';
+  }
 }

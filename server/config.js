@@ -96,6 +96,46 @@ function buildConfig() {
     transcriptionApiResponseFormat: process.env.TRANSCRIPTION_API_RESPONSE_FORMAT || null,
     transcriptionTimeoutMs: integer('TRANSCRIPTION_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     transcriptionPollIntervalMs: integer('TRANSCRIPTION_POLL_INTERVAL_MS', 1_000, { min: 250, max: 60_000 }),
+    // On-host speech recognition (the "Whistle" provider). The model reads at
+    // most 30 s per pass, so a chunk is cut into windows below that limit. A
+    // cut is moved to the quietest moment within the search span before the
+    // limit, so it falls between words rather than through one. Both numbers
+    // are about the model and the audio, not about any language.
+    localAsrWindowMs: integer('NEORECALL_LOCAL_ASR_WINDOW_MS', 28_000, { min: 5_000, max: 30_000 }),
+    localAsrSplitSearchMs: integer('NEORECALL_LOCAL_ASR_SPLIT_SEARCH_MS', 4_000, { min: 0, max: 15_000 }),
+    // A recognition pass takes milliseconds, so a request that has not answered
+    // in this long means the worker is wedged and is replaced rather than awaited.
+    localAsrRequestTimeoutMs: integer('NEORECALL_LOCAL_ASR_REQUEST_TIMEOUT_MS', 120_000, { min: 5_000 }),
+    localAsrStartTimeoutMs: integer('NEORECALL_LOCAL_ASR_START_TIMEOUT_MS', 60_000, { min: 5_000 }),
+    // Words are grouped into transcript segments: a silence this long between
+    // two words ends one, and no segment runs longer than the ceiling.
+    localAsrSegmentGapMs: integer('NEORECALL_LOCAL_ASR_SEGMENT_GAP_MS', 800, { min: 100, max: 10_000 }),
+    localAsrSegmentMaxMs: integer('NEORECALL_LOCAL_ASR_SEGMENT_MAX_MS', 15_000, { min: 1_000, max: 30_000 }),
+    // How many vocabulary terms are offered to the model as keywords per pass.
+    localAsrKeywordLimit: integer('NEORECALL_LOCAL_ASR_KEYWORD_LIMIT', 50, { min: 0, max: 500 }),
+    // Everything NeoRecall runs on this host — the speech model and the local
+    // language model — is fetched and supervised the same way. A download that
+    // makes no progress for the idle timeout is abandoned and resumed, attempts
+    // are spaced by a growing delay so a flaky host is not hammered, and a failed
+    // install is not retried automatically more often than the retry interval.
+    localDownloadIdleTimeoutMs: integer('NEORECALL_LOCAL_DOWNLOAD_IDLE_TIMEOUT_MS', 30_000, { min: 1_000 }),
+    localDownloadAttempts: integer('NEORECALL_LOCAL_DOWNLOAD_ATTEMPTS', 8, { min: 1, max: 100 }),
+    localInstallRetryMs: integer('NEORECALL_LOCAL_INSTALL_RETRY_MS', 300_000, { min: 5_000 }),
+    // A local program that exits is restarted after this delay, which doubles up
+    // to the ceiling while it keeps failing so one that cannot load does not spin.
+    localRestartBaseMs: integer('NEORECALL_LOCAL_RESTART_BASE_MS', 1_000, { min: 100 }),
+    localRestartMaxMs: integer('NEORECALL_LOCAL_RESTART_MAX_MS', 30_000, { min: 1_000 }),
+    // The local language model (Gemma, served by llama.cpp). It listens on
+    // loopback only. Loading it takes seconds and holds about two gigabytes, while
+    // its work comes in bursts — a conversation closing, an Ask — so the server
+    // unloads the model after this much idleness and loads it again on the next
+    // request. 0 keeps it loaded. The speech model is not treated this way: it is
+    // seventeen megabytes and an always-on recorder asks it something every chunk.
+    localLlmPort: integer('NEORECALL_LOCAL_LLM_PORT', 18_791, { min: 1_024, max: 65_535 }),
+    localLlmIdleUnloadSeconds: integer('NEORECALL_LOCAL_LLM_IDLE_UNLOAD_SECONDS', 600, { min: 0 }),
+    // Waking an unloaded model reads it from disk again, which a cold disk can
+    // make slow; the same bound covers the first start after an install.
+    localLlmStartTimeoutMs: integer('NEORECALL_LOCAL_LLM_START_TIMEOUT_MS', 180_000, { min: 5_000 }),
     // Audio conditioning before inference. A short ffmpeg filter chain that
     // levels and cleans a chunk so the transcription service hears the same
     // recording under better conditions. Pure signal processing: no language is

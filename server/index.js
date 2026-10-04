@@ -52,6 +52,7 @@ if (!process.env.NEORECALL_ROLE) {
     .then(applyStartupAdminAccess)
     .then(() => {
       require('./services/sources').init();
+      require('./services/settings/local_models_service').resumeSelected();
       const config = getConfig();
       const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
       for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));

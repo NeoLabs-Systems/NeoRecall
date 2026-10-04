@@ -1148,6 +1148,47 @@
   "providerTranscriptionEndpointLabel": "Basis-URL oder vollständiger Transkriptions-Endpunkt",
   "providerLanguageLabel": "Sprache (optional)",
   "providerLanguageHelp": "Ein Sprachcode, den der Dienst versteht, etwa de oder en.",
+  "providerLocalInstalled": "Installiert. Es läuft auf diesem Server, daher wird nichts an einen externen Dienst gesendet.",
+  "providerLocalNotInstalled": "Noch nicht heruntergeladen. Der Download startet beim Speichern automatisch, etwa {size}.",
+  "@providerLocalNotInstalled": {
+    "placeholders": {
+      "size": { "type": "String" }
+    }
+  },
+  "providerLocalDownloading": "Wird heruntergeladen… {percent} %",
+  "@providerLocalDownloading": {
+    "placeholders": {
+      "percent": { "type": "String" }
+    }
+  },
+  "providerLocalDownloadNow": "Jetzt herunterladen",
+  "providerLocalFailed": "Der Download ist fehlgeschlagen: {message}",
+  "@providerLocalFailed": {
+    "placeholders": {
+      "message": { "type": "String" }
+    }
+  },
+  "providerLocalRetry": "Erneut versuchen",
+  "providerLocalUnsupported": "Dieser Server kann es nicht ausführen: {reason}",
+  "@providerLocalUnsupported": {
+    "placeholders": {
+      "reason": { "type": "String" }
+    }
+  },
+  "providerLocalLicense": "Lizenz: {license}",
+  "@providerLocalLicense": {
+    "placeholders": {
+      "license": { "type": "String" }
+    }
+  },
+  "providerLocalLanguages": "Versteht {languages}. Lassen Sie die Sprache leer, damit sie erkannt wird.",
+  "@providerLocalLanguages": {
+    "placeholders": {
+      "languages": { "type": "String" }
+    }
+  },
+  "providerLocalSpeechNote": "Aufnahmen werden auf diesem Server transkribiert und verlassen ihn nie. Schnell und kostenlos im Betrieb, versteht aber weniger Sprachen als gehostete Dienste.",
+  "providerLocalLlmNote": "Ein kleines Modell: Erinnerungen und Antworten fallen einfacher aus als bei einem gehosteten Modell. Es gibt seinen Speicher frei, wenn es eine Weile nicht gebraucht wird, und lädt bei Bedarf neu.",
   "providerResponseFormatLabel": "Antwortformat",
   "providerSkipThinking": "Denkschritt des Modells überspringen",
   "providerSkipThinkingHelp": "Schneller, und die Antwort wird nicht abgeschnitten, bevor sie beginnt.",
@@ -1244,5 +1285,16 @@
   "adminNoQueuedJobs": "Es wartet nichts.",
   "adminStatFailedJobs": "Fehlgeschlagene Aufträge",
   "adminActorEarlierAdmin": "Ein früherer Admin",
-  "providerLanguageInvalid": "Verwenden Sie einen Sprachcode mit mindestens zwei Buchstaben, etwa de oder en."
+  "providerLanguageInvalid": "Verwenden Sie einen Sprachcode mit mindestens zwei Buchstaben, etwa de oder en.",
+  "settingsGroupAccount": "Konto",
+  "settingsGroupCapture": "Aufnahme",
+  "settingsGroupMemory": "Erinnerung & KI",
+  "settingsGroupConnections": "Verbindungen",
+  "settingsSearchHint": "Alle Einstellungen durchsuchen",
+  "settingsSaving": "Wird gespeichert …",
+  "settingsSavedAutomatically": "Änderungen werden automatisch gespeichert",
+  "settingsSignOutDescription": "Meldet Sie nur auf diesem Gerät von NeoRecall ab.",
+  "settingsSearchNoMatch": "Keine Einstellung passt zu „{query}“.",
+  "settingsSearchResultCount": "{count, plural, =1{1 Treffer} other{{count} Treffer}}",
+  "settingsSaveFailed": "Die Änderung konnte nicht gespeichert werden: {error}"
 }

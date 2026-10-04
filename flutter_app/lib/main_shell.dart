@@ -61,10 +61,6 @@ class _NeoRecallShellState extends State<NeoRecallShell> {
     RecallPage.library => LibraryScreen(controller: controller),
     RecallPage.search => AskScreen(controller: controller),
     RecallPage.sources => SourcesScreen(controller: controller),
-    RecallPage.devices => SettingsScreen(
-      controller: controller,
-      initialSection: SettingsSection.devices,
-    ),
     RecallPage.settings => SettingsScreen(controller: controller),
     // Offered to admin accounts only; an account that lost admin lands in
     // Settings rather than on a page the server would refuse.
@@ -200,6 +196,7 @@ class _Sidebar extends StatelessWidget {
         ? accountLabel!
         : AppL10n.of(context).shellAccountFallback;
     final initial = safeLabel.characters.first.toUpperCase();
+    final settingsActive = controller.page == RecallPage.settings;
 
     return Container(
       width: 276,
@@ -254,9 +251,12 @@ class _Sidebar extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               children: <Widget>[
-                for (final group in neoRecallNavigationGroupsFor(
-                  controller,
-                )) ...<Widget>[
+                // Settings is not listed: the account button at the foot of
+                // the rail is its one way in.
+                for (final group
+                    in neoRecallNavigationGroupsFor(controller).where(
+                      (group) => group.primary != settingsDestination,
+                    )) ...<Widget>[
                   _SidebarButton(
                     selected: group.isCurrent(controller),
                     icon: group.icon,
@@ -300,59 +300,82 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-            decoration: BoxDecoration(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: Material(
+              color: settingsActive
+                  ? palette.accent.withValues(alpha: 0.12)
+                  : palette.bgCard,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: palette.border),
-              color: palette.bgCard,
-            ),
-            child: Row(
-              children: <Widget>[
-                Container(
-                  width: 30,
-                  height: 30,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () => controller.selectPage(RecallPage.settings),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: palette.accentMuted,
-                    border: Border.all(color: palette.borderLight),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    initial,
-                    style: TextStyle(
-                      color: palette.textPrimary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: settingsActive
+                          ? palette.accent.withValues(alpha: 0.35)
+                          : palette.border,
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    safeLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: palette.textSecondary,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Row(
+                    children: <Widget>[
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: palette.accentMuted,
+                          border: Border.all(color: palette.borderLight),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          initial,
+                          style: TextStyle(
+                            color: palette.textPrimary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              safeLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: palette.textPrimary,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              AppL10n.of(context).navSettings,
+                              style: TextStyle(
+                                color: palette.textMuted,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.settings_outlined,
+                        size: 17,
+                        color: settingsActive
+                            ? palette.accent
+                            : palette.textSecondary,
+                      ),
+                    ],
                   ),
                 ),
-                _SidebarIconButton(
-                  tooltip: AppL10n.of(context).navSettings,
-                  icon: Icons.settings_outlined,
-                  onTap: () => controller.selectPage(RecallPage.settings),
-                ),
-                const SizedBox(width: 4),
-                _SidebarIconButton(
-                  tooltip: AppL10n.of(context).shellSignOut,
-                  icon: Icons.logout,
-                  onTap: () async => controller.logout(),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -440,44 +463,6 @@ class _SidebarButtonState extends State<_SidebarButton> {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SidebarIconButton extends StatelessWidget {
-  const _SidebarIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(9),
-          onTap: onTap,
-          child: Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.tag),
-              color: palette.bgTertiary,
-              border: Border.all(color: palette.border),
-            ),
-            child: Icon(icon, size: 17, color: palette.textSecondary),
           ),
         ),
       ),

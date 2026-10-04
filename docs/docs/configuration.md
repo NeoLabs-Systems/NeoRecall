@@ -23,7 +23,7 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 
 ## External inference providers
 
-NeoRecall does not install or run a transcription or language model. Provider settings can come from `.env` or from encrypted live overrides on the app's **Admin › Providers** page. Keys saved there are never returned to the app, and **Use the server’s own configuration** restores `.env` as the source of truth.
+By default NeoRecall does not install or run a transcription or language model: both are external services, and provider settings can come from `.env` or from encrypted live overrides on the app's **Admin › Providers** page. Keys saved there are never returned to the app, and **Use the server’s own configuration** restores `.env` as the source of truth.
 
 For transcription, choose `openai`, `groq`, `deepgram`, `assemblyai`, or `openai-compatible`. Set `TRANSCRIPTION_API_BASE_URL`, `TRANSCRIPTION_API_MODEL`, and the selected provider's API key. The generic OpenAI-compatible adapter accepts either a version root ending in `/v1` or the full `/audio/transcriptions` URL, sends the audio as multipart field `file`, and supports optional `TRANSCRIPTION_API_LANGUAGE` plus `TRANSCRIPTION_API_RESPONSE_FORMAT`. A model is optional for custom endpoints that route it server-side.
 
@@ -52,6 +52,26 @@ neorecall restore <key>   # decrypt one artifact beside the live database
 ```
 
 `restore` refuses to run while NeoRecall is up, and never writes over the live database. It decrypts the artifact next to the original, runs an integrity check, reports the account count and checksum, and prints the two `mv` commands to put it into service. Verify a restore periodically — a backup that has never been restored is an assumption, not a control.
+
+### Running a model on this server instead
+
+Each workload also offers one provider that runs on the server itself, for operators who do not want audio or transcripts to leave it. Choose it on **Admin › Providers**; there is no endpoint, key or model to enter. Saving starts the download, which continues without the app open and resumes after a restart or a dropped connection, and the provider is used only once everything has been verified and has run once. Until then the worker does not start transcription jobs, so audio simply stays on the client rather than being consumed by a model that cannot read it yet.
+
+| Provider | Does | Download | Notes |
+| --- | --- | --- | --- |
+| `whistle-local` (Whistle) | Speech to text | about 43 MB | English, German, French, Spanish, Italian, Dutch, Polish. 30 s per pass; longer chunks are cut at the quietest moment before the limit. Stays loaded. |
+| `gemma-local` (Gemma 2 2B, Q4) | Memory writing, summaries, Ask | about 1.7 GB, plus a 12–18 MB llama.cpp build | 8 192-token context, so budgets are capped to it. Unloads when idle. Gemma Terms of Use apply. |
+
+Both are pinned by SHA-256 in `models/local_runtimes.json`, so the files you run are exactly the ones that were reviewed. Linux x64, macOS arm64 and macOS x64 are supported; on any other platform the provider is shown as unavailable and cannot be selected. Whistle needs no Python on the host: NeoRecall downloads its own pinned interpreter.
+
+A few things to know before choosing them:
+
+- **Whistle reads one language per pass.** With the language left empty it detects one per window, and a recording that mixes languages inside a window is read in the dominant one. Set the language when a household speaks one.
+- **A 2B model writes simpler memories than a hosted one.** It is the right choice for privacy and zero running cost, not for the richest summaries. It also cannot hold a long conversation at once: while it is selected `LLM_CONTEXT_SIZE`, `AI_CONSOLIDATION_MAX_OUTPUT_TOKENS` and `AI_PREVIEW_MAX_OUTPUT_TOKENS` are lowered to what it can hold (never raised), and consolidation windows its input accordingly.
+- **The language model unloads when idle** (`NEORECALL_LOCAL_LLM_IDLE_UNLOAD_SECONDS`, `0` keeps it loaded). Memory work comes in bursts, the model holds about two gigabytes, and waking it takes a few seconds. Whistle is not unloaded: it is 17 MB and an always-on recorder asks it something every chunk.
+- **The language model needs the worker process**, which owns its server. The default `neorecall` command starts one.
+
+The speech-model settings are `NEORECALL_LOCAL_ASR_*`; downloads and restarts of either model share `NEORECALL_LOCAL_DOWNLOAD_*`, `NEORECALL_LOCAL_INSTALL_RETRY_MS` and `NEORECALL_LOCAL_RESTART_*`. The language model listens on `127.0.0.1:NEORECALL_LOCAL_LLM_PORT` only, behind a key derived from the installation secret.
 
 **Admin › Providers** fetches each provider's current model catalog through its API instead of shipping a fixed model list. Providers without a model-list endpoint may route automatically, and custom compatible endpoints remain manually editable if they do not implement `GET /models`.
 

@@ -21,6 +21,15 @@ class TranscriptionProvider {
 
   async ready() { return false; }
 
+  // Whether a request costs something outside this machine, and so counts
+  // towards a configured transcription budget. A provider that runs on this host
+  // costs nothing to call and overrides this.
+  get metered() { return true; }
+
+  // Said to an operator when `ready()` is false, so the reason is specific to
+  // the provider rather than a guess about base URLs and keys.
+  notReadyReason() { return 'Not fully configured: a base URL, a model, or an API key is still missing.'; }
+
   async transcribe(input) {
     const { vocabulary = [], vocabularyCorrectionEnabled = true } = input;
     const settings = providerSettings.getRuntime().transcription;

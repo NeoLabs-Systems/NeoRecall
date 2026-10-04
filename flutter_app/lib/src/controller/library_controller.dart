@@ -133,7 +133,6 @@ mixin LibraryController on ChangeNotifier {
     await _refreshPending();
     unawaited(sync.pump.pump());
     _applyRecordingSchedule();
-    notice = strings.settingsSaved;
     notifyListeners();
   }
 

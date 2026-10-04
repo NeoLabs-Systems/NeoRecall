@@ -20,6 +20,7 @@ const memoryContextRewrite = require('./prompts/rewrite_memory_context');
 const { withInstructions } = require('./prompts/custom_instructions');
 const { withOutputLanguage } = require('./prompts/output_language');
 const { inputBudgetCharacters } = require('./context_budget');
+const limits = require('./model_limits');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
 const settingsService = require('../services/settings/settings_service');
@@ -79,7 +80,7 @@ async function consolidateWindowOnce(userId, window, carryOver) {
   const config = getConfig();
   const response = await provider().chatJSON({
     userId, purpose: 'consolidation', messages: ownerInstructions(userId, 'memories', window.messages(carryOver)),
-    maxTokens: config.aiConsolidationMaxOutputTokens,
+    maxTokens: limits.consolidationOutputTokens(),
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
       schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
   });
@@ -198,11 +199,11 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
       // A long recording is read in many windows and yields many sections, so
       // this grows with the day rather than staying the size of one request.
       messages: ownerInstructions(userId, 'summaries', dailySummaryMessages({
-        sections: contextWithinBudget(sections, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 2_000),
+        sections: contextWithinBudget(sections, inputBudgetCharacters(limits.previewOutputTokens()) - 2_000),
         previousDailySummary,
         timezone,
       })),
-      maxTokens: config.aiPreviewMaxOutputTokens,
+      maxTokens: limits.previewOutputTokens(),
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
     const parsed = dailySummarySchema.safeParse(response.value);
@@ -232,7 +233,7 @@ async function consolidate(userId, input) {
   // before the remaining budget is spent on transcript segments.
   const windowCharacters = Math.min(
     config.consolidationWindowCharacters,
-    Math.max(1, inputBudgetCharacters(config.aiConsolidationMaxOutputTokens) - continuationCharacters),
+    Math.max(1, inputBudgetCharacters(limits.consolidationOutputTokens()) - continuationCharacters),
   );
   const prepared = prepareConsolidationRequest(input, windowCharacters);
   const merged = { conversationSections: [], entities: [], memories: [], dailySummary: null, windowCount: 0 };
@@ -264,7 +265,7 @@ async function previewConversation(userId, { conversation, previousInsight = nul
   const response = await provider().chatJSON({
     userId, purpose: 'conversation_preview',
     messages: ownerInstructions(userId, 'summaries', conversationPreviewMessages({ conversation, previousInsight, timezone })),
-    maxTokens: config.aiPreviewMaxOutputTokens,
+    maxTokens: limits.previewOutputTokens(),
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_conversation_preview', strict: true,
       schema: conversationPreviewJsonSchema } },
   });
@@ -307,7 +308,7 @@ async function planQuery(userId, { question, nowLocal, timezone }) {
   const config = getConfig();
   return withRetries(async () => {
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      userId, purpose: 'ask', maxTokens: limits.previewOutputTokens(),
       messages: planQueryMessages({ question, nowLocal, timezone }),
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_query_plan', strict: true, schema: queryPlanJsonSchema } },
     });
@@ -327,12 +328,12 @@ async function answer(userId, question, context, beforeAttempt, frame = {}) {
   // The question and the instructions ride along with the evidence, so they come
   // out of the same budget before it is spent.
   const reserve = config.askPromptReserveCharacters;
-  const budget = inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - String(question || '').length - reserve;
+  const budget = inputBudgetCharacters(limits.previewOutputTokens()) - String(question || '').length - reserve;
   const bounded = contextWithinBudget(context, Math.max(reserve, budget));
   if (beforeAttempt) beforeAttempt();
   return withRetries(async () => {
     const response = await provider().chatJSON({
-      userId, purpose: 'ask', maxTokens: config.aiPreviewMaxOutputTokens,
+      userId, purpose: 'ask', maxTokens: limits.previewOutputTokens(),
       messages: ownerInstructions(userId, 'ask', answerMessages(question, bounded, frame)),
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_answer', strict: true, schema: answerJsonSchema } },
     });
@@ -351,7 +352,7 @@ async function analyzeContextChat(userId, messages, emptyMessage) {
     userId,
     purpose: 'context_analysis',
     messages: inOwnerLanguage(userId, messages),
-    maxTokens: config.aiPreviewMaxOutputTokens,
+    maxTokens: limits.previewOutputTokens(),
     responseFormat: contextAnalysis.responseFormat,
   });
   const description = String(response.value?.descriptionEn || '').trim();
@@ -360,7 +361,7 @@ async function analyzeContextChat(userId, messages, emptyMessage) {
 }
 
 async function analyzeContextText(userId, { name, content }) {
-  const maximum = Math.max(1, inputBudgetCharacters(getConfig().aiPreviewMaxOutputTokens) - 2_000);
+  const maximum = Math.max(1, inputBudgetCharacters(limits.previewOutputTokens()) - 2_000);
   return analyzeContextChat(
     userId,
     contextAnalysis.textMessages({ name, content: String(content || '').slice(0, maximum) }),
@@ -378,7 +379,7 @@ async function analyzeContextImage(userId, { name, mediaType, data }) {
 
 async function rewriteMemoryWithContext(userId, { memory, segments, contextItems }) {
   const config = getConfig();
-  const budget = Math.max(2_000, inputBudgetCharacters(config.aiPreviewMaxOutputTokens) - 3_000);
+  const budget = Math.max(2_000, inputBudgetCharacters(limits.previewOutputTokens()) - 3_000);
   // Context is the reason for the rewrite, so reserve most of the evidence
   // budget for it. Any unused context room naturally flows to the transcript.
   const boundedContext = contextWithinBudget(contextItems, Math.floor(budget * 0.6));
@@ -387,7 +388,7 @@ async function rewriteMemoryWithContext(userId, { memory, segments, contextItems
   const response = await provider().chatJSON({
     userId, purpose: 'memory_context_rewrite',
     messages: ownerInstructions(userId, 'memories', memoryContextRewrite.messages(memory, boundedSegments, boundedContext)),
-    maxTokens: config.aiPreviewMaxOutputTokens,
+    maxTokens: limits.previewOutputTokens(),
     responseFormat: { type: 'json_schema', json_schema: {
       name: 'neorecall_memory_context_rewrite', strict: true, schema: memoryContextRewrite.jsonSchema,
     } },
@@ -426,7 +427,7 @@ async function rewriteMergedMemory(userId, memories) {
       userId,
       purpose: 'memory_merge',
       messages: ownerInstructions(userId, 'memories', mergeMemoryMessages(memories)),
-      maxTokens: config.aiPreviewMaxOutputTokens,
+      maxTokens: limits.previewOutputTokens(),
       responseFormat: {
         type: 'json_schema',
         json_schema: {
@@ -462,7 +463,7 @@ async function judgeDuplicateMemories(userId, left, right, evidence) {
       userId,
       purpose: 'memory_merge',
       messages: dedupeMemoryMessages(left, right, evidence),
-      maxTokens: config.aiPreviewMaxOutputTokens,
+      maxTokens: limits.previewOutputTokens(),
       responseFormat: {
         type: 'json_schema',
         json_schema: {
