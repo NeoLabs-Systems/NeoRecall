@@ -144,7 +144,10 @@ class ManagedProcess {
     this.logger.warn('Stopped; restarting', { code, signal, delayMs: delay, reason: this.lastError?.message });
     // Restarts do not wait for the next readiness poll: "always running" means
     // the process comes back by itself.
-    const timer = setTimeout(() => this.ensureStarted(), delay);
+    // The timer firing is itself the proof the delay has passed. Re-checking the
+    // clock instead can see it a millisecond early (timers may fire slightly ahead
+    // of Date.now()), decline to start, and leave nothing scheduled to try again.
+    const timer = setTimeout(() => { this.retryAt = 0; this.ensureStarted(); }, delay);
     timer.unref();
   }
 
