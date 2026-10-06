@@ -34,4 +34,17 @@ function previewOutputTokens() {
   return capped(getConfig().aiPreviewMaxOutputTokens, localProfile()?.previewOutputTokens);
 }
 
-module.exports = { contextSize, consolidationOutputTokens, previewOutputTokens };
+// Characters of transcript one consolidation request may read. A small model does
+// markedly better on a short window than on the default, so the profile lowers it.
+function consolidationWindowCharacters() {
+  return capped(getConfig().consolidationWindowCharacters, localProfile()?.consolidationWindowCharacters);
+}
+
+// Whether a window's answer is repaired piece by piece instead of being accepted
+// or rejected whole. True for a model too small to honour the whole contract
+// every time; see ai/repair_consolidation.
+function tolerantOutput() {
+  return Boolean(localProfile()?.tolerantOutput);
+}
+
+module.exports = { contextSize, consolidationOutputTokens, previewOutputTokens, consolidationWindowCharacters, tolerantOutput };

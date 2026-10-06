@@ -21,6 +21,9 @@ const { withInstructions } = require('./prompts/custom_instructions');
 const { withOutputLanguage } = require('./prompts/output_language');
 const { inputBudgetCharacters } = require('./context_budget');
 const limits = require('./model_limits');
+const { createLogger } = require('../utils/logger');
+const logger = createLogger('ai-engine');
+const { repairConsolidation, repairDailySummary } = require('./repair_consolidation');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
 const settingsService = require('../services/settings/settings_service');
@@ -76,6 +79,11 @@ async function withRetries(work) {
   throw lastError;
 }
 
+// The first few places a schema check failed, as `memories.0.importance: …`.
+function describeIssues(zodError) {
+  return zodError.issues.slice(0, 3).map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+}
+
 async function consolidateWindowOnce(userId, window, carryOver) {
   const config = getConfig();
   const response = await provider().chatJSON({
@@ -84,10 +92,20 @@ async function consolidateWindowOnce(userId, window, carryOver) {
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
       schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
   });
-  const parsed = consolidationSchema.safeParse(response.value);
+  let parsed = consolidationSchema.safeParse(response.value);
+  if (!parsed.success && limits.tolerantOutput()) {
+    // A model that cannot honour the whole contract every time is repaired piece
+    // by piece rather than rejected whole.
+    const repaired = repairConsolidation(response.value, { segmentIds: window.segmentIds, continuationMemoryIds: window.continuationMemoryIds });
+    if (repaired.value) {
+      logger.warn('Repaired a consolidation answer that did not fully match the contract', { requestId: response.requestId, dropped: repaired.dropped });
+      parsed = { success: true, data: repaired.value };
+    }
+  }
   if (!parsed.success) {
     markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
-    const error = new Error('Consolidation output did not match the required schema.');
+    // The reason is part of the message because it is all a stored failure keeps.
+    const error = new Error(`Consolidation output did not match the required schema: ${describeIssues(parsed.error)}`);
     error.code = 'AI_SCHEMA_INVALID'; error.details = parsed.error.flatten(); error.aiRequestId = response.requestId; throw error;
   }
   try {
@@ -206,10 +224,14 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
       maxTokens: limits.previewOutputTokens(),
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
-    const parsed = dailySummarySchema.safeParse(response.value);
+    let parsed = dailySummarySchema.safeParse(response.value);
+    if (!parsed.success && limits.tolerantOutput()) {
+      const repaired = repairDailySummary(response.value);
+      if (repaired) parsed = dailySummarySchema.safeParse(repaired);
+    }
     if (!parsed.success) {
       markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
-      throw Object.assign(new Error('Daily summary output did not match the required schema.'), {
+      throw Object.assign(new Error(`Daily summary output did not match the required schema: ${describeIssues(parsed.error)}`), {
         code: 'AI_SCHEMA_INVALID', details: parsed.error.flatten(), aiRequestId: response.requestId,
       });
     }
@@ -232,7 +254,7 @@ async function consolidate(userId, input) {
   // Continuation cards ride in every window, so their exact size is reserved
   // before the remaining budget is spent on transcript segments.
   const windowCharacters = Math.min(
-    config.consolidationWindowCharacters,
+    limits.consolidationWindowCharacters(),
     Math.max(1, inputBudgetCharacters(limits.consolidationOutputTokens()) - continuationCharacters),
   );
   const prepared = prepareConsolidationRequest(input, windowCharacters);

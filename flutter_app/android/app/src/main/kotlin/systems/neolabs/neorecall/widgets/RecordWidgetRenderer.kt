@@ -30,7 +30,11 @@ internal object RecordWidgetRenderer : WidgetRenderer {
   private const val COMPACT_MAX_WIDTH_DP = 219
   private const val COMPACT_MAX_HEIGHT_DP = 95
 
-  private enum class LayoutMode { ICON, COMPACT, FULL }
+  /**
+   * BUTTON is the bare recorder for one or two cells in a single row: no card,
+   * just the pill filling the cell, with a label once it is wider than a cell.
+   */
+  private enum class LayoutMode { BUTTON, COMPACT, FULL }
 
   override fun render(
     context: Context,
@@ -43,6 +47,8 @@ internal object RecordWidgetRenderer : WidgetRenderer {
       null
     }
     val mode = layoutMode(options)
+    val button = mode == LayoutMode.BUTTON
+    val labelled = !button || widthDp(options) > ICON_MAX_WIDTH_DP
     val theme = WidgetKind.RECORD.theme(context, appWidgetId)
     val tap = WidgetKind.RECORD.option(context, appWidgetId, WidgetOptionKeys.TAP)
     val snapshot = WidgetStore.snapshot(context)
@@ -56,12 +62,13 @@ internal object RecordWidgetRenderer : WidgetRenderer {
     val views = RemoteViews(
       context.packageName,
       when (mode) {
-        LayoutMode.ICON -> R.layout.neorecall_record_widget_icon
+        LayoutMode.BUTTON -> R.layout.neorecall_record_widget_button
         LayoutMode.COMPACT -> R.layout.neorecall_record_widget_compact
         LayoutMode.FULL -> R.layout.neorecall_record_widget
       },
     )
-    views.surface(theme)
+    // The bare button keeps its transparent root; only the cards get a surface.
+    if (!button) views.surface(theme)
 
     val statusText: Int
     val statusColor: Int
@@ -100,7 +107,7 @@ internal object RecordWidgetRenderer : WidgetRenderer {
       )
     }
     views.setTextViewText(R.id.widget_title, title)
-    views.setTextColor(R.id.widget_title, theme.textPrimary)
+    views.setTextColor(R.id.widget_title, if (button) theme.onAccent else theme.textPrimary)
 
     // The elapsed time is a Chronometer, so it keeps counting between updates
     // instead of freezing at whatever second the last redraw happened to catch.
@@ -113,11 +120,14 @@ internal object RecordWidgetRenderer : WidgetRenderer {
         null,
         true,
       )
-      views.setTextColor(R.id.widget_elapsed, theme.accent)
+      views.setTextColor(R.id.widget_elapsed, if (button) theme.onAccent else theme.accent)
     } else {
       views.setChronometer(R.id.widget_elapsed, SystemClock.elapsedRealtime(), null, false)
     }
-    views.show(R.id.widget_elapsed, showElapsed)
+    views.show(R.id.widget_elapsed, showElapsed && labelled)
+    // Inside the pill the running clock takes the label's place; the cards
+    // always show the title above it.
+    if (button) views.show(R.id.widget_title, labelled && !showElapsed)
 
     val subtitle = when {
       recording && tap == "smart" -> context.getString(R.string.widget_subtitle_recording)
@@ -154,13 +164,21 @@ internal object RecordWidgetRenderer : WidgetRenderer {
         else -> R.drawable.ic_widget_mic
       },
     )
+    val active = recording || starting
+    // In the bare layout the pill is the button and the icon only sits on it.
+    val actionTarget = if (button) R.id.widget_button else R.id.widget_action
     views.background(
-      R.id.widget_action,
-      if (recording || starting) theme.actionRecording else theme.actionReady,
+      actionTarget,
+      when {
+        button && active -> theme.pillRecording
+        button -> theme.pillReady
+        active -> theme.actionRecording
+        else -> theme.actionReady
+      },
     )
     views.tint(R.id.widget_action, theme.onAccent)
     views.setContentDescription(
-      R.id.widget_action,
+      actionTarget,
       context.getString(
         if (stopping) R.string.widget_action_stop_description
         else R.string.widget_action_description,
@@ -168,15 +186,15 @@ internal object RecordWidgetRenderer : WidgetRenderer {
     )
 
     val openApp = WidgetIntents.open(context, appWidgetId, WidgetIntents.PAGE_RECORD)
-    views.setOnClickPendingIntent(R.id.widget_root, openApp)
-    views.setOnClickPendingIntent(
-      R.id.widget_action,
-      when {
-        tap == "open" -> openApp
-        stopping -> WidgetIntents.stopRecording(context, appWidgetId)
-        else -> WidgetIntents.startRecording(context, appWidgetId)
-      },
-    )
+    val action = when {
+      tap == "open" -> openApp
+      stopping -> WidgetIntents.stopRecording(context, appWidgetId)
+      else -> WidgetIntents.startRecording(context, appWidgetId)
+    }
+    // The bare button leaves only a sliver of root around the pill; a tap there
+    // should do what the button does rather than open the app by surprise.
+    views.setOnClickPendingIntent(R.id.widget_root, if (button) action else openApp)
+    views.setOnClickPendingIntent(actionTarget, action)
     views.show(R.id.widget_configure, mode == LayoutMode.FULL)
     views.setOnClickPendingIntent(
       R.id.widget_configure,
@@ -212,9 +230,13 @@ internal object RecordWidgetRenderer : WidgetRenderer {
     val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
     val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
     return when {
-      width <= ICON_MAX_WIDTH_DP -> LayoutMode.ICON
+      width <= ICON_MAX_WIDTH_DP -> LayoutMode.BUTTON
+      width <= COMPACT_MAX_WIDTH_DP && height <= COMPACT_MAX_HEIGHT_DP -> LayoutMode.BUTTON
       width <= COMPACT_MAX_WIDTH_DP || height <= COMPACT_MAX_HEIGHT_DP -> LayoutMode.COMPACT
       else -> LayoutMode.FULL
     }
   }
+
+  private fun widthDp(options: Bundle?): Int =
+    options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, Int.MAX_VALUE) ?: Int.MAX_VALUE
 }

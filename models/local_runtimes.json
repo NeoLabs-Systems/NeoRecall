@@ -119,7 +119,9 @@
       "profile": {
         "contextSize": 8192,
         "consolidationOutputTokens": 2500,
-        "previewOutputTokens": 1024
+        "previewOutputTokens": 1024,
+    "consolidationWindowCharacters": 4000,
+    "tolerantOutput": true
       },
       "files": [
         {

@@ -42,6 +42,9 @@ internal class WidgetTheme private constructor(val dark: Boolean) {
     drawable(R.drawable.widget_action_ready_dark, R.drawable.widget_action_ready_light)
   val actionRecording =
     drawable(R.drawable.widget_action_recording_dark, R.drawable.widget_action_recording_light)
+  val pillReady = drawable(R.drawable.widget_pill_ready_dark, R.drawable.widget_pill_ready_light)
+  val pillRecording =
+    drawable(R.drawable.widget_pill_recording_dark, R.drawable.widget_pill_recording_light)
   val actionGhost =
     drawable(R.drawable.widget_action_ghost_dark, R.drawable.widget_action_ghost_light)
   val actionSoft =
