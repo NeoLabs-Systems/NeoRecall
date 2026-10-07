@@ -70,6 +70,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         # No --ignore-scripts: better-sqlite3 fetches its native binding in a
         # postinstall step, and without it the server cannot open a database.
+        # onnxruntime-node's postinstall pulls the optional CUDA add-on from a
+        # Microsoft feed on linux/x64; CI never runs on a GPU, and that download
+        # timing out was failing installs. The CPU runtime ships in the package.
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: npm ci --omit=dev
 
       - name: Test
@@ -110,6 +115,11 @@ jobs:
       # rather than a stand-in. A stub would accept headers the real routes
       # reject, and that mistake only surfaces on hardware.
       - name: Install the server
+        # onnxruntime-node's postinstall pulls the optional CUDA add-on from a
+        # Microsoft feed on linux/x64; CI never runs on a GPU, and that download
+        # timing out was failing installs. The CPU runtime ships in the package.
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: npm ci
 
       - name: Install the appliance
