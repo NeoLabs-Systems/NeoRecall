@@ -1362,6 +1362,8 @@ h3, h4 { letter-spacing: -0.03em; font-weight: 650; line-height: 1.15; }
 
   .story-stage-wrap { top: 70px; }
   .run-step { padding: 10px 0; }
+  /* the capture panel's chips wrap to two rows here; 360 clipped its footer */
+  .story-stage { min-height: 410px; }
   .footer-grid { grid-template-columns: 1fr; }
   .nav-inner { min-height: 64px; }
 }
