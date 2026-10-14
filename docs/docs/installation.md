@@ -107,13 +107,20 @@ neorecall install
 ## Updating
 
 ```bash
+neorecall update --notes    # what a waiting update changes, without installing it
 neorecall update            # latest commit on the configured channel
 neorecall update beta       # switch channel and update
 ```
 
 `update` fetches the channel branch, discards local changes to tracked files,
 backs up runtime data, reinstalls dependencies, re-verifies the local models, and
-restarts the service. An older global package installation is migrated to a Git
+restarts the service. If any step after the download fails, it puts the previous
+version back and restarts that instead. When you are already on the latest
+version it says so and changes nothing.
+
+`neorecall` on its own shows a menu of the common actions; `neorecall status
+--details` adds the install folder, data folder, versions and port, and
+`neorecall help --all` lists every command. An older global package installation is migrated to a Git
 checkout on the first `neorecall update`; runtime data in `~/.neorecall` is kept.
 
 ## Docker Compose

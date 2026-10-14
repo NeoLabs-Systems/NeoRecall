@@ -498,7 +498,7 @@ class LocalBackendInstaller {
   /// the panel does not show `[neorecall] ✓ …`.
   String _humanize(String line) {
     var text = line.replaceFirst(RegExp(r'^\[neorecall\]\s*'), '');
-    text = text.replaceFirst(RegExp(r'^[✓✗!→]\s*'), '');
+    text = text.replaceFirst(RegExp(r'^[✓✗✕!•○→]\s*'), '');
     return text.length > 160 ? '${text.substring(0, 157)}…' : text;
   }
 
