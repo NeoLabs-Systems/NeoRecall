@@ -82,6 +82,14 @@
     "sqlite-vec": "0.1.9",
     "zod": "3.25.76"
   },
+  "allowScripts": {
+    "bcrypt": true,
+    "better-sqlite3-multiple-ciphers": true,
+    "ffmpeg-static": true,
+    "onnxruntime-node": true,
+    "protobufjs": true,
+    "sharp": true
+  },
   "optionalDependencies": {
     "sherpa-onnx-node": "1.13.4"
   },
