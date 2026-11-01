@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page not found · NeoRecall</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0e1511" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f1e8" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,420;0,9..144,560;0,9..144,640;1,9..144,420&amp;family=IBM+Plex+Mono:wght@450;500;600&amp;family=Inter:wght@440;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .nav { position: relative; }
+    .brand-mark img { width: 100%; height: 100%; display: block; }
+    .lost { flex: 1; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: clamp(32px, 6vw, 80px); align-items: center; padding-block: clamp(32px, 8vh, 96px); }
+    .lost h1 { font-size: clamp(40px, 6vw, 72px); margin: 18px 0 20px; }
+    .lost .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+    .recall { border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface); backdrop-filter: blur(16px) saturate(140%); box-shadow: var(--shadow-md); overflow: hidden; }
+    .recall .search { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); font-size: 15px; color: var(--ink-2); }
+    .recall .search svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--ink-3); }
+    .recall .search span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .recall .search b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 14px; }
+    .recall .search i { font-style: normal; width: 2px; height: 18px; background: var(--gold); animation: caret 1s steps(2) infinite; flex: 0 0 auto; }
+    .recall ul { list-style: none; margin: 0; padding: 8px 0; }
+    .recall li { display: flex; justify-content: space-between; gap: 16px; padding: 12px 20px; color: var(--ink-2); opacity: 0; animation: rise .5s var(--ease) forwards; }
+    .recall li:nth-child(2) { animation-delay: .35s; }
+    .recall li:nth-child(3) { animation-delay: .7s; }
+    .recall li:nth-child(4) { animation-delay: 1.05s; }
+    .recall li span:last-child { font-family: var(--mono); font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+    .recall .note { padding: 16px 20px; border-top: 1px solid var(--line); font-family: var(--serif); font-style: italic; font-size: 17px; color: var(--ink-2); opacity: 0; animation: rise .5s var(--ease) 1.5s forwards; }
+    @keyframes rise { to { opacity: 1; } }
+    @keyframes caret { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .recall li, .recall .note { animation: none; opacity: 1; } .recall .search i { animation: none; } }
+    @media (max-width: 860px) { .lost { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="NeoRecall home">
+        <span class="brand-mark" aria-hidden="true"><img src="/assets/logo.svg" alt=""></span>
+        NeoRecall
+      </a>
+      <div class="nav-actions">
+        <a class="btn btn-ghost" href="/app">Open app</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap lost">
+    <div>
+      <span class="eyebrow">Error 404 · Not remembered</span>
+      <h1>We remember everything. <em>Except this page.</em></h1>
+      <p class="lede">NeoRecall looked through every recording, transcript and moment. This address never came up. Either it moved, or you dreamt it, and we don't record dreams. Yet.</p>
+      <div class="actions">
+        <a class="btn btn-primary btn-lg" href="/">
+          Back to the start
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-secondary btn-lg" href="/app">Open NeoRecall</a>
+      </div>
+    </div>
+
+    <section class="recall" aria-label="Memory search for this page">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Searching for <b data-path>/this-page</b></span><i aria-hidden="true"></i>
+      </div>
+      <ul>
+        <li><span>Recordings</span><span>0 found</span></li>
+        <li><span>Transcripts</span><span>0 found</span></li>
+        <li><span>People who mentioned it</span><span>nobody</span></li>
+        <li><span>Times you were here before</span><span>never</span></li>
+      </ul>
+      <p class="note">"I'm sure it was right here a minute ago." Everyone, at some point.</p>
+    </section>
+  </main>
+
+  <script>
+    document.querySelector('[data-path]').textContent = location.pathname;
+  </script>
+</body>
+</html>
