@@ -7409,6 +7409,198 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Could not save the change: {error}'**
   String settingsSaveFailed(String error);
+
+  /// No description provided for @adminUpdatesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates'**
+  String get adminUpdatesTitle;
+
+  /// No description provided for @adminUpdatesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall updates itself from GitHub. Your recordings, memories and settings are kept.'**
+  String get adminUpdatesHint;
+
+  /// No description provided for @adminUpdateChannel.
+  ///
+  /// In en, this message translates to:
+  /// **'Channel'**
+  String get adminUpdateChannel;
+
+  /// No description provided for @adminUpdateChannelHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Stable follows main. Beta gets new features first.'**
+  String get adminUpdateChannelHint;
+
+  /// No description provided for @adminUpdateChannelStable.
+  ///
+  /// In en, this message translates to:
+  /// **'Stable'**
+  String get adminUpdateChannelStable;
+
+  /// No description provided for @adminUpdateChannelBeta.
+  ///
+  /// In en, this message translates to:
+  /// **'Beta'**
+  String get adminUpdateChannelBeta;
+
+  /// No description provided for @adminUpdateCheckNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Check now'**
+  String get adminUpdateCheckNow;
+
+  /// No description provided for @adminUpdateNeverChecked.
+  ///
+  /// In en, this message translates to:
+  /// **'Not checked yet'**
+  String get adminUpdateNeverChecked;
+
+  /// No description provided for @adminUpdateUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'You have the latest version'**
+  String get adminUpdateUpToDate;
+
+  /// No description provided for @adminUpdateCheckFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach GitHub. Showing the last result.'**
+  String get adminUpdateCheckFailed;
+
+  /// No description provided for @adminUpdateContainerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs from a container image'**
+  String get adminUpdateContainerTitle;
+
+  /// No description provided for @adminUpdateContainerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Update the image instead of the code inside it. Data on the volume is kept.'**
+  String get adminUpdateContainerHint;
+
+  /// No description provided for @adminUpdateNotGitTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t update itself'**
+  String get adminUpdateNotGitTitle;
+
+  /// No description provided for @adminUpdateNotGitHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This install did not come from Git. Run neorecall update in a terminal.'**
+  String get adminUpdateNotGitHint;
+
+  /// No description provided for @adminUpdateDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Details of the last update'**
+  String get adminUpdateDetails;
+
+  /// No description provided for @adminUpdateChecked.
+  ///
+  /// In en, this message translates to:
+  /// **'Checked {time}'**
+  String adminUpdateChecked(String time);
+
+  /// No description provided for @adminUpdateReadyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} is ready'**
+  String adminUpdateReadyTitle(String version);
+
+  /// No description provided for @adminUpdateReadySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'You have {current} · {channel} channel'**
+  String adminUpdateReadySubtitle(String current, String channel);
+
+  /// No description provided for @adminUpdateNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Update now'**
+  String get adminUpdateNow;
+
+  /// No description provided for @adminUpdateWhatsNew.
+  ///
+  /// In en, this message translates to:
+  /// **'What\'s new'**
+  String get adminUpdateWhatsNew;
+
+  /// No description provided for @adminUpdateConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Update to {version}?'**
+  String adminUpdateConfirmTitle(String version);
+
+  /// No description provided for @adminUpdateConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall saves a backup, installs the new version and restarts. This takes a few minutes, and recording uploads wait until it is back. If anything fails, it goes back to the current version.'**
+  String get adminUpdateConfirmMessage;
+
+  /// No description provided for @adminUpdatingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating NeoRecall'**
+  String get adminUpdatingTitle;
+
+  /// No description provided for @adminUpdatingToTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating to {version}'**
+  String adminUpdatingToTitle(String version);
+
+  /// No description provided for @adminUpdateReconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Restarting NeoRecall…'**
+  String get adminUpdateReconnecting;
+
+  /// No description provided for @adminUpdateHandsOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to do here. This page reconnects by itself when NeoRecall is back.'**
+  String get adminUpdateHandsOff;
+
+  /// No description provided for @adminUpdateDoneTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated to {version}'**
+  String adminUpdateDoneTitle(String version);
+
+  /// No description provided for @adminUpdateDoneReloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Reloading the app to load the new version…'**
+  String get adminUpdateDoneReloading;
+
+  /// No description provided for @adminUpdateReload.
+  ///
+  /// In en, this message translates to:
+  /// **'Reload'**
+  String get adminUpdateReload;
+
+  /// No description provided for @adminUpdateFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The update did not finish'**
+  String get adminUpdateFailedTitle;
+
+  /// No description provided for @adminSearchUpdates.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates'**
+  String get adminSearchUpdates;
+
+  /// No description provided for @adminSearchUpdatesKeywords.
+  ///
+  /// In en, this message translates to:
+  /// **'update upgrade version channel beta stable github release new aktualisieren'**
+  String get adminSearchUpdatesKeywords;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

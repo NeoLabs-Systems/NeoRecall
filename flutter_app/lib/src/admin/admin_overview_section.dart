@@ -5,6 +5,7 @@ import '../../main_spacing.dart';
 import '../../main_theme.dart';
 import '../../l10n/gen/app_l10n.dart';
 import 'admin_client.dart';
+import 'admin_update.dart';
 import 'admin_widgets.dart';
 
 /// Is the server keeping up: queue, workers, temporary audio, search index.
@@ -13,10 +14,12 @@ class AdminOverviewSection extends StatelessWidget {
     super.key,
     required this.controller,
     required this.client,
+    required this.updates,
   });
 
   final NeoRecallController controller;
   final AdminClient client;
+  final UpdateWatcher updates;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +31,7 @@ class AdminOverviewSection extends StatelessWidget {
         children: <Widget>[
           _status(context, stats, reload),
           const SizedBox(height: AppSpacing.sm + 2),
+          AdminUpdatesCard(watcher: updates),
           _workers(context, stats),
         ],
       ),

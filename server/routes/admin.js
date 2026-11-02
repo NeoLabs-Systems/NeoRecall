@@ -13,6 +13,7 @@ const processingSettings = require('../services/settings/processing_settings_ser
 const providerSettings = require('../services/settings/provider_settings_service');
 const localModels = require('../services/settings/local_models_service');
 const backups = require('../services/backup/backup_service');
+const updates = require('../services/updates/update_service');
 const usageLimits = require('../services/usage/usage_limit_service');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
@@ -102,5 +103,14 @@ router.delete('/provider-settings', (req, res) => {
   audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'provider_settings_reset', ipAddress: req.ip });
   res.json({ settings });
 });
+
+router.get('/update', (req, res) => res.json(updates.status()));
+router.post('/update/check', asyncRoute(async (req, res) => res.json(await updates.check())));
+router.post('/update', (req, res) => {
+  const status = updates.start();
+  audit.record({ actorType: 'admin', actorId: req.auth.userId, action: 'update_started', ipAddress: req.ip });
+  res.status(202).json(status);
+});
+router.put('/update/channel', validate(z.object({ channel: z.string().max(16) })), asyncRoute(async (req, res) => res.json(await updates.setChannel(req.body.channel))));
 
 module.exports = router;

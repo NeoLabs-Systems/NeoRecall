@@ -4607,4 +4607,121 @@ class AppL10nEn extends AppL10n {
   String settingsSaveFailed(String error) {
     return 'Could not save the change: $error';
   }
+
+  @override
+  String get adminUpdatesTitle => 'Updates';
+
+  @override
+  String get adminUpdatesHint =>
+      'NeoRecall updates itself from GitHub. Your recordings, memories and settings are kept.';
+
+  @override
+  String get adminUpdateChannel => 'Channel';
+
+  @override
+  String get adminUpdateChannelHint =>
+      'Stable follows main. Beta gets new features first.';
+
+  @override
+  String get adminUpdateChannelStable => 'Stable';
+
+  @override
+  String get adminUpdateChannelBeta => 'Beta';
+
+  @override
+  String get adminUpdateCheckNow => 'Check now';
+
+  @override
+  String get adminUpdateNeverChecked => 'Not checked yet';
+
+  @override
+  String get adminUpdateUpToDate => 'You have the latest version';
+
+  @override
+  String get adminUpdateCheckFailed =>
+      'Couldn\'t reach GitHub. Showing the last result.';
+
+  @override
+  String get adminUpdateContainerTitle => 'Runs from a container image';
+
+  @override
+  String get adminUpdateContainerHint =>
+      'Update the image instead of the code inside it. Data on the volume is kept.';
+
+  @override
+  String get adminUpdateNotGitTitle => 'Can\'t update itself';
+
+  @override
+  String get adminUpdateNotGitHint =>
+      'This install did not come from Git. Run neorecall update in a terminal.';
+
+  @override
+  String get adminUpdateDetails => 'Details of the last update';
+
+  @override
+  String adminUpdateChecked(String time) {
+    return 'Checked $time';
+  }
+
+  @override
+  String adminUpdateReadyTitle(String version) {
+    return 'Version $version is ready';
+  }
+
+  @override
+  String adminUpdateReadySubtitle(String current, String channel) {
+    return 'You have $current · $channel channel';
+  }
+
+  @override
+  String get adminUpdateNow => 'Update now';
+
+  @override
+  String get adminUpdateWhatsNew => 'What\'s new';
+
+  @override
+  String adminUpdateConfirmTitle(String version) {
+    return 'Update to $version?';
+  }
+
+  @override
+  String get adminUpdateConfirmMessage =>
+      'NeoRecall saves a backup, installs the new version and restarts. This takes a few minutes, and recording uploads wait until it is back. If anything fails, it goes back to the current version.';
+
+  @override
+  String get adminUpdatingTitle => 'Updating NeoRecall';
+
+  @override
+  String adminUpdatingToTitle(String version) {
+    return 'Updating to $version';
+  }
+
+  @override
+  String get adminUpdateReconnecting => 'Restarting NeoRecall…';
+
+  @override
+  String get adminUpdateHandsOff =>
+      'Nothing to do here. This page reconnects by itself when NeoRecall is back.';
+
+  @override
+  String adminUpdateDoneTitle(String version) {
+    return 'Updated to $version';
+  }
+
+  @override
+  String get adminUpdateDoneReloading =>
+      'Reloading the app to load the new version…';
+
+  @override
+  String get adminUpdateReload => 'Reload';
+
+  @override
+  String get adminUpdateFailedTitle => 'The update did not finish';
+
+  @override
+  String get adminSearchUpdates => 'Updates';
+
+  @override
+  String get adminSearchUpdatesKeywords =>
+      'update upgrade version channel beta stable github release new aktualisieren';
 }

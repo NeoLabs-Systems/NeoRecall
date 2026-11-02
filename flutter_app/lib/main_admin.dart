@@ -10,6 +10,7 @@ import 'src/admin/admin_activity_sections.dart';
 import 'src/admin/admin_backups_section.dart';
 import 'src/admin/admin_client.dart';
 import 'src/admin/admin_overview_section.dart';
+import 'src/admin/admin_update.dart';
 import 'src/admin/admin_processing_section.dart';
 import 'src/admin/admin_provider_client.dart';
 import 'src/admin/admin_users_section.dart';
@@ -64,6 +65,12 @@ class _AdminSearchEntry {
 }
 
 final List<_AdminSearchEntry> _adminSearchIndex = <_AdminSearchEntry>[
+  _AdminSearchEntry(
+    AdminArea.overview,
+    'overview.updates',
+    (l) => l.adminSearchUpdates,
+    (l) => l.adminSearchUpdatesKeywords,
+  ),
   _AdminSearchEntry(
     AdminArea.overview,
     'overview.status',
@@ -227,10 +234,13 @@ class _AdminScreenState extends State<AdminScreen> {
 
   NeoRecallController get controller => widget.controller;
 
+  late final UpdateWatcher _updates = UpdateWatcher(controller.api);
+
   @override
   void initState() {
     super.initState();
     _refreshAttention();
+    _updates.load();
   }
 
   Future<void> _refreshAttention() async {
@@ -240,6 +250,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   @override
   void dispose() {
+    _updates.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -283,6 +294,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   title: strings.adminTitle,
                   description: strings.adminDescription,
                 ),
+                UpdateBanner(watcher: _updates),
                 _searchField(strings),
                 const SizedBox(height: 14),
                 if (searching)
@@ -385,6 +397,7 @@ class _AdminScreenState extends State<AdminScreen> {
       AdminArea.overview => AdminOverviewSection(
         controller: controller,
         client: client,
+        updates: _updates,
       ),
       AdminArea.users => AdminUsersSection(
         controller: controller,

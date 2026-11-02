@@ -55,6 +55,11 @@ if (!process.env.NEORECALL_ROLE) {
       require('./services/settings/local_models_service').resumeSelected();
       const config = getConfig();
       const server = createApp().listen(config.port, config.host, () => logger.info('NeoRecall HTTP server listening', { host: config.host, port: config.port }));
+      // Looks for a newer release now and every few hours; the admin banner shows the answer.
+      const updates = require('./services/updates/update_service');
+      const checkForUpdates = () => updates.check().catch((error) => logger.warn('Update check failed', { error: error.message }));
+      setImmediate(checkForUpdates);
+      setInterval(checkForUpdates, updates.CHECK_INTERVAL_MS).unref();
       for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
     }).catch((error) => { logger.error('Server startup failed', { error }); process.exitCode = 1; });
 } else {

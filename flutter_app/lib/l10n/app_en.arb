@@ -2637,5 +2637,82 @@
         "type": "String"
       }
     }
-  }
+  },
+  "adminUpdatesTitle": "Updates",
+  "adminUpdatesHint": "NeoRecall updates itself from GitHub. Your recordings, memories and settings are kept.",
+  "adminUpdateChannel": "Channel",
+  "adminUpdateChannelHint": "Stable follows main. Beta gets new features first.",
+  "adminUpdateChannelStable": "Stable",
+  "adminUpdateChannelBeta": "Beta",
+  "adminUpdateCheckNow": "Check now",
+  "adminUpdateNeverChecked": "Not checked yet",
+  "adminUpdateUpToDate": "You have the latest version",
+  "adminUpdateCheckFailed": "Couldn't reach GitHub. Showing the last result.",
+  "adminUpdateContainerTitle": "Runs from a container image",
+  "adminUpdateContainerHint": "Update the image instead of the code inside it. Data on the volume is kept.",
+  "adminUpdateNotGitTitle": "Can't update itself",
+  "adminUpdateNotGitHint": "This install did not come from Git. Run neorecall update in a terminal.",
+  "adminUpdateDetails": "Details of the last update",
+  "adminUpdateChecked": "Checked {time}",
+  "@adminUpdateChecked": {
+    "placeholders": {
+        "time": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateReadyTitle": "Version {version} is ready",
+  "@adminUpdateReadyTitle": {
+    "placeholders": {
+        "version": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateReadySubtitle": "You have {current} · {channel} channel",
+  "@adminUpdateReadySubtitle": {
+    "placeholders": {
+        "current": {
+          "type": "String"
+        },
+        "channel": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateNow": "Update now",
+  "adminUpdateWhatsNew": "What's new",
+  "adminUpdateConfirmTitle": "Update to {version}?",
+  "@adminUpdateConfirmTitle": {
+    "placeholders": {
+        "version": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateConfirmMessage": "NeoRecall saves a backup, installs the new version and restarts. This takes a few minutes, and recording uploads wait until it is back. If anything fails, it goes back to the current version.",
+  "adminUpdatingTitle": "Updating NeoRecall",
+  "adminUpdatingToTitle": "Updating to {version}",
+  "@adminUpdatingToTitle": {
+    "placeholders": {
+        "version": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateReconnecting": "Restarting NeoRecall…",
+  "adminUpdateHandsOff": "Nothing to do here. This page reconnects by itself when NeoRecall is back.",
+  "adminUpdateDoneTitle": "Updated to {version}",
+  "@adminUpdateDoneTitle": {
+    "placeholders": {
+        "version": {
+          "type": "String"
+        }
+    }
+  },
+  "adminUpdateDoneReloading": "Reloading the app to load the new version…",
+  "adminUpdateReload": "Reload",
+  "adminUpdateFailedTitle": "The update did not finish",
+  "adminSearchUpdates": "Updates",
+  "adminSearchUpdatesKeywords": "update upgrade version channel beta stable github release new aktualisieren"
 }
