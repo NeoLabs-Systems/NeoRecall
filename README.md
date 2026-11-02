@@ -28,9 +28,13 @@
   <a href="https://discord.gg/f59rg2RwUT"><img src="https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Join the NeoLabs Discord"></a>
 </p>
 
-<p align="center">
-  <a href="docs/videos/neorecall-promo.mp4"><img src="docs/images/marketing/video-poster.jpg" alt="Watch the NeoRecall walkthrough (38 seconds)" width="100%"></a>
-</p>
+
+
+https://github.com/user-attachments/assets/eb40bc78-905b-459a-bdea-a49aba3c9c09
+
+
+
+
 
 <table>
   <tr>
@@ -69,8 +73,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/ma
 
 Then open **http://localhost:4500** once `neorecall status` reports a running service. The first account you create becomes the administrator; the app then asks for your transcription and language-model services (or an on-host model) and tests both.
 
-> [!NOTE]
-> npm registry distribution has been shut down. The installer clones NeoRecall from GitHub; npm is only used locally to install dependencies and link the `neorecall` command.
 
 ## ✨ What it does
 
