@@ -62,7 +62,8 @@ mixin AskController on ChangeNotifier {
   String _describeAskFailure(Object exception) {
     final code = exception is ApiException ? exception.code : '';
     final detail = exception.toString();
-    if (code == 'USAGE_LIMIT_EXCEEDED' || detail.contains('USAGE_LIMIT_EXCEEDED')) {
+    if (code == 'USAGE_LIMIT_EXCEEDED' ||
+        detail.contains('USAGE_LIMIT_EXCEEDED')) {
       unawaited(refreshAccountUsage(silent: true));
       return strings.usageAskLimited;
     }

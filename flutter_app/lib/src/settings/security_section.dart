@@ -129,6 +129,27 @@ class _SecuritySectionState extends State<SecuritySection> {
           eyebrow: strings.securityExportEyebrow,
           child: _exportCard(palette, ctrl),
         ),
+        // The only sign-out on a phone; on desktop it replaces the icon that
+        // sat next to the Settings button in the rail.
+        SectionCard(
+          eyebrow: strings.shellSignOut,
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  strings.settingsSignOutDescription,
+                  style: TextStyle(color: palette.textSecondary, height: 1.45),
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: () async => ctrl.logout(),
+                icon: const Icon(Icons.logout, size: 18),
+                label: Text(strings.shellSignOut),
+              ),
+            ],
+          ),
+        ),
         _dangerZone(ctrl),
       ],
     );
@@ -274,9 +295,9 @@ class _SecuritySectionState extends State<SecuritySection> {
       return;
     }
     if (saved == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(strings.securityExportSaved(saved))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(strings.securityExportSaved(saved))));
   }
 
   /// The two irreversible actions, deliberately the last thing in the last
@@ -350,12 +371,18 @@ class _SecuritySectionState extends State<SecuritySection> {
             padding: const EdgeInsets.symmetric(vertical: 18),
             child: Container(height: 1, color: palette.border),
           ),
+          // An admin deleting themselves could leave nobody able to run the
+          // server, so the server refuses it; admin is revoked first.
           _DangerAction(
             title: strings.securityDeleteAccountTitle,
-            description: strings.securityDeleteCardDescription,
+            description: ctrl.isAdmin
+                ? strings.securityDeleteAdminBlocked
+                : strings.securityDeleteCardDescription,
             actionLabel: strings.securityDeleteCardAction,
             icon: Icons.delete_forever_outlined,
-            onPressed: ctrl.loading ? null : () => _deleteAccount(ctrl),
+            onPressed: ctrl.loading || ctrl.isAdmin
+                ? null
+                : () => _deleteAccount(ctrl),
           ),
         ],
       ),

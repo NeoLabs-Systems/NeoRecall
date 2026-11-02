@@ -258,10 +258,13 @@ function requireModels(sourceModels) {
 /// Boots a real NeoRecall server against a throwaway home directory and the
 /// stub inference endpoint, and returns everything the scenario needs to talk to
 /// it. The only model files still involved are the local search embeddings.
-async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, timeoutMs }) {
+///
+/// `home` boots against an existing home instead, for a scenario that restarts
+/// the server over the data an earlier boot left (stopped with `keepHome`).
+async function startServer({ label, env = {}, mockHandlers = {}, sourceModels, timeoutMs, home: existingHome = null }) {
   requireModels(sourceModels);
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), `neorecall-${label}-`));
-  fs.symlinkSync(sourceModels, path.join(home, 'models'), 'dir');
+  const home = existingHome || fs.mkdtempSync(path.join(os.tmpdir(), `neorecall-${label}-`));
+  if (!existingHome) fs.symlinkSync(sourceModels, path.join(home, 'models'), 'dir');
   const port = await freePort();
   const mock = modelEndpointMock(mockHandlers);
   await new Promise((resolve) => mock.server.listen(0, '127.0.0.1', resolve));

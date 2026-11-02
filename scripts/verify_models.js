@@ -22,11 +22,11 @@ async function main() {
     speakerIdentity = 'ready';
   }
   process.stdout.write(`Verified ${models.manifest.models.length} model groups, 384-dimensional embeddings, sqlite-vec ${vectorVersion}, speaker identity ${speakerIdentity}.\n`);
-  // Reported, never fatal: the provider may be configured via the admin
-  // dashboard rather than the environment this command sees.
+  // Reported, never fatal: the provider may be configured on the app's Admin
+  // page rather than in the environment this command sees.
   const provider = require('../server/transcription/provider_registry').getProvider();
   if (!(await provider.ready())) {
-    process.stdout.write('No transcription provider is configured yet; set one in .env or the admin dashboard.\n');
+    process.stdout.write('No transcription provider is configured yet; set one in .env or under Admin › Providers in the app.\n');
   }
 }
 

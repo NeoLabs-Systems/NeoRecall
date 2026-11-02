@@ -261,6 +261,7 @@ class IoChunkStore implements ChunkStore, RecordingContextStore {
       await handle.close();
     }
   }
+
   @override
   Future<void> put(AudioChunk chunk, Uint8List bytes) async {
     final partial = File(p.join(_audioDirectory.path, '${chunk.id}.partial'));

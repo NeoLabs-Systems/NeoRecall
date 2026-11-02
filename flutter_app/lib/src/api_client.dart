@@ -158,7 +158,13 @@ class NeoRecallApiClient {
     }
   }
 
-  Future<dynamic> request(String method, String path, {Object? body}) async {
+  /// [timeout] replaces [requestTimeout] for a call known to take longer.
+  Future<dynamic> request(
+    String method,
+    String path, {
+    Object? body,
+    Duration? timeout,
+  }) async {
     final uri = _resolve(path);
     final headers = <String, String>{
       ..._headers,
@@ -184,6 +190,7 @@ class NeoRecallApiClient {
       responseFuture,
       method: method,
       path: path,
+      timeout: timeout,
     );
     if (response.statusCode >= 400) {
       ClientDiagnosticLog.instance.record(

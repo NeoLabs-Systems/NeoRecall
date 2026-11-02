@@ -72,7 +72,27 @@ function inference(input, { onDiagnostics } = {}) {
 const controller = new AbortController();
 spawnInferenceHost();
 scheduler.start();
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { controller.abort(); scheduler.stop(); child?.kill('SIGTERM'); });
+
+// This process owns the local language model's server: it installs, starts,
+// health-checks and restarts it whenever the local provider is selected. The HTTP
+// process only talks to it.
+const LOCAL_LLM_KEEP_MS = 5_000;
+const keepLocalLlm = async () => {
+  const providerSettings = require('../services/settings/provider_settings_service');
+  const localLlm = require('../ai/local_llm');
+  const selected = providerSettings.LLM_PROVIDERS[providerSettings.getRuntime().llm.provider]?.component === localLlm.COMPONENT_ID;
+  await localLlm.maintain({ selected });
+};
+const localLlmTimer = setInterval(() => {
+  keepLocalLlm().catch((error) => logger.warn('Could not keep the local language model running', { reason: error.message }));
+}, LOCAL_LLM_KEEP_MS);
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    controller.abort(); scheduler.stop(); clearInterval(localLlmTimer); child?.kill('SIGTERM');
+    // Not left behind: a model server outlives the process that started it.
+    require('../ai/local_llm').reset().catch(() => {});
+  });
+}
 // Written once at start-up so the top of any log answers "what is this pointed
 // at" without a database query. Never fatal: a server that cannot describe its
 // configuration should still try to run with it.

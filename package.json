@@ -1,6 +1,6 @@
 {
   "name": "neorecall",
-  "version": "0.1.2",
+  "version": "0.1.3-beta.10",
   "description": "Private, self-hosted audio memory for the NeoLabs Ecosystem",
   "license": "AGPL-3.0-only",
   "type": "commonjs",
@@ -42,6 +42,7 @@
     "test:api": "NODE_ENV=test node --test test/api/*.test.js",
     "test:e2e": "node scripts/e2e_smoke.js",
     "test:e2e:live": "node scripts/e2e_live_smoke.js",
+    "test:e2e:admin": "node scripts/e2e_admin_smoke.js",
     "load:backlog": "node scripts/load_backlog.js",
     "verify:models": "node scripts/verify_models.js",
     "verify:no-audio": "node scripts/verify_no_audio_retained.js",

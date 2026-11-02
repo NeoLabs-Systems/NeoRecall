@@ -49,6 +49,7 @@ const DATA_DIR = RUNTIME.data;
 const LOG_DIR = RUNTIME.logs;
 const ENV_FILE = RUNTIME.envFile;
 const PID_FILE = RUNTIME.pidFile;
+const UPDATE_STATUS_FILE = path.join(RUNTIME.data, 'update-status.json');
 const FLUTTER_APP_DIR = path.join(APP_DIR, 'flutter_app');
 const WEB_CLIENT_DIR = path.join(APP_DIR, 'flutter_app', 'build', 'web');
 const LANDING_DIR = path.join(APP_DIR, 'landing');
@@ -80,6 +81,7 @@ module.exports = {
   LOG_DIR,
   ENV_FILE,
   PID_FILE,
+  UPDATE_STATUS_FILE,
   FLUTTER_APP_DIR,
   WEB_CLIENT_DIR,
   LANDING_DIR,

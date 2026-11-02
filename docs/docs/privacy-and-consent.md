@@ -129,7 +129,7 @@ be a hosted API or a compatible service deployed elsewhere on a private network;
 NeoRecall cannot infer the privacy policy of that endpoint.
 
 Embeddings and search remain on the NeoRecall host. Provider API keys supplied
-through the admin dashboard are encrypted at rest and never returned to clients.
+under Admin › Providers are encrypted at rest and never returned to clients.
 Ask sends only its retrieved text context and returns cited sources.
 
 ## Downloading a copy

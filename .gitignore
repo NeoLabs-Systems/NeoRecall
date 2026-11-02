@@ -33,3 +33,4 @@ hardware/neorecall-desk/last-deploy-report.txt
 
 # Written by `flutter gen-l10n`; the generated Dart under lib/l10n/gen is committed.
 flutter_app/l10n_untranslated.json
+/videos

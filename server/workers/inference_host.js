@@ -41,8 +41,12 @@ async function transcribe(input, report = () => {}) {
     const analysisFile = getConfig().audioPreprocessTarget === 'stt+analysis' ? prepared.filename : opened.path;
     const analysis = localAnalysis.analyze(analysisFile);
     if (!analysis.hasSpeech) return [];
+    const provider = getProvider();
     let releaseReservation = () => {};
-    if (input.userId) {
+    // A budget limits what leaves the machine. A provider that runs here costs
+    // nothing external, so metering it would pause transcription for no reason.
+    const metered = provider.metered !== false;
+    if (input.userId && metered) {
       const admitted = usageLimits.enforce(input.userId, 'transcription', {
         reserve: usageLimits.transcriptionSecondsFor(input.durationMs),
       });
@@ -55,11 +59,11 @@ async function transcribe(input, report = () => {}) {
       });
     }
     try {
-      const segments = await getProvider().transcribe({
+      const segments = await provider.transcribe({
         filename: prepared.filename, channelLayout: input.channelLayout, vocabulary: input.vocabulary || [],
         vocabularyCorrectionEnabled: input.vocabularyCorrectionEnabled !== false,
       });
-      if (input.userId && input.chunkId) {
+      if (input.userId && input.chunkId && metered) {
         usageLimits.recordTranscription(input.userId, input.chunkId, input.durationMs);
       }
       if (!analysis.analyzed || !analysis.turns.length) return segments;

@@ -78,6 +78,11 @@ jobs:
           cache: true
 
       - name: Install dependencies
+        # onnxruntime-node's postinstall pulls the optional CUDA add-on from a
+        # Microsoft feed on linux/x64; CI never runs on a GPU, and that download
+        # timing out was failing installs. The CPU runtime ships in the package.
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: npm ci
 
       - name: Install Flutter dependencies

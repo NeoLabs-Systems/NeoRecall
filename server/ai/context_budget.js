@@ -1,6 +1,7 @@
 'use strict';
 
-const { getConfig, LLM_PROMPT_RESERVE_TOKENS } = require('../config');
+const { LLM_PROMPT_RESERVE_TOKENS } = require('../config');
+const limits = require('./model_limits');
 
 // How much input one request may carry, in characters.
 //
@@ -20,7 +21,7 @@ const CHARACTERS_PER_TOKEN = 3;
 // context too small to hold both an output budget and a prompt — so by the time
 // this runs there is always something left to spend.
 function inputBudgetCharacters(maxOutputTokens) {
-  const promptTokens = getConfig().llmContextSize - maxOutputTokens - LLM_PROMPT_RESERVE_TOKENS;
+  const promptTokens = limits.contextSize() - maxOutputTokens - LLM_PROMPT_RESERVE_TOKENS;
   return Math.max(1, promptTokens) * CHARACTERS_PER_TOKEN;
 }
 

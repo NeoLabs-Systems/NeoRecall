@@ -60,7 +60,10 @@ mixin CloudController on ChangeNotifier {
   Future<void> pollCloudLogin() async {
     if (!cloudConnecting && cloudLoginUrl == null) return;
     try {
-      final response = await api.request('POST', '/api/v1/cloud/nextcloud/poll');
+      final response = await api.request(
+        'POST',
+        '/api/v1/cloud/nextcloud/poll',
+      );
       _applyCloud(response);
       if (cloudConnected) _cloudPollTimer?.cancel();
     } catch (_) {
@@ -73,7 +76,11 @@ mixin CloudController on ChangeNotifier {
     cloudBusy = true;
     notifyListeners();
     try {
-      final response = await api.request('PATCH', '/api/v1/cloud', body: changes);
+      final response = await api.request(
+        'PATCH',
+        '/api/v1/cloud',
+        body: changes,
+      );
       _applyCloud(response);
       return null;
     } catch (error) {

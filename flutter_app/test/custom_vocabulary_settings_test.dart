@@ -7,7 +7,7 @@ import 'package:neorecall/l10n/gen/app_l10n.dart';
 
 void main() {
   testWidgets(
-    'custom vocabulary is clear, duplicate-aware, and saves correction preference',
+    'custom vocabulary is clear, duplicate-aware, and saves itself',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 1200);
       tester.view.devicePixelRatio = 1;
@@ -41,19 +41,23 @@ void main() {
       await tester.enterText(field, 'NeoRecall\nneorecall\nQbii Technologies');
       await tester.pump();
       expect(find.text('2/100 terms'), findsOneWidget);
+      expect(controller.lastUpdate, isNull);
+
+      // The terms save once typing pauses; there is no Save button.
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pumpAndSettle();
+      expect(controller.lastUpdate, <String, dynamic>{
+        'customVocabulary': <String>['NeoRecall', 'Qbii Technologies'],
+      });
 
       final correction = find.text('Correct close transcription misspellings');
       await tester.ensureVisible(correction);
       await tester.tap(correction);
-      final save = find.text('Save');
-      await tester.ensureVisible(save);
-      await tester.tap(save);
       await tester.pumpAndSettle();
-      expect(controller.lastUpdate?['customVocabulary'], <String>[
-        'NeoRecall',
-        'Qbii Technologies',
-      ]);
-      expect(controller.lastUpdate?['vocabularyCorrectionEnabled'], false);
+      expect(controller.lastUpdate, <String, dynamic>{
+        'vocabularyCorrectionEnabled': false,
+      });
+      expect(find.text('Save'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

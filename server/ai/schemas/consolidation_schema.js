@@ -325,6 +325,10 @@ function normalizeConsolidationTimestamps(output) {
 
 module.exports = {
   consolidationSchema,
+  conversationSection,
+  entity,
+  memory,
+  miniMemory,
   consolidationJsonSchema,
   consolidationJsonSchemaFor,
   normalizeConsolidationTimestamps,

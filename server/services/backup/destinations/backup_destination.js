@@ -18,7 +18,7 @@
 // @property {string} name             Registry name, as configured.
 // @property {() => Promise<string>} describe
 //           One human-readable line naming where artifacts land. Shown in the
-//           admin dashboard so an operator can confirm the target without
+//           Admin page so an operator can confirm the target without
 //           reading configuration.
 // @property {(source: string, key: string) => Promise<{key: string, bytes: number}>} store
 //           Uploads/copies the encrypted artifact at local path `source`.

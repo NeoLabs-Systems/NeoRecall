@@ -68,7 +68,12 @@ async function main() {
       NEORECALL_MIN_CONSOLIDATION_INTERVAL_MS: '0',
       // Long enough that the recording is still live while the chunks upload,
       // short enough that the run does not have to wait five real minutes for
-      // the conversation to settle.
+      // the conversation to settle. A conversation may only close once the hard
+      // gap has passed, and the soft gap and minimum length must sit below it,
+      // so all four move together.
+      NEORECALL_CONVERSATION_HARD_GAP_MS: '15000',
+      NEORECALL_CONVERSATION_SOFT_GAP_MS: '5000',
+      NEORECALL_CONVERSATION_MINIMUM_MS: '5000',
       NEORECALL_CONVERSATION_QUIET_CLOSE_MS: '15000',
       NEORECALL_SCHEDULER_INTERVAL_MS: '2000',
     },

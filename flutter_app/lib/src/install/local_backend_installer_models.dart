@@ -50,7 +50,6 @@ class LocalBackendInstallResult {
     required this.sourceDirectory,
     required this.channel,
     required this.serverVersion,
-    this.adminApiKey,
     this.cliLinked = true,
   });
 
@@ -58,11 +57,6 @@ class LocalBackendInstallResult {
   final String sourceDirectory;
   final LocalBackendChannel channel;
   final String serverVersion;
-
-  /// The server's administrator API key, read from `~/.neorecall/.env`. It lets
-  /// this app configure transcription and language-model services without the
-  /// admin web dashboard. Null when the key could not be read.
-  final String? adminApiKey;
 
   /// False when the global `neorecall` command could not be linked. The server
   /// still runs; only the terminal shortcut is missing.

@@ -62,7 +62,7 @@ async function main() {
   await Promise.all([pump(), pump()]);
   const endedAt = new Date(Date.parse(startedAt) + count * chunkDuration).toISOString();
   await json('PATCH', `/api/v1/ingest/sessions/${sessionId}`, authToken, { endedAt, status: 'ended', sources: [{ id: sourceId, finalSequence: count - 1 }] });
-  process.stdout.write(`Queued ${count} chunks in recording ${sessionId}. Monitor /admin for drain time.\n`);
+  process.stdout.write(`Queued ${count} chunks in recording ${sessionId}. Monitor Admin › Overview in the app for drain time.\n`);
 }
 
 main().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });

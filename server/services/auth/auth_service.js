@@ -8,6 +8,7 @@ const { randomToken, sha256, hashPassword, verifyPassword, encryptString, decryp
 const { generateSecret, otpauthUri, verifyTotp, normalizeTotpCode } = require('../../utils/totp');
 const { generateRecoveryCodes, lockAfterInvalidAttempt } = require('./two_factor_policy');
 const audit = require('../audit/audit_service');
+const { isReservedAdminUsername } = require('./admin_access_service');
 
 function publicUser(user) {
   return user && { id: user.id, username: user.username, email: user.email, role: user.role, createdAt: user.created_at };
@@ -33,6 +34,11 @@ async function register({ username, email, password }, context = {}) {
   if (String(password || '').length < 12) throw new HttpError(400, 'WEAK_PASSWORD', 'Password must contain at least 12 characters.');
   const db = getDatabase();
   if (db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(normalizedUsername)) throw new HttpError(409, 'USERNAME_TAKEN', 'This username is already in use.');
+  // Said plainly so the operator who listed the name knows why: a listed name
+  // is only granted to an account that already exists.
+  if (isReservedAdminUsername(normalizedUsername)) {
+    throw new HttpError(409, 'USERNAME_RESERVED', 'This username is reserved by the server configuration (NEORECALL_ADMIN_USERS). Choose another one, or remove it from that list to register it.');
+  }
   if (normalizedEmail && db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(normalizedEmail)) throw new HttpError(409, 'EMAIL_TAKEN', 'This email is already in use.');
   const passwordHash = await hashPassword(password);
   const id = crypto.randomUUID();
@@ -275,6 +281,11 @@ async function eraseContent(userId, password, code) {
 
 async function deleteAccount(userId, password, code) {
   const db = getDatabase();
+  // An admin deleting themselves could leave nobody able to open the Admin
+  // page, so admin is removed from the operator side first.
+  if (db.prepare('SELECT role FROM users WHERE id = ?').get(userId)?.role === 'admin') {
+    throw new HttpError(403, 'ADMIN_SELF_DELETE', 'Admin accounts can’t delete themselves. Ask whoever runs this server to revoke admin with `neorecall admin revoke <username>` first.');
+  }
   await verifyIdentity(db, userId, password, code);
   const paths = storedFilePaths(db, userId);
   for (const row of paths) require('../ingest/temp_audio_service').unlinkStrict(row.temporary_path);
@@ -286,7 +297,7 @@ async function deleteAccount(userId, password, code) {
     // the deleted account's identifier forward. IP and metadata go the same
     // way: they are not needed once the person is gone.
     db.prepare(`UPDATE audit_log SET actor_id=NULL, ip_address=NULL, metadata_json=NULL, resource_id=NULL
-      WHERE actor_type='user' AND actor_id=?`).run(userId);
+      WHERE actor_type IN ('user','admin') AND actor_id=?`).run(userId);
     db.prepare(`UPDATE audit_log SET ip_address=NULL, metadata_json=NULL
       WHERE affected_user_id=?`).run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);

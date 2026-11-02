@@ -54,4 +54,5 @@ router.get('/processing-status', requireAuth, (req, res, next) => {
 router.use('/sources', require('./sources'));
 router.use('/integrations', require('./integrations'));
 router.use('/cloud', require('./cloud'));
+router.use('/admin', require('./admin'));
 module.exports = router;

@@ -1,31 +1,28 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'main_shared.dart';
 import 'main_theme.dart';
-import 'src/install/admin_provider_client.dart';
+import 'src/admin/admin_provider_client.dart';
+import 'src/api_client.dart';
 import 'l10n/gen/app_l10n.dart';
 
 /// Configures the transcription and language-model services a NeoRecall server
-/// uses, without the admin web dashboard. Used both at the end of a local
-/// install and from Settings afterwards.
+/// uses. Lives on Admin › Providers, where the first admin lands straight after
+/// this app installs a server.
 class ProviderSetupPanel extends StatefulWidget {
   const ProviderSetupPanel({
     super.key,
     required this.client,
-    this.onFinished,
-    this.finishLabel,
-    this.showSkip = false,
-    this.onSkip,
+    this.onAccessRevoked,
   });
 
   final AdminProviderClient client;
 
-  /// Called once both services are saved (and, when the person asked for it,
-  /// tested).
-  final VoidCallback? onFinished;
-  final String? finishLabel;
-  final bool showSkip;
-  final VoidCallback? onSkip;
+  /// Called when the server answers that this account is no longer an admin.
+  final VoidCallback? onAccessRevoked;
 
   @override
   State<ProviderSetupPanel> createState() => _ProviderSetupPanelState();
@@ -43,6 +40,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   String? _error;
   String? _saved;
   ProviderTestReport? _report;
+  List<LocalModelStatus> _localModels = const <LocalModelStatus>[];
+  Timer? _localPoll;
 
   @override
   void initState() {
@@ -52,6 +51,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
 
   @override
   void dispose() {
+    _localPoll?.cancel();
     _transcription.dispose();
     _llm.dispose();
     super.dispose();
@@ -74,13 +74,51 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _llm.adopt(snapshot.llm, snapshot.llmCatalog);
         _loading = false;
       });
-    } on AdminProviderException catch (error) {
+      unawaited(_refreshLocalModels());
+    } on ApiException catch (error) {
       if (!mounted) return;
+      _noteAccess(error);
       setState(() {
         _error = error.message;
         _loading = false;
       });
     }
+  }
+
+  /// How far each model that runs on the server has got. A server that cannot
+  /// answer this simply has nothing to show; the rest of the form still works.
+  Future<void> _refreshLocalModels() async {
+    try {
+      final models = await widget.client.localModels();
+      if (!mounted) return;
+      setState(() => _localModels = models);
+    } on ApiException catch (error) {
+      _noteAccess(error);
+    }
+    _scheduleLocalPoll();
+  }
+
+  /// Follows a download while one is running; stops when none is.
+  void _scheduleLocalPoll() {
+    _localPoll?.cancel();
+    if (!mounted || !_localModels.any((model) => model.installing)) return;
+    _localPoll = Timer(const Duration(seconds: 2), _refreshLocalModels);
+  }
+
+  Future<void> _installLocalModel(String id) async {
+    try {
+      await widget.client.installLocalModel(id);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      _noteAccess(error);
+      setState(() => _error = error.message);
+      return;
+    }
+    await _refreshLocalModels();
+  }
+
+  void _noteAccess(ApiException error) {
+    if (error.code == 'ADMIN_REQUIRED') widget.onAccessRevoked?.call();
   }
 
   Future<void> _discover(_WorkloadFormState form) async {
@@ -103,8 +141,9 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
           form.model.text = models.first;
         }
       });
-    } on AdminProviderException catch (error) {
+    } on ApiException catch (error) {
       if (!mounted) return;
+      _noteAccess(error);
       setState(() {
         form.discoveryError = error.message;
         form.discovering = false;
@@ -121,15 +160,25 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
     if (entry.baseUrlRequired && form.baseUrl.text.trim().isEmpty) {
       return strings.providerNeedsBaseUrl(entry.label);
     }
+    // Removing the saved key is fine when the server's own configuration has
+    // one to fall back to.
     if (entry.apiKeyRequired &&
         form.apiKey.text.trim().isEmpty &&
-        !form.apiKeyAlreadyStored) {
-      return '${entry.label} needs an API key.';
+        (!form.apiKeyAlreadyStored ||
+            (form.clearApiKey && !form.environmentApiKeyConfigured))) {
+      return strings.providerNeedsApiKey(entry.label);
+    }
+    final language = form.language.text.trim();
+    if (form.isTranscription && language.isNotEmpty && language.length < 2) {
+      return strings.providerLanguageInvalid;
     }
     if (!entry.modelOptional &&
         form.model.text.trim().isEmpty &&
         (entry.defaultModel ?? '').isEmpty) {
-      return '${entry.label} needs a model.';
+      return strings.providerNeedsModel(entry.label);
+    }
+    if (!form.isTranscription && form.extraBodyProblem(strings) != null) {
+      return form.extraBodyProblem(strings);
     }
     return null;
   }
@@ -164,14 +213,66 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _saving = false;
         _saved = AppL10n.of(context).providerSaved;
       });
+      unawaited(_refreshLocalModels());
       return true;
-    } on AdminProviderException catch (error) {
+    } on ApiException catch (error) {
       if (!mounted) return false;
+      _noteAccess(error);
       setState(() {
         _error = error.message;
         _saving = false;
       });
       return false;
+    }
+  }
+
+  /// Drops everything saved from the app, so the server's `.env` applies again.
+  Future<void> _reset() async {
+    final strings = AppL10n.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.providerResetTitle),
+        content: Text(strings.providerResetBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(strings.actionCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(strings.providerResetConfirm),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+      _saved = null;
+      _report = null;
+    });
+    try {
+      final snapshot = await widget.client.reset();
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snapshot;
+        _transcription.adopt(
+          snapshot.transcription,
+          snapshot.transcriptionCatalog,
+        );
+        _llm.adopt(snapshot.llm, snapshot.llmCatalog);
+        _saving = false;
+        _saved = AppL10n.of(context).providerResetDone;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      _noteAccess(error);
+      setState(() {
+        _error = error.message;
+        _saving = false;
+      });
     }
   }
 
@@ -185,8 +286,9 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _report = report;
         _testing = false;
       });
-    } on AdminProviderException catch (error) {
+    } on ApiException catch (error) {
       if (!mounted) return;
+      _noteAccess(error);
       setState(() {
         _error = error.message;
         _testing = false;
@@ -281,22 +383,16 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
             ),
           ],
         ),
-        if (widget.onFinished != null) ...<Widget>[
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: busy ? null : widget.onFinished,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-            icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(widget.finishLabel ?? strings.providerContinue),
-          ),
-        ],
-        if (widget.showSkip) ...<Widget>[
+        if (snapshot.transcription.hasOverrides ||
+            snapshot.llm.hasOverrides) ...<Widget>[
           const SizedBox(height: 4),
-          TextButton(
-            onPressed: busy ? null : widget.onSkip,
-            child: Text(strings.providerSetUpLater),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: busy ? null : _reset,
+              icon: const Icon(Icons.settings_backup_restore_rounded, size: 18),
+              label: Text(strings.providerReset),
+            ),
           ),
         ],
       ],
@@ -362,83 +458,322 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               setState(() => form.selectProvider(value));
             },
           ),
-          if (entry != null && entry.baseUrlRequired) ...<Widget>[
+          if (entry != null && entry.local)
+            ..._localModelChildren(palette, strings, form, entry)
+          else ...<Widget>[
+            if (entry != null && entry.baseUrlRequired) ...<Widget>[
+              const SizedBox(height: 12),
+              _baseUrlField(strings, form),
+            ],
             const SizedBox(height: 12),
             TextField(
-              controller: form.baseUrl,
+              controller: form.apiKey,
+              obscureText: true,
               autocorrect: false,
+              enableSuggestions: false,
               decoration: InputDecoration(
-                labelText: strings.providerBaseUrlLabel,
-                hintText: 'https://example.com/v1',
+                labelText: form.apiKeyAlreadyStored
+                    ? strings.providerApiKeyStoredLabel
+                    : strings.providerApiKeyLabel,
               ),
             ),
-          ],
-          const SizedBox(height: 12),
-          TextField(
-            controller: form.apiKey,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: InputDecoration(
-              labelText: form.apiKeyAlreadyStored
-                  ? strings.providerApiKeyStoredLabel
-                  : strings.providerApiKeyLabel,
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: form.models.isEmpty
+                      ? TextField(
+                          controller: form.model,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: entry?.modelOptional == true
+                                ? strings.providerModelOptionalLabel
+                                : strings.providerModelLabel,
+                          ),
+                        )
+                      : DropdownButtonFormField<String>(
+                          initialValue: form.models.contains(form.model.text)
+                              ? form.model.text
+                              : null,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: strings.providerModelLabel,
+                          ),
+                          items: <DropdownMenuItem<String>>[
+                            for (final id in form.models)
+                              DropdownMenuItem<String>(
+                                value: id,
+                                child: Text(
+                                  id,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) => setState(
+                            () => form.model.text = value ?? form.model.text,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton(
+                  onPressed: form.discovering ? null : () => _discover(form),
+                  child: form.discovering
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(strings.providerFindModels),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: form.models.isEmpty
-                    ? TextField(
-                        controller: form.model,
-                        autocorrect: false,
-                        decoration: InputDecoration(
-                          labelText: entry?.modelOptional == true
-                              ? strings.providerModelOptionalLabel
-                              : strings.providerModelLabel,
-                        ),
-                      )
-                    : DropdownButtonFormField<String>(
-                        initialValue: form.models.contains(form.model.text)
-                            ? form.model.text
-                            : null,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: strings.providerModelLabel,
-                        ),
-                        items: <DropdownMenuItem<String>>[
-                          for (final id in form.models)
-                            DropdownMenuItem<String>(
-                              value: id,
-                              child: Text(id, overflow: TextOverflow.ellipsis),
-                            ),
-                        ],
-                        onChanged: (value) => setState(
-                          () => form.model.text = value ?? form.model.text,
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton(
-                onPressed: form.discovering ? null : () => _discover(form),
-                child: form.discovering
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(strings.providerFindModels),
+            if (form.discoveryError != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                form.discoveryError!,
+                style: TextStyle(color: palette.warning, fontSize: 11),
               ),
             ],
+            if (form.apiKeySource != 'none') ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                form.apiKeySource == 'admin'
+                    ? strings.providerKeySourceSaved
+                    : strings.providerKeySourceServer,
+                style: TextStyle(color: palette.textMuted, fontSize: 11),
+              ),
+            ],
+            _advanced(palette, strings, form, entry),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// What replaces the endpoint, key and model fields for a provider that runs on
+  /// this server: whether it is downloaded, and for speech, the language.
+  List<Widget> _localModelChildren(
+    NeoRecallPalette palette,
+    AppL10n strings,
+    _WorkloadFormState form,
+    ProviderCatalogEntry entry,
+  ) {
+    LocalModelStatus? status;
+    for (final model in _localModels) {
+      if (model.id == entry.component) status = model;
+    }
+    final muted = TextStyle(
+      color: palette.textMuted,
+      fontSize: 11,
+      height: 1.4,
+    );
+    return <Widget>[
+      const SizedBox(height: 12),
+      if (status != null) _localStatus(palette, strings, status),
+      if (form.isTranscription) ...<Widget>[
+        const SizedBox(height: 12),
+        TextField(
+          controller: form.language,
+          autocorrect: false,
+          decoration: InputDecoration(
+            labelText: strings.providerLanguageLabel,
+            helperText: status == null || status.languages.isEmpty
+                ? null
+                : strings.providerLocalLanguages(
+                    status.languages
+                        .map((code) => code.toUpperCase())
+                        .join(', '),
+                  ),
+            helperMaxLines: 3,
           ),
-          if (form.discoveryError != null) ...<Widget>[
-            const SizedBox(height: 8),
-            Text(
-              form.discoveryError!,
-              style: TextStyle(color: palette.warning, fontSize: 11),
+        ),
+      ],
+      const SizedBox(height: 10),
+      Text(
+        form.isTranscription
+            ? strings.providerLocalSpeechNote
+            : strings.providerLocalLlmNote,
+        style: muted,
+      ),
+      if (status != null && status.license.isNotEmpty) ...<Widget>[
+        const SizedBox(height: 6),
+        Text(strings.providerLocalLicense(status.license), style: muted),
+      ],
+    ];
+  }
+
+  Widget _localStatus(
+    NeoRecallPalette palette,
+    AppL10n strings,
+    LocalModelStatus status,
+  ) {
+    final style = TextStyle(
+      color: palette.textSecondary,
+      fontSize: 12,
+      height: 1.4,
+    );
+    Widget line(IconData icon, Color color, String text) => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: style)),
+      ],
+    );
+    Widget action(String label) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton(
+          onPressed: () => _installLocalModel(status.id),
+          child: Text(label),
+        ),
+      ),
+    );
+    switch (status.phase) {
+      case 'installed':
+        return line(
+          Icons.check_circle_outline,
+          palette.success,
+          strings.providerLocalInstalled,
+        );
+      case 'installing':
+        final percent = status.percent ?? 0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(strings.providerLocalDownloading('$percent'), style: style),
+            const SizedBox(height: 6),
+            LinearProgressIndicator(value: percent / 100),
+          ],
+        );
+      case 'failed':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            line(
+              Icons.error_outline,
+              palette.danger,
+              strings.providerLocalFailed(status.error ?? ''),
+            ),
+            action(strings.providerLocalRetry),
+          ],
+        );
+      case 'unsupported':
+        return line(
+          Icons.block,
+          palette.warning,
+          strings.providerLocalUnsupported(status.reason ?? ''),
+        );
+      default:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            line(
+              Icons.download_outlined,
+              palette.textMuted,
+              strings.providerLocalNotInstalled(
+                _formatBytes(status.downloadBytes),
+              ),
+            ),
+            action(strings.providerLocalDownloadNow),
+          ],
+        );
+    }
+  }
+
+  Widget _baseUrlField(AppL10n strings, _WorkloadFormState form) => TextField(
+    controller: form.baseUrl,
+    autocorrect: false,
+    keyboardType: TextInputType.url,
+    decoration: InputDecoration(
+      labelText: form.isTranscription
+          ? strings.providerTranscriptionEndpointLabel
+          : strings.providerBaseUrlLabel,
+      hintText: 'https://example.com/v1',
+    ),
+  );
+
+  /// The values most setups never touch: an endpoint for a provider that has a
+  /// default one, the request details a particular model needs, and removing a
+  /// key saved from the app.
+  Widget _advanced(
+    NeoRecallPalette palette,
+    AppL10n strings,
+    _WorkloadFormState form,
+    ProviderCatalogEntry? entry,
+  ) {
+    return Theme(
+      // An ExpansionTile draws dividers above and below itself by default,
+      // which doubled the card's border.
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 4),
+        title: Text(
+          strings.providerAdvanced,
+          style: TextStyle(color: palette.textSecondary, fontSize: 13),
+        ),
+        children: <Widget>[
+          if (entry != null && !entry.baseUrlRequired) ...<Widget>[
+            _baseUrlField(strings, form),
+            const SizedBox(height: 12),
+          ],
+          if (form.isTranscription) ...<Widget>[
+            TextField(
+              controller: form.language,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: strings.providerLanguageLabel,
+                helperText: strings.providerLanguageHelp,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: form.responseFormat,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: strings.providerResponseFormatLabel,
+              ),
+            ),
+          ] else ...<Widget>[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: form.skipThinking,
+              onChanged: (value) => setState(() => form.setSkipThinking(value)),
+              title: Text(strings.providerSkipThinking),
+              subtitle: Text(strings.providerSkipThinkingHelp),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: form.extraBody,
+              autocorrect: false,
+              enableSuggestions: false,
+              minLines: 2,
+              maxLines: 6,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              onChanged: (_) => setState(form.syncSkipThinking),
+              decoration: InputDecoration(
+                labelText: strings.providerExtraBodyLabel,
+                helperText: strings.providerExtraBodyHelp,
+                helperMaxLines: 3,
+                hintText: '{"top_p": 0.9}',
+                errorText: form.extraBodyProblem(strings),
+              ),
             ),
           ],
+          if (form.apiKeySource == 'admin')
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: form.clearApiKey,
+              onChanged: (value) =>
+                  setState(() => form.clearApiKey = value ?? false),
+              title: Text(strings.providerClearKey),
+            ),
         ],
       ),
     );
@@ -486,6 +821,16 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   }
 }
 
+/// A download size as a person reads it: `1.7 GB`, `17 MB`.
+String _formatBytes(int bytes) {
+  if (bytes >= 1e9) return '${(bytes / 1e9).toStringAsFixed(1)} GB';
+  return '${(bytes / 1e6).round()} MB';
+}
+
+/// What skipping a model's thinking step adds to every request.
+const String _thinkingKwargs = 'chat_template_kwargs';
+const String _enableThinking = 'enable_thinking';
+
 class _WorkloadFormState {
   _WorkloadFormState({required this.workload});
 
@@ -493,10 +838,24 @@ class _WorkloadFormState {
   final TextEditingController model = TextEditingController();
   final TextEditingController baseUrl = TextEditingController();
   final TextEditingController apiKey = TextEditingController();
+  final TextEditingController language = TextEditingController();
+  final TextEditingController responseFormat = TextEditingController();
+  final TextEditingController extraBody = TextEditingController();
   List<ProviderCatalogEntry> catalog = const <ProviderCatalogEntry>[];
   List<String> models = const <String>[];
   String? provider;
   bool apiKeyAlreadyStored = false;
+  String apiKeySource = 'none';
+  bool environmentApiKeyConfigured = false;
+  bool clearApiKey = false;
+
+  /// Where each loaded value came from, and the values themselves, so a value
+  /// from the server's configuration is only sent once someone changes it.
+  Map<String, String> sources = const <String, String>{};
+  String _loadedLanguage = '';
+  String _loadedResponseFormat = '';
+  String _loadedExtraBody = '';
+  bool skipThinking = false;
   bool discovering = false;
   String? discoveryError;
 
@@ -530,16 +889,101 @@ class _WorkloadFormState {
         : (entries.isEmpty ? null : entries.first.id);
     model.text = settings.model ?? '';
     baseUrl.text = settings.baseUrl ?? '';
+    apiKey.clear();
     apiKeyAlreadyStored = settings.apiKeyConfigured;
+    apiKeySource = settings.apiKeySource;
+    environmentApiKeyConfigured = settings.environmentApiKeyConfigured;
+    clearApiKey = false;
+    models = const <String>[];
+    _adoptDetails(settings);
   }
 
   void adoptSaved(ProviderWorkloadSettings settings) {
     apiKeyAlreadyStored = settings.apiKeyConfigured;
+    apiKeySource = settings.apiKeySource;
+    environmentApiKeyConfigured = settings.environmentApiKeyConfigured;
+    clearApiKey = false;
     // A saved key is stored server-side; keeping it in the field would only
     // re-send the same secret on the next save.
     apiKey.clear();
     model.text = settings.model ?? model.text;
     baseUrl.text = settings.baseUrl ?? baseUrl.text;
+    _adoptDetails(settings);
+  }
+
+  void _adoptDetails(ProviderWorkloadSettings settings) {
+    sources = settings.sources;
+    language.text = settings.language ?? '';
+    responseFormat.text = settings.responseFormat ?? '';
+    final body = settings.extraBody;
+    extraBody.text = body == null || body.isEmpty
+        ? ''
+        : const JsonEncoder.withIndent('  ').convert(body);
+    _loadedLanguage = language.text;
+    _loadedResponseFormat = responseFormat.text;
+    _loadedExtraBody = extraBody.text;
+    syncSkipThinking();
+  }
+
+  /// Sent when it is an override already, or when someone changed it here.
+  bool _sends(String field, String loaded, String current) =>
+      sources[field] == 'admin' || current.trim() != loaded.trim();
+
+  /// The extra request JSON as typed, or null when the field is empty.
+  /// Throws [FormatException] when it is not a JSON object.
+  Map<String, dynamic>? _parsedExtraBody() {
+    final raw = extraBody.text.trim();
+    if (raw.isEmpty) return null;
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) throw const FormatException('not an object');
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  String? extraBodyProblem(AppL10n l10n) {
+    try {
+      _parsedExtraBody();
+      return null;
+    } on FormatException {
+      return l10n.providerExtraBodyInvalid;
+    }
+  }
+
+  /// Keeps the switch in step with JSON typed by hand.
+  void syncSkipThinking() {
+    try {
+      final kwargs = _parsedExtraBody()?[_thinkingKwargs];
+      skipThinking = kwargs is Map && kwargs[_enableThinking] == false;
+    } on FormatException {
+      // Leave the switch as it was until the JSON parses again.
+    }
+  }
+
+  /// Writes the switch into the JSON, or takes it back out, leaving every
+  /// other field as it was.
+  void setSkipThinking(bool value) {
+    Map<String, dynamic> body;
+    try {
+      body = _parsedExtraBody() ?? <String, dynamic>{};
+    } on FormatException {
+      return;
+    }
+    final kwargs = Map<String, dynamic>.from(
+      body[_thinkingKwargs] as Map? ?? const <String, dynamic>{},
+    );
+    if (value) {
+      kwargs[_enableThinking] = false;
+    } else {
+      kwargs.remove(_enableThinking);
+    }
+    if (kwargs.isEmpty) {
+      body.remove(_thinkingKwargs);
+    } else {
+      body[_thinkingKwargs] = kwargs;
+    }
+    skipThinking = value;
+    extraBody.text = body.isEmpty
+        ? ''
+        : const JsonEncoder.withIndent('  ').convert(body);
   }
 
   void selectProvider(String value) {
@@ -551,18 +995,44 @@ class _WorkloadFormState {
     baseUrl.text = entry?.defaultBaseUrl ?? '';
     apiKey.clear();
     apiKeyAlreadyStored = false;
+    apiKeySource = 'none';
+    // Unknown for a provider the server was not pointed at; the server looks
+    // up its keys again on save.
+    environmentApiKeyConfigured = false;
+    clearApiKey = false;
+    if (isTranscription) {
+      responseFormat.text = entry?.defaultResponseFormat ?? '';
+    }
   }
 
+  /// Every value the workload has, so saving never resets one the form did
+  /// not show. Only called once [extraBodyProblem] is null.
   ProviderSelection selection() => ProviderSelection(
     provider: provider!,
     model: model.text.trim(),
     baseUrl: baseUrl.text.trim(),
     apiKey: apiKey.text.trim(),
+    clearApiKey: clearApiKey,
+    language: _sends('language', _loadedLanguage, language.text)
+        ? language.text.trim()
+        : null,
+    responseFormat:
+        _sends('responseFormat', _loadedResponseFormat, responseFormat.text)
+        ? responseFormat.text.trim()
+        : null,
+    extraBody:
+        isTranscription ||
+            !_sends('extraBody', _loadedExtraBody, extraBody.text)
+        ? null
+        : _parsedExtraBody(),
   );
 
   void dispose() {
     model.dispose();
     baseUrl.dispose();
     apiKey.dispose();
+    language.dispose();
+    responseFormat.dispose();
+    extraBody.dispose();
   }
 }

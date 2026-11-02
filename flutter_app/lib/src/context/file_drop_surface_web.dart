@@ -126,22 +126,26 @@ class _BrowserFileDropSurface implements FileDropSurface {
   Future<Uint8List> _read(html.File file) async {
     final html.FileReader reader = html.FileReader();
     final Completer<Uint8List> completer = Completer<Uint8List>();
-    unawaited(reader.onLoadEnd.first.then((html.Event _) {
-      if (completer.isCompleted) return;
-      final Object? result = reader.result;
-      if (result is Uint8List) {
-        completer.complete(result);
-      } else if (result is ByteBuffer) {
-        completer.complete(result.asUint8List());
-      } else if (result is List<int>) {
-        completer.complete(Uint8List.fromList(result));
-      } else {
-        completer.completeError(_unreadable(file));
-      }
-    }));
-    unawaited(reader.onError.first.then((html.Event _) {
-      if (!completer.isCompleted) completer.completeError(_unreadable(file));
-    }));
+    unawaited(
+      reader.onLoadEnd.first.then((html.Event _) {
+        if (completer.isCompleted) return;
+        final Object? result = reader.result;
+        if (result is Uint8List) {
+          completer.complete(result);
+        } else if (result is ByteBuffer) {
+          completer.complete(result.asUint8List());
+        } else if (result is List<int>) {
+          completer.complete(Uint8List.fromList(result));
+        } else {
+          completer.completeError(_unreadable(file));
+        }
+      }),
+    );
+    unawaited(
+      reader.onError.first.then((html.Event _) {
+        if (!completer.isCompleted) completer.completeError(_unreadable(file));
+      }),
+    );
     reader.readAsArrayBuffer(file);
     return completer.future;
   }

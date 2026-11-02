@@ -12,7 +12,7 @@ ENV NODE_ENV=production \
     NEORECALL_HOST=0.0.0.0 \
     NEORECALL_PORT=4500 \
     NEORECALL_REQUIRE_VECTOR=true
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini libgomp1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/neorecall
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

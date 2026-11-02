@@ -38,4 +38,17 @@ function requireSession(req, _res, next) {
   return next(new HttpError(403, 'SESSION_REQUIRED', 'An interactive user session is required for this operation.'));
 }
 
-module.exports = { bearer, requireAuth, requireScope, requireAnyScope, requireSession };
+// Admin is the account's role, which authenticateToken reads from the users row
+// on every request rather than from anything cached in the token, so revoking it
+// locks the account out of admin routes at once. Only an interactive session
+// qualifies: API keys and OAuth tokens act for integrations, not for the person
+// running the server.
+function requireAdmin(req, _res, next) {
+  if (req.auth?.type !== 'session') {
+    return next(new HttpError(403, 'SESSION_REQUIRED', 'An interactive user session is required for this operation.'));
+  }
+  if (req.user?.role !== 'admin') return next(new HttpError(403, 'ADMIN_REQUIRED', 'Admin access is required.'));
+  return next();
+}
+
+module.exports = { bearer, requireAuth, requireScope, requireAnyScope, requireSession, requireAdmin };

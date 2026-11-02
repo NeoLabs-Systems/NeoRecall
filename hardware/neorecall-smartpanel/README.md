@@ -112,7 +112,7 @@ re-applies the Wi-Fi credentials.
 ### Creating the API key in NeoRecall
 
 Create an API key with at least the **`ingest:write`** scope (that scope also
-permits the one-time device registration). In the NeoRecall app/admin this is
+permits the one-time device registration). In the NeoRecall app this is
 the standard "API keys" flow; the key looks like `nrk_ab12cd_…`. Paste it into
 the panel's setup page. **Prefer an API key over username/password** — it works
 with 2FA-enabled accounts and is not subject to session expiry. The panel then

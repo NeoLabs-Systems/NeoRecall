@@ -155,8 +155,9 @@ same timeline, each returned segment is joined to the speaker turn it overlaps
 most and inherits that turn's embedding.
 
 That split is deliberate and is drawn by capability rather than by size. Speech
-recognition and language generation are gigabytes and are exactly what an
-external service does well, so NeoRecall installs and runs neither. Speech
+recognition and language generation are what an external service does well, so by
+default NeoRecall installs and runs neither (an operator who wants them on the
+host can choose the optional local providers described under *Local models*). Speech
 detection and diarization are 31 MB and produce the one thing no service returns:
 a voice fingerprint, which is what identifies the same person in a recording made
 weeks later. The native runtime for them is an optional dependency — where it is
@@ -227,10 +228,11 @@ anything new.
 
 ## Generation
 
-Language-model requests always go to the configured external provider. The
-provider may be a hosted API or a compatible service the operator deployed on a
-different machine. NeoRecall stores request state and validates responses, but
-does not install, load, or execute generation weights.
+Language-model requests go to the configured provider. The provider may be a
+hosted API, a compatible service the operator deployed on a different machine, or
+the optional local model (see *Local models*). In every case NeoRecall stores
+request state and validates responses the same way, and by default it does not
+install, load, or execute generation weights.
 
 Every request asks for structured JSON, and the returned value is checked
 against the same server-owned schema before it can change durable state. Prose
@@ -247,6 +249,71 @@ answer, so a long occasion still yields exactly one section and one memory. A
 transcript that fits is a single request and behaves as it always did. A prompt
 that cannot fit at all is refused before generation rather than silently losing
 the beginning of the transcript to a context shift.
+
+## Local models
+
+Two providers run on the host itself for operators who want nothing to leave it:
+Whistle for transcription and Gemma 2 2B for generation. They are a choice made on
+the Providers screen, not a different pipeline — each sits behind the same
+interface as the external services (`TranscriptionProvider`, and the
+OpenAI-compatible request path), so conditioning, speaker alignment, vocabulary
+correction, schema validation and persistence are shared and neither knows which
+provider answered.
+
+Everything about *getting and keeping them running* is generic and lives in
+`server/local_runtime`:
+
+- `models/local_runtimes.json` pins every artifact by URL, size and SHA-256 per
+  platform, in three types — a plain file, a tar archive, a member of a zip. Adding
+  a model is data plus a smoke test, not new download code.
+- `ComponentInstaller` downloads, verifies and unpacks them. Downloads resume,
+  abandon a stalled connection and retry with growing delays; each artifact skips
+  what is already correct; nothing is *installed* until the component's own smoke
+  test has started it and made it answer. State is a file beside the artifacts and
+  a lock file serializes installers across the HTTP and worker processes, which is
+  why either can start an install and either can report on it. A fingerprint of
+  the pinned hashes ties an installation to the manifest, so changing a pin makes
+  every existing install fetch only what changed.
+- `ManagedProcess` keeps a child alive: readiness, restart with backoff,
+  replacement of a process that is alive but not answering, and stop.
+
+Readiness gates work the way it already did for external providers. A local
+provider reports itself not ready until its model is installed and running, the
+worker manager does not lease transcription jobs while that is false, and audio
+therefore stays on the client's ledger rather than being consumed by a model that
+cannot read it. Selecting a local provider starts its installation without further
+action, and so does restarting the server partway through one.
+
+**Whistle** is a C library driven by a stdlib-only Python worker over JSON lines,
+under a pinned interpreter the installer fetches, so the host needs no Python. It
+is resident, because it is 17 MB and an always-on recorder uses it every chunk.
+Requests are strictly serial — the engine is not thread-safe — and one that does
+not answer is replaced rather than awaited. The model reads at most thirty seconds
+per pass, so a chunk is cut into windows at the quietest moment before the limit
+(signal energy, no language), and the returned words are grouped back into
+utterance-sized segments by sentence-final punctuation, silence and a duration
+ceiling, because each segment is later joined to the speaker turn it overlaps
+most. It costs nothing external, so it is exempt from the transcription budget.
+
+**Gemma** runs as a `llama-server` on loopback that the *worker process* owns: the
+HTTP process (Ask) and the worker (consolidation) both use it, so one server has
+one owner, and a worker restarted after a hard kill adopts the server it left
+behind instead of fighting for the port. Because it speaks the OpenAI
+chat-completions protocol the existing provider is reused unchanged; the local
+wrapper only waits for the server to be up and moves system instructions into the
+first user turn, since Gemma's template has no system role. Its eight-thousand
+token context is a fact about the model, so the manifest carries it as a profile
+and `ai/model_limits` caps the configured budgets to it while it is selected —
+only ever lowering them.
+
+The two are treated differently on purpose. A model should not stay resident when
+nothing needs it, but the saving has to exceed the cost of loading it again.
+Gemma holds about two gigabytes, its work arrives in bursts (a conversation
+closing, an Ask), and a reload costs seconds against minutes of generation, so it
+unloads itself after an idle period — llama.cpp's own sleep mode, which keeps the
+process up and lets both server processes use it without coordinating. Whistle
+holds seventeen megabytes and is called continuously; unloading it would save
+nothing and add latency to every chunk.
 
 ## Memory scheduling
 

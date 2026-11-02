@@ -41,7 +41,9 @@ class _NextcloudSectionCardState extends State<NextcloudSectionCard> {
       child: AnimatedBuilder(
         animation: ctrl,
         builder: (context, _) {
-          if (ctrl.loadingCloud && !ctrl.cloudConnected && !ctrl.cloudConnecting) {
+          if (ctrl.loadingCloud &&
+              !ctrl.cloudConnected &&
+              !ctrl.cloudConnecting) {
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Center(child: CircularProgressIndicator()),
@@ -97,9 +99,9 @@ class _NextcloudSectionCardState extends State<NextcloudSectionCard> {
               : () async {
                   final error = await ctrl.startCloudLogin(_urlController.text);
                   if (!mounted || error == null) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(error)),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text(error)));
                 },
           icon: const Icon(Icons.login, size: 18),
           label: Text(l10n.cloudSignIn),
@@ -193,9 +195,7 @@ class _NextcloudSectionCardState extends State<NextcloudSectionCard> {
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(
-                            error ?? l10n.cloudBackupQueued,
-                          ),
+                          content: Text(error ?? l10n.cloudBackupQueued),
                         ),
                       );
                     },

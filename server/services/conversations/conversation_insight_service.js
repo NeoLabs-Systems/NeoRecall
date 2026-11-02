@@ -8,6 +8,7 @@ const settings = require('../settings/settings_service');
 const ai = require('../../ai/ai_engine');
 const aiProviders = require('../../ai/provider_registry');
 const { inputBudgetCharacters } = require('../../ai/context_budget');
+const limits = require('../../ai/model_limits');
 const material = require('./conversation_material_service');
 const contextMaterial = require('../context/context_material_service');
 const usageLimits = require('../usage/usage_limit_service');
@@ -46,7 +47,7 @@ function thresholds() {
     // only the speech recorded since the last one, which is normally small, but a
     // conversation whose previews kept failing can accumulate more than the model
     // can read at once.
-    budgetCharacters: inputBudgetCharacters(config.aiPreviewMaxOutputTokens),
+    budgetCharacters: inputBudgetCharacters(limits.previewOutputTokens()),
     enabled: aiProviders.ready(),
   };
 }

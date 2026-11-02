@@ -267,15 +267,17 @@ void main() {
 
     expect(find.text('Connected'), findsNothing);
     expect(find.text('Account devices'), findsNothing);
-    expect(find.byTooltip('Settings'), findsOneWidget);
-    expect(find.byTooltip('Sign out'), findsOneWidget);
+    // The account button at the foot of the rail is the one way into
+    // Settings; it no longer sits beside a separate gear and sign-out icon.
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Sign out'), findsNothing);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.text('Settings'));
     // Let the shell's page cross-fade finish: while it runs, the outgoing and
     // incoming screens are both mounted and a tap lands on neither reliably.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Settings areas'), findsOneWidget);
+    expect(find.text('CAPTURE'), findsOneWidget);
     expect(find.text('Account devices'), findsOneWidget);
 
     // The rail scrolls: with ten areas it is taller than a short desktop

@@ -3,18 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'main_controller.dart';
-import 'main_provider_setup.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
-import 'src/install/admin_key_store.dart';
-import 'src/install/admin_provider_client.dart';
 import 'src/install/local_backend_installer.dart';
 import 'l10n/gen/app_l10n.dart';
 
-enum _LocalInstallPhase { choose, installing, providers, done, failed }
+enum _LocalInstallPhase { choose, installing, done, failed }
 
 /// Installs a NeoRecall server on this computer without a terminal, then points
-/// the app at it. Mirrors what `install.sh` does on the command line.
+/// the app at it. Mirrors what `install.sh` does on the command line. The
+/// account created next is the server's admin, and choosing the services it
+/// transcribes and writes with happens on Admin › Providers right after.
 class LocalInstallView extends StatefulWidget {
   const LocalInstallView({
     super.key,
@@ -45,8 +44,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   String? _errorRemedy;
   bool _showDetails = false;
   bool _connecting = false;
-  bool _keyRemembered = true;
-  AdminProviderClient? _adminClient;
 
   @override
   void initState() {
@@ -79,7 +76,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   void dispose() {
     _subscription?.cancel();
     _installer.dispose();
-    _adminClient?.dispose();
     _directory.dispose();
     super.dispose();
   }
@@ -109,37 +105,10 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         channel: _channel,
         installDirectory: _directory.text,
       );
-      final adminApiKey = result.adminApiKey;
-      var keyRemembered = adminApiKey != null;
-      if (adminApiKey != null) {
-        // Best-effort: the keychain can refuse or prompt, and a server that is
-        // installed and running must not be reported as a failed setup because
-        // its key could not be filed away. Without it, this session still
-        // configures providers; only Settings on a later launch cannot.
-        try {
-          await const AdminKeyStore()
-              .save(result.backendUrl, adminApiKey)
-              .timeout(const Duration(seconds: 10));
-        } on Object {
-          keyRemembered = false;
-        }
-      }
       if (!mounted) return;
       setState(() {
         _result = result;
-        _adminClient?.dispose();
-        _adminClient = adminApiKey == null
-            ? null
-            : AdminProviderClient(
-                backendUrl: result.backendUrl,
-                apiKey: adminApiKey,
-              );
-        // Without the administrator key there is nothing this screen can
-        // configure, so it goes straight to the finish step.
-        _keyRemembered = keyRemembered;
-        _phase = adminApiKey == null
-            ? _LocalInstallPhase.done
-            : _LocalInstallPhase.providers;
+        _phase = _LocalInstallPhase.done;
       });
     } on LocalBackendInstallerException catch (error) {
       if (!mounted) return;
@@ -250,8 +219,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         return _buildChoose(palette);
       case _LocalInstallPhase.installing:
         return _buildInstalling(palette);
-      case _LocalInstallPhase.providers:
-        return _buildProviders(palette);
       case _LocalInstallPhase.done:
         return _buildDone(palette);
       case _LocalInstallPhase.failed:
@@ -420,53 +387,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
     );
   }
 
-  Widget _buildProviders(NeoRecallPalette palette) {
-    final strings = AppL10n.of(context);
-    final result = _result;
-    final client = _adminClient;
-    if (client == null) return _buildDone(palette);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(Icons.check_circle_outline, color: palette.success),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                strings.installRunning(
-                  result == null
-                      ? ''
-                      : strings.installLocationAt(result.backendUrl),
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (!_keyRemembered) ...<Widget>[
-          const SizedBox(height: 12),
-          InlineMessage(
-            message: strings.installNoAdminKey,
-            icon: Icons.info_outline,
-          ),
-        ],
-        const SizedBox(height: 18),
-        ProviderSetupPanel(
-          client: client,
-          finishLabel: strings.installCreateAccount,
-          onFinished: _connecting ? null : _connect,
-          showSkip: true,
-          onSkip: () => setState(() => _phase = _LocalInstallPhase.done),
-        ),
-        if (widget.controller.error != null) ...<Widget>[
-          const SizedBox(height: 12),
-          InlineMessage(message: widget.controller.error!, error: true),
-        ],
-      ],
-    );
-  }
-
   Widget _buildDone(NeoRecallPalette palette) {
     final strings = AppL10n.of(context);
     final result = _result;
@@ -507,15 +427,11 @@ class _LocalInstallViewState extends State<LocalInstallView> {
           const SizedBox(height: 12),
           InlineMessage(message: widget.controller.error!, error: true),
         ],
-        if (_adminClient != null) ...<Widget>[
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () =>
-                setState(() => _phase = _LocalInstallPhase.providers),
-            icon: const Icon(Icons.tune_rounded),
-            label: Text(strings.installChooseServices),
-          ),
-        ],
+        const SizedBox(height: 12),
+        InlineMessage(
+          message: strings.installNextAccount,
+          icon: Icons.admin_panel_settings_outlined,
+        ),
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: _connecting ? null : _connect,

@@ -4,6 +4,15 @@
 // together. Caught at startup, where every one of these is a one-line fix,
 // rather than as an exception on the first conversation of the day.
 function validateConfig(config, { promptReserveTokens }) {
+  if (config.localAsrSplitSearchMs >= config.localAsrWindowMs) {
+    throw new Error('NEORECALL_LOCAL_ASR_SPLIT_SEARCH_MS must be shorter than NEORECALL_LOCAL_ASR_WINDOW_MS.');
+  }
+  if (config.localAsrSegmentMaxMs < config.localAsrSegmentGapMs) {
+    throw new Error('NEORECALL_LOCAL_ASR_SEGMENT_MAX_MS must be at least NEORECALL_LOCAL_ASR_SEGMENT_GAP_MS.');
+  }
+  if (config.localRestartMaxMs < config.localRestartBaseMs) {
+    throw new Error('NEORECALL_LOCAL_RESTART_MAX_MS must be at least NEORECALL_LOCAL_RESTART_BASE_MS.');
+  }
   if (config.speakerClusterContinuityThreshold > config.speakerClusterThreshold) {
     throw new Error('NEORECALL_SPEAKER_CLUSTER_CONTINUITY_THRESHOLD must not exceed NEORECALL_SPEAKER_CLUSTER_THRESHOLD.');
   }

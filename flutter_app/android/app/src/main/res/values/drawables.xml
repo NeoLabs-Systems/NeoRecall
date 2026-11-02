@@ -15,6 +15,8 @@
     <item name="widget_chip_muted" type="drawable">@drawable/widget_chip_muted_light</item>
     <item name="widget_divider" type="drawable">@drawable/widget_divider_light</item>
     <item name="widget_panel" type="drawable">@drawable/widget_panel_light</item>
+    <item name="widget_pill_ready" type="drawable">@drawable/widget_pill_ready_light</item>
+    <item name="widget_pill_recording" type="drawable">@drawable/widget_pill_recording_light</item>
     <item name="widget_pip_alert" type="drawable">@drawable/widget_pip_alert_light</item>
     <item name="widget_pip_off" type="drawable">@drawable/widget_pip_off_light</item>
     <item name="widget_pip_on" type="drawable">@drawable/widget_pip_on_light</item>
