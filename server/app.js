@@ -52,6 +52,7 @@ function createApp() {
     'The admin API moved to /api/v1/admin and needs a signed-in admin account. Update the NeoRecall app.')));
   app.get(/^\/admin(\/.*)?$/, (_req, res) => res.redirect(302, '/app/'));
   const appWebRoot = WEB_CLIENT_DIR;
+  require('./analytics').registerAnalytics(app, { appWebRoot, landingRoot: path.join(__dirname, '..', 'landing') });
   app.use('/app', express.static(appWebRoot, { extensions: ['html'], fallthrough: true }));
   app.use('/app', (req, res, next) => {
     if (!hasBundledWebClient(appWebRoot)) {

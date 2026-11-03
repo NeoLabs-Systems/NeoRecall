@@ -6,6 +6,8 @@
 
 <p align="center"><strong>Private audio memory you host yourself.</strong></p>
 
+Browser analytics are enabled by default and can be disabled; see [analytics](docs/docs/analytics.md).
+
 <p align="center">
   Records your day anywhere, turns every conversation into a searchable memory,<br>
   and answers from it. On your hardware, with the models you choose.
