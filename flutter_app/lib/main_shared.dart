@@ -58,7 +58,9 @@ class AppPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
         border: bordered ? Border.all(color: palette.border) : null,
       ),
-      child: child,
+      // List tiles and ink inside paint on the nearest Material, which this
+      // box's color would otherwise hide.
+      child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }
@@ -657,7 +659,7 @@ class SectionCard extends StatelessWidget {
                   style: sectionEyebrowStyle(palette),
                 ),
               ),
-              if (trailing != null) trailing!,
+              ?trailing,
             ],
           ),
           const SizedBox(height: 14),

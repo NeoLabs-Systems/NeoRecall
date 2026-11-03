@@ -1,7 +1,6 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:async';
-import 'dart:js' as js;
-import 'dart:js_util' as js_util;
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
 import '../capture/bluetooth_capture_source.dart';
@@ -76,124 +75,110 @@ class WebRecallRecorder implements RecallRecorder {
         rethrow;
       }
     }
-    final capture = js_util.getProperty<Object?>(
-      js_util.globalThis,
-      'NeoRecallCapture',
-    );
+    final capture = globalContext['NeoRecallCapture'] as JSObject?;
     if (capture == null) {
       throw StateError('NeoRecall browser audio module did not load.');
     }
-    final protocolVersion = js_util.getProperty<Object?>(
-      capture,
-      'protocolVersion',
-    );
-    final usesCallbackProtocol = protocolVersion == 2;
-    js_util.setProperty(
-      capture,
-      'onChunk',
-      usesCallbackProtocol
-          ? js.allowInterop((
-              dynamic byteValues,
-              dynamic durationMs,
-              dynamic chunkOverlapMs,
-              dynamic channelLayout,
-              dynamic chunkStartedAt,
-              dynamic monotonicOffsetMs,
-              dynamic isFinal,
-            ) {
-              _addChunk(
-                byteValues,
-                durationMs,
-                chunkOverlapMs,
-                channelLayout,
-                chunkStartedAt,
-                monotonicOffsetMs,
-                isFinal,
-              );
-            })
-          : js.allowInterop((dynamic byteValues, dynamic metadata) {
-              _addChunk(
-                byteValues,
-                js_util.getProperty<Object>(metadata, 'durationMs'),
-                js_util.getProperty<Object>(metadata, 'overlapMs'),
-                js_util.getProperty<Object>(metadata, 'channelLayout'),
-                js_util.getProperty<Object>(metadata, 'startedAt'),
-                js_util.getProperty<Object>(metadata, 'monotonicOffsetMs'),
-                js_util.getProperty<Object>(metadata, 'isFinal'),
-              );
-            }),
-    );
-    js_util.setProperty(
-      capture,
-      'onWarning',
-      js.allowInterop((dynamic value) => _warnings.add(value.toString())),
-    );
-    js_util.setProperty(
-      capture,
-      'onLevel',
-      js.allowInterop(
-        (dynamic value) => _levels.add((value as num).toDouble()),
-      ),
-    );
+    final usesCallbackProtocol = capture['protocolVersion'].dartify() == 2;
+    capture['onChunk'] = usesCallbackProtocol
+        ? ((
+            JSAny? byteValues,
+            JSAny? durationMs,
+            JSAny? chunkOverlapMs,
+            JSAny? channelLayout,
+            JSAny? chunkStartedAt,
+            JSAny? monotonicOffsetMs,
+            JSAny? isFinal,
+          ) {
+            _addChunk(
+              byteValues,
+              durationMs,
+              chunkOverlapMs,
+              channelLayout,
+              chunkStartedAt,
+              monotonicOffsetMs,
+              isFinal,
+            );
+          }).toJS
+        : ((JSAny? byteValues, JSObject metadata) {
+            _addChunk(
+              byteValues,
+              metadata['durationMs'],
+              metadata['overlapMs'],
+              metadata['channelLayout'],
+              metadata['startedAt'],
+              metadata['monotonicOffsetMs'],
+              metadata['isFinal'],
+            );
+          }).toJS;
+    capture['onWarning'] = ((JSAny? value) {
+      _warnings.add(value.toString());
+    }).toJS;
+    capture['onLevel'] = ((JSAny? value) {
+      _levels.add((value.dartify() as num).toDouble());
+    }).toJS;
     final completer = Completer<RecorderCapability>();
-    final completeCapability = js.allowInterop((
-      dynamic hasMicrophone,
-      dynamic hasSystemAudio,
-      dynamic persistentStorage,
-      dynamic sampleRate,
-      dynamic capabilityWarning,
+    void completeCapability(
+      JSAny? hasMicrophone,
+      JSAny? hasSystemAudio,
+      JSAny? persistentStorage,
+      JSAny? sampleRate,
+      JSAny? capabilityWarning,
     ) {
-      if (!completer.isCompleted) {
-        completer.complete(
-          RecorderCapability(
-            microphone: hasMicrophone as bool,
-            systemAudio: hasSystemAudio as bool,
-            persistentStorage: persistentStorage as bool,
-            sampleRate: (sampleRate as num).toInt(),
-            sourceKind: hasSystemAudio
-                ? hasMicrophone
-                      ? 'combined'
-                      : 'system'
-                : 'microphone',
-            warning: capabilityWarning as String?,
-          ),
-        );
-      }
-    });
-    final completeError = js.allowInterop((dynamic value) {
+      if (completer.isCompleted) return;
+      final microphoneGranted = hasMicrophone.dartify() as bool;
+      final systemAudioGranted = hasSystemAudio.dartify() as bool;
+      completer.complete(
+        RecorderCapability(
+          microphone: microphoneGranted,
+          systemAudio: systemAudioGranted,
+          persistentStorage: persistentStorage.dartify() as bool,
+          sampleRate: (sampleRate.dartify() as num).toInt(),
+          sourceKind: systemAudioGranted
+              ? microphoneGranted
+                    ? 'combined'
+                    : 'system'
+              : 'microphone',
+          warning: capabilityWarning.dartify() as String?,
+        ),
+      );
+    }
+
+    final completeError = ((JSAny? value) {
       if (!completer.isCompleted) {
         completer.completeError(StateError(value.toString()));
       }
-    });
+    }).toJS;
     if (usesCallbackProtocol) {
-      js_util.callMethod<Object?>(capture, 'start', <Object>[
-        microphone,
-        systemAudio,
-        chunkMs,
-        overlapMs,
-        completeCapability,
+      capture.callMethodVarArgs<JSAny?>('start'.toJS, <JSAny?>[
+        microphone.toJS,
+        systemAudio.toJS,
+        chunkMs.toJS,
+        overlapMs.toJS,
+        completeCapability.toJS,
         completeError,
       ]);
     } else {
-      final result = js_util.callMethod<Object?>(capture, 'start', <Object>[
-        js_util.jsify(<String, Object>{
+      final result = capture.callMethod<JSAny?>(
+        'start'.toJS,
+        <String, Object>{
           'microphone': microphone,
           'systemAudio': systemAudio,
           'chunkMs': chunkMs,
           'overlapMs': overlapMs,
-        }),
-      ]);
+        }.jsify(),
+      );
       _then(
         result,
-        js.allowInterop((dynamic capability) {
+        ((JSObject capability) {
           completeCapability(
-            js_util.getProperty<Object>(capability, 'microphone'),
-            js_util.getProperty<Object>(capability, 'systemAudio'),
-            js_util.getProperty<Object>(capability, 'persistentStorage'),
-            js_util.getProperty<Object>(capability, 'sampleRate'),
-            js_util.getProperty<Object?>(capability, 'warning'),
+            capability['microphone'],
+            capability['systemAudio'],
+            capability['persistentStorage'],
+            capability['sampleRate'],
+            capability['warning'],
           );
-        }),
+        }).toJS,
         completeError,
         completer,
       );
@@ -204,37 +189,37 @@ class WebRecallRecorder implements RecallRecorder {
   }
 
   void _addChunk(
-    dynamic byteValues,
-    dynamic durationMs,
-    dynamic chunkOverlapMs,
-    dynamic channelLayout,
-    dynamic chunkStartedAt,
-    dynamic monotonicOffsetMs,
-    dynamic isFinal,
+    JSAny? byteValues,
+    JSAny? durationMs,
+    JSAny? chunkOverlapMs,
+    JSAny? channelLayout,
+    JSAny? chunkStartedAt,
+    JSAny? monotonicOffsetMs,
+    JSAny? isFinal,
   ) {
-    final values = List<num>.from(js_util.dartify(byteValues) as List);
+    final values = List<num>.from(byteValues.dartify() as List);
     _chunks.add(
       RecordedAudioChunk(
         bytes: Uint8List.fromList(
           values.map((value) => value.toInt()).toList(),
         ),
-        durationMs: (durationMs as num).toInt(),
-        overlapMs: (chunkOverlapMs as num).toInt(),
-        channelLayout: channelLayout as String,
-        startedAt: DateTime.parse(chunkStartedAt as String),
-        monotonicOffsetMs: (monotonicOffsetMs as num).toInt(),
-        isFinal: isFinal as bool,
+        durationMs: (durationMs.dartify() as num).toInt(),
+        overlapMs: (chunkOverlapMs.dartify() as num).toInt(),
+        channelLayout: channelLayout.dartify() as String,
+        startedAt: DateTime.parse(chunkStartedAt.dartify() as String),
+        monotonicOffsetMs: (monotonicOffsetMs.dartify() as num).toInt(),
+        isFinal: isFinal.dartify() as bool,
       ),
     );
   }
 
   void _then<T>(
-    Object? result,
-    Object onSuccess,
-    Object onError,
+    JSAny? result,
+    JSFunction onSuccess,
+    JSFunction onError,
     Completer<T> completer,
   ) {
-    if (result == null || !js_util.hasProperty(result, 'then')) {
+    if (result == null || !(result as JSObject).has('then')) {
       if (!completer.isCompleted) {
         completer.completeError(
           StateError('NeoRecall browser audio module returned no operation.'),
@@ -242,7 +227,7 @@ class WebRecallRecorder implements RecallRecorder {
       }
       return;
     }
-    js_util.callMethod<Object?>(result, 'then', <Object>[onSuccess, onError]);
+    result.callMethod<JSAny?>('then'.toJS, onSuccess, onError);
   }
 
   @override
@@ -260,29 +245,23 @@ class WebRecallRecorder implements RecallRecorder {
       _recording = false;
       return;
     }
-    final capture = js_util.getProperty<Object?>(
-      js_util.globalThis,
-      'NeoRecallCapture',
-    );
+    final capture = globalContext['NeoRecallCapture'] as JSObject?;
     if (capture == null) {
       throw StateError('NeoRecall browser audio module did not load.');
     }
     final completer = Completer<void>();
-    final complete = js.allowInterop(([dynamic _]) {
+    final complete = (([JSAny? _]) {
       if (!completer.isCompleted) completer.complete();
-    });
-    final completeError = js.allowInterop((dynamic value) {
+    }).toJS;
+    final completeError = ((JSAny? value) {
       if (!completer.isCompleted) {
         completer.completeError(StateError(value.toString()));
       }
-    });
-    if (js_util.getProperty<Object?>(capture, 'protocolVersion') == 2) {
-      js_util.callMethod<Object?>(capture, 'stop', <Object>[
-        complete,
-        completeError,
-      ]);
+    }).toJS;
+    if (capture['protocolVersion'].dartify() == 2) {
+      capture.callMethod<JSAny?>('stop'.toJS, complete, completeError);
     } else {
-      final result = js_util.callMethod<Object?>(capture, 'stop', const []);
+      final result = capture.callMethod<JSAny?>('stop'.toJS);
       _then(result, complete, completeError, completer);
     }
     await completer.future;

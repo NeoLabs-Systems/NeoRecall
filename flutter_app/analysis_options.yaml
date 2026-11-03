@@ -11,6 +11,14 @@
 #     turning them on means six standing false positives and an `ignore:`
 #     comment habit that hides the real ones.
 #   directives_ordering — 110 findings, none of them a defect.
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

@@ -178,50 +178,66 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                TextField(
-                  controller: awaitingTwoFactor ? _twoFactor : _username,
-                  keyboardType: awaitingTwoFactor
-                      ? TextInputType.visiblePassword
-                      : TextInputType.text,
-                  autofillHints: awaitingTwoFactor
-                      ? const <String>[AutofillHints.oneTimeCode]
-                      : const <String>[AutofillHints.username],
-                  decoration: InputDecoration(
-                    labelText: awaitingTwoFactor
-                        ? strings.authTwoFactorFieldLabel
-                        : strings.authUsernameLabel,
+                AutofillGroup(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      TextField(
+                        controller: awaitingTwoFactor ? _twoFactor : _username,
+                        keyboardType: awaitingTwoFactor
+                            ? TextInputType.visiblePassword
+                            : TextInputType.text,
+                        autofillHints: awaitingTwoFactor
+                            ? const <String>[AutofillHints.oneTimeCode]
+                            : const <String>[AutofillHints.username],
+                        decoration: InputDecoration(
+                          labelText: awaitingTwoFactor
+                              ? strings.authTwoFactorFieldLabel
+                              : strings.authUsernameLabel,
+                        ),
+                      ),
+                      if (registerMode && !awaitingTwoFactor) ...<Widget>[
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _email,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const <String>[AutofillHints.email],
+                          decoration: InputDecoration(
+                            labelText: strings.authEmailLabel,
+                          ),
+                        ),
+                      ],
+                      if (!awaitingTwoFactor) ...<Widget>[
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _password,
+                          obscureText: true,
+                          autofillHints: <String>[
+                            registerMode
+                                ? AutofillHints.newPassword
+                                : AutofillHints.password,
+                          ],
+                          onSubmitted: registerMode ? null : (_) => _submit(),
+                          decoration: InputDecoration(
+                            labelText: strings.authPasswordLabel,
+                          ),
+                        ),
+                        if (registerMode) ...<Widget>[
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: _confirm,
+                            obscureText: true,
+                            autofillHints: const <String>[AutofillHints.newPassword],
+                            onSubmitted: (_) => _submit(),
+                            decoration: InputDecoration(
+                              labelText: strings.authConfirmPasswordLabel,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
                   ),
                 ),
-                if (registerMode && !awaitingTwoFactor) ...<Widget>[
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: strings.authEmailLabel,
-                    ),
-                  ),
-                ],
-                if (!awaitingTwoFactor) ...<Widget>[
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _password,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: strings.authPasswordLabel,
-                    ),
-                  ),
-                  if (registerMode) ...<Widget>[
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _confirm,
-                      obscureText: true,
-                      decoration: InputDecoration(
-                        labelText: strings.authConfirmPasswordLabel,
-                      ),
-                    ),
-                  ],
-                ],
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: controller.loading ? null : _submit,

@@ -706,75 +706,79 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
     _WorkloadFormState form,
     ProviderCatalogEntry? entry,
   ) {
-    return Theme(
-      // An ExpansionTile draws dividers above and below itself by default,
-      // which doubled the card's border.
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 4),
-        title: Text(
-          strings.providerAdvanced,
-          style: TextStyle(color: palette.textSecondary, fontSize: 13),
+    // The card's color would hide the tile's ink otherwise.
+    return Material(
+      type: MaterialType.transparency,
+      child: Theme(
+        // An ExpansionTile draws dividers above and below itself by default,
+        // which doubled the card's border.
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 4),
+          title: Text(
+            strings.providerAdvanced,
+            style: TextStyle(color: palette.textSecondary, fontSize: 13),
+          ),
+          children: <Widget>[
+            if (entry != null && !entry.baseUrlRequired) ...<Widget>[
+              _baseUrlField(strings, form),
+              const SizedBox(height: 12),
+            ],
+            if (form.isTranscription) ...<Widget>[
+              TextField(
+                controller: form.language,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: strings.providerLanguageLabel,
+                  helperText: strings.providerLanguageHelp,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: form.responseFormat,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: strings.providerResponseFormatLabel,
+                ),
+              ),
+            ] else ...<Widget>[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: form.skipThinking,
+                onChanged: (value) => setState(() => form.setSkipThinking(value)),
+                title: Text(strings.providerSkipThinking),
+                subtitle: Text(strings.providerSkipThinkingHelp),
+              ),
+              const SizedBox(height: 4),
+              TextField(
+                controller: form.extraBody,
+                autocorrect: false,
+                enableSuggestions: false,
+                minLines: 2,
+                maxLines: 6,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                onChanged: (_) => setState(form.syncSkipThinking),
+                decoration: InputDecoration(
+                  labelText: strings.providerExtraBodyLabel,
+                  helperText: strings.providerExtraBodyHelp,
+                  helperMaxLines: 3,
+                  hintText: '{"top_p": 0.9}',
+                  errorText: form.extraBodyProblem(strings),
+                ),
+              ),
+            ],
+            if (form.apiKeySource == 'admin')
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: form.clearApiKey,
+                onChanged: (value) =>
+                    setState(() => form.clearApiKey = value ?? false),
+                title: Text(strings.providerClearKey),
+              ),
+          ],
         ),
-        children: <Widget>[
-          if (entry != null && !entry.baseUrlRequired) ...<Widget>[
-            _baseUrlField(strings, form),
-            const SizedBox(height: 12),
-          ],
-          if (form.isTranscription) ...<Widget>[
-            TextField(
-              controller: form.language,
-              autocorrect: false,
-              decoration: InputDecoration(
-                labelText: strings.providerLanguageLabel,
-                helperText: strings.providerLanguageHelp,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: form.responseFormat,
-              autocorrect: false,
-              decoration: InputDecoration(
-                labelText: strings.providerResponseFormatLabel,
-              ),
-            ),
-          ] else ...<Widget>[
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: form.skipThinking,
-              onChanged: (value) => setState(() => form.setSkipThinking(value)),
-              title: Text(strings.providerSkipThinking),
-              subtitle: Text(strings.providerSkipThinkingHelp),
-            ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: form.extraBody,
-              autocorrect: false,
-              enableSuggestions: false,
-              minLines: 2,
-              maxLines: 6,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              onChanged: (_) => setState(form.syncSkipThinking),
-              decoration: InputDecoration(
-                labelText: strings.providerExtraBodyLabel,
-                helperText: strings.providerExtraBodyHelp,
-                helperMaxLines: 3,
-                hintText: '{"top_p": 0.9}',
-                errorText: form.extraBodyProblem(strings),
-              ),
-            ),
-          ],
-          if (form.apiKeySource == 'admin')
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              value: form.clearApiKey,
-              onChanged: (value) =>
-                  setState(() => form.clearApiKey = value ?? false),
-              title: Text(strings.providerClearKey),
-            ),
-        ],
       ),
     );
   }
