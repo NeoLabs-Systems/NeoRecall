@@ -45,6 +45,11 @@ function createApp() {
   app.use(require('./routes/mcp'));
   app.use('/api/v1', slidingWindow({ windowMs: 5 * 60_000, limit: 2000 }));
   app.use('/api/v1', require('./routes'));
+  app.get('/api/public/status', (_req, res) => {
+    const status = require('./public_status');
+    res.set('Cache-Control', 'no-store');
+    res.json({ ...status.buildPublicStatus(), history: status.history.history() });
+  });
   // The admin dashboard that lived here is the app's Admin page now. Its API
   // answers in JSON so an older app says why instead of failing to parse a
   // page; old bookmarks land in the app rather than on a bare 404.

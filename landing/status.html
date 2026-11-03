@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Live service status for NeoRecall.">
+  <title>System status · NeoRecall</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/status.css">
+  <script src="/js/status.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="nav">
+      <a class="brand" href="/"><img src="/assets/logo.svg" alt="" width="32" height="32"><span>NeoRecall</span><span class="nav-divider"></span><span class="nav-label">STATUS</span></a>
+      <a class="back" href="/">← <span>Back to product</span></a>
+    </header>
+    <main>
+      <div class="intro"><div><div class="eyebrow"><span></span> SYSTEM STATUS</div><h1>Everything, at a glance.</h1><p>Current service health for this NeoRecall instance.</p></div><div class="live"><span></span> AUTO REFRESH</div></div>
+      <section class="summary" aria-live="polite">
+        <div class="summary-main"><div class="status-icon unknown" id="status-icon"><span></span></div><div><div class="kicker">CURRENT STATUS</div><h2 id="overall">Checking status…</h2><p id="note">Connecting to the status endpoint.</p></div></div>
+        <div class="summary-meta"><span>LAST CHECKED</span><strong id="updated">—</strong><small>Refreshes every minute</small></div>
+      </section>
+      <section class="history-panel" aria-labelledby="history-title">
+        <div class="section-head"><div><div class="kicker">RECENT HISTORY</div><h2 id="history-title">The last 48 hours</h2></div><div class="history-label">HOURLY SAMPLES</div></div>
+        <div class="history" id="history" role="img" aria-label="Status history is loading"></div>
+        <div class="history-axis"><span>48 hours ago</span><span>Now</span></div>
+        <div class="legend"><span><i class="operational"></i>Operational</span><span><i class="degraded"></i>Degraded</span><span><i class="unavailable"></i>Unavailable</span><span><i class="unknown"></i>No data</span></div>
+        <p class="history-help">Each bar shows the worst recorded sample in an hour. Gaps mean no data, not downtime.</p>
+      </section>
+      <section class="services" aria-labelledby="services-title"><div class="section-head"><div><div class="kicker">SERVICE HEALTH</div><h2 id="services-title">Monitored components</h2></div><span class="component-count" id="component-count"></span></div><div class="component-list" id="components" aria-live="polite"></div></section>
+      <p class="disclaimer">Checks describe this instance and do not verify every external provider or user configuration.</p>
+    </main>
+    <footer><span>NeoRecall <span class="footer-separator">/</span> System status</span><a href="/">Back to product ↗</a></footer>
+  </div>
+</body>
+</html>
