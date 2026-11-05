@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'main_admin.dart';
 import 'main_controller.dart';
@@ -157,21 +158,79 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
-    return DecoratedBox(
+    final l10n = AppL10n.of(context);
+    final destinations = neoRecallTabDestinationsFor(controller);
+    final selectedIndex = neoRecallTabIndex(controller);
+    return Container(
       decoration: BoxDecoration(
+        color: palette.bgPrimary,
         border: Border(top: BorderSide(color: palette.border)),
       ),
-      child: NavigationBar(
-        selectedIndex: neoRecallTabIndex(controller),
-        onDestinationSelected: (index) =>
-            neoRecallTabDestinationsFor(controller)[index].select(controller),
-        destinations: <Widget>[
-          for (final destination in neoRecallTabDestinationsFor(controller))
-            NavigationDestination(
-              icon: Icon(destination.icon),
-              label: destination.label(AppL10n.of(context)),
-            ),
-        ],
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+          child: Row(
+            children: <Widget>[
+              for (var i = 0; i < destinations.length; i++)
+                Expanded(
+                  child: _Tab(
+                    icon: destinations[i].icon,
+                    label: destinations[i].label(l10n),
+                    active: i == selectedIndex,
+                    onTap: () => destinations[i].select(controller),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Tab extends StatelessWidget {
+  const _Tab({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = neoRecallPaletteOf(context);
+    final color = active ? palette.accent : palette.textMuted;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 21, color: color),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.geist(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
