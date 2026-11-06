@@ -4769,4 +4769,113 @@ class AppL10nDe extends AppL10n {
   @override
   String get adminSearchUpdatesKeywords =>
       'update aktualisieren version kanal beta stabil github release neu';
+
+  @override
+  String get neoRouterTitle => 'NeoRouter';
+
+  @override
+  String get neoRouterIntro =>
+      'Verbinden Sie NeoRecall einmal mit Ihrem NeoRouter, dann kann es alle Modelle nutzen, die der Router für Zusammenfassungen und Chat, Spracherkennung und Suche anbietet.';
+
+  @override
+  String get neoRouterConnect => 'NeoRouter verbinden';
+
+  @override
+  String get neoRouterConnectBody =>
+      'NeoRouter öffnet sich in Ihrem Browser. Genehmigen Sie dort NeoRecall, danach erhält dieser Server seinen eigenen Schlüssel. Der Schlüssel wird in der App nie angezeigt.';
+
+  @override
+  String get neoRouterAddressLabel => 'Adresse des NeoRouters';
+
+  @override
+  String get neoRouterContinue => 'Weiter';
+
+  @override
+  String neoRouterWaiting(String code) {
+    return 'Warten auf Ihre Genehmigung in NeoRouter. Dort sollte der Code $code stehen.';
+  }
+
+  @override
+  String get neoRouterOpenAgain => 'NeoRouter erneut öffnen';
+
+  @override
+  String get neoRouterConnected => 'NeoRouter ist verbunden.';
+
+  @override
+  String neoRouterConnectedTo(String address) {
+    return 'Verbunden mit $address';
+  }
+
+  @override
+  String neoRouterUnreachable(String address) {
+    return 'NeoRouter unter $address ist gerade nicht erreichbar. Die Suche antwortet weiter über Stichwörter; Zusammenfassungen und Transkription warten und versuchen es erneut.';
+  }
+
+  @override
+  String get neoRouterRoleLlm => 'Zusammenfassungen und Chat';
+
+  @override
+  String get neoRouterRoleTranscription => 'Spracherkennung';
+
+  @override
+  String get neoRouterRoleEmbeddings => 'Such-Embeddings';
+
+  @override
+  String neoRouterModelCount(int models, int auto) {
+    String _temp0 = intl.Intl.pluralLogic(
+      models,
+      locale: localeName,
+      other: '$models Modelle',
+      one: '1 Modell',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      auto,
+      locale: localeName,
+      other: '$auto Auto-Modelle',
+      one: '1 Auto-Modell',
+    );
+    return '$_temp0 und $_temp1 verfügbar';
+  }
+
+  @override
+  String neoRouterNotAllowed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count weitere Modelle sind für diesen Schlüssel nicht erlaubt',
+      one: '1 weiteres Modell ist für diesen Schlüssel nicht erlaubt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get neoRouterNoModels => 'NeoRouter hat dafür noch keine Modelle.';
+
+  @override
+  String neoRouterRoleFailed(String reason) {
+    return 'NeoRouter hat diese Art von Aufgabe abgelehnt: $reason';
+  }
+
+  @override
+  String get neoRouterEmbeddingsNote =>
+      'Eine Änderung baut den Suchindex im Hintergrund neu auf.';
+
+  @override
+  String get neoRouterDisconnect => 'Trennen';
+
+  @override
+  String get neoRouterDisconnectTitle => 'NeoRouter trennen?';
+
+  @override
+  String get neoRouterDisconnectBody =>
+      'NeoRecall vergisst den Schlüssel und nutzt wieder die Dienste aus der eigenen Konfiguration des Servers.';
+
+  @override
+  String neoRouterSignInFailed(String reason) {
+    return 'Die Verbindung mit NeoRouter ist fehlgeschlagen: $reason';
+  }
+
+  @override
+  String get neoRouterSignInTimedOut =>
+      'NeoRouter wurde nicht rechtzeitig genehmigt. Bitte starten Sie erneut.';
 }

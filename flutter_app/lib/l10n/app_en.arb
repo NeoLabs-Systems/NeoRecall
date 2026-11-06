@@ -2714,5 +2714,81 @@
   "adminUpdateReload": "Reload",
   "adminUpdateFailedTitle": "The update did not finish",
   "adminSearchUpdates": "Updates",
-  "adminSearchUpdatesKeywords": "update upgrade version channel beta stable github release new aktualisieren"
+  "adminSearchUpdatesKeywords": "update upgrade version channel beta stable github release new aktualisieren",
+  "neoRouterTitle": "NeoRouter",
+  "neoRouterIntro": "Connect NeoRecall to your NeoRouter once, and it can use every model the router offers for summaries and chat, speech to text and search.",
+  "neoRouterConnect": "Connect NeoRouter",
+  "neoRouterConnectBody": "NeoRouter opens in your browser. Approve NeoRecall there and this server receives its own key. The key is never shown in the app.",
+  "neoRouterAddressLabel": "NeoRouter address",
+  "neoRouterContinue": "Continue",
+  "neoRouterWaiting": "Waiting for your approval in NeoRouter. It should show the code {code}.",
+  "@neoRouterWaiting": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterOpenAgain": "Open NeoRouter again",
+  "neoRouterConnected": "NeoRouter is connected.",
+  "neoRouterConnectedTo": "Connected to {address}",
+  "@neoRouterConnectedTo": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterUnreachable": "NeoRouter at {address} cannot be reached right now. Search keeps answering from keywords; summaries and transcription wait and try again.",
+  "@neoRouterUnreachable": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterRoleLlm": "Summaries and chat",
+  "neoRouterRoleTranscription": "Speech to text",
+  "neoRouterRoleEmbeddings": "Search embeddings",
+  "neoRouterModelCount": "{models, plural, =1{1 model} other{{models} models}} and {auto, plural, =1{1 auto model} other{{auto} auto models}} available",
+  "@neoRouterModelCount": {
+    "placeholders": {
+      "models": {
+        "type": "int"
+      },
+      "auto": {
+        "type": "int"
+      }
+    }
+  },
+  "neoRouterNotAllowed": "{count, plural, =1{1 more model is not allowed for this key} other{{count} more models are not allowed for this key}}",
+  "@neoRouterNotAllowed": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "neoRouterNoModels": "NeoRouter has no models for this yet.",
+  "neoRouterRoleFailed": "NeoRouter refused this kind of work: {reason}",
+  "@neoRouterRoleFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterEmbeddingsNote": "Changing this rebuilds the search index in the background.",
+  "neoRouterDisconnect": "Disconnect",
+  "neoRouterDisconnectTitle": "Disconnect NeoRouter?",
+  "neoRouterDisconnectBody": "NeoRecall forgets the key and goes back to the services in the server's own configuration.",
+  "neoRouterSignInFailed": "Connecting to NeoRouter failed: {reason}",
+  "@neoRouterSignInFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterSignInTimedOut": "NeoRouter was not approved in time. Start again."
 }

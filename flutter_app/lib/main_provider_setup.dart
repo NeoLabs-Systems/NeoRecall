@@ -163,6 +163,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
     // Removing the saved key is fine when the server's own configuration has
     // one to fall back to.
     if (entry.apiKeyRequired &&
+        !entry.neorouter &&
         form.apiKey.text.trim().isEmpty &&
         (!form.apiKeyAlreadyStored ||
             (form.clearApiKey && !form.environmentApiKeyConfigured))) {
@@ -465,18 +466,21 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               const SizedBox(height: 12),
               _baseUrlField(strings, form),
             ],
-            const SizedBox(height: 12),
-            TextField(
-              controller: form.apiKey,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: form.apiKeyAlreadyStored
-                    ? strings.providerApiKeyStoredLabel
-                    : strings.providerApiKeyLabel,
+            // NeoRouter's address and key come from its connection.
+            if (entry?.neorouter != true) ...<Widget>[
+              const SizedBox(height: 12),
+              TextField(
+                controller: form.apiKey,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: form.apiKeyAlreadyStored
+                      ? strings.providerApiKeyStoredLabel
+                      : strings.providerApiKeyLabel,
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,7 +547,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
                 style: TextStyle(color: palette.textMuted, fontSize: 11),
               ),
             ],
-            _advanced(palette, strings, form, entry),
+            if (entry?.neorouter != true)
+              _advanced(palette, strings, form, entry),
           ],
         ],
       ),
@@ -746,7 +751,8 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: form.skipThinking,
-                onChanged: (value) => setState(() => form.setSkipThinking(value)),
+                onChanged: (value) =>
+                    setState(() => form.setSkipThinking(value)),
                 title: Text(strings.providerSkipThinking),
                 subtitle: Text(strings.providerSkipThinkingHelp),
               ),

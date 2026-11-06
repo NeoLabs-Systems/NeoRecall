@@ -8,6 +8,8 @@ import 'main_theme.dart';
 import 'l10n/gen/app_l10n.dart';
 import 'src/admin/admin_activity_sections.dart';
 import 'src/admin/admin_backups_section.dart';
+import 'src/admin/admin_neorouter_card.dart';
+import 'src/admin/admin_neorouter_client.dart';
 import 'src/admin/admin_client.dart';
 import 'src/admin/admin_overview_section.dart';
 import 'src/admin/admin_update.dart';
@@ -223,6 +225,9 @@ class AdminScreen extends StatefulWidget {
 }
 
 class _AdminScreenState extends State<AdminScreen> {
+  /// Bumped when the NeoRouter connection changes what the providers use.
+  int _providersRevision = 0;
+
   final TextEditingController _search = TextEditingController();
 
   /// Card to bring into view after opening a search result.
@@ -421,13 +426,30 @@ class _AdminScreenState extends State<AdminScreen> {
         client: client,
         onChanged: _refreshAttention,
       ),
-      AdminArea.providers => AdminCard(
-        id: 'providers',
-        eyebrow: strings.adminServices,
-        child: ProviderSetupPanel(
-          client: AdminProviderClient(controller.api),
-          onAccessRevoked: controller.adminAccessRevoked,
-        ),
+      AdminArea.providers => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AdminCard(
+            id: 'neorouter',
+            eyebrow: strings.neoRouterTitle,
+            child: AdminNeoRouterCard(
+              controller: controller,
+              client: AdminNeoRouterClient(controller.api),
+              // What the providers below are pointed at just changed.
+              onChanged: () => setState(() => _providersRevision++),
+            ),
+          ),
+          const SizedBox(height: 14),
+          AdminCard(
+            id: 'providers',
+            eyebrow: strings.adminServices,
+            child: ProviderSetupPanel(
+              key: ValueKey<int>(_providersRevision),
+              client: AdminProviderClient(controller.api),
+              onAccessRevoked: controller.adminAccessRevoked,
+            ),
+          ),
+        ],
       ),
       AdminArea.processing => AdminProcessingSection(
         controller: controller,

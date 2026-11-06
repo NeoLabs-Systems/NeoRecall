@@ -1328,5 +1328,81 @@
   "adminUpdateReload": "Neu laden",
   "adminUpdateFailedTitle": "Das Update wurde nicht abgeschlossen",
   "adminSearchUpdates": "Updates",
-  "adminSearchUpdatesKeywords": "update aktualisieren version kanal beta stabil github release neu"
+  "adminSearchUpdatesKeywords": "update aktualisieren version kanal beta stabil github release neu",
+  "neoRouterTitle": "NeoRouter",
+  "neoRouterIntro": "Verbinden Sie NeoRecall einmal mit Ihrem NeoRouter, dann kann es alle Modelle nutzen, die der Router für Zusammenfassungen und Chat, Spracherkennung und Suche anbietet.",
+  "neoRouterConnect": "NeoRouter verbinden",
+  "neoRouterConnectBody": "NeoRouter öffnet sich in Ihrem Browser. Genehmigen Sie dort NeoRecall, danach erhält dieser Server seinen eigenen Schlüssel. Der Schlüssel wird in der App nie angezeigt.",
+  "neoRouterAddressLabel": "Adresse des NeoRouters",
+  "neoRouterContinue": "Weiter",
+  "neoRouterWaiting": "Warten auf Ihre Genehmigung in NeoRouter. Dort sollte der Code {code} stehen.",
+  "@neoRouterWaiting": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterOpenAgain": "NeoRouter erneut öffnen",
+  "neoRouterConnected": "NeoRouter ist verbunden.",
+  "neoRouterConnectedTo": "Verbunden mit {address}",
+  "@neoRouterConnectedTo": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterUnreachable": "NeoRouter unter {address} ist gerade nicht erreichbar. Die Suche antwortet weiter über Stichwörter; Zusammenfassungen und Transkription warten und versuchen es erneut.",
+  "@neoRouterUnreachable": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterRoleLlm": "Zusammenfassungen und Chat",
+  "neoRouterRoleTranscription": "Spracherkennung",
+  "neoRouterRoleEmbeddings": "Such-Embeddings",
+  "neoRouterModelCount": "{models, plural, =1{1 Modell} other{{models} Modelle}} und {auto, plural, =1{1 Auto-Modell} other{{auto} Auto-Modelle}} verfügbar",
+  "@neoRouterModelCount": {
+    "placeholders": {
+      "models": {
+        "type": "int"
+      },
+      "auto": {
+        "type": "int"
+      }
+    }
+  },
+  "neoRouterNotAllowed": "{count, plural, =1{1 weiteres Modell ist für diesen Schlüssel nicht erlaubt} other{{count} weitere Modelle sind für diesen Schlüssel nicht erlaubt}}",
+  "@neoRouterNotAllowed": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "neoRouterNoModels": "NeoRouter hat dafür noch keine Modelle.",
+  "neoRouterRoleFailed": "NeoRouter hat diese Art von Aufgabe abgelehnt: {reason}",
+  "@neoRouterRoleFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterEmbeddingsNote": "Eine Änderung baut den Suchindex im Hintergrund neu auf.",
+  "neoRouterDisconnect": "Trennen",
+  "neoRouterDisconnectTitle": "NeoRouter trennen?",
+  "neoRouterDisconnectBody": "NeoRecall vergisst den Schlüssel und nutzt wieder die Dienste aus der eigenen Konfiguration des Servers.",
+  "neoRouterSignInFailed": "Die Verbindung mit NeoRouter ist fehlgeschlagen: {reason}",
+  "@neoRouterSignInFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "neoRouterSignInTimedOut": "NeoRouter wurde nicht rechtzeitig genehmigt. Bitte starten Sie erneut."
 }

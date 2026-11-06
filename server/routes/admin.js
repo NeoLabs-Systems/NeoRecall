@@ -76,6 +76,7 @@ router.post('/provider-settings/test', asyncRoute(async (req, res) => {
     metadata: { transcription: result.transcription.ok, llm: result.llm.ok } });
   res.json(result);
 }));
+router.use('/neorouter', require('./admin_neorouter'));
 router.get('/local-models', (req, res) => res.json({ models: localModels.status() }));
 // Starts (or retries) the download in the background; the client polls the
 // status above. 202 because the work outlives the request.

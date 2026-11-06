@@ -437,6 +437,14 @@ function buildConfig() {
     // aborted and retried at the same cost.
     aiTimeoutMs: integer('AI_REQUEST_TIMEOUT_MS', 1_800_000, { min: 1_000 }),
     aiMaxRetries: integer('AI_MAX_RETRIES', 2, { min: 0, max: 10 }),
+    // NeoRouter ("Connect NeoRouter"): how long a short request to the router
+    // (model lists, embeddings, the sign-in) may take, how long a pending
+    // approval stays valid, and how long a model list is reused.
+    neorouterRequestTimeoutMs: integer('NEORECALL_NEOROUTER_REQUEST_TIMEOUT_MS', 20_000, { min: 1_000 }),
+    neorouterSignInTtlMs: integer('NEORECALL_NEOROUTER_SIGN_IN_TTL_MS', 600_000, { min: 30_000 }),
+    // Documents per job when search vectors are rebuilt after the embedding source changes.
+    reindexBatchSize: integer('NEORECALL_REINDEX_BATCH_SIZE', 20, { min: 1, max: 500 }),
+    neorouterOfferCacheMs: integer('NEORECALL_NEOROUTER_OFFER_CACHE_MS', 300_000, { min: 0 }),
     // Has to cover the sections, memories and mini-memories one window of input
     // can justify; a completion cut off mid-JSON reads as a validation failure.
     // It shares the context budget with the prompt, so it cannot be raised

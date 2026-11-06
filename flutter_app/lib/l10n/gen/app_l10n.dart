@@ -7601,6 +7601,150 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'update upgrade version channel beta stable github release new aktualisieren'**
   String get adminSearchUpdatesKeywords;
+
+  /// No description provided for @neoRouterTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter'**
+  String get neoRouterTitle;
+
+  /// No description provided for @neoRouterIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect NeoRecall to your NeoRouter once, and it can use every model the router offers for summaries and chat, speech to text and search.'**
+  String get neoRouterIntro;
+
+  /// No description provided for @neoRouterConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect NeoRouter'**
+  String get neoRouterConnect;
+
+  /// No description provided for @neoRouterConnectBody.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter opens in your browser. Approve NeoRecall there and this server receives its own key. The key is never shown in the app.'**
+  String get neoRouterConnectBody;
+
+  /// No description provided for @neoRouterAddressLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter address'**
+  String get neoRouterAddressLabel;
+
+  /// No description provided for @neoRouterContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get neoRouterContinue;
+
+  /// No description provided for @neoRouterWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for your approval in NeoRouter. It should show the code {code}.'**
+  String neoRouterWaiting(String code);
+
+  /// No description provided for @neoRouterOpenAgain.
+  ///
+  /// In en, this message translates to:
+  /// **'Open NeoRouter again'**
+  String get neoRouterOpenAgain;
+
+  /// No description provided for @neoRouterConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter is connected.'**
+  String get neoRouterConnected;
+
+  /// No description provided for @neoRouterConnectedTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected to {address}'**
+  String neoRouterConnectedTo(String address);
+
+  /// No description provided for @neoRouterUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter at {address} cannot be reached right now. Search keeps answering from keywords; summaries and transcription wait and try again.'**
+  String neoRouterUnreachable(String address);
+
+  /// No description provided for @neoRouterRoleLlm.
+  ///
+  /// In en, this message translates to:
+  /// **'Summaries and chat'**
+  String get neoRouterRoleLlm;
+
+  /// No description provided for @neoRouterRoleTranscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Speech to text'**
+  String get neoRouterRoleTranscription;
+
+  /// No description provided for @neoRouterRoleEmbeddings.
+  ///
+  /// In en, this message translates to:
+  /// **'Search embeddings'**
+  String get neoRouterRoleEmbeddings;
+
+  /// No description provided for @neoRouterModelCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{models, plural, =1{1 model} other{{models} models}} and {auto, plural, =1{1 auto model} other{{auto} auto models}} available'**
+  String neoRouterModelCount(int models, int auto);
+
+  /// No description provided for @neoRouterNotAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 more model is not allowed for this key} other{{count} more models are not allowed for this key}}'**
+  String neoRouterNotAllowed(int count);
+
+  /// No description provided for @neoRouterNoModels.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter has no models for this yet.'**
+  String get neoRouterNoModels;
+
+  /// No description provided for @neoRouterRoleFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter refused this kind of work: {reason}'**
+  String neoRouterRoleFailed(String reason);
+
+  /// No description provided for @neoRouterEmbeddingsNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Changing this rebuilds the search index in the background.'**
+  String get neoRouterEmbeddingsNote;
+
+  /// No description provided for @neoRouterDisconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect'**
+  String get neoRouterDisconnect;
+
+  /// No description provided for @neoRouterDisconnectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect NeoRouter?'**
+  String get neoRouterDisconnectTitle;
+
+  /// No description provided for @neoRouterDisconnectBody.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall forgets the key and goes back to the services in the server\'s own configuration.'**
+  String get neoRouterDisconnectBody;
+
+  /// No description provided for @neoRouterSignInFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting to NeoRouter failed: {reason}'**
+  String neoRouterSignInFailed(String reason);
+
+  /// No description provided for @neoRouterSignInTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRouter was not approved in time. Start again.'**
+  String get neoRouterSignInTimedOut;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

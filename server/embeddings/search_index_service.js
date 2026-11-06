@@ -46,13 +46,29 @@ function upsertDocument({ userId, kind, sourceId, title = null, body, occurredAt
   return document;
 }
 
+// Embeds every document again, in batches. Run when the source of embeddings
+// changes: vectors from different models cannot be compared with each other.
+function reindexAll(database = getDatabase()) {
+  const batch = require('../config').getConfig().reindexBatchSize;
+  const documents = database.prepare('SELECT id,user_id FROM search_documents ORDER BY id').all();
+  for (let offset = 0; offset < documents.length; offset += batch) {
+    const slice = documents.slice(offset, offset + batch);
+    jobs.enqueue({
+      userId: slice[0].user_id, resourceType: 'search_reindex', resourceId: `reindex:${slice[0].id}`,
+      type: 'embed_search_documents', priority: 10, payload: { documentIds: slice.map((document) => document.id) },
+    }, database);
+  }
+  return documents.length;
+}
+
 async function embedDocuments(documentIds) {
   const db = getDatabase();
   for (const documentId of documentIds) {
     const document = db.prepare('SELECT * FROM search_documents WHERE id=?').get(documentId);
     if (!document) continue;
     const vector = await embeddingService.embed([document.title, document.body].filter(Boolean).join('\n'), 'passage');
-    const modelRevision = embeddingModelRevision();
+    const space = embeddingService.spaceOf(vector);
+    const modelRevision = space ? `neorouter:${space}@${vector.length}` : embeddingModelRevision();
     db.transaction(() => {
       db.prepare(`INSERT INTO search_embeddings (document_id,user_id,model_revision,dimensions,embedding,text_hash)
         VALUES (?,?,?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET model_revision=excluded.model_revision,dimensions=excluded.dimensions,
@@ -67,4 +83,4 @@ async function embedDocuments(documentIds) {
   }
 }
 
-module.exports = { upsertDocument, embedDocuments, embeddingModelRevision, removeBySources, removeForUser };
+module.exports = { upsertDocument, embedDocuments, reindexAll, embeddingModelRevision, removeBySources, removeForUser };

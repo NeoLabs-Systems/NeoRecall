@@ -12,6 +12,7 @@ class ProviderCatalogEntry {
     required this.modelOptional,
     this.defaultResponseFormat,
     this.local = false,
+    this.neorouter = false,
     this.component,
   });
 
@@ -28,12 +29,16 @@ class ProviderCatalogEntry {
   /// key to enter, and the model has to be downloaded first.
   final bool local;
 
+  /// True for NeoRouter: its address and key come from the connection made
+  /// with Connect NeoRouter, so only the model is chosen here.
+  final bool neorouter;
+
   /// The local model's id, for looking up its install state.
   final String? component;
 
   /// Providers without a fixed endpoint need the operator to supply one. A local
   /// one has no endpoint at all.
-  bool get baseUrlRequired => defaultBaseUrl == null && !local;
+  bool get baseUrlRequired => defaultBaseUrl == null && !local && !neorouter;
 
   factory ProviderCatalogEntry.fromJson(Map<String, dynamic> json) =>
       ProviderCatalogEntry(
@@ -46,6 +51,7 @@ class ProviderCatalogEntry {
         modelOptional: json['modelOptional'] == true,
         defaultResponseFormat: _trimmedOrNull(json['defaultResponseFormat']),
         local: json['local'] == true,
+        neorouter: json['neorouter'] == true,
         component: _trimmedOrNull(json['component']),
       );
 }

@@ -6,6 +6,9 @@ const embeddings = require('../../embeddings/embedding_service');
 const scorer = require('./retrieval_scorer');
 const { DOCUMENT_KINDS } = require('./document_kinds');
 const { placeholders } = require('../../utils/query');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('search');
 
 function ftsExpression(query) {
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
@@ -68,8 +71,18 @@ async function search(userId, query, { limit = 20, kinds = [], from = null, to =
 
   let semanticRows = [];
   let weakCount = 0;
+  let queryVector = null;
   if (isVectorReady()) {
-    const queryVector = await embeddings.embed(query, 'query');
+    try {
+      queryVector = await embeddings.embed(query, 'query');
+    } catch (error) {
+      // A NeoRouter that cannot be reached must not take search down with it:
+      // keyword results still answer. Any other failure is a real fault.
+      if (!String(error.code || '').startsWith('NEOROUTER_')) throw error;
+      logger.warn('Semantic search skipped: NeoRouter could not embed the query', { errorCode: error.code, reason: error.message });
+    }
+  }
+  if (queryVector) {
     const neighbours = db.prepare('SELECT document_id id,distance FROM vec_search WHERE embedding MATCH ? AND user_id=? AND k=?')
       .all(queryVector, userId, BigInt(candidateLimit)).map((row) => ({ id: Number(row.id), similarity: cosineSimilarity(row.distance) }));
     semanticRows = neighbours.filter((row) => row.similarity >= config.semanticSimilarityFloor);
@@ -86,7 +99,7 @@ async function search(userId, query, { limit = 20, kinds = [], from = null, to =
   rrfAdd(fused, semanticRows, 'semantic');
   rrfAdd(fused, windowRows, 'window');
   const similarityById = new Map(semanticRows.map((row) => [row.id, row.similarity]));
-  const branchCount = 1 + (isVectorReady() ? 1 : 0) + (windowRows.length ? 1 : 0);
+  const branchCount = 1 + (queryVector ? 1 : 0) + (windowRows.length ? 1 : 0);
   const maxRrf = branchCount / (config.rrfK + 1);
 
   const items = [...fused.values()];
