@@ -33,7 +33,7 @@ A reasoning model spends the output budget on its thinking block and the JSON ne
 
 ## A request fails after about five minutes with no reason given
 
-A model that answers slowly used to be cut off by a hidden five-minute ceiling in the HTTP client and reported only as `fetch failed`. Requests now run until `AI_REQUEST_TIMEOUT_MS` (default thirty minutes) without a response, so a local model that needs ten minutes for a long conversation is left to finish. A genuine stall is reported as `AI_TIMEOUT`, naming the wait.
+A model that answers slowly used to be cut off by a hidden five-minute ceiling in the HTTP client and reported only as `fetch failed`. Requests now run until `AI_REQUEST_TIMEOUT_MS` (default thirty minutes) without a response, so a slow model that needs ten minutes for a long conversation is left to finish. A genuine stall is reported as `AI_TIMEOUT`, naming the wait.
 
 ## Memory generation is waiting
 

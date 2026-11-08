@@ -73,7 +73,7 @@ https://github.com/user-attachments/assets/eb40bc78-905b-459a-bdea-a49aba3c9c09
 bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 ```
 
-Then open **http://localhost:4500** once `neorecall status` reports a running service. The first account you create becomes the administrator; the app then asks for your transcription and language-model services (or an on-host model) and tests both.
+Then open **http://localhost:4500** once `neorecall status` reports a running service. The first account you create becomes the administrator; the app then asks for your transcription and language-model services (a cloud provider, or NeoRouter) and tests both.
 
 
 ## ✨ What it does
@@ -101,7 +101,7 @@ Then open **http://localhost:4500** once `neorecall status` reports a running se
   </tr>
 </table>
 
-**Inference:** bring any OpenAI-compatible transcription and language-model service, or run Whistle (speech to text) and Gemma 2 2B (memories and Ask) on the server itself. NeoRecall bundles no model you did not choose.
+**Inference:** bring any cloud transcription and language-model service, or connect NeoRouter in one click. NeoRecall runs no speech or language model on the server itself.
 
 ## 🧭 Explore it
 

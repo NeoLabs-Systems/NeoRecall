@@ -23,7 +23,6 @@ const { inputBudgetCharacters } = require('./context_budget');
 const limits = require('./model_limits');
 const { createLogger } = require('../utils/logger');
 const logger = createLogger('ai-engine');
-const { repairConsolidation, repairDailySummary } = require('./repair_consolidation');
 const { getConfig } = require('../config');
 const { getDatabase } = require('../db/database');
 const settingsService = require('../services/settings/settings_service');
@@ -92,16 +91,7 @@ async function consolidateWindowOnce(userId, window, carryOver) {
     responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_memory_consolidation', strict: true,
       schema: consolidationJsonSchemaFor(window.segmentIds, window.continuationMemoryIds) } },
   });
-  let parsed = consolidationSchema.safeParse(response.value);
-  if (!parsed.success && limits.tolerantOutput()) {
-    // A model that cannot honour the whole contract every time is repaired piece
-    // by piece rather than rejected whole.
-    const repaired = repairConsolidation(response.value, { segmentIds: window.segmentIds, continuationMemoryIds: window.continuationMemoryIds });
-    if (repaired.value) {
-      logger.warn('Repaired a consolidation answer that did not fully match the contract', { requestId: response.requestId, dropped: repaired.dropped });
-      parsed = { success: true, data: repaired.value };
-    }
-  }
+  const parsed = consolidationSchema.safeParse(response.value);
   if (!parsed.success) {
     markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
     // The reason is part of the message because it is all a stored failure keeps.
@@ -224,11 +214,7 @@ async function writeDailySummary(userId, { sections, previousDailySummary, timez
       maxTokens: limits.previewOutputTokens(),
       responseFormat: { type: 'json_schema', json_schema: { name: 'neorecall_daily_summary', strict: true, schema: dailySummaryJsonSchema } },
     });
-    let parsed = dailySummarySchema.safeParse(response.value);
-    if (!parsed.success && limits.tolerantOutput()) {
-      const repaired = repairDailySummary(response.value);
-      if (repaired) parsed = dailySummarySchema.safeParse(repaired);
-    }
+    const parsed = dailySummarySchema.safeParse(response.value);
     if (!parsed.success) {
       markValidationFailed(response.requestId, 'AI_SCHEMA_INVALID');
       throw Object.assign(new Error(`Daily summary output did not match the required schema: ${describeIssues(parsed.error)}`), {

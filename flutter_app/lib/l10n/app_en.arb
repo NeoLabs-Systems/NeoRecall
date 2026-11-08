@@ -2461,47 +2461,6 @@
   "providerTranscriptionEndpointLabel": "Base URL or full transcription endpoint",
   "providerLanguageLabel": "Language (optional)",
   "providerLanguageHelp": "A language code the service understands, such as de or en.",
-  "providerLocalInstalled": "Installed. It runs on this server, so nothing is sent to an outside service.",
-  "providerLocalNotInstalled": "Not downloaded yet. It downloads automatically when you save, about {size}.",
-  "@providerLocalNotInstalled": {
-    "placeholders": {
-      "size": { "type": "String" }
-    }
-  },
-  "providerLocalDownloading": "Downloading… {percent}%",
-  "@providerLocalDownloading": {
-    "placeholders": {
-      "percent": { "type": "String" }
-    }
-  },
-  "providerLocalDownloadNow": "Download now",
-  "providerLocalFailed": "The download failed: {message}",
-  "@providerLocalFailed": {
-    "placeholders": {
-      "message": { "type": "String" }
-    }
-  },
-  "providerLocalRetry": "Try again",
-  "providerLocalUnsupported": "This server cannot run it: {reason}",
-  "@providerLocalUnsupported": {
-    "placeholders": {
-      "reason": { "type": "String" }
-    }
-  },
-  "providerLocalLicense": "License: {license}",
-  "@providerLocalLicense": {
-    "placeholders": {
-      "license": { "type": "String" }
-    }
-  },
-  "providerLocalLanguages": "Reads {languages}. Leave the language empty to detect it.",
-  "@providerLocalLanguages": {
-    "placeholders": {
-      "languages": { "type": "String" }
-    }
-  },
-  "providerLocalSpeechNote": "Recordings are transcribed on this server and never leave it. Fast and free to run, but it reads fewer languages than hosted services.",
-  "providerLocalLlmNote": "A small model: memories and answers will be simpler than with a hosted model. It frees its memory when it has been idle for a while and loads again when needed.",
   "providerResponseFormatLabel": "Response format",
   "providerSkipThinking": "Skip the model’s thinking step",
   "providerSkipThinkingHelp": "Faster, and avoids a reply cut off before it starts.",

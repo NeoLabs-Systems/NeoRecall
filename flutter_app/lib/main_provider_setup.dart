@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -40,8 +39,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
   String? _error;
   String? _saved;
   ProviderTestReport? _report;
-  List<LocalModelStatus> _localModels = const <LocalModelStatus>[];
-  Timer? _localPoll;
 
   @override
   void initState() {
@@ -51,7 +48,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
 
   @override
   void dispose() {
-    _localPoll?.cancel();
     _transcription.dispose();
     _llm.dispose();
     super.dispose();
@@ -74,7 +70,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _llm.adopt(snapshot.llm, snapshot.llmCatalog);
         _loading = false;
       });
-      unawaited(_refreshLocalModels());
     } on ApiException catch (error) {
       if (!mounted) return;
       _noteAccess(error);
@@ -83,38 +78,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _loading = false;
       });
     }
-  }
-
-  /// How far each model that runs on the server has got. A server that cannot
-  /// answer this simply has nothing to show; the rest of the form still works.
-  Future<void> _refreshLocalModels() async {
-    try {
-      final models = await widget.client.localModels();
-      if (!mounted) return;
-      setState(() => _localModels = models);
-    } on ApiException catch (error) {
-      _noteAccess(error);
-    }
-    _scheduleLocalPoll();
-  }
-
-  /// Follows a download while one is running; stops when none is.
-  void _scheduleLocalPoll() {
-    _localPoll?.cancel();
-    if (!mounted || !_localModels.any((model) => model.installing)) return;
-    _localPoll = Timer(const Duration(seconds: 2), _refreshLocalModels);
-  }
-
-  Future<void> _installLocalModel(String id) async {
-    try {
-      await widget.client.installLocalModel(id);
-    } on ApiException catch (error) {
-      if (!mounted) return;
-      _noteAccess(error);
-      setState(() => _error = error.message);
-      return;
-    }
-    await _refreshLocalModels();
   }
 
   void _noteAccess(ApiException error) {
@@ -214,7 +177,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         _saving = false;
         _saved = AppL10n.of(context).providerSaved;
       });
-      unawaited(_refreshLocalModels());
       return true;
     } on ApiException catch (error) {
       if (!mounted) return false;
@@ -459,9 +421,7 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
               setState(() => form.selectProvider(value));
             },
           ),
-          if (entry != null && entry.local)
-            ..._localModelChildren(palette, strings, form, entry)
-          else ...<Widget>[
+          ...<Widget>[
             if (entry != null && entry.baseUrlRequired) ...<Widget>[
               const SizedBox(height: 12),
               _baseUrlField(strings, form),
@@ -553,141 +513,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
         ],
       ),
     );
-  }
-
-  /// What replaces the endpoint, key and model fields for a provider that runs on
-  /// this server: whether it is downloaded, and for speech, the language.
-  List<Widget> _localModelChildren(
-    NeoRecallPalette palette,
-    AppL10n strings,
-    _WorkloadFormState form,
-    ProviderCatalogEntry entry,
-  ) {
-    LocalModelStatus? status;
-    for (final model in _localModels) {
-      if (model.id == entry.component) status = model;
-    }
-    final muted = TextStyle(
-      color: palette.textMuted,
-      fontSize: 11,
-      height: 1.4,
-    );
-    return <Widget>[
-      const SizedBox(height: 12),
-      if (status != null) _localStatus(palette, strings, status),
-      if (form.isTranscription) ...<Widget>[
-        const SizedBox(height: 12),
-        TextField(
-          controller: form.language,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: strings.providerLanguageLabel,
-            helperText: status == null || status.languages.isEmpty
-                ? null
-                : strings.providerLocalLanguages(
-                    status.languages
-                        .map((code) => code.toUpperCase())
-                        .join(', '),
-                  ),
-            helperMaxLines: 3,
-          ),
-        ),
-      ],
-      const SizedBox(height: 10),
-      Text(
-        form.isTranscription
-            ? strings.providerLocalSpeechNote
-            : strings.providerLocalLlmNote,
-        style: muted,
-      ),
-      if (status != null && status.license.isNotEmpty) ...<Widget>[
-        const SizedBox(height: 6),
-        Text(strings.providerLocalLicense(status.license), style: muted),
-      ],
-    ];
-  }
-
-  Widget _localStatus(
-    NeoRecallPalette palette,
-    AppL10n strings,
-    LocalModelStatus status,
-  ) {
-    final style = TextStyle(
-      color: palette.textSecondary,
-      fontSize: 12,
-      height: 1.4,
-    );
-    Widget line(IconData icon, Color color, String text) => Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: style)),
-      ],
-    );
-    Widget action(String label) => Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: OutlinedButton(
-          onPressed: () => _installLocalModel(status.id),
-          child: Text(label),
-        ),
-      ),
-    );
-    switch (status.phase) {
-      case 'installed':
-        return line(
-          Icons.check_circle_outline,
-          palette.success,
-          strings.providerLocalInstalled,
-        );
-      case 'installing':
-        final percent = status.percent ?? 0;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(strings.providerLocalDownloading('$percent'), style: style),
-            const SizedBox(height: 6),
-            LinearProgressIndicator(value: percent / 100),
-          ],
-        );
-      case 'failed':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            line(
-              Icons.error_outline,
-              palette.danger,
-              strings.providerLocalFailed(status.error ?? ''),
-            ),
-            action(strings.providerLocalRetry),
-          ],
-        );
-      case 'unsupported':
-        return line(
-          Icons.block,
-          palette.warning,
-          strings.providerLocalUnsupported(status.reason ?? ''),
-        );
-      default:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            line(
-              Icons.download_outlined,
-              palette.textMuted,
-              strings.providerLocalNotInstalled(
-                _formatBytes(status.downloadBytes),
-              ),
-            ),
-            action(strings.providerLocalDownloadNow),
-          ],
-        );
-    }
   }
 
   Widget _baseUrlField(AppL10n strings, _WorkloadFormState form) => TextField(
@@ -829,12 +654,6 @@ class _ProviderSetupPanelState extends State<ProviderSetupPanel> {
       ),
     );
   }
-}
-
-/// A download size as a person reads it: `1.7 GB`, `17 MB`.
-String _formatBytes(int bytes) {
-  if (bytes >= 1e9) return '${(bytes / 1e9).toStringAsFixed(1)} GB';
-  return '${(bytes / 1e6).round()} MB';
 }
 
 /// What skipping a model's thinking step adds to every request.

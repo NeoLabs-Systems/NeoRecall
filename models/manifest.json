@@ -6,7 +6,8 @@
     "asr/encoder.int8.onnx",
     "asr/decoder.int8.onnx",
     "asr/joiner.int8.onnx",
-    "asr/tokens.txt"
+    "asr/tokens.txt",
+    "local"
   ],
   "models": [
     {

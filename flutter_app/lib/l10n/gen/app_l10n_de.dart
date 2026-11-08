@@ -4212,54 +4212,6 @@ class AppL10nDe extends AppL10n {
       'Ein Sprachcode, den der Dienst versteht, etwa de oder en.';
 
   @override
-  String get providerLocalInstalled =>
-      'Installiert. Es läuft auf diesem Server, daher wird nichts an einen externen Dienst gesendet.';
-
-  @override
-  String providerLocalNotInstalled(String size) {
-    return 'Noch nicht heruntergeladen. Der Download startet beim Speichern automatisch, etwa $size.';
-  }
-
-  @override
-  String providerLocalDownloading(String percent) {
-    return 'Wird heruntergeladen… $percent %';
-  }
-
-  @override
-  String get providerLocalDownloadNow => 'Jetzt herunterladen';
-
-  @override
-  String providerLocalFailed(String message) {
-    return 'Der Download ist fehlgeschlagen: $message';
-  }
-
-  @override
-  String get providerLocalRetry => 'Erneut versuchen';
-
-  @override
-  String providerLocalUnsupported(String reason) {
-    return 'Dieser Server kann es nicht ausführen: $reason';
-  }
-
-  @override
-  String providerLocalLicense(String license) {
-    return 'Lizenz: $license';
-  }
-
-  @override
-  String providerLocalLanguages(String languages) {
-    return 'Versteht $languages. Lassen Sie die Sprache leer, damit sie erkannt wird.';
-  }
-
-  @override
-  String get providerLocalSpeechNote =>
-      'Aufnahmen werden auf diesem Server transkribiert und verlassen ihn nie. Schnell und kostenlos im Betrieb, versteht aber weniger Sprachen als gehostete Dienste.';
-
-  @override
-  String get providerLocalLlmNote =>
-      'Ein kleines Modell: Erinnerungen und Antworten fallen einfacher aus als bei einem gehosteten Modell. Es gibt seinen Speicher frei, wenn es eine Weile nicht gebraucht wird, und lädt bei Bedarf neu.';
-
-  @override
   String get providerResponseFormatLabel => 'Antwortformat';
 
   @override

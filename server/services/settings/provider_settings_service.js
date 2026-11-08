@@ -24,10 +24,6 @@ const LLM_PROVIDERS = Object.freeze({
   // its address and key come from that connection, so there is nothing to enter.
   // Model "auto" lets NeoRouter pick per request.
   neorouter: { label: 'NeoRouter', protocol: 'openai', baseUrl: null, defaultModel: 'auto', keyEnvironment: [], requiresApiKey: true, neorouter: true },
-  // Runs on this server: llama.cpp serving Gemma on loopback, installed and kept
-  // running by NeoRecall (see server/ai/local_llm). The address, key and model are
-  // fixed, so there is nothing for the operator to enter.
-  'gemma-local': { label: 'Gemma 2 2B (runs on this server)', protocol: 'local', baseUrl: null, defaultModel: 'gemma-2-2b-it', keyEnvironment: [], local: true, component: 'gemma-2-2b-it' },
 });
 
 const TRANSCRIPTION_PROVIDERS = Object.freeze({
@@ -37,10 +33,6 @@ const TRANSCRIPTION_PROVIDERS = Object.freeze({
   assemblyai: { label: 'AssemblyAI', protocol: 'assemblyai', baseUrl: 'https://api.assemblyai.com', defaultModel: null, modelOptional: true, keyEnvironment: ['ASSEMBLYAI_API_KEY'], requiresApiKey: true },
   'openai-compatible': { label: 'Custom OpenAI-compatible', protocol: 'openai', baseUrl: null, defaultModel: null, modelOptional: true, keyEnvironment: ['TRANSCRIPTION_API_KEY'] },
   neorouter: { label: 'NeoRouter', protocol: 'openai', baseUrl: null, defaultModel: 'auto', responseFormat: 'verbose_json', keyEnvironment: [], requiresApiKey: true, neorouter: true },
-  // Runs on this server. There is no endpoint, key or model to choose: the
-  // runtime and the model are downloaded and kept running by NeoRecall itself
-  // (see server/transcription/local_asr). `languages` is what the model reads.
-  'whistle-local': { label: 'Whistle (runs on this server)', protocol: 'local', baseUrl: null, defaultModel: 'whistle', modelOptional: true, keyEnvironment: [], local: true, component: 'whistle' },
 });
 
 const SETTINGS_KEYS = Object.freeze({
@@ -108,7 +100,11 @@ function resolveWorkload(workload) {
   const isLlm = workload === 'llm';
   const catalog = isLlm ? LLM_PROVIDERS : TRANSCRIPTION_PROVIDERS;
   const settingKey = SETTINGS_KEYS[workload];
-  const override = readSetting(settingKey) || {};
+  const saved = readSetting(settingKey) || {};
+  // A selection saved for a provider that no longer exists (the on-host models
+  // were removed) is ignored, so the server's own configuration applies again
+  // rather than every request failing on an unknown provider.
+  const override = saved.provider && !catalog[saved.provider] ? {} : saved;
   const environmentProvider = isLlm ? config.aiProvider : config.transcriptionProvider;
   const fallbackProvider = isLlm ? 'openai_compatible' : 'openai-compatible';
   const provider = override.provider ?? environmentProvider ?? fallbackProvider;
@@ -131,24 +127,21 @@ function resolveWorkload(workload) {
   const environmentExtraBody = isLlm ? config.aiApiExtraBody : null;
   const extraBody = override.extraBody ?? environmentExtraBody ?? null;
 
-  // The local language model has a fixed address and a key both server processes
-  // derive; neither is configurable, so neither comes from settings.
-  const local = isLlm && definition.local ? require('../../ai/local_llm/endpoint') : null;
-  // Likewise the router's address and key come from the connection, never from
-  // an override or the environment.
+  // The router's address and key come from the connection, never from an
+  // override or the environment.
   const router = definition.neorouter ? neorouter.get() : null;
   return {
     provider,
     label: definition.label,
     protocol: definition.protocol,
     model,
-    baseUrl: local ? local.baseUrl(config) : definition.neorouter ? router?.apiBase ?? null : baseUrl,
-    apiKey: local ? local.apiKey() : definition.neorouter ? router?.apiKey ?? null : apiKey,
+    baseUrl: definition.neorouter ? router?.apiBase ?? null : baseUrl,
+    apiKey: definition.neorouter ? router?.apiKey ?? null : apiKey,
     language: isLlm ? null : override.language ?? environmentLanguage ?? null,
     responseFormat: isLlm ? null : (override.responseFormat ?? environmentResponseFormat ?? definition.responseFormat ?? 'verbose_json'),
     extraBody,
-    apiKeyConfigured: definition.neorouter ? Boolean(router) : Boolean(apiKey) || Boolean(local),
-    apiKeySource: local || definition.neorouter ? 'none' : adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
+    apiKeyConfigured: definition.neorouter ? Boolean(router) : Boolean(apiKey),
+    apiKeySource: definition.neorouter ? 'none' : adminApiKey ? 'admin' : environmentApiKey ? 'environment' : 'none',
     // Whether removing a key saved from the app leaves one to fall back to.
     environmentApiKeyConfigured: definition.neorouter ? false : Boolean(environmentApiKey),
     sources: {
@@ -183,12 +176,8 @@ function catalogForAdmin(catalog) {
     defaultResponseFormat: value.responseFormat ?? 'verbose_json',
     apiKeyRequired: Boolean(value.requiresApiKey),
     modelOptional: Boolean(value.modelOptional),
-    // True when the provider runs on this server and has to be installed first.
-    local: Boolean(value.local),
     // True for NeoRouter: address and key come from the connection.
     neorouter: Boolean(value.neorouter),
-    // The manifest id to ask /admin/local-models about when `local` is true.
-    component: value.component || null,
   }));
 }
 
@@ -208,33 +197,18 @@ function validateSelection(workload, value) {
   const catalog = workload === 'llm' ? LLM_PROVIDERS : TRANSCRIPTION_PROVIDERS;
   const definition = catalog[value.provider];
   if (!definition) throw new HttpError(400, 'UNSUPPORTED_PROVIDER', `Unsupported ${workload} provider: ${value.provider}.`);
-  if (definition.protocol !== 'local' && !definition.modelOptional && !value.model && !definition.defaultModel) {
+  if (!definition.modelOptional && !value.model && !definition.defaultModel) {
     throw new HttpError(400, 'PROVIDER_MODEL_REQUIRED', `A model is required for ${definition.label}.`);
   }
   if (definition.neorouter && !neorouter.get()) {
     throw new HttpError(400, 'NEOROUTER_NOT_CONNECTED', 'NeoRouter is not connected. Connect it first.');
   }
-  if (definition.protocol !== 'local' && !definition.neorouter && !value.baseUrl && !definition.baseUrl) {
+  if (!definition.neorouter && !value.baseUrl && !definition.baseUrl) {
     throw new HttpError(400, 'PROVIDER_BASE_URL_REQUIRED', `A base URL is required for ${definition.label}.`);
   }
-  if (definition.local) assertLocalSelection(workload, value, definition);
   if (value.baseUrl) {
     const protocol = new URL(value.baseUrl).protocol;
     if (!['http:', 'https:'].includes(protocol)) throw new HttpError(400, 'INVALID_PROVIDER_URL', 'Provider base URLs must use HTTP or HTTPS.');
-  }
-}
-
-// A local provider can only be chosen where its runtime exists, and only with a
-// language its model reads — saying so here beats a recording that fails later.
-function assertLocalSelection(workload, value, definition) {
-  const installer = require('../../local_runtime/registry').installerFor(definition.component);
-  if (!installer.supported) {
-    throw new HttpError(400, 'LOCAL_PROVIDER_UNSUPPORTED', `${definition.label} is not available on this server (${installer.platformKey}).`);
-  }
-  const language = String(value.language || '').toLowerCase().split(/[-_]/)[0];
-  if (workload === 'transcription' && language && !installer.languages().includes(language)) {
-    throw new HttpError(400, 'LOCAL_PROVIDER_LANGUAGE_UNSUPPORTED',
-      `${definition.label} reads ${installer.languages().join(', ')}. Leave the language empty to detect it.`);
   }
 }
 
@@ -351,7 +325,6 @@ async function discoverModels(input) {
   const catalog = value.workload === 'llm' ? LLM_PROVIDERS : TRANSCRIPTION_PROVIDERS;
   const definition = catalog[value.provider];
   if (!definition) throw new HttpError(400, 'UNSUPPORTED_PROVIDER', `Unsupported ${value.workload} provider: ${value.provider}.`);
-  if (definition.protocol === 'local') return { models: [], automatic: true };
   if (definition.neorouter) return discoverNeoRouterModels(value.workload);
   if (definition.protocol === 'assemblyai') return { models: [], automatic: true };
   const credentials = discoveryCredentials(value.workload, value, definition);

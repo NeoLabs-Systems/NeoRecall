@@ -5,7 +5,6 @@ const providerSettings = require('../services/settings/provider_settings_service
 const PROVIDERS = Object.freeze({
   anthropic: './providers/anthropic_provider',
   openai: './providers/openai_compatible_provider',
-  local: './providers/local_provider',
 });
 
 function provider() {

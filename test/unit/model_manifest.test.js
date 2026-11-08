@@ -81,6 +81,17 @@ test('update reclaims a superseded model without touching anything else', () => 
   assert.deepEqual(pruneRetired(), [], 'pruning twice is a no-op');
 });
 
+test('the on-host models NeoRecall used to run are removed as a whole directory', () => {
+  // Whistle and Gemma were downloaded under models/local; NeoRecall now uses
+  // cloud providers or NeoRouter only, so the next setup reclaims that space.
+  assert.ok((manifest.retired || []).includes('local'));
+  seed('local/gemma-2-2b-it/weights/model.gguf', 2048);
+  seed('local/whistle/state.json', 64);
+  const removed = pruneRetired().find((entry) => entry.path === 'local');
+  assert.equal(removed?.bytes, 2112);
+  assert.ok(!fs.existsSync(path.join(ensureRuntimeDirs().models, 'local')));
+});
+
 test('an obsolete LLM_MODEL_FILE setting cannot keep a retired bundled model installed', () => {
   const retired = (manifest.retired || [])[0];
   const filename = seed(retired, 1024);

@@ -33,7 +33,7 @@
     else window.addEventListener('load', function () { setTimeout(reportLoad, 0); }, { once: true });
     // Only preselected API groups are recorded; paths and request data never leave the browser.
     var groups = ['devices', 'ingest', 'imports', 'recordings', 'transcripts', 'conversations', 'speakers', 'memories', 'mini-memories', 'daily-summaries', 'search', 'settings', 'integrations', 'sources'];
-    var adminSections = ['stats', 'users', 'jobs', 'ai-requests', 'audit', 'backups', 'processing-settings', 'provider-settings', 'local-models', 'update', 'config'];
+    var adminSections = ['stats', 'users', 'jobs', 'ai-requests', 'audit', 'backups', 'processing-settings', 'provider-settings', 'update', 'config'];
     var counts = Object.create(null);
     function feature(url, method, status) {
       try {

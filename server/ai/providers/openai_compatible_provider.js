@@ -151,7 +151,7 @@ async function chatJSON(request) {
 
 // One JSON POST on the configured deadline. Not `fetch`: it abandons a request
 // whose response headers have not arrived in five minutes and reports only
-// "fetch failed", and a local model can legitimately need longer. This deadline
+// "fetch failed", and a slow model can legitimately need longer. This deadline
 // is an inactivity timeout, so a model answering steadily is never cut off.
 function postJson(url, { headers, body, timeoutMs }) {
   return new Promise((resolve, reject) => {
