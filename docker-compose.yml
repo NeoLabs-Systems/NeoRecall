@@ -6,6 +6,7 @@ services:
     ports:
       - "4500:4500"
     environment:
+      ANALYTICS_ENABLED:
       NEORECALL_HOST: 0.0.0.0
       NEORECALL_PORT: 4500
       NEORECALL_REQUIRE_VECTOR: "true"
