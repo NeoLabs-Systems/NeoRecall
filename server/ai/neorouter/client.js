@@ -55,4 +55,22 @@ async function embed(connection, text, { inputType, dimensions }) {
   return { vector: Float32Array.from(vector, (value) => value / norm), space: space || String(data.model || 'auto') };
 }
 
-module.exports = { call, embed, modelList };
+// Whether `error` says the key's model answers at another size than asked
+// (this client's own check, or the router's since it refuses such vectors).
+function wrongSize(error) {
+  return error?.code === 'NEOROUTER_BAD_EMBEDDING' || /dimensions instead of/.test(String(error?.message));
+}
+
+// Resets the key's embedding pin after a wrong-size answer, but only when
+// `unused(model)` confirms no stored vector came from the pinned model: those
+// would stop being comparable with what the next model makes. True if reset.
+async function resetUnusedPin(connection, error, unused) {
+  if (!wrongSize(error)) return false;
+  const { data } = await call(connection, '/embeddings/pin').catch(() => ({ data: null }));
+  const model = data?.pin?.canonicalId;
+  if (!model || !unused(model)) return false;
+  const reset = await call(connection, '/embeddings/pin', { method: 'DELETE' }).catch(() => null);
+  return Boolean(reset?.data?.reset);
+}
+
+module.exports = { call, embed, modelList, resetUnusedPin };

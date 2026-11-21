@@ -22,6 +22,9 @@ let address;
 let approved = false;
 let online = true;
 let seen;
+let pinned = 'nvidia/embed';
+let pinResets = 0;
+const fixedSize = new Map([['old/fixed-768', 768]]);
 
 // A NeoRouter as NeoRecall sees it: the device sign-in and the /v1 endpoints.
 function fakeNeoRouter() {
@@ -58,8 +61,16 @@ function fakeNeoRouter() {
   router.post('/v1/embeddings', auth, (req, res) => {
     seen = { embeddings: req.body };
     // Two components, ignoring `dimensions` on purpose except for its size: the client must normalize.
-    const vector = Array.from({ length: req.body.dimensions }, (_, index) => (index === 0 ? 3 : index === 1 ? 4 : 0));
-    res.set('X-NeoRouter-Embedding-Pin', 'nvidia/embed').json({ model: 'nvidia-2/embed', data: [{ index: 0, embedding: vector }] });
+    // A model in `fixedSize` ignores the asked size, as some real embedders do.
+    const size = fixedSize.get(pinned) || req.body.dimensions;
+    const vector = Array.from({ length: size }, (_, index) => (index === 0 ? 3 : index === 1 ? 4 : 0));
+    res.set('X-NeoRouter-Embedding-Pin', pinned).json({ model: 'nvidia-2/embed', data: [{ index: 0, embedding: vector }] });
+  });
+  router.get('/v1/embeddings/pin', auth, (req, res) => res.json({ pin: { canonicalId: pinned, dimensions: 384 } }));
+  router.delete('/v1/embeddings/pin', auth, (req, res) => {
+    pinResets += 1;
+    pinned = 'nvidia/embed';
+    res.json({ reset: true });
   });
   return new Promise((resolve) => { const server = http.createServer(router).listen(0, '127.0.0.1', () => resolve(server)); });
 }
@@ -187,6 +198,28 @@ test('search vectors come from the router at the index size, unit length, and ar
   const document = searchIndex.upsertDocument({ userId: admin.id, kind: 'memory', sourceId: 'm1', body: 'a memory', occurredAt: new Date().toISOString() });
   await searchIndex.embedDocuments([document.id]);
   assert.equal(getDatabase().prepare('SELECT model_revision FROM search_embeddings WHERE document_id=?').get(document.id).model_revision, 'neorouter:nvidia/embed@384');
+});
+
+test('a pin to a model that never answered at the index size is reset once, then search vectors flow', async () => {
+  const embeddings = require('../../server/embeddings/embedding_service');
+  pinned = 'old/fixed-768';
+  pinResets = 0;
+  const { vector, space } = await embeddings.embedDetailed('hello', 'passage');
+  assert.equal(pinResets, 1);
+  assert.equal(vector.length, 384);
+  assert.equal(space, 'nvidia/embed');
+});
+
+test('a pin that already made stored vectors is never reset, even when its model changes size', async () => {
+  const embeddings = require('../../server/embeddings/embedding_service');
+  fixedSize.set('nvidia/embed', 768);
+  pinResets = 0;
+  try {
+    await assert.rejects(() => embeddings.embedDetailed('hello', 'passage'), /768 embedding dimensions/);
+    assert.equal(pinResets, 0, 'the index holds vectors from nvidia/embed');
+  } finally {
+    fixedSize.delete('nvidia/embed');
+  }
 });
 
 test('search keeps answering from keywords while the router is unreachable', async () => {

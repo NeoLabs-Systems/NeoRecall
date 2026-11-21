@@ -29,11 +29,33 @@ const spaceOf = (vector) => spaces.get(vector) ?? null;
 async function embedDetailed(text, prefix = 'passage') {
   const connection = require('../ai/neorouter/connection').get();
   if (connection?.embeddings) {
-    const { embed: routerEmbed } = require('../ai/neorouter/client');
-    const result = await routerEmbed(connection, String(text).slice(0, 16_000), { inputType: prefix, dimensions: getConfig().embeddingDimensions });
+    const result = await routerEmbed(connection, String(text).slice(0, 16_000), prefix);
     spaces.set(result.vector, result.space);
     return { vector: result.vector, space: result.space };
   }
+  return { vector: await embedLocal(text, prefix), space: null };
+}
+
+// A router key stays pinned to the model it first used. If that model never
+// answers at the index size, no vector of ours came from it, so the pin can be
+// reset once and the router lets the key pick a model that does.
+async function routerEmbed(connection, text, prefix) {
+  const client = require('../ai/neorouter/client');
+  const options = { inputType: prefix, dimensions: getConfig().embeddingDimensions };
+  try {
+    return await client.embed(connection, text, options);
+  } catch (error) {
+    const unused = (space) => require('../db/database').getDatabase()
+      .prepare('SELECT 1 FROM search_embeddings WHERE model_revision=? LIMIT 1').get(`neorouter:${space}@${options.dimensions}`) === undefined;
+    if (!(await client.resetUnusedPin(connection, error, unused))) throw error;
+    return client.embed(connection, text, options);
+  }
+}
+
+// The model that runs here, whatever the router settings say. Install and
+// update check this one: the router is a service that can be down for a while
+// without the app being broken.
+async function embedLocal(text, prefix = 'passage') {
   const model = await extractor();
   const output = await model(`${prefix}: ${String(text).slice(0, 16_000)}`, {
     pooling: 'mean', normalize: true, truncation: true, max_length: 512,
@@ -42,7 +64,7 @@ async function embedDetailed(text, prefix = 'passage') {
   if (values.length !== getConfig().embeddingDimensions || values.length !== 384) {
     throw new Error(`Embedding model returned ${values.length} dimensions; NeoRecall v1 requires 384.`);
   }
-  return { vector: new Float32Array(values), space: null };
+  return new Float32Array(values);
 }
 
 async function embed(text, prefix = 'passage') {
@@ -50,4 +72,4 @@ async function embed(text, prefix = 'passage') {
 }
 
 function resetForTests() { extractorPromise = undefined; }
-module.exports = { embed, embedDetailed, spaceOf, resetForTests };
+module.exports = { embed, embedDetailed, embedLocal, spaceOf, resetForTests };
