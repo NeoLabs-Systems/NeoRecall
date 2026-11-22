@@ -24,6 +24,10 @@ jobs:
     name: Attach apps to release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
       - name: Verify draft release target
         shell: bash
         env:
@@ -144,6 +148,12 @@ jobs:
           done
 
           echo "Verified ${#assets[@]} asset(s) on release $RELEASE_TAG."
+
+      - name: Add download buttons to the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: node scripts/release_download_notes.js --tag "$RELEASE_TAG"
 
       - name: Publish completed GitHub release
         shell: bash

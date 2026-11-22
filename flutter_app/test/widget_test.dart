@@ -8,6 +8,7 @@ import 'package:neorecall/main_auth.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_local_install.dart';
 import 'package:neorecall/main_memories.dart';
+import 'package:neorecall/main_navigation.dart';
 import 'package:neorecall/main_record.dart';
 import 'package:neorecall/main_shell.dart';
 import 'package:neorecall/main_speakers.dart';
@@ -316,22 +317,24 @@ void main() {
     );
     await tester.pump();
 
+    // The tab's label is drawn in the accent color while it is the open tab.
+    final accent = neoRecallPaletteOf(
+      tester.element(find.byType(NeoRecallShell)),
+    ).accent;
+    bool lit(String label) =>
+        tester.widget<Text>(find.text(label).last).style?.color == accent;
+
     // A bar, not a drawer: the whole product is visible without a hamburger.
-    expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(Drawer), findsNothing);
-    expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      0,
-    );
+    expect(neoRecallTabIndex(controller), 0);
+    expect(lit('Library'), isFalse);
 
     await tester.tap(find.text('Library'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(controller.page, RecallPage.library);
-    expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      1,
-    );
+    expect(neoRecallTabIndex(controller), 1);
+    expect(lit('Library'), isTrue);
 
     // Library remembers which list it was on, so returning to the tab does not
     // snap back to Moments.
@@ -351,10 +354,8 @@ void main() {
     controller.selectPage(RecallPage.sources);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      0,
-    );
+    expect(neoRecallTabIndex(controller), 0);
+    expect(lit('Library'), isFalse);
     expect(tester.takeException(), isNull);
   });
 
