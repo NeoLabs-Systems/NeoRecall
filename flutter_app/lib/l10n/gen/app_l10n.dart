@@ -2767,29 +2767,47 @@ abstract class AppL10n {
   /// **'{name} will lose read-only access to this account until you connect it again.'**
   String integrationsRevokeBody(String name);
 
-  /// No description provided for @cloudNextcloudEyebrow.
+  /// No description provided for @cloudEyebrow.
   ///
   /// In en, this message translates to:
-  /// **'NEXTCLOUD'**
-  String get cloudNextcloudEyebrow;
+  /// **'CLOUD BACKUP'**
+  String get cloudEyebrow;
 
-  /// No description provided for @cloudNextcloudTitle.
+  /// No description provided for @cloudTitle.
   ///
   /// In en, this message translates to:
-  /// **'Back up to your Nextcloud'**
-  String get cloudNextcloudTitle;
+  /// **'Back up to your own cloud'**
+  String get cloudTitle;
 
-  /// No description provided for @cloudNextcloudDescription.
+  /// No description provided for @cloudDescription.
   ///
   /// In en, this message translates to:
-  /// **'Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.'**
-  String get cloudNextcloudDescription;
+  /// **'Connect your NeoCloud or Nextcloud. NeoRecall can copy your recordings and a backup of this account there. Copies only go out — nothing is read back or restored.'**
+  String get cloudDescription;
+
+  /// No description provided for @cloudProviderNeoCloud.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoCloud'**
+  String get cloudProviderNeoCloud;
+
+  /// No description provided for @cloudProviderNextcloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Nextcloud'**
+  String get cloudProviderNextcloud;
+
+  /// No description provided for @cloudNeoCloudBenefits.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve NeoRecall on your NeoCloud\'s own page — no password to copy. Every upload is checked for damage, and long recordings continue after a dropped connection.'**
+  String get cloudNeoCloudBenefits;
 
   /// No description provided for @cloudInstanceUrlLabel.
   ///
   /// In en, this message translates to:
-  /// **'Nextcloud URL'**
-  String get cloudInstanceUrlLabel;
+  /// **'{provider} URL'**
+  String cloudInstanceUrlLabel(String provider);
 
   /// No description provided for @cloudInstanceUrlHint.
   ///
@@ -2800,14 +2818,20 @@ abstract class AppL10n {
   /// No description provided for @cloudSignIn.
   ///
   /// In en, this message translates to:
-  /// **'Sign in with Nextcloud'**
-  String get cloudSignIn;
+  /// **'Sign in with {provider}'**
+  String cloudSignIn(String provider);
 
   /// No description provided for @cloudWaiting.
   ///
   /// In en, this message translates to:
   /// **'Finish signing in in the browser. This screen updates when Nextcloud issues an app password.'**
   String get cloudWaiting;
+
+  /// No description provided for @cloudNeoCloudWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve NeoRecall in NeoCloud. Check that NeoCloud shows this code:'**
+  String get cloudNeoCloudWaiting;
 
   /// No description provided for @cloudOpenLogin.
   ///
@@ -2824,8 +2848,8 @@ abstract class AppL10n {
   /// No description provided for @cloudAudioDescription.
   ///
   /// In en, this message translates to:
-  /// **'When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.'**
-  String get cloudAudioDescription;
+  /// **'When a recording ends, upload one audio file to {provider}. NeoRecall still deletes its own copies.'**
+  String cloudAudioDescription(String provider);
 
   /// No description provided for @cloudDataTitle.
   ///
@@ -2860,14 +2884,32 @@ abstract class AppL10n {
   /// No description provided for @cloudDisconnectTitle.
   ///
   /// In en, this message translates to:
-  /// **'Disconnect Nextcloud?'**
-  String get cloudDisconnectTitle;
+  /// **'Disconnect {provider}?'**
+  String cloudDisconnectTitle(String provider);
 
   /// No description provided for @cloudDisconnectBody.
   ///
   /// In en, this message translates to:
-  /// **'NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.'**
-  String get cloudDisconnectBody;
+  /// **'NeoRecall will forget this connection and stop uploading. Files already copied to {provider} are left in place.'**
+  String cloudDisconnectBody(String provider);
+
+  /// No description provided for @cloudNeoCloudRevokeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'To also withdraw NeoRecall\'s access in NeoCloud, remove “NeoRecall” under Settings › Devices there.'**
+  String get cloudNeoCloudRevokeHint;
+
+  /// No description provided for @cloudQuota.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoCloud storage: {used} of {limit} used'**
+  String cloudQuota(String used, String limit);
+
+  /// No description provided for @cloudQuotaUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoCloud storage: {used} used'**
+  String cloudQuotaUnlimited(String used);
 
   /// No description provided for @cloudLastAudio.
   ///

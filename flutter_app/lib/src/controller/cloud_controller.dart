@@ -1,6 +1,7 @@
 part of '../../main_controller.dart';
 
-/// Per-user Nextcloud backup (write-only copies of audio and account data).
+/// Per-user cloud backup to NeoCloud or Nextcloud (write-only copies of audio
+/// and account data). One destination at a time.
 mixin CloudController on ChangeNotifier {
   NeoRecallApiClient get api;
 
@@ -10,6 +11,9 @@ mixin CloudController on ChangeNotifier {
   };
   bool loadingCloud = false;
   bool cloudBusy = false;
+
+  /// Why the last sign-in ended without connecting (declined, expired).
+  String? cloudLoginError;
   Timer? _cloudPollTimer;
 
   String get cloudStatusName =>
@@ -17,6 +21,13 @@ mixin CloudController on ChangeNotifier {
   bool get cloudConnected => cloudStatus['connected'] == true;
   bool get cloudConnecting => cloudStatusName == 'connecting';
   String? get cloudLoginUrl => cloudStatus['loginUrl'] as String?;
+
+  /// `neocloud` or `nextcloud` while connecting or connected; null otherwise.
+  String? get cloudProvider => cloudStatus['type'] as String?;
+
+  /// The short code NeoCloud shows on its approval page, so the user can check
+  /// they are approving this very sign-in.
+  String? get cloudUserCode => cloudStatus['userCode'] as String?;
 
   Future<void> loadCloudStatus() async {
     loadingCloud = true;
@@ -35,13 +46,17 @@ mixin CloudController on ChangeNotifier {
     }
   }
 
-  Future<String?> startCloudLogin(String instanceUrl) async {
+  Future<String?> startCloudLogin(
+    String instanceUrl, {
+    String provider = 'neocloud',
+  }) async {
+    cloudLoginError = null;
     cloudBusy = true;
     notifyListeners();
     try {
       final response = await api.request(
         'POST',
-        '/api/v1/cloud/nextcloud/login',
+        '/api/v1/cloud/${provider == 'nextcloud' ? 'nextcloud' : 'neocloud'}/login',
         body: {'instanceUrl': instanceUrl},
       );
       _applyCloud(response);
@@ -59,13 +74,23 @@ mixin CloudController on ChangeNotifier {
 
   Future<void> pollCloudLogin() async {
     if (!cloudConnecting && cloudLoginUrl == null) return;
+    final provider = cloudProvider == 'nextcloud' ? 'nextcloud' : 'neocloud';
     try {
       final response = await api.request(
         'POST',
-        '/api/v1/cloud/nextcloud/poll',
+        '/api/v1/cloud/$provider/poll',
       );
       _applyCloud(response);
       if (cloudConnected) _cloudPollTimer?.cancel();
+    } on ApiException catch (error) {
+      // NeoCloud answers a declined or expired sign-in for good: stop waiting
+      // and show why instead of spinning until the code runs out.
+      if (error.code == 'CLOUD_LOGIN_DENIED' ||
+          error.code == 'CLOUD_LOGIN_EXPIRED') {
+        _cloudPollTimer?.cancel();
+        cloudLoginError = error.message;
+        await loadCloudStatus();
+      }
     } catch (_) {
       // Keep the waiting state; the next tick retries.
     }

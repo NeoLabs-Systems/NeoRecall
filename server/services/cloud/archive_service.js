@@ -11,6 +11,7 @@ const jobs = require('../jobs/job_service');
 const tempAudio = require('../ingest/temp_audio_service');
 const accounts = require('./cloud_account_service');
 const { createWebDavSink } = require('./sinks/webdav_sink');
+const { createNeoCloudSink } = require('./sinks/neocloud_sink');
 const userExport = require('./user_export_service');
 const { concatRecording } = require('./concat_recording');
 const { createLogger } = require('../../utils/logger');
@@ -63,10 +64,14 @@ function enqueueDataBackup(userId, triggerKind = 'scheduled') {
 
 function sinkFor(userId) {
   const account = accounts.get(userId);
-  const password = accounts.appPassword(userId);
-  if (!account || !password) {
-    throw Object.assign(new Error('Nextcloud is not connected.'), { code: 'CLOUD_NOT_CONNECTED', retryable: false });
+  const credential = accounts.credential(userId);
+  if (!account || !credential) {
+    throw Object.assign(new Error('No cloud backup is connected.'), { code: 'CLOUD_NOT_CONNECTED', retryable: false });
   }
+  if (account.type === 'neocloud') {
+    return createNeoCloudSink({ baseUrl: account.baseUrl, token: credential, folder: account.folder });
+  }
+  const password = credential;
   return createWebDavSink({
     baseUrl: account.baseUrl,
     username: account.username,
@@ -75,11 +80,11 @@ function sinkFor(userId) {
   });
 }
 
-function insertItem({ userId, accountId, kind, localPath, remotePath, bytes, checksum }, database = getDatabase()) {
+function insertItem({ userId, accountId, kind, localPath, remotePath, bytes, checksum, capturedAt = null }, database = getDatabase()) {
   const id = crypto.randomUUID();
   database.prepare(`INSERT INTO cloud_archive_items
-    (id,user_id,account_id,kind,local_path,remote_path,bytes,sha256,state)
-    VALUES (?,?,?,?,?,?,?,?,'queued')`).run(id, userId, accountId, kind, localPath, remotePath, bytes, checksum);
+    (id,user_id,account_id,kind,local_path,remote_path,bytes,sha256,captured_at,state)
+    VALUES (?,?,?,?,?,?,?,?,?,'queued')`).run(id, userId, accountId, kind, localPath, remotePath, bytes, checksum, capturedAt);
   return id;
 }
 
@@ -182,7 +187,10 @@ function finalizeAssembly(assembly) {
     const bytes = fs.statSync(dest).size;
     const checksum = sha256File(dest);
     require('../../utils/sealed_fs').sealInPlace(dest);
+    const session = getDatabase().prepare('SELECT device_started_at FROM recording_sessions WHERE id=?')
+      .get(assembly.session_id);
     insertItem({
+      capturedAt: session?.device_started_at || null,
       userId: assembly.user_id,
       accountId: assembly.account_id,
       kind: 'audio',
@@ -221,9 +229,9 @@ function maybeEnqueueAfterStage(chunk) {
   if (sessionClosed(session) || source?.closed_at) enqueuePut(chunk.user_id);
 }
 
-// Copy a transcribed chunk aside for Nextcloud. Must not throw to the receipt
+// Copy a transcribed chunk aside for the cloud backup. Must not throw to the receipt
 // path: a failed copy is a missed backup, not a stuck recording. The PUT waits
-// until the recording itself has ended so Nextcloud receives one file, not a
+// until the recording itself has ended so the cloud receives one file, not a
 // folder of 30-second parts.
 function stageAudio(chunk) {
   if (!chunk?.temporary_path || !fs.existsSync(chunk.temporary_path)) return { skipped: true, reason: 'missing' };
@@ -264,16 +272,22 @@ async function putOne(item) {
   db.prepare(`UPDATE cloud_archive_items SET state='uploading', attempts=attempts+1 WHERE id=?`).run(item.id);
   try {
     const sink = sinkFor(item.user_id);
-    // Nextcloud is the owner's ordinary library: a playable WAV or a readable
+    // The cloud is the owner's ordinary library: a playable WAV or a readable
     // zip, never a sealed NeoRecall blob. Local pending copies stay sealed.
     await require('../../utils/sealed_fs').withPlainAsync(item.local_path, async (plain) => {
       if (require('../../utils/sealed_fs').isSealed(plain)) {
-        throw new Error('Refusing to upload a sealed file to Nextcloud.');
+        throw new Error('Refusing to upload a sealed file to the cloud.');
       }
-      return sink.put(plain, item.remote_path);
+      return sink.put(plain, item.remote_path, {
+        capturedAt: item.captured_at || null,
+        resumeUploadId: item.remote_upload_id || null,
+        onUploadStarted: (uploadId) => {
+          db.prepare('UPDATE cloud_archive_items SET remote_upload_id=? WHERE id=?').run(uploadId, item.id);
+        },
+      });
     });
     tempAudio.unlinkStrict(item.local_path);
-    db.prepare(`UPDATE cloud_archive_items SET state='uploaded', local_path=NULL, uploaded_at=?, last_error=NULL
+    db.prepare(`UPDATE cloud_archive_items SET state='uploaded', local_path=NULL, remote_upload_id=NULL, uploaded_at=?, last_error=NULL
       WHERE id=?`).run(new Date().toISOString(), item.id);
     accounts.recordSuccess(item.user_id, item.kind);
     return { uploaded: true, id: item.id };
@@ -311,7 +325,21 @@ async function drain(userId) {
     const result = await putOne(item);
     if (result.uploaded) uploaded += 1;
   }
+  if (uploaded) await refreshQuota(userId);
   return { uploaded };
+}
+
+// NeoCloud reports how full the account is; Settings shows it so a nearly
+// full NeoCloud is visible before copies start failing. Best effort only.
+async function refreshQuota(userId) {
+  const account = accounts.get(userId);
+  if (account?.type !== 'neocloud') return;
+  try {
+    const info = await sinkFor(userId).me();
+    accounts.recordQuota(userId, info.quota);
+  } catch (error) {
+    logger.warn('NeoCloud quota check failed', { userId, error });
+  }
 }
 
 async function backupUserData(userId, { force = false } = {}) {
@@ -413,5 +441,5 @@ function discardPending(userId) {
 
 module.exports = {
   stageAudio, drain, backupUserData, scheduleDueBackups, enqueuePendingPuts, sweepPending,
-  enqueueDataBackup, enqueuePut, finalizeSession, discardPending,
+  enqueueDataBackup, enqueuePut, finalizeSession, discardPending, refreshQuota,
 };

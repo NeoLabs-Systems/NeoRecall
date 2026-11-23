@@ -182,7 +182,7 @@ final List<_SettingsEntry> _settingsEntries = <_SettingsEntry>[
   _SettingsEntry(
     SettingsSection.integrations,
     (l) => l.settingsNavIntegrations,
-    ['mcp', 'nextcloud', 'claude', 'backup'],
+    ['mcp', 'neocloud', 'nextcloud', 'cloud', 'claude', 'backup'],
   ),
 ];
 

@@ -71,3 +71,31 @@ test('connected account patches, queues a backup, and disconnects without echoin
   const after = await request(app).get('/api/v1/cloud').set(auth).expect(200);
   assert.equal(after.body.cloud.connected, false);
 });
+
+test('NeoCloud sign-in rejects link-local addresses and plain HTTP to public hosts', async () => {
+  const auth = await register('cloud-neocloud-ssrf');
+  const linkLocal = await request(app).post('/api/v1/cloud/neocloud/login').set(auth)
+    .send({ instanceUrl: 'https://169.254.169.254' }).expect(400);
+  assert.equal(linkLocal.body.error.code, 'INVALID_CLOUD_URL');
+  assert.match(linkLocal.body.error.message, /NeoCloud/);
+  const plain = await request(app).post('/api/v1/cloud/neocloud/login').set(auth)
+    .send({ instanceUrl: 'http://files.example.com' }).expect(400);
+  assert.equal(plain.body.error.code, 'INVALID_CLOUD_URL');
+});
+
+test('a connected NeoCloud reports its provider and quota without the device token', async () => {
+  const auth = await register('cloud-neocloud-status');
+  accounts.upsertConnected(auth.userId, {
+    type: 'neocloud',
+    baseUrl: 'https://files.example.test',
+    username: 'ada',
+    token: 'nc_device_secret',
+    deviceId: 'dev-1',
+    quota: { used: 10, limit: -1 },
+  });
+  const status = await request(app).get('/api/v1/cloud').set(auth).expect(200);
+  assert.equal(status.body.cloud.type, 'neocloud');
+  assert.deepEqual(status.body.cloud.quota, { used: 10, limit: -1 });
+  assert.ok(!JSON.stringify(status.body).includes('nc_device_secret'));
+  await request(app).delete('/api/v1/cloud').set(auth).expect(204);
+});

@@ -29,7 +29,7 @@ function cancel(userId) {
 }
 
 async function start(userId, instanceUrl, { fetchImpl = fetch } = {}) {
-  const baseUrl = normalizeInstanceUrl(instanceUrl);
+  const baseUrl = normalizeInstanceUrl(instanceUrl, { label: 'Nextcloud' });
   const url = joinUrl(baseUrl, 'index.php/login/v2');
   let response;
   try {
@@ -68,7 +68,7 @@ async function start(userId, instanceUrl, { fetchImpl = fetch } = {}) {
     startedAt: Date.now(),
   };
   pending.set(userId, entry);
-  return { status: 'connecting', loginUrl, baseUrl };
+  return { status: 'connecting', type: 'nextcloud', loginUrl, baseUrl };
 }
 
 async function poll(userId, { fetchImpl = fetch } = {}) {
@@ -93,7 +93,7 @@ async function poll(userId, { fetchImpl = fetch } = {}) {
     wrapped.retryable = true;
     throw wrapped;
   }
-  if (response.status === 404) return { status: 'connecting', loginUrl: entry.loginUrl, baseUrl: entry.baseUrl };
+  if (response.status === 404) return { status: 'connecting', type: 'nextcloud', loginUrl: entry.loginUrl, baseUrl: entry.baseUrl };
   if (response.status < 200 || response.status >= 300) {
     throw new HttpError(502, 'CLOUD_LOGIN_FAILED', 'Nextcloud login did not complete.');
   }
@@ -120,7 +120,7 @@ async function poll(userId, { fetchImpl = fetch } = {}) {
 function publicPending(userId) {
   const entry = getPending(userId);
   if (!entry) return null;
-  return { status: 'connecting', loginUrl: entry.loginUrl, baseUrl: entry.baseUrl };
+  return { status: 'connecting', type: 'nextcloud', loginUrl: entry.loginUrl, baseUrl: entry.baseUrl };
 }
 
 module.exports = { start, poll, cancel, getPending, publicPending };

@@ -2,8 +2,8 @@
 
 const { HttpError } = require('../../middleware/error_handler');
 
-// Nextcloud instance URLs come from the user. The server will POST to them
-// (Login Flow) and PUT files (WebDAV), so a crafted URL is an SSRF primitive.
+// Nextcloud and NeoCloud instance URLs come from the user. The server will POST to them
+// (Login Flow / device login) and upload files, so a crafted URL is an SSRF primitive.
 // The rules are: a real http(s) origin, no credentials, no link-local or
 // metadata addresses, and plaintext HTTP only for private/local hosts.
 
@@ -56,25 +56,25 @@ function invalid(message) {
   return new HttpError(400, 'INVALID_CLOUD_URL', message);
 }
 
-function normalizeInstanceUrl(raw) {
+function normalizeInstanceUrl(raw, { label = 'Nextcloud' } = {}) {
   const trimmed = String(raw || '').trim();
-  if (!trimmed) throw invalid('A Nextcloud URL is required.');
+  if (!trimmed) throw invalid(`A ${label} URL is required.`);
   let parsed;
   try {
     parsed = new URL(trimmed);
   } catch {
     throw invalid('That is not a valid URL.');
   }
-  if (parsed.username || parsed.password) throw invalid('The Nextcloud URL must not include credentials.');
+  if (parsed.username || parsed.password) throw invalid(`The ${label} URL must not include credentials.`);
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw invalid('The Nextcloud URL must be http or https.');
+    throw invalid(`The ${label} URL must be http or https.`);
   }
-  if (!parsed.hostname) throw invalid('The Nextcloud URL is missing a host.');
-  if (isBlockedHost(parsed.hostname)) throw invalid('That host cannot be used as a Nextcloud instance.');
+  if (!parsed.hostname) throw invalid(`The ${label} URL is missing a host.`);
+  if (isBlockedHost(parsed.hostname)) throw invalid(`That host cannot be used as a ${label} instance.`);
   if (parsed.protocol === 'http:' && !isLoopbackOrPrivateHost(parsed.hostname)) {
-    throw invalid('HTTP is only allowed for a local or private Nextcloud address. Use HTTPS otherwise.');
+    throw invalid(`HTTP is only allowed for a local or private ${label} address. Use HTTPS otherwise.`);
   }
-  if (parsed.pathname.includes('..')) throw invalid('The Nextcloud URL path is invalid.');
+  if (parsed.pathname.includes('..')) throw invalid(`The ${label} URL path is invalid.`);
   parsed.hash = '';
   parsed.search = '';
   const path = parsed.pathname.replace(/\/+$/, '');

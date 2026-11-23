@@ -49,26 +49,36 @@ the backup snapshot is encrypted again with the key in
 somewhere without that key means they cannot be restored, and copying the key
 alongside them means the outer encryption protects nothing.
 
-## Nextcloud copies
+## NeoCloud and Nextcloud copies
 
-Each account can connect its own self-hosted Nextcloud instance under
-**Settings → Integrations**. After signing in on that instance, the owner can
-opt in to two write-only copies:
+Each account can connect one self-hosted NeoCloud or Nextcloud under
+**Settings → Integrations**. NeoCloud is approved on the NeoCloud server's own
+device page (the account's password, 2FA or passkey stay there; NeoRecall only
+receives a device token it can use for files, which the owner can remove under
+**Settings → Devices** in NeoCloud). Nextcloud signs in through its Login Flow
+and issues an app password. After that, the owner can opt in to two
+write-only copies:
 
 - **recordings** — while a recording is still open, transcribed chunks are
   copied aside locally. When that recording ends, NeoRecall joins them into
-  one audio file, PUTs that file to Nextcloud, and deletes the local copies
-  as usual;
+  one audio file, uploads that file, and deletes the local copies as usual;
 - **this account's data** — a periodic (and manual) zip of that user's
   transcripts, conversations, memories, summaries, notes, named speakers,
   entities, settings and device metadata. It is not a snapshot of the server
   and it does not include other users. The same zip is available in the app
   under **Settings → Security → Your data**.
 
-Nothing is read back. Nextcloud is not a restore path. The copies leave this
+Nothing is read back. Neither destination is a restore path. The copies leave this
 machine because the account asked them to, and they are written as ordinary
 files — a playable recording or a readable zip — not sealed NeoRecall blobs.
-A failed Nextcloud upload never delays a terminal receipt.
+A failed upload never delays a terminal receipt.
+
+With NeoCloud, every upload declares its SHA-256 and NeoCloud refuses bytes
+that arrive damaged; a retry after a lost answer finds the file already sent
+instead of storing a second copy; recordings over 8 MB go up in parts and
+continue where an interrupted attempt stopped; and the file is dated to when
+the recording started. Settings shows how full the NeoCloud account is. A full
+NeoCloud or a removed device stops the uploads with a message saying so.
 
 ## Deleting an account
 
@@ -83,7 +93,7 @@ account are unlinked, and the app erases anything still spooled on the device
 before signing out. Audit rows that mentioned the account keep their
 operational action, but lose the account identifier, IP address, and metadata.
 It cannot be undone, and it does not reach backup artifacts taken before the
-deletion, files already copied to Nextcloud, or data already sent to a
+deletion, files already copied to NeoCloud or Nextcloud, or data already sent to a
 configured provider.
 
 ## Deletion receipt invariant
@@ -109,7 +119,7 @@ The SQLite file itself is encrypted at rest with that installation key
 vectors, and settings are ciphertext on disk. A process that has `secret.key`
 decrypts pages in memory so search, matching, and generation keep working
 without a new password or a change in the product. Temporary audio, import
-parts, context originals, and pending Nextcloud copies are sealed with
+parts, context originals, and pending cloud copies are sealed with
 AES-256-GCM while they sit on disk; they are opened only for the job that
 needs the bytes. Clients seal pending capture audio the same way, with a key
 held in the device keychain or secure storage.
@@ -138,7 +148,7 @@ Ask sends only its retrieved text context and returns cited sources.
 transcripts, conversation titles and summaries, memories, notes and extracted
 context text, named speakers, entities, settings, and device metadata. It does
 not include audio, voice embeddings, other accounts, or server secrets. The
-same file is what Nextcloud receives when that account enables data copies.
+same file is what NeoCloud or Nextcloud receives when that account enables data copies.
 
 ## Account isolation
 

@@ -5,7 +5,7 @@ import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
 import 'settings_section_list.dart';
-import 'nextcloud_section.dart';
+import 'cloud_backup_section.dart';
 import '../../l10n/gen/app_l10n.dart';
 
 /// MCP URL and authorized OAuth clients (NeoAgent and remote MCP).
@@ -32,7 +32,7 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
     return SettingsSectionList(
       controller: ctrl,
       children: <Widget>[
-        NextcloudSectionCard(controller: ctrl),
+        CloudBackupSectionCard(controller: ctrl),
         SectionCard(
           eyebrow: AppL10n.of(context).integrationsMcpEyebrow,
           child: Column(

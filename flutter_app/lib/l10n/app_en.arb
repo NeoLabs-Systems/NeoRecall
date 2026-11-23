@@ -909,23 +909,82 @@
       }
     }
   },
-  "cloudNextcloudEyebrow": "NEXTCLOUD",
-  "cloudNextcloudTitle": "Back up to your Nextcloud",
-  "cloudNextcloudDescription": "Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.",
-  "cloudInstanceUrlLabel": "Nextcloud URL",
+  "cloudEyebrow": "CLOUD BACKUP",
+  "cloudTitle": "Back up to your own cloud",
+  "cloudDescription": "Connect your NeoCloud or Nextcloud. NeoRecall can copy your recordings and a backup of this account there. Copies only go out — nothing is read back or restored.",
+  "cloudProviderNeoCloud": "NeoCloud",
+  "cloudProviderNextcloud": "Nextcloud",
+  "cloudNeoCloudBenefits": "Approve NeoRecall on your NeoCloud's own page — no password to copy. Every upload is checked for damage, and long recordings continue after a dropped connection.",
+  "cloudInstanceUrlLabel": "{provider} URL",
+  "@cloudInstanceUrlLabel": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "cloudInstanceUrlHint": "https://cloud.example.com",
-  "cloudSignIn": "Sign in with Nextcloud",
+  "cloudSignIn": "Sign in with {provider}",
+  "@cloudSignIn": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "cloudWaiting": "Finish signing in in the browser. This screen updates when Nextcloud issues an app password.",
+  "cloudNeoCloudWaiting": "Approve NeoRecall in NeoCloud. Check that NeoCloud shows this code:",
   "cloudOpenLogin": "Open login page",
   "cloudAudioTitle": "Copy recordings",
-  "cloudAudioDescription": "When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.",
+  "cloudAudioDescription": "When a recording ends, upload one audio file to {provider}. NeoRecall still deletes its own copies.",
+  "@cloudAudioDescription": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "cloudDataTitle": "Back up this account",
   "cloudDataDescription": "Periodically upload transcripts, memories, summaries and settings for this account only.",
   "cloudBackupNow": "Back up now",
   "cloudBackupQueued": "Backup queued",
   "cloudDisconnect": "Disconnect",
-  "cloudDisconnectTitle": "Disconnect Nextcloud?",
-  "cloudDisconnectBody": "NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.",
+  "cloudDisconnectTitle": "Disconnect {provider}?",
+  "@cloudDisconnectTitle": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudDisconnectBody": "NeoRecall will forget this connection and stop uploading. Files already copied to {provider} are left in place.",
+  "@cloudDisconnectBody": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudNeoCloudRevokeHint": "To also withdraw NeoRecall's access in NeoCloud, remove “NeoRecall” under Settings › Devices there.",
+  "cloudQuota": "NeoCloud storage: {used} of {limit} used",
+  "@cloudQuota": {
+    "placeholders": {
+      "used": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudQuotaUnlimited": "NeoCloud storage: {used} used",
+  "@cloudQuotaUnlimited": {
+    "placeholders": {
+      "used": {
+        "type": "String"
+      }
+    }
+  },
   "cloudLastAudio": "Last audio copy: {when}",
   "@cloudLastAudio": {
     "placeholders": {

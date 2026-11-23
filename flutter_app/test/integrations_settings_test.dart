@@ -31,7 +31,7 @@ void main() {
 
     expect(find.text('https://recall.example.test/mcp'), findsOneWidget);
     expect(find.text('Copy MCP URL'), findsOneWidget);
-    expect(find.text('Back up to your Nextcloud'), findsOneWidget);
+    expect(find.text('Back up to your own cloud'), findsOneWidget);
     expect(find.text('Claude'), findsOneWidget);
     expect(find.text('MCP client'), findsOneWidget);
     expect(tester.takeException(), isNull);

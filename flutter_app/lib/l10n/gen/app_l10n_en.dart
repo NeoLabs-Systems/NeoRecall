@@ -1717,27 +1717,45 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
-  String get cloudNextcloudEyebrow => 'NEXTCLOUD';
+  String get cloudEyebrow => 'CLOUD BACKUP';
 
   @override
-  String get cloudNextcloudTitle => 'Back up to your Nextcloud';
+  String get cloudTitle => 'Back up to your own cloud';
 
   @override
-  String get cloudNextcloudDescription =>
-      'Connect a self-hosted Nextcloud instance. NeoRecall can copy your recordings and a dump of this account there. Copies only go out — nothing is read back or restored from Nextcloud.';
+  String get cloudDescription =>
+      'Connect your NeoCloud or Nextcloud. NeoRecall can copy your recordings and a backup of this account there. Copies only go out — nothing is read back or restored.';
 
   @override
-  String get cloudInstanceUrlLabel => 'Nextcloud URL';
+  String get cloudProviderNeoCloud => 'NeoCloud';
+
+  @override
+  String get cloudProviderNextcloud => 'Nextcloud';
+
+  @override
+  String get cloudNeoCloudBenefits =>
+      'Approve NeoRecall on your NeoCloud\'s own page — no password to copy. Every upload is checked for damage, and long recordings continue after a dropped connection.';
+
+  @override
+  String cloudInstanceUrlLabel(String provider) {
+    return '$provider URL';
+  }
 
   @override
   String get cloudInstanceUrlHint => 'https://cloud.example.com';
 
   @override
-  String get cloudSignIn => 'Sign in with Nextcloud';
+  String cloudSignIn(String provider) {
+    return 'Sign in with $provider';
+  }
 
   @override
   String get cloudWaiting =>
       'Finish signing in in the browser. This screen updates when Nextcloud issues an app password.';
+
+  @override
+  String get cloudNeoCloudWaiting =>
+      'Approve NeoRecall in NeoCloud. Check that NeoCloud shows this code:';
 
   @override
   String get cloudOpenLogin => 'Open login page';
@@ -1746,8 +1764,9 @@ class AppL10nEn extends AppL10n {
   String get cloudAudioTitle => 'Copy recordings';
 
   @override
-  String get cloudAudioDescription =>
-      'When a recording ends, upload one audio file to Nextcloud. NeoRecall still deletes its own copies.';
+  String cloudAudioDescription(String provider) {
+    return 'When a recording ends, upload one audio file to $provider. NeoRecall still deletes its own copies.';
+  }
 
   @override
   String get cloudDataTitle => 'Back up this account';
@@ -1766,11 +1785,28 @@ class AppL10nEn extends AppL10n {
   String get cloudDisconnect => 'Disconnect';
 
   @override
-  String get cloudDisconnectTitle => 'Disconnect Nextcloud?';
+  String cloudDisconnectTitle(String provider) {
+    return 'Disconnect $provider?';
+  }
 
   @override
-  String get cloudDisconnectBody =>
-      'NeoRecall will forget this instance and stop uploading. Files already copied to Nextcloud are left in place.';
+  String cloudDisconnectBody(String provider) {
+    return 'NeoRecall will forget this connection and stop uploading. Files already copied to $provider are left in place.';
+  }
+
+  @override
+  String get cloudNeoCloudRevokeHint =>
+      'To also withdraw NeoRecall\'s access in NeoCloud, remove “NeoRecall” under Settings › Devices there.';
+
+  @override
+  String cloudQuota(String used, String limit) {
+    return 'NeoCloud storage: $used of $limit used';
+  }
+
+  @override
+  String cloudQuotaUnlimited(String used) {
+    return 'NeoCloud storage: $used used';
+  }
 
   @override
   String cloudLastAudio(String when) {

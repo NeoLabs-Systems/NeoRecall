@@ -104,10 +104,10 @@ test('Login Flow v2 stores an app password after a successful poll', async () =>
   assert.equal(pub.username, 'ada');
   assert.equal(pub.audioEnabled, false);
   assert.ok(!JSON.stringify(pub).includes('app-secret'));
-  assert.equal(accounts.appPassword(userId), 'app-secret');
+  assert.equal(accounts.credential(userId), 'app-secret');
   accounts.disconnect(userId);
   assert.equal(accounts.get(userId), null);
-  assert.equal(accounts.appPassword(userId), null);
+  assert.equal(accounts.credential(userId), null);
 });
 
 test('WebDAV sink issues MKCOL then PUT and never GET', async () => {
