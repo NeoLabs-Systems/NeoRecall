@@ -101,8 +101,32 @@ jobs:
             exit 1
           fi
 
-          # Upload any artifacts not already attached directly by upstream jobs.
-          gh release upload "$RELEASE_TAG" "${available_assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          # Upload only missing or size-mismatched artifacts cleanly using shared helper.
+          existing_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets)"
+          to_upload=()
+          for asset in "${available_assets[@]}"; do
+            name="$(basename "$asset")"
+            size="$(wc -c < "$asset" | tr -d ' ')"
+            if ! jq --exit-status --arg name "$name" --argjson size "$size" \
+              '.assets | any(.name == $name and .size == $size)' <<<"$existing_json" >/dev/null; then
+              to_upload+=("$asset")
+            fi
+          done
+          if [[ "${#to_upload[@]}" -gt 0 ]]; then
+            uploaded=0
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "$RELEASE_TAG" "${to_upload[@]}" --repo "$GITHUB_REPOSITORY" --clobber; then
+                uploaded=1
+                break
+              fi
+              echo "Upload attempt ${attempt} failed; retrying..."
+              sleep $((attempt * 5))
+            done
+            if [[ "$uploaded" -ne 1 ]]; then
+              echo "::error::Failed uploading missing assets to $RELEASE_TAG."
+              exit 1
+            fi
+          fi
 
           uploaded_assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets)"
           for asset in "${available_assets[@]}"; do
