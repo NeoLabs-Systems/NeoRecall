@@ -565,7 +565,7 @@ func (m *Manager) cmdStop(context.Context, []string) error {
 	if err != nil {
 		return err
 	}
-	sm.Stop()
+	m.stopRunningProcesses(cfg, sm)
 	m.UI.OK("NeoRecall stopped.")
 	return nil
 }

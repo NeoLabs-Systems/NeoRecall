@@ -285,8 +285,9 @@ function sleep(ms) {
 }
 let lastErr;
 for (let attempt = 0; attempt < 12; attempt++) {
-  const db = new Database(process.argv[2], { timeout: 10000 });
+  let db;
   try {
+    db = new Database(process.argv[2], { timeout: 10000 });
     db.key(key);
     db.pragma('busy_timeout = 10000');
     db.pragma('wal_checkpoint(TRUNCATE)');
@@ -301,7 +302,7 @@ for (let attempt = 0; attempt < 12; attempt++) {
     }
     sleep(300);
   } finally {
-    try { db.close(); } catch (_) {}
+    try { db?.close(); } catch (_) {}
   }
 }
 if (lastErr) throw lastErr;

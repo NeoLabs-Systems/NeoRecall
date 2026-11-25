@@ -506,6 +506,12 @@ func TestSignedRuntimeUpdateStartsAndRollsBackEndToEnd(t *testing.T) {
 	if err := legacyManager.waitForServerVersion(legacyCtx, legacyPort, "1.0.0", 10*time.Second); err != nil {
 		t.Fatalf("legacy Node server: %v", err)
 	}
+	if err := legacyManager.cmdStop(legacyCtx, nil); err != nil {
+		t.Fatalf("stop legacy Node server: %v", err)
+	}
+	if cli.PortOpen(legacyPort) {
+		t.Fatal("stop reported success while legacy Node server still owns its port")
+	}
 	latest = "2.0.0"
 	if err := legacyManager.cmdUpdate(legacyCtx, nil); err != nil {
 		t.Fatalf("update Node installation to Go: %v", err)
