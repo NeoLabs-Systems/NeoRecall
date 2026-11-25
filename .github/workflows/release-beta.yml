@@ -167,6 +167,14 @@ jobs:
           echo "::error::Failed to create GitHub release $RELEASE_TAG after 5 attempts."
           exit 1
 
+  build-cli:
+    name: Build CLI & web bundle
+    needs: release
+    uses: ./.github/workflows/_build-cli.yml
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
   build-apps:
     name: Build app binaries
     needs: release
@@ -186,6 +194,7 @@ jobs:
       needs.release.result == 'success'
     needs:
       - release
+      - build-cli
       - build-apps
     uses: ./.github/workflows/_publish-app-assets.yml
     with:

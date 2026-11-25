@@ -1,15 +1,112 @@
 package manager_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NeoLabs-Systems/neolabs-go/cli"
+	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
 	"github.com/NeoLabs-Systems/neorecall/internal/manager"
 	"github.com/NeoLabs-Systems/neorecall/internal/models"
+	"github.com/NeoLabs-Systems/neorecall/internal/schema"
 )
+
+func TestJSToGoMigrationAndTarSafety(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	binDir := t.TempDir()
+	npmSym := filepath.Join(binDir, "neorecall")
+	if err := os.Symlink("/usr/local/lib/node_modules/neorecall/bin/neorecall.js", npmSym); err != nil {
+		t.Fatal(err)
+	}
+
+	getenv := func(k string) string {
+		switch k {
+		case "NEORECALL_HOME":
+			return home
+		case "PATH":
+			return binDir
+		}
+		return ""
+	}
+	cfg, err := config.Load(getenv, home, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg.Paths.Ensure()
+
+	// Seed an existing pre-Go database, master key, and .env pointing at a deleted JS dir.
+	if _, err := crypto.MasterKey(cfg.Paths.SecretKey); err != nil {
+		t.Fatal(err)
+	}
+	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Ensure(ctx, db.W); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	if err := os.WriteFile(cfg.Paths.EnvFile, []byte("PORT=4500\nNEORECALL_APP_DIR=/nonexistent/js-neorecall\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st := manager.InspectLegacyJS(cfg, home, getenv)
+	if !st.NeedsMigration || !st.HasDB || st.MigratedMarker || st.LegacyNPMBin != npmSym {
+		t.Fatalf("unexpected legacy JS inspection: %+v", st)
+	}
+
+	// Run setup --no-models --skip-web and verify backup, npm symlink cleanup, and marker creation.
+	m := &manager.Manager{
+		Getenv:   getenv,
+		UserHome: home,
+		Cwd:      home,
+		Version:  config.Version,
+		In:       strings.NewReader(""),
+		Out:      &bytes.Buffer{},
+		Err:      &bytes.Buffer{},
+		UI:       cli.NewUI(true),
+	}
+	_ = m
+	t.Setenv("NEORECALL_HOME", home)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	if err := manager.Run(ctx, []string{"setup", "--no-models", "--skip-web"}, nil); err != nil {
+		t.Fatalf("setup migration failed: %v", err)
+	}
+	if _, err := os.Lstat(npmSym); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy npm symlink to be removed")
+	}
+	stAfter := manager.InspectLegacyJS(cfg, home, getenv)
+	if stAfter.NeedsMigration || !stAfter.MigratedMarker {
+		t.Fatalf("expected NeedsMigration=false and MigratedMarker=true after migration, got %+v", stAfter)
+	}
+	baks, _ := os.ReadDir(cfg.Paths.Backups)
+	if len(baks) == 0 {
+		t.Fatalf("expected pre-upgrade NRB1 backup in %s", cfg.Paths.Backups)
+	}
+
+	// Verify ExtractTarGZSafe blocks path traversal.
+	var tb bytes.Buffer
+	gw := gzip.NewWriter(&tb)
+	tw := tar.NewWriter(gw)
+	_ = tw.WriteHeader(&tar.Header{Name: "../evil.txt", Mode: 0o644, Size: 3})
+	_, _ = tw.Write([]byte("bad"))
+	_ = tw.Close()
+	_ = gw.Close()
+	badArc := filepath.Join(t.TempDir(), "bad.tar.gz")
+	_ = os.WriteFile(badArc, tb.Bytes(), 0o600)
+	if err := manager.ExtractTarGZSafe(badArc, t.TempDir()); err == nil {
+		t.Fatalf("expected unsafe traversal error")
+	}
+}
 
 func TestCLIAccountAdminBackupRestoreResetPasswordAndVerifyNoAudio(t *testing.T) {
 	ctx := context.Background()

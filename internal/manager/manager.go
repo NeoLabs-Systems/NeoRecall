@@ -124,6 +124,31 @@ func (m *Manager) serviceManager(cfg config.Config) (*service.Manager, error) {
 	if workDir == "" {
 		workDir = cfg.Paths.Home
 	}
+	pathParts := []string{}
+	seenDir := map[string]bool{}
+	addDir := func(d string) {
+		if d != "" && !seenDir[d] {
+			seenDir[d] = true
+			pathParts = append(pathParts, d)
+		}
+	}
+	if exeDir := filepath.Dir(exe); exeDir != "" && exeDir != "." {
+		addDir(exeDir)
+	}
+	for _, d := range []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"} {
+		addDir(d)
+	}
+	for _, d := range filepath.SplitList(m.Getenv("PATH")) {
+		addDir(d)
+	}
+
+	env := []service.EnvVar{
+		{Key: "NEORECALL_HOME", Value: cfg.Paths.Home},
+		{Key: "PATH", Value: strings.Join(pathParts, string(os.PathListSeparator))},
+	}
+	if workDir != "" {
+		env = append(env, service.EnvVar{Key: "NEORECALL_APP_DIR", Value: workDir})
+	}
 	spec := service.Spec{
 		Label:       config.DefaultServiceLabel,
 		Name:        "neorecall",
@@ -132,13 +157,11 @@ func (m *Manager) serviceManager(cfg config.Config) (*service.Manager, error) {
 		Program:     exe,
 		Args:        []string{"serve"},
 		WorkDir:     workDir,
-		Env: []service.EnvVar{
-			{Key: "NEORECALL_HOME", Value: cfg.Paths.Home},
-		},
-		EnvFile: cfg.Paths.EnvFile,
-		LogDir:  cfg.Paths.Logs,
-		LogName: "neorecall",
-		PIDFile: cfg.Paths.PIDFile,
+		Env:         env,
+		EnvFile:     cfg.Paths.EnvFile,
+		LogDir:      cfg.Paths.Logs,
+		LogName:     "neorecall",
+		PIDFile:     cfg.Paths.PIDFile,
 	}
 	return service.New(spec, runtime.GOOS)
 }
@@ -280,6 +303,15 @@ func randomHex(bytesLen int) string {
 }
 
 func (m *Manager) cmdSetup(ctx context.Context, args []string) error {
+	if ch, ok := cli.FlagValue(args, "--channel"); ok {
+		if parsed := release.ParseChannel(ch); parsed != "" {
+			cfg0, cerr := m.loadConfig()
+			if cerr == nil {
+				_ = m.ensureDefaultEnvFile(cfg0)
+				_ = envfile.Upsert(cfg0.Paths.EnvFile, "NEORECALL_RELEASE_CHANNEL", parsed)
+			}
+		}
+	}
 	cfg, err := m.loadConfig()
 	if err != nil {
 		return err
@@ -293,8 +325,36 @@ func (m *Manager) cmdSetup(ctx context.Context, args []string) error {
 	}
 
 	m.UI.Title("Setting up NeoRecall", cfg.Paths.Home)
-	skipModels := cli.HasFlag(args, "--no-models")
+	legacy := InspectLegacyJS(cfg, m.UserHome, m.Getenv)
+	var backupKey string
+	if legacy.NeedsMigration {
+		m.UI.Info("Detected existing NeoRecall installation; preserving database, keys, and settings.")
+		sm, _ := m.serviceManager(cfg)
+		m.stopRunningProcesses(cfg, sm)
+		bk, merr := m.migrateLegacyJSState(ctx, cfg, legacy)
+		if merr != nil {
+			return merr
+		}
+		backupKey = bk
+		cfg, err = m.loadConfig()
+		if err != nil {
+			return err
+		}
+	}
 
+	channel := (&updates.Service{Cfg: func() config.Config { return cfg }}).Channel()
+	if _, serr := os.Stat(filepath.Join(cfg.WebDir, "index.html")); serr != nil && !cli.HasFlag(args, "--skip-web") {
+		if err := m.UI.Step("Downloading bundled web UI", "Web UI ready", func() error {
+			_, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel)
+			return werr
+		}); err != nil {
+			m.UI.Warn("Web UI bundle download skipped: " + err.Error())
+		} else {
+			cfg, _ = m.loadConfig()
+		}
+	}
+
+	skipModels := cli.HasFlag(args, "--no-models")
 	if !skipModels {
 		if err := m.UI.Step("Downloading & verifying pinned ML models", "ML models verified", func() error {
 			if _, err := models.DownloadAll(ctx, m.HTTP, cfg.AppDir, cfg.Paths.Models, nil); err != nil {
@@ -313,6 +373,7 @@ func (m *Manager) cmdSetup(ctx context.Context, args []string) error {
 		return err
 	}
 
+	_ = WriteMigratedMarker(cfg, m.Version, backupKey, "setup complete")
 	m.UI.OK("NeoRecall setup complete.")
 	m.UI.Note(fmt.Sprintf("Start it with %s or %s.", m.UI.Command("neorecall serve"), m.UI.Command("neorecall start")))
 	return nil
@@ -330,10 +391,18 @@ func (m *Manager) cmdInstall(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	snap := m.snapshotService(cfg)
+	m.stopRunningProcesses(cfg, sm)
 	if err := sm.Install(); err != nil {
+		restoreServiceSnapshot(snap, sm)
 		return err
 	}
 	if err := sm.Launch(); err != nil {
+		restoreServiceSnapshot(snap, sm)
+		return err
+	}
+	if err := m.waitForServer(ctx, cfg.Port, 30*time.Second); err != nil {
+		restoreServiceSnapshot(snap, sm)
 		return err
 	}
 	m.UI.OK("NeoRecall installed and started.")
@@ -351,6 +420,15 @@ func (m *Manager) cmdStart(ctx context.Context, _ []string) error {
 	sm, err := m.serviceManager(cfg)
 	if err != nil {
 		return err
+	}
+	legacy := InspectLegacyJS(cfg, m.UserHome, m.Getenv)
+	if legacy.LegacyPlist || legacy.LegacySystemd {
+		snap := m.snapshotService(cfg)
+		m.stopRunningProcesses(cfg, sm)
+		if err := sm.Install(); err != nil {
+			restoreServiceSnapshot(snap, sm)
+			return err
+		}
 	}
 	if !sm.Installed() {
 		if err := sm.StartFallback(); err != nil {
@@ -699,20 +777,103 @@ func (m *Manager) cmdChannel(_ context.Context, args []string) error {
 	return nil
 }
 
-func (m *Manager) cmdUpdate(_ context.Context, args []string) error {
+func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 	cfg, err := m.loadConfig()
 	if err != nil {
 		return err
 	}
+	if cfg.ContainerImage {
+		return errors.New("this NeoRecall runs in a container image; update by pulling the newer image and restarting the container")
+	}
 	uSvc := &updates.Service{Cfg: func() config.Config { return cfg }, AppDir: cfg.AppDir, CurrentVersion: m.Version}
-	if len(args) > 0 {
-		if ch := release.ParseChannel(args[0]); ch != "" {
-			_, _ = uSvc.SetChannel(ch)
+	pos := cli.Positionals(args)
+	if len(pos) > 0 {
+		if ch := release.ParseChannel(pos[0]); ch != "" {
+			if _, serr := uSvc.SetChannel(ch); serr != nil {
+				return serr
+			}
 		}
 	}
-	chk := uSvc.Check()
-	b, _ := json.MarshalIndent(chk, "", "  ")
-	fmt.Fprintln(m.Out, string(b))
+	if cli.HasFlag(args, "--check") || cli.HasFlag(args, "--json") {
+		chk := uSvc.Check()
+		b, _ := json.MarshalIndent(chk, "", "  ")
+		fmt.Fprintln(m.Out, string(b))
+		return nil
+	}
+
+	channel := uSvc.Channel()
+	rel, err := fetchLatestRelease(ctx, m.HTTP, channel)
+	if err != nil {
+		return err
+	}
+	targetVer := strings.TrimPrefix(rel.TagName, "v")
+	curVer := strings.TrimPrefix(m.Version, "v")
+	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") {
+		m.UI.OK(fmt.Sprintf("NeoRecall is up to date (%s on %s).", curVer, channel))
+		return nil
+	}
+
+	assetName, err := cliAssetNameForHost()
+	if err != nil {
+		return err
+	}
+	var binAsset *githubAsset
+	for i := range rel.Assets {
+		if rel.Assets[i].Name == assetName {
+			binAsset = &rel.Assets[i]
+			break
+		}
+	}
+	if binAsset == nil {
+		return fmt.Errorf("release %s does not include %s yet", rel.TagName, assetName)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	nextBin := exe + ".next"
+	if err := downloadVerifiedAsset(ctx, m.HTTP, *binAsset, nextBin, 0o755); err != nil {
+		return err
+	}
+
+	sm, _ := m.serviceManager(cfg)
+	wasRunning := cli.PortOpen(cfg.Port)
+	m.stopRunningProcesses(cfg, sm)
+
+	bakBin := exe + ".bak"
+	_ = os.Remove(bakBin)
+	if err := os.Rename(exe, bakBin); err != nil {
+		_ = os.Remove(nextBin)
+		return err
+	}
+	if err := os.Rename(nextBin, exe); err != nil {
+		_ = os.Rename(bakBin, exe)
+		return err
+	}
+
+	// Refresh standalone web bundle if installed in RuntimeDir.
+	if strings.HasPrefix(cfg.AppDir, cfg.Paths.RuntimeDir) || cli.HasFlag(args, "--refresh-web") {
+		_, _ = m.ensureStandaloneWebBundle(ctx, cfg, channel)
+	}
+
+	if wasRunning && sm != nil && sm.Installed() {
+		if err := sm.Launch(); err != nil {
+			_ = os.Remove(exe)
+			_ = os.Rename(bakBin, exe)
+			_ = sm.Launch()
+			return err
+		}
+		if err := m.waitForServer(ctx, cfg.Port, 30*time.Second); err != nil {
+			m.stopRunningProcesses(cfg, sm)
+			_ = os.Remove(exe)
+			_ = os.Rename(bakBin, exe)
+			_ = sm.Launch()
+			return fmt.Errorf("updated binary failed healthcheck; rolled back to previous version: %w", err)
+		}
+	}
+	_ = os.Remove(bakBin)
+	m.UI.OK(fmt.Sprintf("Updated NeoRecall to %s.", targetVer))
 	return nil
 }
 

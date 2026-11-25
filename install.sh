@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # NeoRecall installer: downloads the neorecall binary for this computer from the
-# latest GitHub release and runs `neorecall install`. Existing runtime data under
-# $NEORECALL_HOME (or ~/.neorecall) is preserved.
+# latest GitHub release and runs `neorecall install`. Existing Node.js or Go
+# installations under $NEORECALL_HOME (or ~/.neorecall) keep all data and are
+# automatically backed up and migrated.
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 
 set -euo pipefail
@@ -25,7 +26,7 @@ echo
 case "$(uname -s)" in
   Darwin) OS="macos" ;;
   Linux)  OS="linux" ;;
-  *) err "This installer supports macOS and Linux. On Windows, use the desktop app installer."; exit 1 ;;
+  *) err "This installer supports macOS and Linux. On Windows, download neorecall-cli-windows-x64.exe from the release page."; exit 1 ;;
 esac
 case "$(uname -m)" in
   x86_64|amd64)  ARCH="x64" ;;
@@ -45,7 +46,7 @@ ok "Channel: ${CHANNEL}"
 
 RUNTIME_DIR="${NEORECALL_HOME:-$HOME/.neorecall}"
 if [[ -f "$RUNTIME_DIR/data/neorecall.sqlite3" || -f "$RUNTIME_DIR/.env" ]]; then
-  info "Existing NeoRecall data found at ${RUNTIME_DIR}; it will be preserved."
+  info "Existing NeoRecall data found at ${RUNTIME_DIR}; it will be backed up and preserved."
 fi
 
 info "Looking up the latest release..."
@@ -63,7 +64,7 @@ read -r URL DIGEST < <(printf '%s\n' "$RELEASES" | awk -v channel="$CHANNEL" -v 
     digest = ""
   }')
 if [[ -z "${URL:-}" ]]; then
-  err "No NeoRecall ${CHANNEL} release has a binary for ${OS}-${ARCH} yet."
+  err "No NeoRecall ${CHANNEL} release has a CLI binary for ${OS}-${ARCH} yet."
   exit 1
 fi
 
@@ -93,7 +94,7 @@ ok "Installed ${BIN_DIR}/neorecall"
 OLD_CLI="$(command -v neorecall 2>/dev/null || true)"
 if [[ -n "$OLD_CLI" && "$OLD_CLI" != "$BIN_DIR/neorecall" && -L "$OLD_CLI" ]]; then
   case "$(readlink "$OLD_CLI")" in
-    *bin/neorecall.js) rm -f "$OLD_CLI"; info "Removed the legacy Node.js neorecall command at ${OLD_CLI}" ;;
+    *bin/neo*call.js|*bin/neorecall.js) rm -f "$OLD_CLI"; info "Removed the legacy Node.js neorecall command at ${OLD_CLI}" ;;
   esac
 fi
 
@@ -116,4 +117,4 @@ esac
 hash -r
 
 echo
-exec "$BIN_DIR/neorecall" install
+exec "$BIN_DIR/neorecall" install --channel "$CHANNEL"

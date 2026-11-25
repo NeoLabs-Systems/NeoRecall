@@ -65,6 +65,14 @@ jobs:
           pattern: neorecall-*-app
           merge-multiple: true
 
+      - name: Download CLI and web bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          name: neorecall-cli-bundle
+          merge-multiple: true
+        continue-on-error: true
+
       - name: Inventory app assets
         id: app_assets
         shell: bash
@@ -79,9 +87,24 @@ jobs:
             "dist/NeoRecall-Android-${version}.apk"
             "dist/NeoRecall-WearOS-${version}.apk"
           )
+          optional_cli_assets=(
+            "dist/neorecall-cli-linux-x64"
+            "dist/neorecall-cli-linux-arm64"
+            "dist/neorecall-cli-macos-x64"
+            "dist/neorecall-cli-macos-arm64"
+            "dist/neorecall-cli-windows-x64.exe"
+            "dist/neorecall-web-${version}.tar.gz"
+          )
           available_assets=()
           missing_assets=()
           for asset in "${expected_assets[@]}"; do
+            if [[ -f "$asset" ]]; then
+              available_assets+=("$asset")
+            else
+              missing_assets+=("$asset")
+            fi
+          done
+          for asset in "${optional_cli_assets[@]}"; do
             if [[ -f "$asset" ]]; then
               available_assets+=("$asset")
             else

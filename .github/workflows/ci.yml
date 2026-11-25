@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -39,14 +39,19 @@ jobs:
           fi
 
       - name: Vet
+        env:
+          GOWORK: 'off'
         run: go vet ./...
 
       - name: Test
+        env:
+          GOWORK: 'off'
         run: go test -race -count=1 ./...
 
       - name: Static build
         env:
           CGO_ENABLED: '0'
+          GOWORK: 'off'
         run: |
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/neorecall

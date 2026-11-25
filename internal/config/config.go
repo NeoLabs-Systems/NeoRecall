@@ -458,13 +458,46 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+func resolveAppDir(envDir, cwd, runtimeDir, userHome string) string {
+	if strings.TrimSpace(envDir) != "" {
+		return strings.TrimSpace(envDir)
+	}
+	hasAssets := func(dir string) bool {
+		if dir == "" {
+			return false
+		}
+		if _, err := os.Stat(filepath.Join(dir, "flutter_app", "build", "web", "index.html")); err == nil {
+			return true
+		}
+		if _, err := os.Stat(filepath.Join(dir, "landing", "index.html")); err == nil {
+			return true
+		}
+		return false
+	}
+	var exeDir string
+	if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
+	}
+	for _, cand := range []string{
+		cwd,
+		exeDir,
+		filepath.Join(runtimeDir, "app"),
+		filepath.Join(userHome, "NeoRecall"),
+	} {
+		if hasAssets(cand) {
+			return cand
+		}
+	}
+	return cwd
+}
+
 // Load parses and validates the NeoRecall configuration.
 func Load(getenv func(string) string, userHome, cwd string) (Config, error) {
 	var c Config
 	r := &reader{getenv: getenv}
 	c.Paths = ResolvePaths(getenv, userHome)
 
-	c.AppDir = firstNonEmpty(getenv("NEORECALL_APP_DIR"), cwd)
+	c.AppDir = resolveAppDir(getenv("NEORECALL_APP_DIR"), cwd, c.Paths.RuntimeDir, userHome)
 	c.WebDir = firstNonEmpty(getenv("NEORECALL_WEB_DIR"), filepath.Join(c.AppDir, "flutter_app", "build", "web"))
 	c.Landing = firstNonEmpty(getenv("NEORECALL_LANDING_DIR"), filepath.Join(c.AppDir, "landing"))
 
