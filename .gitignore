@@ -47,6 +47,7 @@ flutter_app/l10n_untranslated.json
 runtime-data/
 models/downloads/
 *.sqlite*
+!internal/schema/testdata/*.sqlite3
 *.wav
 *.webm
 *.mp3
