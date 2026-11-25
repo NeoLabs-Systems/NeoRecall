@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -318,14 +317,6 @@ func restoreRuntimeSnapshot(markerPath string, marker []byte, snapshot serviceSn
 }
 
 func refreshRuntimeLauncher(binary, storeRoot string) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return err
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -338,31 +329,10 @@ func refreshRuntimeLauncher(binary, storeRoot string) error {
 	if err != nil {
 		return err
 	}
-	if filepath.Clean(exe) != launcher {
+	invoked := release.InvocationPath(os.Args[0])
+	if strings.HasPrefix(invoked, filepath.Clean(storeRoot)+string(os.PathSeparator)) {
 		return nil
 	}
-	if strings.HasPrefix(exe, filepath.Clean(storeRoot)+string(os.PathSeparator)) {
-		return nil
-	}
-	source, err := os.Open(binary)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-	temp, err := os.CreateTemp(binDir, ".neorecall-update-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-	_, err = io.Copy(temp, source)
-	if err == nil {
-		err = temp.Chmod(0o755)
-	}
-	if closeErr := temp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), launcher)
+	_, err = release.RefreshCommandLauncher(invoked, launcher, binary)
+	return err
 }
