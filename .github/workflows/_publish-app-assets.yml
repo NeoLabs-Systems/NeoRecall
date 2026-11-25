@@ -70,7 +70,6 @@ jobs:
         with:
           path: dist
           name: neorecall-cli-bundle
-          merge-multiple: true
         continue-on-error: true
 
       - name: Inventory app assets

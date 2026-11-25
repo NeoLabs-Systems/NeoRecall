@@ -1,11 +1,7 @@
 name: Release Beta
 
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
+  push:
     branches:
       - beta
   workflow_dispatch:
@@ -15,18 +11,19 @@ permissions:
   id-token: write
 
 concurrency:
-  group: release-beta
-  cancel-in-progress: false
+  group: release-beta-${{ github.ref }}
+  cancel-in-progress: ${{ github.actor != 'github-actions[bot]' }}
 
 jobs:
+  ci:
+    name: CI
+    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Prepare beta release
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push'
-      )
+    needs: ci
+    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.beta_version.outputs.release_tag }}
@@ -36,7 +33,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha || 'beta' }}
+          ref: beta
 
       - name: Set up Go
         uses: actions/setup-go@v5
