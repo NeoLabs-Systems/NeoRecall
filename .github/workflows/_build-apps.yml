@@ -29,11 +29,11 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Enable macOS desktop (CocoaPods mode)
-        run: flutter config --enable-macos-desktop --no-enable-swift-package-manager
-
       - name: Set up Flutter
         uses: ./.github/actions/setup-flutter
+
+      - name: Enable macOS desktop (CocoaPods mode)
+        run: flutter config --enable-macos-desktop --no-enable-swift-package-manager
 
       - name: Ensure macOS project exists
         run: |

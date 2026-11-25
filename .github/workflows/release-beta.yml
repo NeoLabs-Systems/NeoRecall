@@ -190,10 +190,10 @@ jobs:
 
   notify-discord:
     name: Notify Discord
+    if: always() && needs.release.result == 'success' && needs.publish-release-assets.result == 'success' && needs.release.outputs.release_tag != ''
     needs:
       - release
       - publish-release-assets
-    if: needs.release.outputs.release_tag != ''
     uses: ./.github/workflows/discord-release.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}
