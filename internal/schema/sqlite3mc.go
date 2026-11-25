@@ -163,17 +163,21 @@ func EnsurePlaintextLegacyDB(ctx context.Context, dbPath, secretKeyPath, appDir,
 	walPath := dbPath + "-wal"
 	walInfo, walErr := os.Stat(walPath)
 	hasNonEmptyWAL := walErr == nil && walInfo.Size() > 0
+	if hasNonEmptyWAL {
+		if wb, rerr := os.ReadFile(walPath); rerr == nil {
+			_ = os.WriteFile(walPath+".pre-decrypt.bak", wb, 0o600)
+		}
+	}
 	if modPath := findLegacyBSMCModule(appDir, homeDir); modPath != "" {
 		if nerr := decryptViaLegacyNode(ctx, modPath, dbPath, secretKeyPath); nerr == nil {
 			if ok, _ := IsPlainSQLiteFile(dbPath); ok {
 				return true, nil
 			}
-		} else if hasNonEmptyWAL {
-			return false, fmt.Errorf("legacy database has pending WAL frames and Node rekey failed: %w", nerr)
-		}
-	} else if hasNonEmptyWAL {
-		if wb, rerr := os.ReadFile(walPath); rerr == nil {
-			_ = os.WriteFile(walPath+".pre-decrypt.bak", wb, 0o600)
+		} else {
+			walAfter, werr := os.Stat(walPath)
+			if werr == nil && walAfter.Size() > 0 {
+				return false, fmt.Errorf("legacy database has pending WAL frames and Node rekey failed: %w", nerr)
+			}
 		}
 	}
 
@@ -276,16 +280,31 @@ func decryptViaLegacyNode(ctx context.Context, modPath, dbPath, keyPath string) 
 const fs = require('node:fs');
 const Database = require(process.argv[1]);
 const key = fs.readFileSync(process.argv[3]);
-const db = new Database(process.argv[2], { timeout: 10000 });
-try {
-  db.key(key);
-  db.pragma('busy_timeout = 10000');
-  db.pragma('wal_checkpoint(TRUNCATE)');
-  db.pragma('journal_mode = DELETE');
-  db.rekey(Buffer.alloc(0));
-} finally {
-  db.close();
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
+let lastErr;
+for (let attempt = 0; attempt < 12; attempt++) {
+  const db = new Database(process.argv[2], { timeout: 10000 });
+  try {
+    db.key(key);
+    db.pragma('busy_timeout = 10000');
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    db.pragma('journal_mode = DELETE');
+    db.rekey(Buffer.alloc(0));
+    lastErr = null;
+    break;
+  } catch (err) {
+    lastErr = err;
+    if (!err || err.code !== 'SQLITE_BUSY' || attempt === 11) {
+      throw err;
+    }
+    sleep(300);
+  } finally {
+    try { db.close(); } catch (_) {}
+  }
+}
+if (lastErr) throw lastErr;
 `
 	cmd := exec.CommandContext(ctx, nodeBin, "-e", script, modPath, dbPath, keyPath)
 	out, err := cmd.CombinedOutput()

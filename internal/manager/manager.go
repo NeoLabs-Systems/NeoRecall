@@ -331,7 +331,7 @@ func (m *Manager) ensureDefaultEnvFile(cfg config.Config) error {
 	}
 	secret := randomHex(32)
 	content := strings.Join([]string{
-		fmt.Sprintf("PORT=%d", port),
+		fmt.Sprintf("NEORECALL_PORT=%d", port),
 		"NEORECALL_HOST=127.0.0.1",
 		"NEORECALL_SECRET=" + secret,
 		"NEORECALL_RELEASE_CHANNEL=stable",

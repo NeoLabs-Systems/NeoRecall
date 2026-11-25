@@ -164,12 +164,25 @@ func (m *Manager) stopRunningProcesses(cfg config.Config, sm *service.Manager) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && cli.PortOpen(port) {
 		// If a legacy detached Node process still holds the port, signal it politely.
-		terminateLegacyPortOwner(port)
+		terminateLegacyPortOwner(port, syscall.SIGTERM)
 		time.Sleep(250 * time.Millisecond)
 	}
+	if cli.PortOpen(port) {
+		terminateLegacyPortOwner(port, syscall.SIGKILL)
+		time.Sleep(250 * time.Millisecond)
+	}
+	terminateProcessesHoldingDB(cfg.Paths.Database)
 }
 
-func terminateLegacyPortOwner(port int) {
+func isNeoRecallProcessCmd(cmdLine string) bool {
+	s := strings.ToLower(cmdLine)
+	return strings.Contains(s, "neorecall") ||
+		strings.Contains(s, "server/index.js") ||
+		strings.Contains(s, "server/workers") ||
+		strings.Contains(s, "inference_host")
+}
+
+func terminateLegacyPortOwner(port int, sig syscall.Signal) {
 	if runtime.GOOS == "windows" {
 		return
 	}
@@ -186,13 +199,73 @@ func terminateLegacyPortOwner(port int) {
 		if cerr != nil {
 			continue
 		}
-		cmdLine := strings.ToLower(string(cmdOut))
-		if strings.Contains(cmdLine, "neorecall") || strings.Contains(cmdLine, "server/index.js") {
+		if isNeoRecallProcessCmd(string(cmdOut)) {
 			if p, ferr := os.FindProcess(pid); ferr == nil {
-				_ = p.Signal(syscall.SIGTERM)
+				_ = p.Signal(sig)
 			}
 		}
 	}
+}
+
+func terminateProcessesHoldingDB(dbPath string) {
+	if runtime.GOOS == "windows" || dbPath == "" {
+		return
+	}
+	var targets []string
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if _, err := os.Stat(p); err == nil {
+			targets = append(targets, p)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	out, err := exec.Command("lsof", append([]string{"-t"}, targets...)...).Output()
+	if err != nil {
+		return
+	}
+	seen := map[int]bool{}
+	var targetsProc []*os.Process
+	for _, field := range strings.Fields(string(out)) {
+		pid, perr := strconv.Atoi(field)
+		if perr != nil || pid <= 0 || pid == os.Getpid() || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		cmdOut, cerr := exec.Command("ps", "-p", field, "-o", "command=").Output()
+		if cerr != nil {
+			continue
+		}
+		if isNeoRecallProcessCmd(string(cmdOut)) {
+			if p, ferr := os.FindProcess(pid); ferr == nil {
+				_ = p.Signal(syscall.SIGTERM)
+				targetsProc = append(targetsProc, p)
+			}
+		}
+	}
+	if len(targetsProc) == 0 {
+		return
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		alive := false
+		for _, p := range targetsProc {
+			if p.Signal(syscall.Signal(0)) == nil {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	for _, p := range targetsProc {
+		if p.Signal(syscall.Signal(0)) == nil {
+			_ = p.Signal(syscall.SIGKILL)
+		}
+	}
+	time.Sleep(250 * time.Millisecond)
 }
 
 func (m *Manager) migrateLegacyJSState(ctx context.Context, cfg config.Config, st LegacyJSState) (backupKey string, err error) {
