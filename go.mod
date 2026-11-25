@@ -3,7 +3,7 @@ module github.com/NeoLabs-Systems/neorecall
 go 1.27
 
 require (
-	github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125213758-3085ab96fa3f
+	github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125214733-d36e724c413a
 	github.com/ebitengine/purego v0.11.3
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/google/uuid v1.6.0
