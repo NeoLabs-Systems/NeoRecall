@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	Version                = "0.1.0"
+	Version                = "0.1.4-beta.7"
 	LLMPromptReserveTokens = 512
 	DefaultEmbeddingModel  = "Xenova/multilingual-e5-small"
 	DefaultEmbeddingDims   = 384
