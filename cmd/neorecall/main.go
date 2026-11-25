@@ -1,4 +1,4 @@
-// Command neorecall runs the NeoRecall backend server (`neorecall serve` or plain `neorecall`)
+// Command neorecall runs the NeoRecall backend server (`neorecall serve`)
 // and manages the local installation (`neorecall help`).
 package main
 
@@ -26,7 +26,7 @@ import (
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 0 || args[0] == "serve" || (args[0] == "start" && len(args) > 1 && args[1] == "--foreground") {
+	if len(args) > 0 && (args[0] == "serve" || (args[0] == "start" && len(args) > 1 && args[1] == "--foreground")) {
 		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		if err := serve(log); err != nil {
 			log.Error("neorecall stopped", "error", err)
@@ -36,7 +36,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if args[0] == "healthcheck" {
+	if len(args) > 0 && args[0] == "healthcheck" {
 		if err := manager.Healthcheck(ctx, os.Getenv); err != nil {
 			os.Exit(1)
 		}

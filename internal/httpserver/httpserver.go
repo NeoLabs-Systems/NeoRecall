@@ -584,6 +584,7 @@ func (h *statusHistory) record(status string) {
 
 var flutterNoStore = map[string]bool{
 	"index.html":                true,
+	"main.dart.js":              true,
 	"flutter_bootstrap.js":      true,
 	"flutter_service_worker.js": true,
 	"version.json":              true,

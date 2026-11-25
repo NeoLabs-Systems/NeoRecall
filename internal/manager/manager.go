@@ -224,8 +224,7 @@ func Run(ctx context.Context, args []string, boot Booter) error {
 	}
 	m.Boot = boot
 	if len(args) == 0 {
-		m.printHelp()
-		return nil
+		return m.cmdHome(ctx)
 	}
 	cfg, err := m.loadConfig()
 	if err != nil {
@@ -239,6 +238,48 @@ func Run(ctx context.Context, args []string, boot Booter) error {
 		return fmt.Errorf("%q isn't a neorecall command. Run `neorecall help` to see what you can do", args[0])
 	}
 	return cmd.Run(ctx, args[1:])
+}
+
+func (m *Manager) cmdHome(ctx context.Context) error {
+	cfg, err := m.loadConfig()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(cfg.Paths.EnvFile); os.IsNotExist(err) && m.UI.Interactive() {
+		return m.cmdInstall(ctx, nil)
+	}
+	_, running := fetchJSON(ctx, fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port))
+	m.UI.Blank()
+	if running {
+		m.UI.Item("ok", m.UI.Bold("NeoRecall is running"), fmt.Sprintf("http://localhost:%d", cfg.Port))
+	} else {
+		m.UI.Item("warn", m.UI.Bold("NeoRecall isn't running"), "run neorecall start")
+	}
+	m.UI.Blank()
+	if !m.UI.Interactive() {
+		m.UI.Print("  Every command: neorecall help")
+		m.UI.Blank()
+		return nil
+	}
+	choices := []cli.Choice{}
+	if !running {
+		choices = append(choices, cli.Choice{Value: "start", Label: "Start NeoRecall"})
+	}
+	choices = append(choices, cli.Choice{Value: "status", Label: "Check that everything works"})
+	if running {
+		choices = append(choices, cli.Choice{Value: "restart", Label: "Restart NeoRecall"})
+	}
+	choices = append(choices,
+		cli.Choice{Value: "update", Label: "Get the latest version"},
+		cli.Choice{Value: "setup", Label: "Change settings", Hint: "models, address, integrations"},
+		cli.Choice{Value: "doctor", Label: "Something's wrong — help me fix it"},
+		cli.Choice{Value: "help", Label: "More…", Hint: "every command"},
+	)
+	picked, ok, err := m.UI.SelectOrQuit("What would you like to do?", choices)
+	if err != nil || !ok {
+		return err
+	}
+	return cli.Find(m.commands(), picked).Run(ctx, nil)
 }
 
 func Healthcheck(ctx context.Context, getenv func(string) string) error {
@@ -882,7 +923,7 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 	needWebRefresh := cli.HasFlag(args, "--refresh-web") || !isGitCheckout || webStatErr != nil
 
 	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") {
-		if needWebRefresh {
+		if cli.HasFlag(args, "--refresh-web") || webStatErr != nil {
 			if _, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true); werr != nil {
 				m.UI.Warn("Web UI bundle refresh skipped: " + werr.Error())
 			}
@@ -905,6 +946,16 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 	}
 	if binAsset == nil {
 		return failJob(fmt.Errorf("release %s does not include %s yet", rel.TagName, assetName), false)
+	}
+	m.UI.Title("Updating NeoRecall", fmt.Sprintf("%s → %s · %s", curVer, targetVer, channel))
+	if _, err := os.Stat(cfg.Paths.Database); err == nil {
+		if err := m.UI.Step("Saving a backup of your data", "Saved a backup of your data", func() error {
+			return m.cmdBackup(ctx, nil)
+		}); err != nil {
+			return failJob(err, false)
+		}
+	} else if !os.IsNotExist(err) {
+		return failJob(err, false)
 	}
 
 	recordJob("downloading", 35, "Downloading "+assetName+" ("+targetVer+")", "running", "", false)
@@ -929,18 +980,36 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		return failJob(err, false)
 	}
 	if err := os.Rename(nextBin, exe); err != nil {
-		_ = os.Rename(bakBin, exe)
+		if restoreErr := os.Rename(bakBin, exe); restoreErr != nil {
+			return failJob(errors.Join(err, fmt.Errorf("restore previous binary: %w", restoreErr)), false)
+		}
 		return failJob(err, true)
 	}
-
-	// Refresh standalone web bundle whenever not running from a git checkout (or explicitly requested).
-	if needWebRefresh {
-		recordJob("web", 75, "Updating web interface bundle", "running", "", false)
-		if _, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true); werr != nil {
-			m.UI.Warn("Web UI bundle update failed: " + werr.Error())
-		} else {
-			cfg, _ = m.loadConfig()
+	rollback := func(cause error) error {
+		m.stopRunningProcesses(cfg, sm)
+		if err := os.Remove(exe); err != nil && !os.IsNotExist(err) {
+			return failJob(errors.Join(cause, fmt.Errorf("remove updated binary: %w", err)), false)
 		}
+		if err := os.Rename(bakBin, exe); err != nil {
+			return failJob(errors.Join(cause, fmt.Errorf("restore previous binary: %w", err)), false)
+		}
+		if sm != nil && (wasRunning || sm.Installed()) {
+			var err error
+			if sm.Installed() {
+				err = sm.Launch()
+			} else {
+				err = sm.StartFallback()
+			}
+			if err != nil {
+				return failJob(errors.Join(cause, fmt.Errorf("restart previous version: %w", err)), false)
+			}
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			if err := m.waitForServerVersion(rollbackCtx, cfg.Port, curVer, 30*time.Second); err != nil {
+				return failJob(errors.Join(cause, fmt.Errorf("verify previous version: %w", err)), false)
+			}
+		}
+		return failJob(fmt.Errorf("%w; restored NeoRecall %s", cause, curVer), true)
 	}
 
 	if (wasRunning || (sm != nil && sm.Installed())) && sm != nil {
@@ -952,27 +1021,44 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 			lerr = sm.StartFallback()
 		}
 		if lerr != nil {
-			_ = os.Remove(exe)
-			_ = os.Rename(bakBin, exe)
-			if sm.Installed() {
-				_ = sm.Launch()
-			}
-			return failJob(lerr, true)
+			return rollback(lerr)
 		}
-		if err := m.waitForServer(ctx, cfg.Port, 30*time.Second); err != nil {
-			m.stopRunningProcesses(cfg, sm)
-			_ = os.Remove(exe)
-			_ = os.Rename(bakBin, exe)
-			if sm.Installed() {
-				_ = sm.Launch()
-			}
-			return failJob(fmt.Errorf("updated binary failed healthcheck; rolled back to previous version: %w", err), true)
+		if err := m.waitForServerVersion(ctx, cfg.Port, targetVer, 30*time.Second); err != nil {
+			return rollback(fmt.Errorf("updated binary failed healthcheck: %w", err))
 		}
 	}
-	_ = os.Remove(bakBin)
+	// Keep the previous web bundle intact if download or extraction fails.
+	if needWebRefresh {
+		recordJob("web", 95, "Updating web interface bundle", "running", "", false)
+		if _, werr := m.installWebBundle(ctx, cfg, rel); werr != nil {
+			m.UI.Warn("Web UI bundle update failed: " + werr.Error())
+		}
+	}
+	// Keep the previous binary as a recovery copy until the next update.
 	recordJob("completed", 100, fmt.Sprintf("Updated NeoRecall to %s.", targetVer), "completed", targetVer, false)
 	m.UI.OK(fmt.Sprintf("Updated NeoRecall to %s.", targetVer))
 	return nil
+}
+
+func (m *Manager) waitForServerVersion(ctx context.Context, port int, version string, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if health, ok := fetchJSON(ctx, fmt.Sprintf("http://127.0.0.1:%d/health", port)); ok {
+			if got, _ := health["version"].(string); strings.TrimPrefix(got, "v") == version {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("NeoRecall did not report version %s on port %d", version, port)
+		case <-tick.C:
+		}
+	}
 }
 
 func (m *Manager) cmdEnv(_ context.Context, args []string) error {

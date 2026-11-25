@@ -25,6 +25,9 @@ func TestAppWiringHealthMetaStatusCSPAndSPA(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(webDir, "index.html"), []byte(`<!doctype html><html><head><base href="/"></head><body>SPA</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(webDir, "main.dart.js"), []byte("app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(landingDir, "index.html"), []byte(`<!doctype html><html><head></head><body>LANDING</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +143,11 @@ func TestAppWiringHealthMetaStatusCSPAndSPA(t *testing.T) {
 	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/settings", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `<base href="/app/">`) {
 		t.Fatalf("/app/settings=%d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/main.dart.js", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("main.dart.js: status=%d headers=%v", rec.Code, rec.Header())
 	}
 	rec = httptest.NewRecorder()
 	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))

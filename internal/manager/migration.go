@@ -461,6 +461,10 @@ func (m *Manager) ensureStandaloneWebBundle(ctx context.Context, cfg config.Conf
 	if err != nil {
 		return cfg.AppDir, err
 	}
+	return m.installWebBundle(ctx, cfg, rel)
+}
+
+func (m *Manager) installWebBundle(ctx context.Context, cfg config.Config, rel githubRelease) (string, error) {
 	var webAsset *githubAsset
 	for i := range rel.Assets {
 		if strings.HasPrefix(rel.Assets[i].Name, "neorecall-web-") && strings.HasSuffix(rel.Assets[i].Name, ".tar.gz") {
@@ -487,11 +491,46 @@ func (m *Manager) ensureStandaloneWebBundle(ctx context.Context, cfg config.Conf
 		_ = os.RemoveAll(staging)
 		return cfg.AppDir, err
 	}
-	_ = os.RemoveAll(appRoot)
-	if err := os.Rename(staging, appRoot); err != nil {
+	if _, err := os.Stat(filepath.Join(staging, "flutter_app", "build", "web", "index.html")); err != nil {
 		_ = os.RemoveAll(staging)
+		return cfg.AppDir, fmt.Errorf("downloaded web bundle is incomplete: %w", err)
+	}
+	backup, err := os.MkdirTemp(cfg.Paths.RuntimeDir, ".web-previous-")
+	if err != nil {
 		return cfg.AppDir, err
 	}
-	_ = envfile.Upsert(cfg.Paths.EnvFile, "NEORECALL_APP_DIR", appRoot)
+	if err := os.Remove(backup); err != nil {
+		return cfg.AppDir, err
+	}
+	hadPrevious := false
+	if err := os.Rename(appRoot, backup); err == nil {
+		hadPrevious = true
+	} else if !os.IsNotExist(err) {
+		return cfg.AppDir, err
+	}
+	restore := func() error {
+		if err := os.RemoveAll(appRoot); err != nil {
+			return err
+		}
+		if hadPrevious {
+			return os.Rename(backup, appRoot)
+		}
+		return nil
+	}
+	if err := os.Rename(staging, appRoot); err != nil {
+		if restoreErr := restore(); restoreErr != nil {
+			return cfg.AppDir, errors.Join(err, restoreErr)
+		}
+		return cfg.AppDir, err
+	}
+	if err := envfile.Upsert(cfg.Paths.EnvFile, "NEORECALL_APP_DIR", appRoot); err != nil {
+		if restoreErr := restore(); restoreErr != nil {
+			return cfg.AppDir, errors.Join(err, restoreErr)
+		}
+		return cfg.AppDir, err
+	}
+	if hadPrevious {
+		_ = os.RemoveAll(backup)
+	}
 	return appRoot, nil
 }
