@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/NeoLabs-Systems/neorecall/internal/runtimebundle"
 )
 
 const (
@@ -68,11 +70,18 @@ func run(ctx context.Context, args []string) error {
 	tag := fs.String("tag", "", "")
 	repo := fs.String("repo", "", "")
 	dryRun := fs.Bool("dry-run", false, "")
+	output := fs.String("output", "dist", "")
+	version := fs.String("version", "", "")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 
 	switch args[0] {
+	case "runtime-bundles":
+		if *version == "" {
+			return errors.New("--version is required")
+		}
+		return runtimebundle.Build(".", *output, *version, os.Getenv("NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY"))
 	case "version":
 		v, err := ReadVersion(".")
 		if err != nil {

@@ -11,6 +11,9 @@ on:
         description: Release tag used to name web bundle artifact
         required: true
         type: string
+    secrets:
+      NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY:
+        required: true
 
 permissions:
   contents: write
@@ -26,7 +29,7 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Set up Go
-        uses: ./.github/actions/setup-go
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-go@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Build static CLI binaries and web bundle
         env:
@@ -58,6 +61,13 @@ jobs:
             test/fixtures/de_en_two_speakers.wav
           ls -lh dist
 
+      - name: Build signed runtime bundles
+        env:
+          GOWORK: 'off'
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY: ${{ secrets.NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY }}
+        run: go run ./cmd/neorecall-release runtime-bundles --version "$RELEASE_TAG"
+
       - name: Upload CLI and web bundle artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,3 +83,6 @@ jobs:
           files: |
             dist/neorecall-cli-*
             dist/neorecall-web-*.tar.gz
+            dist/neorecall-runtime-*.zip
+            dist/neorecall-runtime-manifest-*.json
+            dist/neorecall-runtime-manifest-*.json.sig

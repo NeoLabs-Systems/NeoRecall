@@ -43,7 +43,7 @@ jobs:
           ref: beta
 
       - name: Set up Go
-        uses: ./.github/actions/setup-go
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-go@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Configure Git identity
         run: |
@@ -88,7 +88,7 @@ jobs:
 
       - name: Fallback web client build
         if: steps.dl_web.outcome != 'success'
-        uses: ./.github/actions/setup-flutter
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-flutter@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Fallback compile web client
         if: steps.dl_web.outcome != 'success'
@@ -149,6 +149,7 @@ jobs:
     name: Build CLI & web bundle
     needs: release
     uses: ./.github/workflows/_build-cli.yml
+    secrets: inherit
     with:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}

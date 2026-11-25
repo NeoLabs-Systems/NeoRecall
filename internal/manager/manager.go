@@ -47,17 +47,25 @@ const defaultPort = 4500
 type Booter func(ctx context.Context, use func(context.Context, *dbx.DB, config.Config) error) error
 
 type Manager struct {
-	Getenv   func(string) string
-	UserHome string
-	Cwd      string
-	AppDir   string
-	Version  string
-	In       io.Reader
-	Out      io.Writer
-	Err      io.Writer
-	UI       *cli.UI
-	HTTP     *http.Client
-	Boot     Booter
+	Getenv                      func(string) string
+	UserHome                    string
+	Cwd                         string
+	AppDir                      string
+	Version                     string
+	In                          io.Reader
+	Out                         io.Writer
+	Err                         io.Writer
+	UI                          *cli.UI
+	HTTP                        *http.Client
+	ReleaseAPIBase              string
+	RuntimePublicKey            string
+	RestartAfterLegacyMigration bool
+	RuntimeStartupTimeout       time.Duration
+	RuntimeRollbackTimeout      time.Duration
+	StopManagedService          func(config.Config, *service.Manager)
+	ServiceFactory              func(config.Config) (*service.Manager, error)
+	ReleaseClientFactory        func() *release.Client
+	Boot                        Booter
 }
 
 func New(args []string) (*Manager, error) {
@@ -81,6 +89,9 @@ func New(args []string) (*Manager, error) {
 	cfg, cerr := m.loadConfig()
 	if cerr == nil {
 		m.AppDir = cfg.AppDir
+		if current, err := runtimeStore(cfg).Current(); err == nil {
+			m.Version = current.Version
+		}
 	} else {
 		m.AppDir = cwd
 	}
@@ -90,7 +101,24 @@ func New(args []string) (*Manager, error) {
 func (m *Manager) loadConfig() (config.Config, error) {
 	p := config.ResolvePaths(m.Getenv, m.UserHome)
 	_ = runtimecfg.LoadEnvFile(p.EnvFile, os.LookupEnv, os.Setenv)
-	return config.Load(m.Getenv, m.UserHome, m.Cwd)
+	cfg, err := config.Load(m.Getenv, m.UserHome, m.Cwd)
+	if err != nil {
+		return cfg, err
+	}
+	if marker, err := runtimeStore(cfg).Current(); err == nil {
+		dir, err := runtimeStore(cfg).RuntimeDir(marker.Version)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.AppDir = filepath.Join(dir, "app")
+		if m.Getenv("NEORECALL_WEB_DIR") == "" {
+			cfg.WebDir = filepath.Join(cfg.AppDir, "flutter_app", "build", "web")
+		}
+		if m.Getenv("NEORECALL_LANDING_DIR") == "" {
+			cfg.Landing = filepath.Join(cfg.AppDir, "landing")
+		}
+	}
+	return cfg, nil
 }
 
 func (m *Manager) withDB(ctx context.Context, fn func(context.Context, *dbx.DB, config.Config) error) error {
@@ -119,9 +147,19 @@ func (m *Manager) withDB(ctx context.Context, fn func(context.Context, *dbx.DB, 
 }
 
 func (m *Manager) serviceManager(cfg config.Config) (*service.Manager, error) {
+	if m.ServiceFactory != nil {
+		return m.ServiceFactory(cfg)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		exe = "neorecall"
+	}
+	if marker, err := runtimeStore(cfg).Current(); err == nil {
+		dir, err := runtimeStore(cfg).RuntimeDir(marker.Version)
+		if err != nil {
+			return nil, err
+		}
+		exe = filepath.Join(dir, "app", "bin", runtimeBinaryName())
 	}
 	workDir := cfg.AppDir
 	if workDir == "" {
@@ -166,7 +204,11 @@ func (m *Manager) serviceManager(cfg config.Config) (*service.Manager, error) {
 		LogName:     "neorecall",
 		PIDFile:     cfg.Paths.PIDFile,
 	}
-	return service.New(spec, runtime.GOOS)
+	platform := runtime.GOOS
+	if platform == "darwin" {
+		platform = "macos"
+	}
+	return service.New(spec, platform)
 }
 
 func (m *Manager) commands() []cli.Command {
@@ -256,30 +298,24 @@ func (m *Manager) cmdHome(ctx context.Context) error {
 		m.UI.Item("warn", m.UI.Bold("NeoRecall isn't running"), "run neorecall start")
 	}
 	m.UI.Blank()
-	if !m.UI.Interactive() {
-		m.UI.Print("  Every command: neorecall help")
-		m.UI.Blank()
-		return nil
-	}
-	choices := []cli.Choice{}
-	if !running {
-		choices = append(choices, cli.Choice{Value: "start", Label: "Start NeoRecall"})
-	}
-	choices = append(choices, cli.Choice{Value: "status", Label: "Check that everything works"})
-	if running {
-		choices = append(choices, cli.Choice{Value: "restart", Label: "Restart NeoRecall"})
-	}
-	choices = append(choices,
-		cli.Choice{Value: "update", Label: "Get the latest version"},
-		cli.Choice{Value: "setup", Label: "Change settings", Hint: "models, address, integrations"},
-		cli.Choice{Value: "doctor", Label: "Something's wrong — help me fix it"},
-		cli.Choice{Value: "help", Label: "More…", Hint: "every command"},
-	)
-	picked, ok, err := m.UI.SelectOrQuit("What would you like to do?", choices)
-	if err != nil || !ok {
-		return err
-	}
-	return cli.Find(m.commands(), picked).Run(ctx, nil)
+	return m.UI.HomeMenu("neorecall", cli.HomeActions{
+		AppName: "NeoRecall", Running: running, ShowUpdate: true,
+		SettingsHint: "models, address, integrations",
+		Open: func() error {
+			opener := map[string]string{"darwin": "open", "windows": "explorer"}[runtime.GOOS]
+			if opener == "" {
+				opener = "xdg-open"
+			}
+			return exec.Command(opener, fmt.Sprintf("http://localhost:%d", cfg.Port)).Start()
+		},
+		Start:    func() error { return m.cmdStart(ctx, nil) },
+		Status:   func() error { return m.cmdStatus(ctx, nil) },
+		Restart:  func() error { return m.cmdRestart(ctx, nil) },
+		Update:   func() error { return m.cmdUpdate(ctx, nil) },
+		Settings: func() error { return m.cmdSetup(ctx, nil) },
+		Doctor:   func() error { return m.cmdDoctor(ctx, nil) },
+		Help:     func() error { m.printHelp(); return nil },
+	})
 }
 
 func Healthcheck(ctx context.Context, getenv func(string) string) error {
@@ -429,7 +465,19 @@ func (m *Manager) cmdSetup(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (m *Manager) cmdInstall(ctx context.Context, args []string) error {
+func (m *Manager) cmdInstall(ctx context.Context, args []string) (result error) {
+	bootstrapped, err := m.bootstrapSignedRuntime(ctx, args)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if result != nil && bootstrapped != "" {
+			cfg, err := m.loadConfig()
+			if err == nil {
+				_ = os.Remove(filepath.Join(runtimeStore(cfg).Root, "current.json"))
+			}
+		}
+	}()
 	if err := m.cmdSetup(ctx, args); err != nil {
 		return err
 	}
@@ -442,18 +490,36 @@ func (m *Manager) cmdInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	snap := m.snapshotService(cfg)
+	wasInstalled := sm.Installed()
+	rollbackInstall := func() {
+		if wasInstalled {
+			restoreServiceSnapshot(snap, sm)
+		} else {
+			sm.Uninstall()
+		}
+	}
 	m.stopRunningProcesses(cfg, sm)
 	if err := sm.Install(); err != nil {
-		restoreServiceSnapshot(snap, sm)
+		rollbackInstall()
 		return err
 	}
-	if err := sm.Launch(); err != nil {
-		restoreServiceSnapshot(snap, sm)
+	if bootstrapped != "" {
+		err = m.waitForServerVersion(ctx, cfg.Port, bootstrapped, 30*time.Second)
+	} else {
+		err = m.waitForServer(ctx, cfg.Port, 30*time.Second)
+	}
+	if err != nil {
+		rollbackInstall()
 		return err
 	}
-	if err := m.waitForServer(ctx, cfg.Port, 30*time.Second); err != nil {
-		restoreServiceSnapshot(snap, sm)
-		return err
+	if bootstrapped != "" {
+		dir, err := runtimeStore(cfg).RuntimeDir(bootstrapped)
+		if err != nil {
+			return err
+		}
+		if err := refreshRuntimeLauncher(filepath.Join(dir, "app", "bin", runtimeBinaryName()), runtimeStore(cfg).Root); err != nil {
+			m.UI.Warn("NeoRecall installed, but the command-line launcher could not be refreshed: " + err.Error())
+		}
 	}
 	m.UI.OK("NeoRecall installed and started.")
 	return nil
@@ -904,17 +970,21 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 			return failJob(merr, false)
 		}
 		_ = WriteMigratedMarker(cfg, m.Version, bk, "migrated during update")
+		m.RestartAfterLegacyMigration = true
 		cfg, _ = m.loadConfig()
 	}
 
 	channel := uSvc.Channel()
 	recordJob("checking", 15, "Checking latest "+channel+" release on GitHub", "running", "", false)
-	rel, err := fetchLatestRelease(ctx, m.HTTP, channel)
+	rel, err := fetchLatestReleaseFrom(ctx, m.HTTP, channel, m.releaseAPIBase())
 	if err != nil {
 		return failJob(err, false)
 	}
 	targetVer := strings.TrimPrefix(rel.TagName, "v")
 	curVer := strings.TrimPrefix(m.Version, "v")
+	if active, err := runtimeStore(cfg).Current(); err == nil {
+		curVer = active.Version
+	}
 	isGitCheckout := cfg.AppDir != "" && func() bool {
 		st, serr := os.Stat(filepath.Join(cfg.AppDir, ".git"))
 		return serr == nil && st.IsDir()
@@ -931,6 +1001,19 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		recordJob("completed", 100, "NeoRecall is up to date ("+curVer+" on "+channel+").", "completed", curVer, false)
 		m.UI.OK(fmt.Sprintf("NeoRecall is up to date (%s on %s).", curVer, channel))
 		return nil
+	}
+	if hasSignedRuntime(rel, targetVer) {
+		recordJob("downloading", 35, "Downloading verified runtime "+targetVer, "running", "", false)
+		rolledBack, err := m.updateSignedRuntime(ctx, cfg, rel, curVer, targetVer)
+		m.RestartAfterLegacyMigration = false
+		if err != nil {
+			return failJob(err, rolledBack)
+		}
+		recordJob("completed", 100, "Updated NeoRecall to "+targetVer+".", "completed", targetVer, false)
+		return nil
+	}
+	if _, err := runtimeStore(cfg).Current(); err == nil {
+		return failJob(errors.New("the selected release does not contain a signed runtime manifest"), false)
 	}
 
 	assetName, err := cliAssetNameForHost()

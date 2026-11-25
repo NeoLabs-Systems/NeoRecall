@@ -30,7 +30,7 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Set up Flutter
-        uses: ./.github/actions/setup-flutter
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-flutter@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Enable macOS desktop (CocoaPods mode)
         run: flutter config --enable-macos-desktop --no-enable-swift-package-manager
@@ -105,7 +105,7 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Set up Flutter
-        uses: ./.github/actions/setup-flutter
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-flutter@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Enable Windows desktop
         shell: pwsh
@@ -191,7 +191,7 @@ jobs:
           cache-read-only: false
 
       - name: Set up Flutter
-        uses: ./.github/actions/setup-flutter
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-flutter@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Ensure Android project exists
         run: |

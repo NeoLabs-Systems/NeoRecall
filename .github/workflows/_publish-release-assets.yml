@@ -30,7 +30,7 @@ jobs:
           ref: ${{ inputs.release_tag }}
 
       - name: Set up Go
-        uses: ./.github/actions/setup-go
+        uses: NeoLabs-Systems/neolabs-go/.github/actions/setup-go@1cd3668653c972a8c10cffcf52be95638bba74f8
 
       - name: Verify draft release target
         env:
@@ -84,6 +84,13 @@ jobs:
             "dist/neorecall-cli-macos-arm64"
             "dist/neorecall-cli-windows-x64.exe"
             "dist/neorecall-web-${version}.tar.gz"
+            "dist/neorecall-runtime-linux-x64-${version}.zip"
+            "dist/neorecall-runtime-linux-arm64-${version}.zip"
+            "dist/neorecall-runtime-macos-x64-${version}.zip"
+            "dist/neorecall-runtime-macos-arm64-${version}.zip"
+            "dist/neorecall-runtime-windows-x64-${version}.zip"
+            "dist/neorecall-runtime-manifest-${version}.json"
+            "dist/neorecall-runtime-manifest-${version}.json.sig"
           )
 
           available_assets=()

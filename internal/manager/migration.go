@@ -353,10 +353,14 @@ type githubRelease struct {
 var releaseSemverRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
 
 func fetchLatestRelease(ctx context.Context, client *http.Client, channel string) (githubRelease, error) {
+	return fetchLatestReleaseFrom(ctx, client, channel, "https://api.github.com")
+}
+
+func fetchLatestReleaseFrom(ctx context.Context, client *http.Client, channel, apiBase string) (githubRelease, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 60 * time.Second}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=50", githubRepo), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/releases?per_page=50", strings.TrimRight(apiBase, "/"), githubRepo), nil)
 	if err != nil {
 		return githubRelease{}, err
 	}
