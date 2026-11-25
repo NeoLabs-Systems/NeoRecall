@@ -27,6 +27,7 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/conversations", read(rt.handleList))
 	mux.Handle("GET /api/v1/conversations/timeline", read(rt.handleTimeline))
 	mux.Handle("GET /api/v1/conversations/pending", read(rt.handlePending))
+	mux.Handle("GET /api/v1/conversations/{id}/segments", read(rt.handleSegments))
 	mux.Handle("GET /api/v1/conversations/{id}", read(rt.handleGet))
 	mux.Handle("DELETE /api/v1/conversations/{id}", write(rt.handleDelete))
 	mux.Handle("POST /api/v1/conversations/bulk-delete", write(rt.handleBulk))
@@ -54,7 +55,7 @@ func (rt *Routes) handleList(w http.ResponseWriter, r *http.Request) {
 func (rt *Routes) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
 	q := r.URL.Query()
-	res, err := Timeline(r.Context(), rt.Svc.DB.R, a.UserID, q.Get("limit"), q.Get("from"), q.Get("to"))
+	res, err := Timeline(r.Context(), rt.Svc.DB.R, a.UserID, q.Get("limit"), q.Get("before"))
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -126,6 +127,16 @@ func (rt *Routes) handleBulk(w http.ResponseWriter, r *http.Request) {
 func (rt *Routes) handleReprocess(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
 	res, err := rt.Svc.Reprocess(r.Context(), a.UserID, r.PathValue("id"))
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, res)
+}
+
+func (rt *Routes) handleSegments(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	res, err := TimelineSegments(r.Context(), rt.Svc.DB.R, a.UserID, r.PathValue("id"), 1500)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return

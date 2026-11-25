@@ -1,12 +1,10 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -14,6 +12,8 @@ import (
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/llm"
+	"github.com/NeoLabs-Systems/neolabs-go/llm/transport"
 	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/providers"
@@ -285,23 +285,27 @@ func (c *ProviderClient) sendOpenAI(ctx context.Context, rt providers.ResolvedWo
 
 	tctx, cancel := context.WithTimeout(ctx, time.Duration(max(5000, cfg.AITimeoutMs))*time.Millisecond)
 	defer cancel()
-	httpReq, err := http.NewRequestWithContext(tctx, http.MethodPost, rt.BaseURL+"/chat/completions", bytes.NewReader(jb))
-	if err != nil {
-		return fail(0, "AI_REQUEST_FAILED", err.Error())
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	headers := map[string]string{"Content-Type": "application/json"}
 	if rt.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+rt.APIKey)
+		headers["Authorization"] = "Bearer " + rt.APIKey
 	}
-	res, err := c.httpClient().Do(httpReq)
+	res, err := transport.Do(tctx, c.httpClient(), rt.Provider, "The request to the AI endpoint failed.", transport.Request{
+		Method: http.MethodPost,
+		URL:    transport.JoinURL(rt.BaseURL, "/chat/completions"),
+		Header: headers,
+		Body:   jb,
+	})
 	if err != nil {
-		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(tctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 			return fail(0, "AI_TIMEOUT", "The language model timed out.")
 		}
 		return fail(0, "AI_REQUEST_FAILED", err.Error())
 	}
 	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 16<<20))
+	raw, err := transport.ReadBody(res.Body, 16<<20, "AI")
+	if err != nil {
+		return fail(res.StatusCode, "AI_REQUEST_FAILED", err.Error())
+	}
 
 	var payload map[string]any
 	_ = json.Unmarshal(raw, &payload)
@@ -324,9 +328,9 @@ func (c *ProviderClient) sendOpenAI(ctx context.Context, rt providers.ResolvedWo
 			(strings.Contains(strings.ToLower(errCodeStr), "context_length_exceeded") ||
 				strings.Contains(strings.ToLower(errCodeStr), "string_above_max_length") ||
 				contextOverflowRe.MatchString(detail)) {
-			return fail(res.StatusCode, "AI_CONTEXT_EXCEEDED", fmt.Sprintf("The request was longer than the model's context allows: %s Lower LLM_CONTEXT_SIZE to match the endpoint, or lower NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS.", detail))
+			return fail(res.StatusCode, "AI_CONTEXT_EXCEEDED", fmt.Sprintf("The request was longer than the model's context allows: %s Lower LLM_CONTEXT_SIZE to match the endpoint, or lower NEORECALL_CONSOLIDATION_WINDOW_CHARACTERS.", llm.SanitizeDetail(detail)))
 		}
-		return fail(res.StatusCode, "AI_HTTP_ERROR", detail)
+		return fail(res.StatusCode, "AI_HTTP_ERROR", llm.SanitizeDetail(detail))
 	}
 
 	if eObj, _ := payload["error"].(map[string]any); eObj != nil {
@@ -464,22 +468,27 @@ func (c *ProviderClient) sendAnthropic(ctx context.Context, rt providers.Resolve
 
 	tctx, cancel := context.WithTimeout(ctx, time.Duration(max(5000, cfg.AITimeoutMs))*time.Millisecond)
 	defer cancel()
-	httpReq, err := http.NewRequestWithContext(tctx, http.MethodPost, rt.BaseURL+"/messages", bytes.NewReader(jb))
+	res, err := transport.Do(tctx, c.httpClient(), rt.Provider, "The request to Anthropic failed.", transport.Request{
+		Method: http.MethodPost,
+		URL:    transport.JoinURL(rt.BaseURL, "/messages"),
+		Header: map[string]string{
+			"Content-Type":      "application/json",
+			"x-api-key":         rt.APIKey,
+			"anthropic-version": "2023-06-01",
+		},
+		Body: jb,
+	})
 	if err != nil {
-		return fail(0, "AI_REQUEST_FAILED", err.Error())
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", rt.APIKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	res, err := c.httpClient().Do(httpReq)
-	if err != nil {
-		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(tctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 			return fail(0, "AI_TIMEOUT", "The AI request timed out.")
 		}
 		return fail(0, "AI_REQUEST_FAILED", err.Error())
 	}
 	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 16<<20))
+	raw, err := transport.ReadBody(res.Body, 16<<20, "Anthropic")
+	if err != nil {
+		return fail(res.StatusCode, "AI_REQUEST_FAILED", err.Error())
+	}
 	var payload map[string]any
 	_ = json.Unmarshal(raw, &payload)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {

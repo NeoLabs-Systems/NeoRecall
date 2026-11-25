@@ -246,24 +246,31 @@ func New(d Deps) http.Handler {
 		return httperr.ClientIP(r, d.cfg().TrustProxy)
 	})
 
-	var h http.Handler = mux
-	h = apiRateMiddleware(lim, d.Log)(h)
-	if d.Diag != nil && d.Auth != nil {
-		h = d.Diag.Middleware(d.Auth.Resolve)(h)
-	} else if d.Diag != nil {
-		h = d.Diag.Middleware(nil)(h)
+	var diags httpx.Middleware = func(next http.Handler) http.Handler {
+		if d.Diag != nil && d.Auth != nil {
+			return d.Diag.Middleware(d.Auth.Resolve)(next)
+		}
+		if d.Diag != nil {
+			return d.Diag.Middleware(nil)(next)
+		}
+		return next
 	}
-	h = jsonBodyLimitMiddleware(jsonBodyLimit)(h)
-	h = corsMiddleware(d.Config)(h)
-	h = httpx.NoStoreAPI()(h)
 	analyticsOrigin := ""
 	if d.analyticsOn() {
 		analyticsOrigin = countlyOrigin
 	}
-	h = secheaders.Middleware(SecurityHeaders(c, analyticsOrigin))(h)
-	h = httpx.Recover(d.Log)(h)
-	h = httperr.WithRequestID()(h)
-	return h
+	return httpx.Chain(
+		mux,
+		httperr.WithRequestID(),
+		httpx.Recover(d.Log),
+		secheaders.Middleware(SecurityHeaders(c, analyticsOrigin)),
+		httpx.APICaseGuard(),
+		httpx.NoStoreAPI(),
+		corsMiddleware(d.Config),
+		jsonBodyLimitMiddleware(jsonBodyLimit),
+		diags,
+		apiRateMiddleware(lim, d.Log),
+	)
 }
 
 func StartStatusSampler(ctx context.Context, d Deps) func() {

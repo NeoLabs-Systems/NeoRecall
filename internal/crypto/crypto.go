@@ -24,6 +24,7 @@ import (
 
 	"github.com/NeoLabs-Systems/neolabs-go/filebox"
 	"github.com/NeoLabs-Systems/neolabs-go/passhash"
+	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
 )
 
 const (
@@ -102,7 +103,7 @@ func MasterKey(secretKeyPath string) ([]byte, error) {
 		return cachedKey, nil
 	}
 	if _, err := os.Stat(abs); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		if err := runtimecfg.EnsurePrivateDir(filepath.Dir(abs)); err != nil {
 			return nil, err
 		}
 		buf := make([]byte, MasterKeyLen)

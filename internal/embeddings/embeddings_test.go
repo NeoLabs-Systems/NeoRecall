@@ -14,6 +14,7 @@ import (
 	"github.com/NeoLabs-Systems/neorecall/internal/embeddings"
 	"github.com/NeoLabs-Systems/neorecall/internal/jobs"
 	"github.com/NeoLabs-Systems/neorecall/internal/schema"
+	"github.com/NeoLabs-Systems/neorecall/internal/transcription"
 )
 
 func TestTokenizerLSHBandsAndSearchVector(t *testing.T) {
@@ -131,6 +132,14 @@ func TestTokenizerLSHBandsAndSearchVector(t *testing.T) {
 		t.Fatalf("expected d1 first with high similarity, got %+v", matches)
 	}
 
+	// The closest legacy row must remain searchable even when enough indexed rows exist.
+	if _, err := db.W.ExecContext(ctx, `DELETE FROM search_embedding_bands WHERE document_id=?`, d1.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := svc.SearchVector(ctx, uid, nil, unitVec(7), 1)
+	if err != nil || len(legacy) != 1 || legacy[0].DocumentID != d1.ID {
+		t.Fatalf("legacy embedding not ranked: %+v %v", legacy, err)
+	}
 	tx2, err := db.W.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -146,4 +155,26 @@ func TestTokenizerLSHBandsAndSearchVector(t *testing.T) {
 	if len(matchesAfter) != 1 || matchesAfter[0].DocumentID != d2.ID {
 		t.Fatalf("expected only d2 after m1 removal, got %+v", matchesAfter)
 	}
+	// Legacy archives may contain more than 1,000 embeddings without bands.
+	_, err = db.W.ExecContext(ctx, `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1001) INSERT INTO search_documents(user_id,kind,source_id,body,occurred_at,text_hash) SELECT ?, 'memory', 'legacy-' || x, 'legacy', '2026-01-01', 'hash' FROM n`, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.W.ExecContext(ctx, `INSERT INTO search_embeddings(document_id,user_id,model_revision,dimensions,embedding,text_hash) SELECT id,user_id,'legacy',384,?,text_hash FROM search_documents WHERE user_id=? AND source_id LIKE 'legacy-%'`, transcription.VectorToBytes(unitVec(42)), uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.W.ExecContext(ctx, `UPDATE search_embeddings SET embedding=? WHERE document_id=(SELECT id FROM search_documents WHERE user_id=? AND source_id='legacy-1001')`, transcription.VectorToBytes(unitVec(99)), uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lastID int64
+	if err = db.R.QueryRowContext(ctx, `SELECT id FROM search_documents WHERE user_id=? AND source_id='legacy-1001'`, uid).Scan(&lastID); err != nil {
+		t.Fatal(err)
+	}
+	large, err := svc.SearchVector(ctx, uid, nil, unitVec(99), 1)
+	if err != nil || len(large) != 1 || large[0].DocumentID != lastID {
+		t.Fatalf("large legacy archive: %+v %v", large, err)
+	}
+
 }

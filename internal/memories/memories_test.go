@@ -163,6 +163,41 @@ func TestConsolidationMemoriesAndRoutes(t *testing.T) {
 		t.Fatalf("expected pinned=true and 1 miniMemory, got %+v", updated)
 	}
 
+	request := func(method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+key.Token)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	list := request(http.MethodGet, "/api/v1/mini-memories?memoryId="+mems[0].PublicID)
+	var miniList struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &miniList); err != nil || len(miniList.Items) != 1 {
+		t.Fatalf("mini list %s: %v", list.Body.String(), err)
+	}
+	miniID, ok := miniList.Items[0]["public_id"].(string)
+	if !ok || miniID == "" || miniList.Items[0]["memory"] == nil {
+		t.Fatalf("mini response contract: %s", list.Body.String())
+	}
+	detail := request(http.MethodGet, "/api/v1/mini-memories/"+miniID)
+	var mini map[string]any
+	if err := json.Unmarshal(detail.Body.Bytes(), &mini); detail.Code != 200 || err != nil || len(mini["sources"].([]any)) != 1 {
+		t.Fatalf("mini detail: %d %s %v", detail.Code, detail.Body.String(), err)
+	}
+	memoryDetail := request(http.MethodGet, "/api/v1/memories/"+mems[0].PublicID)
+	var detailBody map[string]any
+	_ = json.Unmarshal(memoryDetail.Body.Bytes(), &detailBody)
+	if _, ok := detailBody["contextItems"]; !ok {
+		t.Fatalf("missing contextItems: %s", memoryDetail.Body.String())
+	}
+	if rec := request(http.MethodDelete, "/api/v1/mini-memories/"+miniID); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete mini: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(http.MethodGet, "/api/v1/mini-memories/"+miniID); rec.Code != http.StatusNotFound {
+		t.Fatalf("deleted mini still present: %d", rec.Code)
+	}
 	// Check runs endpoint
 	runsReq := httptest.NewRequest(http.MethodGet, "/api/v1/memories/consolidations", nil)
 	runsReq.Header.Set("Authorization", "Bearer "+key.Token)

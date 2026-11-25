@@ -37,6 +37,8 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/memories/merge", write(rt.handleMerge))
 
 	mux.Handle("GET /api/v1/mini-memories", read(rt.handleListMini))
+	mux.Handle("GET /api/v1/mini-memories/{id}", read(rt.handleGetMini))
+	mux.Handle("DELETE /api/v1/mini-memories/{id}", write(rt.handleDeleteMini))
 	mux.Handle("PATCH /api/v1/mini-memories/{id}", write(rt.handlePatchMini))
 
 	mux.Handle("GET /api/v1/daily-summaries", read(rt.handleListDaily))
@@ -134,7 +136,7 @@ func (rt *Routes) handleMerge(w http.ResponseWriter, r *http.Request) {
 func (rt *Routes) handleListMini(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
 	q := r.URL.Query()
-	items, err := rt.Svc.ListMini(r.Context(), a.UserID, q.Get("kind"), q.Get("status"), q.Get("limit"))
+	items, err := rt.Svc.ListMini(r.Context(), a.UserID, q.Get("kind"), q.Get("status"), q.Get("limit"), q.Get("memoryId"), q.Get("entity"), q.Get("q"))
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -149,7 +151,12 @@ func (rt *Routes) handlePatchMini(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	mm, err := rt.Svc.UpdateMini(r.Context(), a.UserID, r.PathValue("id"), body)
+	_, err := rt.Svc.UpdateMini(r.Context(), a.UserID, r.PathValue("id"), body)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	mm, err := rt.Svc.MiniDetail(r.Context(), a.UserID, r.PathValue("id"))
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -199,4 +206,22 @@ func (rt *Routes) handleConsolidationRun(w http.ResponseWriter, r *http.Request)
 		rid = runID
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"queued": queued, "runId": rid})
+}
+
+func (rt *Routes) handleGetMini(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	v, err := rt.Svc.MiniDetail(r.Context(), a.UserID, r.PathValue("id"))
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, v)
+}
+func (rt *Routes) handleDeleteMini(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	if err := rt.Svc.RemoveMini(r.Context(), a.UserID, r.PathValue("id")); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

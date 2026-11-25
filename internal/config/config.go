@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
 )
 
 const (
@@ -94,10 +96,9 @@ func (p Paths) Ensure() error {
 		p.Home, p.Data, p.Models, p.AudioTmp, p.AudioWork,
 		p.ImportTmp, p.Context, p.Logs, p.Backups, p.CloudPending,
 	} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := runtimecfg.EnsurePrivateDir(dir); err != nil {
 			return err
 		}
-		_ = os.Chmod(dir, 0o700)
 	}
 	return nil
 }
@@ -400,15 +401,12 @@ func (r *reader) bool(name string, def bool) bool {
 	if raw == "" {
 		return def
 	}
-	switch strings.ToLower(raw) {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	default:
+	b := runtimecfg.Bool(raw, true)
+	if b != runtimecfg.Bool(raw, false) {
 		r.err = fmt.Errorf("%s must be true or false", name)
 		return def
 	}
+	return b
 }
 
 func (r *reader) enum(name, def string, allowed ...string) string {

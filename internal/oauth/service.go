@@ -6,9 +6,7 @@ package oauth
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
@@ -20,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/oauthclient"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
@@ -536,8 +535,7 @@ func (s *Service) CreateAuthorizationCode(ctx context.Context, clientID, userID,
 }
 
 func verifyPKCE(verifier, challenge string) bool {
-	sum := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:]) == challenge
+	return oauthclient.CodeChallenge(verifier) == challenge
 }
 
 func (s *Service) issueTokenSet(ctx context.Context, tx *sql.Tx, clientID, userID string, scopes []string) (TokenSet, error) {

@@ -155,6 +155,11 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 			Timeout: 60 * time.Second,
 		})
 	}
+	// Provider endpoints are configured by the operator and may run on a LAN.
+	providerHTTP := opts.HTTPClient
+	if providerHTTP == nil {
+		providerHTTP = ssrf.NewClient(ssrf.Options{AllowPrivate: true, Timeout: 60 * time.Second})
+	}
 	version := opts.Version
 	if version == "" {
 		version = config.Version
@@ -198,7 +203,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		DB:        db,
 		Cfg:       cfgFn,
 		MasterKey: keyFn,
-		HTTP:      httpClient,
+		HTTP:      providerHTTP,
 		Log:       log,
 	}
 	a.Providers = &providers.Service{
@@ -206,7 +211,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		Cfg:       cfgFn,
 		MasterKey: keyFn,
 		NeoRouter: a.NeoRouter,
-		HTTP:      httpClient,
+		HTTP:      providerHTTP,
 		Getenv:    getenv,
 		ProbePath: filepath.Join(appDir, "test", "fixtures", "de_en_two_speakers.wav"),
 		Log:       log,
@@ -218,7 +223,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		Cfg:       cfgFn,
 		Providers: a.Providers,
 		Usage:     a.Usage,
-		HTTP:      httpClient,
+		HTTP:      providerHTTP,
 		Log:       log,
 	}
 	a.AI = &ai.Engine{

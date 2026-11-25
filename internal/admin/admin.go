@@ -186,7 +186,7 @@ func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitR
 	}
 	args = append(args, lim)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT id, user_id, resource_type, resource_id, type, status, priority,
-		attempts, max_attempts, run_after, last_error_code, last_error_message, created_at, updated_at, completed_at
+		attempts, max_attempts, next_attempt_at, last_error_code, last_error_message, created_at, updated_at, completed_at
 		FROM jobs `+where+` ORDER BY created_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
@@ -194,21 +194,21 @@ func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitR
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, rtype, rid, jtype, st, runAfter, created, updated string
-		var uid, ec, em, compAt sql.NullString
+		var id, jtype, st, runAfter, created, updated string
+		var uid, rtype, rid, ec, em, compAt sql.NullString
 		var prio, att, maxAtt int
 		if rows.Scan(&id, &uid, &rtype, &rid, &jtype, &st, &prio, &att, &maxAtt, &runAfter, &ec, &em, &created, &updated, &compAt) == nil {
 			out = append(out, map[string]any{
 				"id":                 id,
 				"user_id":            nullStr(uid),
-				"resource_type":      rtype,
-				"resource_id":        rid,
+				"resource_type":      nullStr(rtype),
+				"resource_id":        nullStr(rid),
 				"type":               jtype,
 				"status":             st,
 				"priority":           prio,
 				"attempts":           att,
 				"max_attempts":       maxAtt,
-				"run_after":          runAfter,
+				"next_attempt_at":    runAfter,
 				"last_error_code":    nullStr(ec),
 				"last_error_message": nullStr(em),
 				"created_at":         created,
@@ -237,7 +237,7 @@ func (s *Service) CancelJob(ctx context.Context, id string) (map[string]any, err
 func (s *Service) AIRequests(ctx context.Context, limitRaw string) ([]map[string]any, error) {
 	lim := transcripts.PageLimit(limitRaw, 200, 50)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT id, user_id, purpose, provider, model, state, http_status,
-		error_code, prompt_tokens, completion_tokens, reserved_at, completed_at
+		error_code, prompt_tokens, completion_tokens, reserved_at, sent_at, completed_at
 		FROM ai_requests ORDER BY reserved_at DESC LIMIT ?`, lim)
 	if err != nil {
 		return nil, err
@@ -246,9 +246,9 @@ func (s *Service) AIRequests(ctx context.Context, limitRaw string) ([]map[string
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, purpose, prov, model, state, resAt string
-		var uid, ec, compAt sql.NullString
+		var uid, ec, sentAt, compAt sql.NullString
 		var httpSt, pt, ct sql.NullInt64
-		if rows.Scan(&id, &uid, &purpose, &prov, &model, &state, &httpSt, &ec, &pt, &ct, &resAt, &compAt) == nil {
+		if rows.Scan(&id, &uid, &purpose, &prov, &model, &state, &httpSt, &ec, &pt, &ct, &resAt, &sentAt, &compAt) == nil {
 			out = append(out, map[string]any{
 				"id":                id,
 				"user_id":           nullStr(uid),
@@ -261,6 +261,7 @@ func (s *Service) AIRequests(ctx context.Context, limitRaw string) ([]map[string
 				"prompt_tokens":     nullInt(pt),
 				"completion_tokens": nullInt(ct),
 				"reserved_at":       resAt,
+				"sent_at":           nullStr(sentAt),
 				"completed_at":      nullStr(compAt),
 			})
 		}
@@ -270,8 +271,8 @@ func (s *Service) AIRequests(ctx context.Context, limitRaw string) ([]map[string
 
 func (s *Service) AuditLog(ctx context.Context, limitRaw string) ([]map[string]any, error) {
 	lim := transcripts.PageLimit(limitRaw, 200, 50)
-	rows, err := s.DB.R.QueryContext(ctx, `SELECT id, actor_type, actor_id, affected_user_id, action, resource_type, resource_id, ip_address, metadata_json, created_at
-		FROM audit_log ORDER BY id DESC LIMIT ?`, lim)
+	rows, err := s.DB.R.QueryContext(ctx, `SELECT a.id, a.actor_type, a.actor_id, a.affected_user_id, a.action, a.resource_type, a.resource_id, a.ip_address, a.metadata_json, a.created_at, actor.username, affected.username
+  FROM audit_log a LEFT JOIN users actor ON a.actor_type IN ('user','admin') AND actor.id=a.actor_id LEFT JOIN users affected ON affected.id=a.affected_user_id ORDER BY a.id DESC LIMIT ?`, lim)
 	if err != nil {
 		return nil, err
 	}
@@ -280,19 +281,21 @@ func (s *Service) AuditLog(ctx context.Context, limitRaw string) ([]map[string]a
 	for rows.Next() {
 		var id int64
 		var at, action, created string
-		var aid, aff, rt, rid, ip, meta sql.NullString
-		if rows.Scan(&id, &at, &aid, &aff, &action, &rt, &rid, &ip, &meta, &created) == nil {
+		var aid, aff, rt, rid, ip, meta, actorName, affectedName sql.NullString
+		if rows.Scan(&id, &at, &aid, &aff, &action, &rt, &rid, &ip, &meta, &created, &actorName, &affectedName) == nil {
 			out = append(out, map[string]any{
-				"id":               id,
-				"actor_type":       at,
-				"actor_id":         nullStr(aid),
-				"affected_user_id": nullStr(aff),
-				"action":           action,
-				"resource_type":    nullStr(rt),
-				"resource_id":      nullStr(rid),
-				"ip_address":       nullStr(ip),
-				"metadata_json":    nullStr(meta),
-				"created_at":       created,
+				"id":                id,
+				"actor_type":        at,
+				"actor_id":          nullStr(aid),
+				"actor_username":    nullStr(actorName),
+				"affected_username": nullStr(affectedName),
+				"affected_user_id":  nullStr(aff),
+				"action":            action,
+				"resource_type":     nullStr(rt),
+				"resource_id":       nullStr(rid),
+				"ip_address":        nullStr(ip),
+				"metadata_json":     nullStr(meta),
+				"created_at":        created,
 			})
 		}
 	}
@@ -342,6 +345,10 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/jobs/{id}/cancel", adm(rt.handleCancelJob))
 	mux.Handle("GET /api/v1/admin/ai-requests", adm(rt.handleAIRequests))
 	mux.Handle("GET /api/v1/admin/audit", adm(rt.handleAudit))
+	mux.Handle("GET /api/v1/admin/config/usage-limits", adm(rt.handleGetDefaultsLegacy))
+	mux.Handle("PUT /api/v1/admin/config/usage-limits", adm(rt.handlePutDefaultsLegacy))
+	mux.Handle("GET /api/v1/admin/users/{id}/usage-limits", adm(rt.handleGetUserLimits))
+	mux.Handle("PUT /api/v1/admin/users/{id}/usage-limits", adm(rt.handlePutUserLimits))
 	mux.Handle("GET /api/v1/admin/usage-limits", adm(rt.handleGetDefaults))
 	mux.Handle("PUT /api/v1/admin/usage-limits", adm(rt.handlePutDefaults))
 	mux.Handle("GET /api/v1/admin/users/{id}/limits", adm(rt.handleGetUserLimits))
@@ -351,6 +358,7 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/speakers/reevaluate", adm(rt.handleSpeakerReevaluate))
 
 	mux.Handle("GET /api/v1/admin/backups", adm(rt.handleBackupsStatus))
+	mux.Handle("POST /api/v1/admin/backups/run", adm(rt.handleBackupCreate))
 	mux.Handle("POST /api/v1/admin/backups", adm(rt.handleBackupCreate))
 	mux.Handle("GET /api/v1/admin/backups/{key}/download", adm(rt.handleBackupDownload))
 	mux.Handle("DELETE /api/v1/admin/backups/{key}", adm(rt.handleBackupDelete))
@@ -376,7 +384,7 @@ func (rt *Routes) handleUsers(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "users": items})
 }
 
 func (rt *Routes) handlePatchUser(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +415,7 @@ func (rt *Routes) handleJobs(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "jobs": items})
 }
 
 func (rt *Routes) handleRetryJob(w http.ResponseWriter, r *http.Request) {
@@ -434,7 +442,7 @@ func (rt *Routes) handleAIRequests(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "requests": items})
 }
 
 func (rt *Routes) handleAudit(w http.ResponseWriter, r *http.Request) {
@@ -443,7 +451,7 @@ func (rt *Routes) handleAudit(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "entries": items})
 }
 
 func (rt *Routes) handleGetDefaults(w http.ResponseWriter, r *http.Request) {
@@ -619,4 +627,21 @@ func (rt *Routes) handleUpdateStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, res)
+}
+
+func (rt *Routes) handleGetDefaultsLegacy(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"limits": rt.Svc.Usage.GetInstallDefaults(r.Context())})
+}
+func (rt *Routes) handlePutDefaultsLegacy(w http.ResponseWriter, r *http.Request) {
+	var body map[string]*int
+	if err := httperr.DecodeJSON(r, &body); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	res, err := rt.Svc.Usage.SetInstallDefaults(r.Context(), body)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"limits": res})
 }

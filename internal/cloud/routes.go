@@ -27,6 +27,9 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/cloud", read(rt.handleGet))
 	mux.Handle("PATCH /api/v1/cloud", write(rt.handlePatch))
 	mux.Handle("DELETE /api/v1/cloud", write(rt.handleDelete))
+	mux.Handle("POST /api/v1/cloud/nextcloud/login", write(rt.handleNCStart))
+	mux.Handle("POST /api/v1/cloud/neocloud/login", write(rt.handleNeoStart))
+	mux.Handle("POST /api/v1/cloud/backup", write(rt.handleLegacyBackup))
 	mux.Handle("POST /api/v1/cloud/nextcloud/start", write(rt.handleNCStart))
 	mux.Handle("POST /api/v1/cloud/nextcloud/poll", write(rt.handleNCPoll))
 	mux.Handle("POST /api/v1/cloud/nextcloud/cancel", write(rt.handleNCCancel))
@@ -45,11 +48,11 @@ func (rt *Routes) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if res["connected"] == false {
 		if pend := rt.Svc.PublicPending(a.UserID); pend != nil {
-			httpx.WriteJSON(w, http.StatusOK, pend)
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": pend})
 			return
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handlePatch(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +71,7 @@ func (rt *Routes) handlePatch(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -94,12 +97,14 @@ func (rt *Routes) handleNCStart(w http.ResponseWriter, r *http.Request) {
 	if u == "" {
 		u = body.InstanceURL
 	}
+	rt.Svc.NextcloudCancel(a.UserID)
+	rt.Svc.NeoCloudCancel(a.UserID)
 	res, err := rt.Svc.NextcloudStart(r.Context(), a.UserID, u)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handleNCPoll(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +117,7 @@ func (rt *Routes) handleNCPoll(w http.ResponseWriter, r *http.Request) {
 	if res == nil {
 		res, _ = rt.Svc.PublicAccount(r.Context(), a.UserID)
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handleNCCancel(w http.ResponseWriter, r *http.Request) {
@@ -135,12 +140,14 @@ func (rt *Routes) handleNeoStart(w http.ResponseWriter, r *http.Request) {
 	if u == "" {
 		u = body.InstanceURL
 	}
+	rt.Svc.NextcloudCancel(a.UserID)
+	rt.Svc.NeoCloudCancel(a.UserID)
 	res, err := rt.Svc.NeoCloudStart(r.Context(), a.UserID, u)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handleNeoPoll(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +160,7 @@ func (rt *Routes) handleNeoPoll(w http.ResponseWriter, r *http.Request) {
 	if res == nil {
 		res, _ = rt.Svc.PublicAccount(r.Context(), a.UserID)
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": res})
 }
 
 func (rt *Routes) handleNeoCancel(w http.ResponseWriter, r *http.Request) {
@@ -170,4 +177,24 @@ func (rt *Routes) handleBackupNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"uploaded": uploaded})
+}
+
+func (rt *Routes) handleLegacyBackup(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	acc, _, err := rt.Svc.GetAccount(r.Context(), a.UserID)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	if acc == nil {
+		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusNotFound, "CLOUD_NOT_CONNECTED", "Connect a cloud backup first."))
+		return
+	}
+	rt.Svc.EnqueueDataBackup(r.Context(), a.UserID, "manual")
+	status, err := rt.Svc.PublicAccount(r.Context(), a.UserID)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cloud": status, "queued": true})
 }

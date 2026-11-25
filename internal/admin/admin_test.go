@@ -96,6 +96,14 @@ func TestAdminSourcesStatusAndUpdates(t *testing.T) {
 	if rec := get("/api/v1/admin/stats"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"users":1`) {
 		t.Fatalf("admin stats failed: %d %s", rec.Code, rec.Body.String())
 	}
+
+	for path, key := range map[string]string{"/api/v1/admin/users": "users", "/api/v1/admin/jobs": "jobs", "/api/v1/admin/ai-requests": "requests", "/api/v1/admin/audit": "entries", "/api/v1/admin/config/usage-limits": "limits", "/api/v1/admin/users/" + regUser.ID + "/usage-limits": "userId"} {
+		rec := get(path)
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); rec.Code != 200 || err != nil || body[key] == nil {
+			t.Fatalf("%s contract: %d %s %v", path, rec.Code, rec.Body.String(), err)
+		}
+	}
 	if rec := get("/api/v1/admin/update"); rec.Code != 200 {
 		t.Fatalf("admin update failed: %d %s", rec.Code, rec.Body.String())
 	}

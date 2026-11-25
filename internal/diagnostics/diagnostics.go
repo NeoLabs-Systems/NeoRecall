@@ -11,6 +11,7 @@ import (
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
+	"github.com/NeoLabs-Systems/neolabs-go/publicerr"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
@@ -38,7 +39,7 @@ func SafeMessage(v string) string {
 	if v == "" {
 		return ""
 	}
-	s := bearerRe.ReplaceAllString(v, "Bearer [redacted]")
+	s := publicerr.Sanitize(bearerRe.ReplaceAllString(v, "Bearer [redacted]"), "", "")
 	if len(s) > 500 {
 		s = s[:500]
 	}

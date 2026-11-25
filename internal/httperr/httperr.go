@@ -8,14 +8,15 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/apperr"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
+	"github.com/NeoLabs-Systems/neolabs-go/publicerr"
 	"github.com/google/uuid"
 )
 
@@ -83,6 +84,12 @@ func WriteError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		}
 		msg = he.Message
 		details = he.Details
+	} else if ae, ok := apperr.As(err); ok {
+		status = ae.Status
+		if c := publicerr.PublicCode(ae.Code); c != "" {
+			code = c
+		}
+		msg = publicerr.NonAdminMessage(publicerr.Failure{Message: ae.Message, Status: status, Code: ae.Code}, "", "")
 	} else if errors.As(err, &maxErr) {
 		status = http.StatusRequestEntityTooLarge
 		code = "BODY_TOO_LARGE"
@@ -129,16 +136,7 @@ func DecodeJSON(r *http.Request, dst any) error {
 
 // ClientIP resolves the caller's IP (honouring X-Forwarded-For only when trustProxy is true).
 func ClientIP(r *http.Request, trustProxy bool) string {
-	if trustProxy {
-		if xff := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); xff != "" {
-			return xff
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return httpx.ClientIP(r, trustProxy)
 }
 
 // SlidingLimiter reproduces server/middleware/rate_limit.js per-key sliding windows.

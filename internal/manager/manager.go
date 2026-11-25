@@ -277,7 +277,7 @@ func (m *Manager) ensureDefaultEnvFile(cfg config.Config) error {
 	if _, err := os.Stat(cfg.Paths.EnvFile); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Paths.EnvFile), 0o700); err != nil {
+	if err := runtimecfg.EnsurePrivateDir(filepath.Dir(cfg.Paths.EnvFile)); err != nil {
 		return err
 	}
 	port := cfg.Port

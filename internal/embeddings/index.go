@@ -271,135 +271,44 @@ type VectorMatch struct {
 	Similarity float64
 }
 
-// SearchVector retrieves semantic neighbours via LSH band lookup + exact float32 cosine scoring.
+// SearchVector scores all compatible embeddings, including migrated rows without bands.
 func (s *Service) SearchVector(ctx context.Context, userID string, kinds []string, queryVec []float32, limit int) ([]VectorMatch, error) {
 	if len(queryVec) == 0 || limit <= 0 {
 		return nil, nil
 	}
-	probes, idxs := bandProbes(queryVec)
-	candMatches := make(map[int64]int)
-	var candOrder []int64
-
-	kindJoin := ""
-	kindClause := ""
-	var kindArgs []any
+	args := []any{userID, len(queryVec)}
+	filter := ""
 	if len(kinds) > 0 {
-		kindJoin = " JOIN search_documents d ON d.id=b.document_id"
-		kindClause = " AND d.kind IN (" + placeholders(len(kinds)) + ")"
+		filter = " AND d.kind IN (" + placeholders(len(kinds)) + ")"
 		for _, k := range kinds {
-			kindArgs = append(kindArgs, k)
+			args = append(args, k)
 		}
 	}
-	for i, vals := range probes {
-		args := []any{userID, len(queryVec), indexVersion, idxs[i]}
-		for _, v := range vals {
-			args = append(args, v)
-		}
-		args = append(args, kindArgs...)
-		rows, err := s.DB.R.QueryContext(ctx, `SELECT b.document_id FROM search_embedding_bands b`+kindJoin+`
-			WHERE b.user_id=? AND b.dimension=? AND b.index_version=? AND b.band_index=?
-			  AND b.band_value IN (`+placeholders(len(vals))+`)`+kindClause, args...)
-		if err != nil {
+	rows, err := s.DB.R.QueryContext(ctx, `SELECT e.document_id,e.embedding FROM search_embeddings e JOIN search_documents d ON d.id=e.document_id WHERE e.user_id=? AND e.dimensions=?`+filter, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []VectorMatch{}
+	for rows.Next() {
+		var id int64
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var docID int64
-			if rows.Scan(&docID) == nil {
-				if candMatches[docID] == 0 {
-					candOrder = append(candOrder, docID)
-				}
-				candMatches[docID]++
-			}
+		vec := transcription.VectorFromBytes(blob)
+		if len(vec) != len(queryVec) {
+			continue
 		}
-		rows.Close()
-	}
-
-	sort.SliceStable(candOrder, func(i, j int) bool {
-		return candMatches[candOrder[i]] > candMatches[candOrder[j]]
-	})
-	poolCap := max(600, limit*4)
-	if len(candOrder) > poolCap {
-		candOrder = candOrder[:poolCap]
-	}
-
-	// Score candidate vectors with exact float32 cosine. If LSH found fewer than limit
-	// (e.g. legacy embeddings before bands or tiny dataset), also check unbanded rows.
-	seen := make(map[int64]bool, len(candOrder))
-	var out []VectorMatch
-	scoreBatch := func(ids []int64) error {
-		for off := 0; off < len(ids); off += 400 {
-			end := min(len(ids), off+400)
-			args := make([]any, 0, 1+end-off)
-			args = append(args, userID)
-			for _, id := range ids[off:end] {
-				args = append(args, id)
-			}
-			rows, err := s.DB.R.QueryContext(ctx, `SELECT document_id, embedding FROM search_embeddings
-				WHERE user_id=? AND document_id IN (`+placeholders(end-off)+`)`, args...)
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				var docID int64
-				var blob []byte
-				if rows.Scan(&docID, &blob) == nil {
-					vec := transcription.VectorFromBytes(blob)
-					if len(vec) == len(queryVec) {
-						sim := transcription.Cosine(queryVec, vec)
-						if !math.IsNaN(sim) {
-							out = append(out, VectorMatch{DocumentID: docID, Similarity: sim})
-						}
-					}
-				}
-			}
-			rows.Close()
-		}
-		return nil
-	}
-	if len(candOrder) > 0 {
-		for _, id := range candOrder {
-			seen[id] = true
-		}
-		if err := scoreBatch(candOrder); err != nil {
-			return nil, err
+		sim := transcription.Cosine(queryVec, vec)
+		if !math.IsNaN(sim) {
+			out = append(out, VectorMatch{DocumentID: id, Similarity: sim})
 		}
 	}
-	if len(out) < limit {
-		// Scan any user embeddings not yet covered by LSH bands.
-		args := []any{userID}
-		kFilter := ""
-		if len(kinds) > 0 {
-			kFilter = " AND d.kind IN (" + placeholders(len(kinds)) + ")"
-			args = append(args, kindArgs...)
-		}
-		args = append(args, indexVersion)
-		rows, err := s.DB.R.QueryContext(ctx, `SELECT e.document_id, e.embedding
-			FROM search_embeddings e JOIN search_documents d ON d.id=e.document_id
-			WHERE e.user_id=?`+kFilter+`
-			  AND NOT EXISTS (SELECT 1 FROM search_embedding_bands b WHERE b.document_id=e.document_id AND b.index_version=?)
-			LIMIT 1000`, args...)
-		if err == nil {
-			for rows.Next() {
-				var docID int64
-				var blob []byte
-				if rows.Scan(&docID, &blob) == nil && !seen[docID] {
-					seen[docID] = true
-					vec := transcription.VectorFromBytes(blob)
-					if len(vec) == len(queryVec) {
-						sim := transcription.Cosine(queryVec, vec)
-						if !math.IsNaN(sim) {
-							out = append(out, VectorMatch{DocumentID: docID, Similarity: sim})
-						}
-					}
-				}
-			}
-			rows.Close()
-		}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Similarity > out[j].Similarity
-	})
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Similarity > out[j].Similarity })
 	if len(out) > limit {
 		out = out[:limit]
 	}

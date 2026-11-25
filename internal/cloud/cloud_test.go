@@ -103,7 +103,7 @@ func TestNormalizeInstanceURLAndNeoCloudBackup(t *testing.T) {
 	(&cloud.Routes{Svc: svc, Auth: &auth.Authenticator{Service: authSvc, Log: log}, Log: log}).Mount(mux)
 
 	// Start & poll NeoCloud login
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/cloud/neocloud/start", strings.NewReader(`{"url":"`+mockNeoCloud.URL+`"}`))
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/cloud/neocloud/login", strings.NewReader(`{"url":"`+mockNeoCloud.URL+`"}`))
 	startReq.Header.Set("Authorization", "Bearer "+key.Token)
 	startRec := httptest.NewRecorder()
 	mux.ServeHTTP(startRec, startReq)
@@ -119,6 +119,20 @@ func TestNormalizeInstanceURLAndNeoCloudBackup(t *testing.T) {
 		t.Fatalf("neocloud poll failed: %d %s", pollRec.Code, pollRec.Body.String())
 	}
 
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/cloud", nil)
+	getReq.Header.Set("Authorization", "Bearer "+key.Token)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != 200 || !strings.Contains(getRec.Body.String(), `"cloud":{"`) {
+		t.Fatalf("cloud envelope: %d %s", getRec.Code, getRec.Body.String())
+	}
+	legacyReq := httptest.NewRequest(http.MethodPost, "/api/v1/cloud/backup", nil)
+	legacyReq.Header.Set("Authorization", "Bearer "+key.Token)
+	legacyRec := httptest.NewRecorder()
+	mux.ServeHTTP(legacyRec, legacyReq)
+	if legacyRec.Code != 200 || !strings.Contains(legacyRec.Body.String(), `"queued":true`) {
+		t.Fatalf("legacy cloud backup: %d %s", legacyRec.Code, legacyRec.Body.String())
+	}
 	// Backup now -> exports zip, seals locally, unseals to plaintext for upload, verifies ZIP is readable.
 	bakReq := httptest.NewRequest(http.MethodPost, "/api/v1/cloud/backup-now", nil)
 	bakReq.Header.Set("Authorization", "Bearer "+key.Token)

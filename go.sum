@@ -1,5 +1,5 @@
-github.com/NeoLabs-Systems/neolabs-go v0.3.3 h1:MvSslGWak8ho9Drwy7swQmBqH/JrvwKZtijPf5ICfu8=
-github.com/NeoLabs-Systems/neolabs-go v0.3.3/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
+github.com/NeoLabs-Systems/neolabs-go v0.3.4 h1:WnTPnmR+uHCedRyNn97g/txKp8mhzJfzM36gjQybr8w=
+github.com/NeoLabs-Systems/neolabs-go v0.3.4/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/ebitengine/purego v0.11.3 h1:OB+JLpdm7ioymhyA+6s5kbb/uOuYycAgL8NNTFc5MLg=

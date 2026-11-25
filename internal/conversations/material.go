@@ -140,11 +140,13 @@ type SegmentRow struct {
 	SpeakerConfidence *float64 `json:"speaker_confidence"`
 	OverlappingSpeech bool     `json:"overlapping_speech"`
 	CreatedAt         string   `json:"created_at"`
+	VoiceprintName    *string  `json:"voiceprint_name,omitempty"`
+	LocalLabel        *string  `json:"local_label,omitempty"`
 }
 
-func scanSegment(s interface{ Scan(...any) error }, withSession bool) (SegmentRow, error) {
+func scanSegment(s interface{ Scan(...any) error }, withSession bool, withNames ...bool) (SegmentRow, error) {
 	var r SegmentRow
-	var convID, spkID, lang sql.NullString
+	var convID, spkID, lang, voiceName, localLabel sql.NullString
 	var asrC, spkC sql.NullFloat64
 	var ov int
 	dest := []any{
@@ -154,6 +156,9 @@ func scanSegment(s interface{ Scan(...any) error }, withSession bool) (SegmentRo
 	}
 	if withSession {
 		dest = append(dest, &r.SessionID)
+	}
+	if len(withNames) > 0 && withNames[0] {
+		dest = append(dest, &voiceName, &localLabel)
 	}
 	if err := s.Scan(dest...); err != nil {
 		return SegmentRow{}, err
@@ -174,6 +179,12 @@ func scanSegment(s interface{ Scan(...any) error }, withSession bool) (SegmentRo
 	if spkC.Valid {
 		v := spkC.Float64
 		r.SpeakerConfidence = &v
+	}
+	if voiceName.Valid {
+		r.VoiceprintName = &voiceName.String
+	}
+	if localLabel.Valid {
+		r.LocalLabel = &localLabel.String
 	}
 	r.OverlappingSpeech = ov != 0
 	return r, nil

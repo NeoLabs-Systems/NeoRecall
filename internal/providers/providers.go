@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/llm/transport"
 	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
@@ -631,42 +631,43 @@ func (s *Service) DiscoverModels(ctx context.Context, workload, provider, baseUR
 		catalogURL = u.String()
 	}
 
-	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(tctx, http.MethodGet, catalogURL, nil)
-	if err != nil {
-		return nil, err
-	}
+	hdrs := map[string]string{}
 	switch def.Protocol {
 	case "anthropic":
-		req.Header.Set("x-api-key", effKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
+		hdrs["x-api-key"] = effKey
+		hdrs["anthropic-version"] = "2023-06-01"
 	case "deepgram":
 		if effKey != "" {
-			req.Header.Set("Authorization", "Token "+effKey)
+			hdrs["Authorization"] = "Token " + effKey
 		}
 	default:
 		if effKey != "" {
-			req.Header.Set("Authorization", "Bearer "+effKey)
+			hdrs["Authorization"] = "Bearer " + effKey
 		}
 	}
-	res, err := s.httpClient().Do(req)
+	res, err := transport.FetchText(ctx, s.httpClient(), transport.FetchOptions{
+		Method:   http.MethodGet,
+		URL:      catalogURL,
+		Header:   hdrs,
+		MaxBytes: 4 << 20,
+		Service:  def.Label,
+		Timeout:  30 * time.Second,
+		Provider: provider,
+	})
 	if err != nil {
 		return nil, httperr.New(http.StatusBadGateway, "MODEL_DISCOVERY_FAILED", fmt.Sprintf("Could not reach %s: %v", catalogURL, err))
 	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	var payload map[string]any
-	_ = json.Unmarshal(raw, &payload)
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
+	_ = json.Unmarshal([]byte(res.Text), &payload)
+	if !res.OK() {
 		opt := " Type the model name yourself if the service does not list them."
 		if def.ModelOptional {
 			opt = " This provider does not require a model, so you can leave the field empty."
 		}
-		if res.StatusCode == 404 || res.StatusCode == 405 || res.StatusCode == 501 {
+		if res.Status == 404 || res.Status == 405 || res.Status == 501 {
 			return nil, httperr.New(http.StatusBadGateway, "MODEL_DISCOVERY_UNSUPPORTED", fmt.Sprintf("%s does not offer a model list at %s.%s", def.Label, catalogURL, opt))
 		}
-		return nil, httperr.New(http.StatusBadGateway, "MODEL_DISCOVERY_FAILED", fmt.Sprintf("%s returned HTTP %d from %s.%s", def.Label, res.StatusCode, catalogURL, opt))
+		return nil, httperr.New(http.StatusBadGateway, "MODEL_DISCOVERY_FAILED", fmt.Sprintf("%s returned HTTP %d from %s.%s", def.Label, res.Status, catalogURL, opt))
 	}
 
 	var rawList []any

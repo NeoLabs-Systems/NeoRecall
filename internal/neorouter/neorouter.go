@@ -1,7 +1,6 @@
 package neorouter
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -22,6 +20,8 @@ import (
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
+	"github.com/NeoLabs-Systems/neolabs-go/llm/transport"
+	"github.com/NeoLabs-Systems/neolabs-go/oauthclient"
 	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
 	"github.com/NeoLabs-Systems/neorecall/internal/audit"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
@@ -230,46 +230,46 @@ func (e *RouterError) Error() string { return e.Message }
 
 func (s *Service) Call(ctx context.Context, conn *Connection, method, path string, body any) (map[string]any, http.Header, error) {
 	timeout := time.Duration(max(1000, s.cfg().NeoRouterRequestTimeoutMs)) * time.Millisecond
-	tctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var rdr io.Reader
+	var bodyBytes []byte
+	headers := map[string]string{
+		"Authorization": "Bearer " + conn.APIKey,
+		"Accept":        "application/json",
+	}
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, nil, err
 		}
-		rdr = bytes.NewReader(b)
+		bodyBytes = b
+		headers["Content-Type"] = "application/json"
 	}
-	req, err := http.NewRequestWithContext(tctx, method, conn.APIBase+path, rdr)
-	if err != nil {
-		return nil, nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+conn.APIKey)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	res, err := s.httpClient().Do(req)
+	res, err := transport.FetchText(ctx, s.httpClient(), transport.FetchOptions{
+		Method:   method,
+		URL:      transport.JoinURL(conn.APIBase, path),
+		Header:   headers,
+		Body:     bodyBytes,
+		MaxBytes: 4 << 20,
+		Service:  "NeoRouter",
+		Timeout:  timeout,
+		Provider: ProviderID,
+	})
 	if err != nil {
 		return nil, nil, &RouterError{Code: "NEOROUTER_UNREACHABLE", Message: fmt.Sprintf("Could not reach NeoRouter at %s.", conn.Origin)}
 	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	var data map[string]any
-	_ = json.Unmarshal(raw, &data)
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		msg := fmt.Sprintf("HTTP %d", res.StatusCode)
+	_ = json.Unmarshal([]byte(res.Text), &data)
+	if !res.OK() {
+		msg := fmt.Sprintf("HTTP %d", res.Status)
 		if eObj, _ := data["error"].(map[string]any); eObj != nil {
 			if m, _ := eObj["message"].(string); m != "" {
-				msg = m
+				msg = oauthclient.SanitizeRemote(m)
 			}
 		}
 		code := "NEOROUTER_HTTP_ERROR"
-		if res.StatusCode == 401 || res.StatusCode == 403 {
+		if res.Status == 401 || res.Status == 403 {
 			code = "NEOROUTER_KEY_REJECTED"
 		}
-		return nil, res.Header, &RouterError{Code: code, Status: res.StatusCode, Message: "NeoRouter: " + msg}
+		return nil, res.Header, &RouterError{Code: code, Status: res.Status, Message: "NeoRouter: " + msg}
 	}
 	return data, res.Header, nil
 }
@@ -524,23 +524,22 @@ func (s *Service) Disconnect(ctx context.Context) error {
 
 func (s *Service) postForm(ctx context.Context, targetURL string, form url.Values) (int, map[string]any, error) {
 	timeout := time.Duration(max(1000, s.cfg().NeoRouterRequestTimeoutMs)) * time.Millisecond
-	tctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(tctx, http.MethodPost, targetURL, strings.NewReader(form.Encode()))
+	res, err := transport.FetchText(ctx, s.httpClient(), transport.FetchOptions{
+		Method:   http.MethodPost,
+		URL:      targetURL,
+		Header:   map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+		Body:     []byte(form.Encode()),
+		MaxBytes: 1 << 20,
+		Service:  "NeoRouter",
+		Timeout:  timeout,
+		Provider: ProviderID,
+	})
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	res, err := s.httpClient().Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	var parsed map[string]any
-	_ = json.Unmarshal(raw, &parsed)
-	return res.StatusCode, parsed, nil
+	_ = json.Unmarshal([]byte(res.Text), &parsed)
+	return res.Status, parsed, nil
 }
 
 func (s *Service) pruneFlowsLocked(now time.Time) {

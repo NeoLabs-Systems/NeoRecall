@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
@@ -52,20 +53,22 @@ func (s *Service) cfg() config.Config {
 }
 
 type MiniMemoryRow struct {
-	InternalID          int64    `json:"internal_id,omitempty"`
-	ID                  string   `json:"id"`
-	MemoryID            string   `json:"memory_id,omitempty"`
-	Kind                string   `json:"kind"`
-	TextEn              string   `json:"text_en"`
-	Importance          float64  `json:"importance"`
-	ImportanceOverride  *float64 `json:"importance_override"`
-	EffectiveImportance float64  `json:"effective_importance"`
-	Confidence          float64  `json:"confidence"`
-	DueAt               *string  `json:"due_at"`
-	OccurredAt          *string  `json:"occurred_at"`
-	Status              *string  `json:"status"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	InternalID          int64          `json:"internal_id,omitempty"`
+	ID                  string         `json:"public_id"`
+	MemoryID            string         `json:"memory_public_id,omitempty"`
+	Memory              map[string]any `json:"memory,omitempty"`
+	TimelineAt          string         `json:"timeline_at,omitempty"`
+	Kind                string         `json:"kind"`
+	TextEn              string         `json:"text_en"`
+	Importance          float64        `json:"importance"`
+	ImportanceOverride  *float64       `json:"importance_override"`
+	EffectiveImportance float64        `json:"effective_importance"`
+	Confidence          float64        `json:"confidence"`
+	DueAt               *string        `json:"due_at"`
+	OccurredAt          *string        `json:"occurred_at"`
+	Status              *string        `json:"status"`
+	CreatedAt           string         `json:"created_at"`
+	UpdatedAt           string         `json:"updated_at"`
 }
 
 type MemoryRow struct {
@@ -111,7 +114,7 @@ type MemoryDetail struct {
 	Entities     []LinkedEntity     `json:"entities"`
 	MiniMemories []MiniMemoryRow    `json:"mini_memories"`
 	Sources      []MemorySourceItem `json:"sources"`
-	ContextItems []nctx.Item        `json:"context_items"`
+	ContextItems []nctx.Item        `json:"contextItems"`
 }
 
 func scanMemoryRow(s interface{ Scan(...any) error }) (MemoryRow, error) {
@@ -794,7 +797,7 @@ func (s *Service) RewriteWithContext(ctx context.Context, userID string, memoryI
 	return m.PublicID, nil
 }
 
-func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw string) ([]MiniMemoryRow, error) {
+func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw string, filters ...string) ([]MiniMemoryRow, error) {
 	lim := transcripts.PageLimit(limitRaw, 200, 50)
 	conds := []string{"mm.user_id=?"}
 	args := []any{userID}
@@ -806,11 +809,28 @@ func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw s
 		conds = append(conds, "mm.status=?")
 		args = append(args, status)
 	}
+
+	if len(filters) > 0 && filters[0] != "" {
+		conds = append(conds, "m.public_id=?")
+		args = append(args, filters[0])
+	}
+	if len(filters) > 1 && filters[1] != "" {
+		conds = append(conds, "EXISTS (SELECT 1 FROM mini_memory_entities mme WHERE mme.mini_memory_id=mm.id AND mme.entity_id=?)")
+		args = append(args, filters[1])
+	}
+	if len(filters) > 2 && filters[2] != "" {
+		conds = append(conds, "mm.text_en LIKE ? COLLATE NOCASE")
+		args = append(args, "%"+strings.TrimSpace(filters[2])+"%")
+	}
+	if len(filters) > 3 && filters[3] != "" {
+		conds = append(conds, "mm.public_id=?")
+		args = append(args, filters[3])
+	}
 	args = append(args, lim)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT mm.id, mm.public_id, m.public_id, mm.kind, mm.text_en, mm.importance,
-		mm.importance_override, mm.confidence, mm.due_at, mm.occurred_at, mm.status, mm.created_at, mm.updated_at
+		mm.importance_override, mm.confidence, mm.due_at, mm.occurred_at, mm.status, mm.created_at, mm.updated_at, m.title_en, m.emoji, m.type, COALESCE(mm.occurred_at,mm.due_at,mm.created_at)
 		FROM mini_memories mm JOIN memories m ON m.id=mm.memory_id
-		WHERE `+strings.Join(conds, " AND ")+` ORDER BY mm.created_at DESC LIMIT ?`, args...)
+		WHERE `+strings.Join(conds, " AND ")+` ORDER BY COALESCE(mm.occurred_at,mm.due_at,mm.created_at) DESC, mm.id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -819,9 +839,16 @@ func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw s
 	for rows.Next() {
 		var r MiniMemoryRow
 		var impOv sql.NullFloat64
-		var due, occ, st sql.NullString
+		var due, occ, st, emoji sql.NullString
+		var title, memType string
 		if rows.Scan(&r.InternalID, &r.ID, &r.MemoryID, &r.Kind, &r.TextEn, &r.Importance,
-			&impOv, &r.Confidence, &due, &occ, &st, &r.CreatedAt, &r.UpdatedAt) == nil {
+			&impOv, &r.Confidence, &due, &occ, &st, &r.CreatedAt, &r.UpdatedAt, &title, &emoji, &memType, &r.TimelineAt) == nil {
+			r.Memory = map[string]any{"public_id": r.MemoryID, "title_en": title, "type": memType, "emoji": nil}
+			if emoji.Valid && emoji.String != "" {
+				r.Memory["emoji"] = emoji.String
+			} else {
+				r.Memory["emoji"] = ai.DefaultEmojiForType(memType)
+			}
 			r.EffectiveImportance = r.Importance
 			if impOv.Valid {
 				v := impOv.Float64
@@ -850,6 +877,24 @@ type MiniPatch struct {
 	ClearDueAt         bool     `json:"clearDueAt"`
 	ImportanceOverride *float64 `json:"importanceOverride"`
 	ClearImportanceOv  bool     `json:"clearImportanceOverride"`
+}
+
+// UnmarshalJSON distinguishes an explicit null override from an omitted field.
+func (p *MiniPatch) UnmarshalJSON(data []byte) error {
+	type plain MiniPatch
+	var v plain
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["importanceOverride"]; ok && string(raw) == "null" {
+		v.ClearImportanceOv = true
+	}
+	*p = MiniPatch(v)
+	return nil
 }
 
 func (s *Service) UpdateMini(ctx context.Context, userID, publicID string, p MiniPatch) (MiniMemoryRow, error) {
@@ -1007,4 +1052,101 @@ func anyInts(in []int64) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// MiniDetail returns the original mini-memory detail contract.
+func (s *Service) MiniDetail(ctx context.Context, userID, publicID string) (map[string]any, error) {
+	rows, err := s.ListMini(ctx, userID, "", "", "1", "", "", "", publicID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, httperr.New(http.StatusNotFound, "NOT_FOUND", "Mini-memory not found.")
+	}
+	m := rows[0]
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	if err = json.Unmarshal(encoded, &out); err != nil {
+		return nil, err
+	}
+	var summary, started string
+	if err = s.DB.R.QueryRowContext(ctx, `SELECT summary_en,started_at FROM memories WHERE public_id=? AND user_id=?`, m.MemoryID, userID).Scan(&summary, &started); err != nil {
+		return nil, err
+	}
+	m.Memory["summary_en"] = summary
+	m.Memory["started_at"] = started
+	out["memory"] = m.Memory
+	sources := []map[string]any{}
+	sr, err := s.DB.R.QueryContext(ctx, `SELECT ts.public_id,ts.started_at,ts.ended_at,ts.text,ts.conversation_id FROM mini_memory_sources ms JOIN transcript_segments ts ON ts.id=ms.segment_id WHERE ms.mini_memory_id=? ORDER BY ts.started_at`, m.InternalID)
+	if err != nil {
+		return nil, err
+	}
+	for sr.Next() {
+		var id, start, end, text string
+		var conv sql.NullString
+		if err = sr.Scan(&id, &start, &end, &text, &conv); err != nil {
+			sr.Close()
+			return nil, err
+		}
+		var cid any
+		if conv.Valid {
+			cid = conv.String
+		}
+		sources = append(sources, map[string]any{"segment_id": id, "started_at": start, "ended_at": end, "text": text, "conversation_id": cid})
+	}
+	err = sr.Err()
+	sr.Close()
+	if err != nil {
+		return nil, err
+	}
+	entities := []LinkedEntity{}
+	er, err := s.DB.R.QueryContext(ctx, `SELECT e.id,e.kind,e.canonical_name_en,e.display_name,me.role FROM mini_memory_entities me JOIN entities e ON e.id=me.entity_id WHERE me.mini_memory_id=? AND e.user_id=? ORDER BY e.canonical_name_en`, m.InternalID, userID)
+	if err != nil {
+		return nil, err
+	}
+	for er.Next() {
+		var e LinkedEntity
+		var name sql.NullString
+		if err = er.Scan(&e.ID, &e.Kind, &e.CanonicalNameEn, &name, &e.Role); err != nil {
+			er.Close()
+			return nil, err
+		}
+		if name.Valid {
+			e.DisplayName = &name.String
+		}
+		entities = append(entities, e)
+	}
+	err = er.Err()
+	er.Close()
+	if err != nil {
+		return nil, err
+	}
+	out["sources"] = sources
+	out["entities"] = entities
+	return out, nil
+}
+func (s *Service) RemoveMini(ctx context.Context, userID, publicID string) error {
+	tx, err := s.DB.W.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var id int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM mini_memories WHERE user_id=? AND public_id=?`, userID, publicID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return httperr.New(http.StatusNotFound, "NOT_FOUND", "Mini-memory not found.")
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = embeddings.RemoveBySourcesTx(ctx, tx, userID, []embeddings.SearchSourceRef{{Kind: "mini_memory", SourceID: strconv.FormatInt(id, 10)}}); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM mini_memories WHERE user_id=? AND id=?`, userID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

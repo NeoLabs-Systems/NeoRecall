@@ -105,15 +105,42 @@ func TestGroupingBoundariesInsightsTimelineAndDelete(t *testing.T) {
 		t.Fatalf("insight execute unexpected: %+v err=%v", res, err)
 	}
 
-	tl, err := conversations.Timeline(ctx, db.R, uid, "20", "", "")
+	tl, err := conversations.Timeline(ctx, db.R, uid, "20", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := tl["items"].([]conversations.ConversationRow)
+	items := tl["moments"].([]map[string]any)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 timeline items, got %d", len(items))
 	}
 
+	first, err := conversations.Timeline(ctx, db.R, uid, "1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := first["moments"].([]map[string]any)
+	cursor, ok := first["nextCursor"].(string)
+	if len(page) != 1 || !ok || cursor == "" {
+		t.Fatalf("invalid first page: %+v", first)
+	}
+	if page[0]["segmentCount"].(int) == 0 || len(page[0]["segments"].([]conversations.SegmentRow)) == 0 {
+		t.Fatalf("missing timeline preview: %+v", page[0])
+	}
+	second, err := conversations.Timeline(ctx, db.R, uid, "1", cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page2 := second["moments"].([]map[string]any)
+	if len(page2) != 1 || page2[0]["id"] == page[0]["id"] {
+		t.Fatalf("invalid second page: %+v", second)
+	}
+	segments, err := conversations.TimelineSegments(ctx, db.R, uid, page[0]["id"].(string), 1500)
+	if err != nil || segments["segmentCount"].(int) == 0 {
+		t.Fatalf("segments: %+v %v", segments, err)
+	}
+	if _, err = conversations.TimelineSegments(ctx, db.R, "another-user", page[0]["id"].(string), 1500); err == nil {
+		t.Fatal("other user can access transcript")
+	}
 	svc := &conversations.Service{DB: db, Cfg: func() config.Config { return cfg }, Log: log}
 	if _, err := svc.BulkRemove(ctx, uid, []string{touched[1]}); err != nil {
 		t.Fatal(err)
