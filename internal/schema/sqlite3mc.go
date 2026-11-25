@@ -179,6 +179,8 @@ func EnsurePlaintextLegacyDB(ctx context.Context, dbPath, secretKeyPath, appDir,
 				return false, fmt.Errorf("legacy database has pending WAL frames and Node rekey failed: %w", nerr)
 			}
 		}
+	} else if hasNonEmptyWAL {
+		return false, fmt.Errorf("legacy database has pending WAL frames but the legacy Node SQLite module could not be found; restore the original NeoRecall installation and retry")
 	}
 
 	encrypted, err := os.ReadFile(dbPath)

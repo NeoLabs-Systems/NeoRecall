@@ -71,3 +71,34 @@ func TestEnsurePlaintextLegacyDBUnlockAndVerify(t *testing.T) {
 		t.Fatalf("expected second call to be no-op, got converted=%v err=%v", converted2, err)
 	}
 }
+
+func TestLegacyEncryptedWALRequiresNodeModule(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "neorecall.sqlite3")
+	keyPath := filepath.Join(dir, "secret.key")
+	fixture, err := os.ReadFile(filepath.Join("testdata", "bsmc_sample.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, fixture, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{0x37}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	wal := []byte("pending frames")
+	if err := os.WriteFile(dbPath+"-wal", wal, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := schema.EnsurePlaintextLegacyDB(context.Background(), dbPath, keyPath, filepath.Join(dir, "missing"), filepath.Join(dir, "missing-home")); err == nil {
+		t.Fatal("expected error when WAL cannot be decrypted")
+	}
+	got, err := os.ReadFile(dbPath + "-wal")
+	if err != nil || !bytes.Equal(got, wal) {
+		t.Fatalf("WAL changed: %q, %v", got, err)
+	}
+	got, err = os.ReadFile(dbPath)
+	if err != nil || !bytes.Equal(got, fixture) {
+		t.Fatalf("database changed: %v", err)
+	}
+}
