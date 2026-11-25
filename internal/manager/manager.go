@@ -795,12 +795,55 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		return errors.New("this NeoRecall runs in a container image; update by pulling the newer image and restarting the container")
 	}
 	uSvc := &updates.Service{Cfg: func() config.Config { return cfg }, AppDir: cfg.AppDir, CurrentVersion: m.Version}
+	applyMode := cli.HasFlag(args, "--apply")
+	var jobSt updates.UpdateStatusFile
+	if applyMode {
+		jobSt = uSvc.ReadJobStatus()
+		if jobSt.State != "running" {
+			now := timeutil.NowISO()
+			vBef := strings.TrimPrefix(m.Version, "v")
+			jobSt = updates.UpdateStatusFile{
+				State: "running", Phase: "starting", Progress: 5, Message: "Checking for updates",
+				StartedAt: &now, VersionBefore: &vBef, Changelog: []string{}, Logs: []string{},
+			}
+			uSvc.WriteJobStatus(jobSt)
+		}
+	}
+	recordJob := func(phase string, progress int, msg string, state string, verAfter string, rolledBack bool) {
+		if !applyMode {
+			return
+		}
+		jobSt.Phase = phase
+		jobSt.Progress = progress
+		jobSt.Message = msg
+		jobSt.Logs = append(jobSt.Logs, msg)
+		if state != "" {
+			jobSt.State = state
+		}
+		if verAfter != "" {
+			jobSt.VersionAfter = &verAfter
+		}
+		jobSt.RolledBack = rolledBack
+		if state == "completed" || state == "failed" {
+			done := timeutil.NowISO()
+			jobSt.CompletedAt = &done
+		}
+		uSvc.WriteJobStatus(jobSt)
+	}
+	failJob := func(err error, rolledBack bool) error {
+		if err != nil {
+			recordJob("failed", 100, err.Error(), "failed", "", rolledBack)
+		}
+		return err
+	}
+
 	pos := cli.Positionals(args)
 	if len(pos) > 0 {
 		if ch := release.ParseChannel(pos[0]); ch != "" {
 			if _, serr := uSvc.SetChannel(ch); serr != nil {
-				return serr
+				return failJob(serr, false)
 			}
+			cfg, _ = m.loadConfig()
 		}
 	}
 	if cli.HasFlag(args, "--check") || cli.HasFlag(args, "--json") {
@@ -810,21 +853,48 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		return nil
 	}
 
+	// If an earlier install left an unmigrated Node.js DB/service behind, finish migrating it before restarting.
+	legacy := InspectLegacyJS(cfg, m.UserHome, m.Getenv)
+	if legacy.NeedsMigration {
+		sm, _ := m.serviceManager(cfg)
+		m.stopRunningProcesses(cfg, sm)
+		bk, merr := m.migrateLegacyJSState(ctx, cfg, legacy)
+		if merr != nil {
+			return failJob(merr, false)
+		}
+		_ = WriteMigratedMarker(cfg, m.Version, bk, "migrated during update")
+		cfg, _ = m.loadConfig()
+	}
+
 	channel := uSvc.Channel()
+	recordJob("checking", 15, "Checking latest "+channel+" release on GitHub", "running", "", false)
 	rel, err := fetchLatestRelease(ctx, m.HTTP, channel)
 	if err != nil {
-		return err
+		return failJob(err, false)
 	}
 	targetVer := strings.TrimPrefix(rel.TagName, "v")
 	curVer := strings.TrimPrefix(m.Version, "v")
+	isGitCheckout := cfg.AppDir != "" && func() bool {
+		st, serr := os.Stat(filepath.Join(cfg.AppDir, ".git"))
+		return serr == nil && st.IsDir()
+	}()
+	_, webStatErr := os.Stat(filepath.Join(cfg.WebDir, "index.html"))
+	needWebRefresh := cli.HasFlag(args, "--refresh-web") || !isGitCheckout || webStatErr != nil
+
 	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") {
+		if needWebRefresh {
+			if _, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true); werr != nil {
+				m.UI.Warn("Web UI bundle refresh skipped: " + werr.Error())
+			}
+		}
+		recordJob("completed", 100, "NeoRecall is up to date ("+curVer+" on "+channel+").", "completed", curVer, false)
 		m.UI.OK(fmt.Sprintf("NeoRecall is up to date (%s on %s).", curVer, channel))
 		return nil
 	}
 
 	assetName, err := cliAssetNameForHost()
 	if err != nil {
-		return err
+		return failJob(err, false)
 	}
 	var binAsset *githubAsset
 	for i := range rel.Assets {
@@ -834,54 +904,73 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		}
 	}
 	if binAsset == nil {
-		return fmt.Errorf("release %s does not include %s yet", rel.TagName, assetName)
+		return failJob(fmt.Errorf("release %s does not include %s yet", rel.TagName, assetName), false)
 	}
 
+	recordJob("downloading", 35, "Downloading "+assetName+" ("+targetVer+")", "running", "", false)
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return failJob(err, false)
 	}
 	nextBin := exe + ".next"
 	if err := downloadVerifiedAsset(ctx, m.HTTP, *binAsset, nextBin, 0o755); err != nil {
-		return err
+		return failJob(err, false)
 	}
 
 	sm, _ := m.serviceManager(cfg)
 	wasRunning := cli.PortOpen(cfg.Port)
+	recordJob("installing", 60, "Installing NeoRecall "+targetVer, "running", "", false)
 	m.stopRunningProcesses(cfg, sm)
 
 	bakBin := exe + ".bak"
 	_ = os.Remove(bakBin)
 	if err := os.Rename(exe, bakBin); err != nil {
 		_ = os.Remove(nextBin)
-		return err
+		return failJob(err, false)
 	}
 	if err := os.Rename(nextBin, exe); err != nil {
 		_ = os.Rename(bakBin, exe)
-		return err
+		return failJob(err, true)
 	}
 
-	// Refresh standalone web bundle if installed in RuntimeDir.
-	if strings.HasPrefix(cfg.AppDir, cfg.Paths.RuntimeDir) || cli.HasFlag(args, "--refresh-web") {
-		_, _ = m.ensureStandaloneWebBundle(ctx, cfg, channel, true)
+	// Refresh standalone web bundle whenever not running from a git checkout (or explicitly requested).
+	if needWebRefresh {
+		recordJob("web", 75, "Updating web interface bundle", "running", "", false)
+		if _, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true); werr != nil {
+			m.UI.Warn("Web UI bundle update failed: " + werr.Error())
+		} else {
+			cfg, _ = m.loadConfig()
+		}
 	}
 
-	if wasRunning && sm != nil && sm.Installed() {
-		if err := sm.Launch(); err != nil {
+	if (wasRunning || (sm != nil && sm.Installed())) && sm != nil {
+		recordJob("restarting", 88, "Restarting NeoRecall service", "running", "", false)
+		var lerr error
+		if sm.Installed() {
+			lerr = sm.Launch()
+		} else {
+			lerr = sm.StartFallback()
+		}
+		if lerr != nil {
 			_ = os.Remove(exe)
 			_ = os.Rename(bakBin, exe)
-			_ = sm.Launch()
-			return err
+			if sm.Installed() {
+				_ = sm.Launch()
+			}
+			return failJob(lerr, true)
 		}
 		if err := m.waitForServer(ctx, cfg.Port, 30*time.Second); err != nil {
 			m.stopRunningProcesses(cfg, sm)
 			_ = os.Remove(exe)
 			_ = os.Rename(bakBin, exe)
-			_ = sm.Launch()
-			return fmt.Errorf("updated binary failed healthcheck; rolled back to previous version: %w", err)
+			if sm.Installed() {
+				_ = sm.Launch()
+			}
+			return failJob(fmt.Errorf("updated binary failed healthcheck; rolled back to previous version: %w", err), true)
 		}
 	}
 	_ = os.Remove(bakBin)
+	recordJob("completed", 100, fmt.Sprintf("Updated NeoRecall to %s.", targetVer), "completed", targetVer, false)
 	m.UI.OK(fmt.Sprintf("Updated NeoRecall to %s.", targetVer))
 	return nil
 }

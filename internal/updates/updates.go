@@ -1,22 +1,33 @@
 package updates
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/cli/envfile"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/release"
+	"github.com/NeoLabs-Systems/neolabs-go/llm/transport"
+	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
+	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
 	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 )
 
-const CheckInterval = 6 * time.Hour
+const (
+	CheckInterval     = 6 * time.Hour
+	defaultGitHubRepo = "NeoLabs-Systems/NeoRecall"
+)
+
+var semverTagRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
 
 type UpdateStatusFile struct {
 	State         string   `json:"state"`
@@ -45,6 +56,8 @@ type Service struct {
 	Cfg            func() config.Config
 	AppDir         string
 	CurrentVersion string
+	HTTP           *http.Client
+	ReleaseAPIBase string
 
 	mu        sync.Mutex
 	lastCheck CheckInfo
@@ -88,12 +101,9 @@ func (s *Service) WriteJobStatus(st UpdateStatusFile) {
 }
 
 func (s *Service) BlockedReason() *string {
-	if os.Getenv("container") != "" || fileExists("/.dockerenv") {
+	c := s.cfg()
+	if c.ContainerImage || os.Getenv("container") != "" || fileExists("/.dockerenv") {
 		r := "container"
-		return &r
-	}
-	if s.AppDir == "" || !dirExists(filepath.Join(s.AppDir, ".git")) {
-		r := "not_git"
 		return &r
 	}
 	return nil
@@ -101,6 +111,13 @@ func (s *Service) BlockedReason() *string {
 
 func (s *Service) Channel() string {
 	ch := release.NormalizeChannel(os.Getenv("NEORECALL_RELEASE_CHANNEL"))
+	if ch == "" && s.cfg().Paths.EnvFile != "" {
+		if raw, err := os.ReadFile(s.cfg().Paths.EnvFile); err == nil {
+			if v := runtimecfg.ParseEnv(string(raw))["NEORECALL_RELEASE_CHANNEL"]; v != "" {
+				ch = release.NormalizeChannel(v)
+			}
+		}
+	}
 	if ch == "" {
 		return "stable"
 	}
@@ -146,14 +163,82 @@ func (s *Service) Status() map[string]any {
 	}
 }
 
+func (s *Service) httpClient() *http.Client {
+	if s.HTTP != nil {
+		return s.HTTP
+	}
+	return ssrf.NewClient(ssrf.Options{Timeout: 20 * time.Second})
+}
+
+func (s *Service) latestFromGitHub(channel string) (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(s.ReleaseAPIBase), "/")
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	res, err := transport.FetchText(ctx, s.httpClient(), transport.FetchOptions{
+		Method:   http.MethodGet,
+		URL:      base + "/repos/" + defaultGitHubRepo + "/releases?per_page=50",
+		Header:   map[string]string{"Accept": "application/vnd.github+json"},
+		MaxBytes: 4 << 20,
+		Service:  "GitHub Releases",
+		Timeout:  20 * time.Second,
+	})
+	if err != nil {
+		return "", err
+	}
+	if !res.OK() {
+		return "", httperr.New(res.Status, "GITHUB_RELEASES_FAILED", "Could not check GitHub releases.")
+	}
+	var all []struct {
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	if err := json.Unmarshal([]byte(res.Text), &all); err != nil {
+		return "", err
+	}
+	best := ""
+	for _, r := range all {
+		if r.Draft || (channel != "beta" && r.Prerelease) || !semverTagRe.MatchString(r.TagName) {
+			continue
+		}
+		v := strings.TrimPrefix(r.TagName, "v")
+		if best == "" || release.CompareVersions(v, best) > 0 {
+			best = v
+		}
+	}
+	return best, nil
+}
+
 func (s *Service) Check() map[string]any {
 	ch := s.Channel()
 	if s.BlockedReason() != nil {
 		return s.Status()
 	}
-	cmd := exec.Command("git", "fetch", "origin", "--tags", "--force", "--quiet")
-	cmd.Dir = s.AppDir
-	err := cmd.Run()
+	latestTag, err := s.latestFromGitHub(ch)
+	if (err != nil || latestTag == "") && s.AppDir != "" && dirExists(filepath.Join(s.AppDir, ".git")) {
+		cmd := exec.Command("git", "fetch", "origin", "--tags", "--force", "--quiet")
+		cmd.Dir = s.AppDir
+		if gerr := cmd.Run(); gerr == nil {
+			out, _ := exec.Command("git", "-C", s.AppDir, "tag", "-l", "v*", "--sort=-v:refname").Output()
+			for _, line := range strings.Split(string(out), "\n") {
+				tag := strings.TrimSpace(line)
+				if tag == "" || !semverTagRe.MatchString(tag) {
+					continue
+				}
+				if ch == "stable" && strings.Contains(tag, "-") {
+					continue
+				}
+				v := strings.TrimPrefix(tag, "v")
+				if latestTag == "" || release.CompareVersions(v, latestTag) > 0 {
+					latestTag = v
+				}
+			}
+			err = nil
+		}
+	}
 	now := timeutil.NowISO()
 	if err != nil {
 		s.mu.Lock()
@@ -163,22 +248,8 @@ func (s *Service) Check() map[string]any {
 		s.mu.Unlock()
 		return s.Status()
 	}
-
-	out, _ := exec.Command("git", "-C", s.AppDir, "tag", "-l", "v*", "--sort=-v:refname").Output()
-	var latestTag string
-	for _, line := range strings.Split(string(out), "\n") {
-		tag := strings.TrimSpace(line)
-		if tag == "" {
-			continue
-		}
-		if ch == "stable" && strings.Contains(tag, "-") {
-			continue
-		}
-		latestTag = strings.TrimPrefix(tag, "v")
-		break
-	}
 	var upd map[string]any
-	if latestTag != "" && release.CompareVersions(latestTag, s.CurrentVersion) > 0 {
+	if latestTag != "" && release.CompareVersions(latestTag, strings.TrimPrefix(s.CurrentVersion, "v")) > 0 {
 		upd = map[string]any{"version": latestTag, "changes": []string{}}
 	}
 	s.mu.Lock()
@@ -192,7 +263,6 @@ func (s *Service) assertIdle() error {
 		if *r == "container" {
 			return httperr.New(http.StatusConflict, "UPDATE_CONTAINER", "NeoRecall runs from a container image. Pull the new image and recreate the container.")
 		}
-		return httperr.New(http.StatusConflict, "UPDATE_NOT_GIT", "This install did not come from Git, so it cannot update itself.")
 	}
 	if s.ReadJobStatus().State == "running" {
 		return httperr.New(http.StatusConflict, "UPDATE_RUNNING", "An update is already running.")
@@ -209,6 +279,9 @@ func (s *Service) SetChannel(requested string) (map[string]any, error) {
 		return nil, httperr.New(http.StatusBadRequest, "INVALID_CHANNEL", `The release channel must be "stable" or "beta".`)
 	}
 	_ = os.Setenv("NEORECALL_RELEASE_CHANNEL", ch)
+	if envPath := s.cfg().Paths.EnvFile; envPath != "" {
+		_ = envfile.Upsert(envPath, "NEORECALL_RELEASE_CHANNEL", ch)
+	}
 	return s.Check(), nil
 }
 

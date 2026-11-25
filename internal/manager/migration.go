@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -276,11 +277,13 @@ type githubRelease struct {
 	Assets     []githubAsset `json:"assets"`
 }
 
+var releaseSemverRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
+
 func fetchLatestRelease(ctx context.Context, client *http.Client, channel string) (githubRelease, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 60 * time.Second}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", githubRepo), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=50", githubRepo), nil)
 	if err != nil {
 		return githubRelease{}, err
 	}
@@ -304,6 +307,9 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, channel string
 			continue
 		}
 		if channel != "beta" && rel.Prerelease {
+			continue
+		}
+		if !releaseSemverRe.MatchString(rel.TagName) {
 			continue
 		}
 		if best == nil || release.CompareVersions(strings.TrimPrefix(rel.TagName, "v"), strings.TrimPrefix(best.TagName, "v")) > 0 {

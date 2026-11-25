@@ -50,19 +50,75 @@ if [[ -f "$RUNTIME_DIR/data/neorecall.sqlite3" || -f "$RUNTIME_DIR/.env" ]]; the
 fi
 
 info "Looking up the latest release..."
-RELEASES="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/releases?per_page=20")"
+if ! RELEASES="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/releases?per_page=50")"; then
+  err "Could not fetch releases from GitHub (network error or API rate limit). Wait a minute and try again."
+  exit 1
+fi
 read -r URL DIGEST < <(printf '%s\n' "$RELEASES" | awk -v channel="$CHANNEL" -v want="neorecall-cli-${OS}-${ARCH}" '
-  /"tag_name":/ { draft = 0; pre = 0; digest = "" }
+  function trim_v(s) { sub(/^v/, "", s); return s }
+  function is_semver(t) { return t ~ /^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/ }
+  function parse_ver(raw,    core_pre, core, pre, parts, n) {
+    raw = trim_v(raw)
+    n = index(raw, "-")
+    if (n > 0) {
+      core = substr(raw, 1, n - 1)
+      pre = substr(raw, n + 1)
+    } else {
+      core = raw
+      pre = ""
+    }
+    split(core, parts, ".")
+    maj = parts[1] + 0; min = parts[2] + 0; pat = parts[3] + 0
+    is_pre = (pre != "")
+    pre_num = -1
+    if (pre ~ /^beta\.[0-9]+$/) {
+      pre_num = substr(pre, 6) + 0
+    }
+  }
+  function cmp_ver(a, b,    amaj, amin, apat, apre, aprenum, bmaj, bmin, bpat, bpre, bprenum) {
+    if (b == "") return 1
+    parse_ver(a); amaj = maj; amin = min; apat = pat; apre = is_pre; aprenum = pre_num
+    parse_ver(b); bmaj = maj; bmin = min; bpat = pat; bpre = is_pre; bprenum = pre_num
+    if (amaj != bmaj) return (amaj > bmaj) ? 1 : -1
+    if (amin != bmin) return (amin > bmin) ? 1 : -1
+    if (apat != bpat) return (apat > bpat) ? 1 : -1
+    if (!apre && bpre) return 1
+    if (apre && !bpre) return -1
+    if (aprenum >= 0 && bprenum >= 0 && aprenum != bprenum) return (aprenum > bprenum) ? 1 : -1
+    if (a == b) return 0
+    return (a > b) ? 1 : -1
+  }
+  function flush_release() {
+    if (tag != "" && is_semver(tag) && !draft && (channel == "beta" || !pre) && cand_url != "") {
+      if (cmp_ver(tag, best_tag) > 0) {
+        best_tag = tag
+        best_url = cand_url
+        best_digest = (cand_digest == "" ? "-" : cand_digest)
+      }
+    }
+  }
+  /"tag_name":/ {
+    flush_release()
+    split($0, t, "\""); tag = t[4]
+    draft = 0; pre = 0; digest = ""; cand_url = ""; cand_digest = ""
+  }
   /"draft": true/ { draft = 1 }
   /"prerelease": true/ { pre = 1 }
   /"digest":/ { split($0, d, "\""); digest = d[4] }
   /"browser_download_url":/ {
     split($0, u, "\""); url = u[4]; n = split(url, parts, "/"); name = parts[n]
-    if (!draft && (channel == "beta" || !pre) && index(name, want) == 1 && name !~ /\.(sig|json)$/) {
-      print url, (digest == "" ? "-" : digest); exit
+    if (index(name, want) == 1 && name !~ /\.(sig|json)$/) {
+      cand_url = url
+      cand_digest = digest
     }
     digest = ""
-  }')
+  }
+  END {
+    flush_release()
+    if (best_url != "") {
+      print best_url, best_digest
+    }
+  }') || true
 if [[ -z "${URL:-}" ]]; then
   err "No NeoRecall ${CHANNEL} release has a CLI binary for ${OS}-${ARCH} yet."
   exit 1

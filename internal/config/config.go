@@ -16,8 +16,10 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
 )
 
+// Version is the NeoRecall build version (mutable var so -ldflags -X overrides it cleanly).
+var Version = "0.1.4-beta.13"
+
 const (
-	Version                = "0.1.4-beta.13"
 	LLMPromptReserveTokens = 512
 	DefaultEmbeddingModel  = "Xenova/multilingual-e5-small"
 	DefaultEmbeddingDims   = 384
