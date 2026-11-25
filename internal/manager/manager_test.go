@@ -55,7 +55,12 @@ func TestJSToGoMigrationAndTarSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	if err := os.WriteFile(cfg.Paths.EnvFile, []byte("PORT=4500\nNEORECALL_APP_DIR=/nonexistent/js-neorecall\n"), 0o600); err != nil {
+	legacyApp := filepath.Join(home, "legacy-app")
+	_ = os.MkdirAll(filepath.Join(legacyApp, "flutter_app", "build", "web"), 0o755)
+	_ = os.MkdirAll(filepath.Join(legacyApp, "server"), 0o755)
+	_ = os.WriteFile(filepath.Join(legacyApp, "flutter_app", "build", "web", "index.html"), []byte("<html></html>"), 0o644)
+	_ = os.WriteFile(filepath.Join(legacyApp, "server", "index.js"), []byte("// legacy"), 0o644)
+	if err := os.WriteFile(cfg.Paths.EnvFile, []byte("PORT=4500\nNEORECALL_APP_DIR="+legacyApp+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,6 +88,13 @@ func TestJSToGoMigrationAndTarSafety(t *testing.T) {
 	}
 	if _, err := os.Lstat(npmSym); !os.IsNotExist(err) {
 		t.Fatalf("expected legacy npm symlink to be removed")
+	}
+	envRaw, err := os.ReadFile(cfg.Paths.EnvFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(envRaw), "NEORECALL_APP_DIR="+legacyApp) {
+		t.Fatalf("expected legacy JS NEORECALL_APP_DIR to be cleared from .env, got:\n%s", envRaw)
 	}
 	stAfter := manager.InspectLegacyJS(cfg, home, getenv)
 	if stAfter.NeedsMigration || !stAfter.MigratedMarker {

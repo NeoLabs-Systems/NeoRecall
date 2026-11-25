@@ -69,6 +69,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # opus_codec_macos ships a CocoaPods vendored xcframework whose SPM target
+  # fails Xcode binary-artifact resolution under Flutter 3.47+ defaults.
+  config:
+    enable-swift-package-manager: false
   # Generates AppL10n from lib/l10n/*.arb (see l10n.yaml) on pub get and build.
   generate: true
   assets:

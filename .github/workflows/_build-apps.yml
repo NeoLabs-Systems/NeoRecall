@@ -37,7 +37,7 @@ jobs:
           cache: true
 
       - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
+        run: flutter config --enable-macos-desktop --no-enable-swift-package-manager
 
       - name: Ensure macOS project exists
         run: |

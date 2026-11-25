@@ -101,7 +101,7 @@ jobs:
         include:
           - platform: macOS
             runner: macos-14
-            command: flutter build macos --release --no-pub
+            command: flutter config --no-enable-swift-package-manager && flutter build macos --release --no-pub
             verify: test -n "$(find build/macos/Build/Products/Release -path '*.app/Contents/Frameworks/opus.framework' -print -quit)"
           - platform: Windows
             runner: windows-2022

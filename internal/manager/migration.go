@@ -200,12 +200,16 @@ func (m *Manager) migrateLegacyJSState(ctx context.Context, cfg config.Config, s
 		}
 	}
 
-	// Clear stale NEORECALL_APP_DIR / WEB_DIR / LANDING_DIR from .env if they point
-	// to a removed checkout so the Go binary resolves the active runtime bundle.
+	// Clear stale NEORECALL_APP_DIR from .env if it points to a missing directory
+	// or a legacy Node.js checkout so Go resolves or installs the standalone web bundle.
 	if vals, lerr := envfile.Load(cfg.Paths.EnvFile); lerr == nil {
 		if appDir := strings.TrimSpace(vals["NEORECALL_APP_DIR"]); appDir != "" {
-			if _, serr := os.Stat(filepath.Join(appDir, "flutter_app", "build", "web", "index.html")); serr != nil {
+			_, hasWeb := os.Stat(filepath.Join(appDir, "flutter_app", "build", "web", "index.html"))
+			_, hasLegacyServer := os.Stat(filepath.Join(appDir, "server", "index.js"))
+			_, hasLegacyPkg := os.Stat(filepath.Join(appDir, "package.json"))
+			if hasWeb != nil || hasLegacyServer == nil || hasLegacyPkg == nil {
 				_, _ = envfile.Remove(cfg.Paths.EnvFile, "NEORECALL_APP_DIR")
+				_ = os.Unsetenv("NEORECALL_APP_DIR")
 			}
 		}
 	}
@@ -432,9 +436,11 @@ func cliAssetNameForHost() (string, error) {
 	return name, nil
 }
 
-func (m *Manager) ensureStandaloneWebBundle(ctx context.Context, cfg config.Config, channel string) (string, error) {
-	if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err == nil {
-		return cfg.AppDir, nil
+func (m *Manager) ensureStandaloneWebBundle(ctx context.Context, cfg config.Config, channel string, force bool) (string, error) {
+	if !force {
+		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err == nil {
+			return cfg.AppDir, nil
+		}
 	}
 	rel, err := fetchLatestRelease(ctx, m.HTTP, channel)
 	if err != nil {

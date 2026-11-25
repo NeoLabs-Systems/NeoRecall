@@ -343,9 +343,15 @@ func (m *Manager) cmdSetup(ctx context.Context, args []string) error {
 	}
 
 	channel := (&updates.Service{Cfg: func() config.Config { return cfg }}).Channel()
-	if _, serr := os.Stat(filepath.Join(cfg.WebDir, "index.html")); serr != nil && !cli.HasFlag(args, "--skip-web") {
+	_, webStatErr := os.Stat(filepath.Join(cfg.WebDir, "index.html"))
+	forceWeb := cli.HasFlag(args, "--refresh-web") ||
+		(legacy.NeedsMigration && (cfg.AppDir == "" || strings.HasPrefix(cfg.AppDir, cfg.Paths.RuntimeDir)))
+	if webStatErr != nil && !cli.HasFlag(args, "--skip-web") {
+		forceWeb = true
+	}
+	if forceWeb && !cli.HasFlag(args, "--skip-web") {
 		if err := m.UI.Step("Downloading bundled web UI", "Web UI ready", func() error {
-			_, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel)
+			_, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true)
 			return werr
 		}); err != nil {
 			m.UI.Warn("Web UI bundle download skipped: " + err.Error())
@@ -854,7 +860,7 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 
 	// Refresh standalone web bundle if installed in RuntimeDir.
 	if strings.HasPrefix(cfg.AppDir, cfg.Paths.RuntimeDir) || cli.HasFlag(args, "--refresh-web") {
-		_, _ = m.ensureStandaloneWebBundle(ctx, cfg, channel)
+		_, _ = m.ensureStandaloneWebBundle(ctx, cfg, channel, true)
 	}
 
 	if wasRunning && sm != nil && sm.Installed() {
