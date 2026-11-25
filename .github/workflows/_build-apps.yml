@@ -14,7 +14,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-macos:
@@ -25,28 +25,21 @@ jobs:
         working-directory: flutter_app
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.47.9'
-          cache: true
-
-      - name: Enable macOS desktop
+      - name: Enable macOS desktop (CocoaPods mode)
         run: flutter config --enable-macos-desktop --no-enable-swift-package-manager
+
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       - name: Ensure macOS project exists
         run: |
           if [ ! -d "macos" ]; then
             flutter create --platforms=macos .
           fi
-
-      - name: Install dependencies
-        run: flutter pub get
 
       - name: Build macOS release
         run: flutter build macos --release --no-pub
@@ -55,7 +48,6 @@ jobs:
         run: test -n "$(find build/macos/Build/Products/Release -path '*.app/Contents/Frameworks/opus.framework' -print -quit)"
 
       - name: Package macOS app
-        shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -78,13 +70,12 @@ jobs:
           trap 'rm -rf "$DMG_ROOT"' EXIT
           ditto "$APP_PATH" "$DMG_ROOT/$(basename "$APP_PATH")"
           ln -s /Applications "$DMG_ROOT/Applications"
-          OUT="../dist/NeoRecall-macOS-${VERSION}.dmg"
           hdiutil create \
             -volname "NeoRecall" \
             -srcfolder "$DMG_ROOT" \
             -format UDZO \
             -ov \
-            "$OUT"
+            "../dist/NeoRecall-macOS-${VERSION}.dmg"
           ls -la ../dist
 
       - name: Upload macOS artifact
@@ -94,6 +85,13 @@ jobs:
           path: dist/NeoRecall-macOS-*.dmg
           if-no-files-found: error
 
+      - name: Attach macOS app to release
+        if: inputs.release_tag != ''
+        uses: ./.github/actions/attach-release-assets
+        with:
+          release_tag: ${{ inputs.release_tag }}
+          files: dist/NeoRecall-macOS-*.dmg
+
   build-windows:
     name: Build Windows app
     runs-on: windows-2022
@@ -102,16 +100,12 @@ jobs:
         working-directory: flutter_app
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.47.9'
-          cache: true
+        uses: ./.github/actions/setup-flutter
 
       - name: Enable Windows desktop
         shell: pwsh
@@ -123,10 +117,6 @@ jobs:
           if (-not (Test-Path "windows")) {
             flutter create --platforms=windows .
           }
-
-      - name: Install dependencies
-        shell: pwsh
-        run: flutter pub get
 
       - name: Build Windows release
         shell: pwsh
@@ -170,30 +160,38 @@ jobs:
           path: dist/NeoRecall-Windows-x64-*.zip
           if-no-files-found: error
 
+      - name: Attach Windows app to release
+        if: inputs.release_tag != ''
+        uses: ./.github/actions/attach-release-assets
+        with:
+          release_tag: ${{ inputs.release_tag }}
+          files: dist/NeoRecall-Windows-x64-*.zip
+
   build-android:
-    name: Build Android APK
+    name: Build Android & Wear OS APKs
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: flutter_app
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.47.9'
-          cache: true
+        uses: ./.github/actions/setup-flutter
 
       - name: Ensure Android project exists
         run: |
@@ -201,10 +199,7 @@ jobs:
             flutter create --platforms=android .
           fi
 
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build Android APK
+      - name: Build Android & Wear OS APKs
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -214,33 +209,17 @@ jobs:
             VERSION="commit-${GITHUB_SHA:0:12}"
           fi
           mkdir -p ../dist
-          # Release builds use the fixed debug keystore committed at
-          # android/app/debug.keystore (see build.gradle.kts) so every build
-          # shares the same signature and can be installed as an update.
           flutter build apk --release --no-pub
           unzip -l build/app/outputs/flutter-apk/app-release.apk |
             grep -Eq 'lib/(arm64-v8a|armeabi-v7a|x86_64)/libopus\.so'
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/NeoRecall-Android-${VERSION}.apk"
-          ls -la ../dist
 
-      - name: Build Wear OS APK
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="commit-${GITHUB_SHA:0:12}"
-          fi
-          # The watch APK is a separate application that shares the phone's
-          # applicationId and signature, so it installs alongside it and can be
-          # sideloaded onto a watch without the phone build being touched.
           (cd android && ./gradlew :wear:assembleRelease)
           cp build/wear/outputs/apk/release/wear-release.apk \
             "../dist/NeoRecall-WearOS-${VERSION}.apk"
           ls -la ../dist
 
-      - name: Upload Android artifact
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: neorecall-android-app
@@ -248,3 +227,12 @@ jobs:
             dist/NeoRecall-Android-*.apk
             dist/NeoRecall-WearOS-*.apk
           if-no-files-found: error
+
+      - name: Attach Android & Wear OS APKs to release
+        if: inputs.release_tag != ''
+        uses: ./.github/actions/attach-release-assets
+        with:
+          release_tag: ${{ inputs.release_tag }}
+          files: |
+            dist/NeoRecall-Android-*.apk
+            dist/NeoRecall-WearOS-*.apk

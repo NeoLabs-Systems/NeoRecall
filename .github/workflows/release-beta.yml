@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
+  packages: write
   id-token: write
 
 concurrency:
@@ -19,9 +22,13 @@ jobs:
     name: CI
     if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    with:
+      compile_gates: false
+      upload_web: true
 
   release:
-    name: Prepare beta release
+    name: Publish beta release
     needs: ci
     if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
@@ -30,15 +37,13 @@ jobs:
       release_sha: ${{ steps.capture_release_sha.outputs.release_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: beta
 
       - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
+        uses: ./.github/actions/setup-go
 
       - name: Configure Git identity
         run: |
@@ -47,7 +52,6 @@ jobs:
 
       - name: Verify release source
         id: release_source
-        shell: bash
         run: |
           set -euo pipefail
           git fetch origin beta --tags --force
@@ -59,99 +63,72 @@ jobs:
           fi
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve next beta version
+      - name: Resolve and set beta version
         id: beta_version
-        shell: bash
+        env:
+          GOWORK: 'off'
         run: |
           set -euo pipefail
-          file_version="$(sed -nE 's/.*Version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/config/config.go | head -n 1)"
-          file_base="${file_version%%-*}"
-          latest_stable="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1)"
-          latest_stable="${latest_stable:-0.0.0}"
-          IFS=. read -r major minor patch <<< "$latest_stable"
-          stable_next="${major}.${minor}.$((patch + 1))"
-          base="$(printf '%s\n%s\n' "${file_base:-0.1.0}" "$stable_next" | sort -V | tail -n 1)"
-          last_beta="$(git tag --list "v${base}-beta.*" | sed -nE "s/^v${base//./\\.}-beta\.([0-9]+)$/\1/p" | sort -n | tail -n 1)"
-          next=$(( ${last_beta:--1} + 1 ))
-          version="${base}-beta.${next}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v${version}" >> "$GITHUB_OUTPUT"
+          go run ./cmd/neorecall-release resolve-version --channel beta --github-output
+          source_tag="v$(go run ./cmd/neorecall-release version)"
+          version="$(go run ./cmd/neorecall-release resolve-version --channel beta)"
+          go run ./cmd/neorecall-release set-version "$version"
+          echo "NEW_VERSION=v${version}" >> "$GITHUB_ENV"
 
-      - name: Set Go version constant
-        shell: bash
-        run: |
-          sed -i -E 's/(Version[[:space:]]*=[[:space:]]*)"[^"]+"/\1"${{ steps.beta_version.outputs.version }}"/' internal/config/config.go
+      # Reuse the tested web bundle from CI to skip a duplicate Flutter build.
+      - name: Clean existing web bundle directory
+        run: rm -rf flutter_app/build/web && mkdir -p flutter_app/build/web
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Download bundled web client from CI
+        id: dl_web
+        uses: actions/download-artifact@v4
         with:
-          channel: stable
-          flutter-version: '3.47.9'
-          cache: true
+          name: neorecall-ci-web-bundle
+          path: flutter_app/build/web
+        continue-on-error: true
 
-      - name: Install Flutter dependencies
-        working-directory: flutter_app
-        run: flutter pub get
+      - name: Fallback web client build
+        if: steps.dl_web.outcome != 'success'
+        uses: ./.github/actions/setup-flutter
 
-      # The Git installer clones this branch and runs it directly, so the
-      # release commit has to carry a web client built from that same commit.
-      - name: Build bundled web client
-        working-directory: flutter_app
-        run: flutter build web --release --no-pub --base-href /app/
+      - name: Fallback compile web client
+        if: steps.dl_web.outcome != 'success'
+        uses: ./.github/actions/build-web
 
-      - name: Commit and tag beta release
-        shell: bash
+      - name: Commit and push beta release
         run: |
           set -euo pipefail
           git add internal/config/config.go
           git add -f flutter_app/build/web
-          git commit -m "chore(beta-release): v${{ steps.beta_version.outputs.version }} [skip ci]"
-          git tag "${{ steps.beta_version.outputs.release_tag }}" -m "chore(beta-release): v${{ steps.beta_version.outputs.version }}"
+          git commit -m "chore(beta-release): ${NEW_VERSION} [skip ci]"
+          git tag "$NEW_VERSION" -m "chore(beta-release): ${NEW_VERSION}"
+          remote_sha="$(git ls-remote origin refs/heads/beta | awk '{print $1}')"
+          if [[ "$remote_sha" != "${{ steps.release_source.outputs.source_sha }}" ]]; then
+            echo "::error::beta advanced to $remote_sha while this release was being prepared."
+            exit 1
+          fi
+          git push --atomic origin HEAD:refs/heads/beta "refs/tags/${NEW_VERSION}"
 
       - name: Capture release sha
         id: capture_release_sha
         run: echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Push beta release commit and tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote_sha="$(
-            git ls-remote origin refs/heads/beta |
-              awk '{print $1}'
-          )"
-          if [[ "$remote_sha" != "${{ steps.release_source.outputs.source_sha }}" ]]; then
-            echo "::error::beta advanced to $remote_sha while this release was being prepared."
-            exit 1
-          fi
-          git push \
-            --atomic \
-            origin \
-            HEAD:refs/heads/beta \
-            "refs/tags/${{ steps.beta_version.outputs.release_tag }}"
-
       - name: Create draft GitHub prerelease
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.beta_version.outputs.release_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ steps.capture_release_sha.outputs.release_sha }}
         run: |
           set -euo pipefail
-          # The release tag was already pushed. A transient `gh release
-          # create` failure here must not permanently burn this version
-          # number, so retry with backoff and treat an already-existing
-          # release (e.g. from a prior attempt of this same step, or a
-          # workflow re-run) as success instead of erroring out.
           for attempt in 1 2 3 4 5; do
-            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "Release $RELEASE_TAG already exists; reusing it."
+            if gh release view "$NEW_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "GitHub prerelease $NEW_VERSION already exists."
               exit 0
             fi
-            if gh release create "$RELEASE_TAG" \
+            if gh release create "$NEW_VERSION" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --target "$RELEASE_SHA" \
-              --title "Beta $RELEASE_TAG" \
+              --title "Beta $NEW_VERSION" \
               --generate-notes \
               --draft \
               --prerelease \
@@ -161,8 +138,13 @@ jobs:
             echo "gh release create failed (attempt ${attempt}); retrying..."
             sleep $((attempt * 5))
           done
-          echo "::error::Failed to create GitHub release $RELEASE_TAG after 5 attempts."
           exit 1
+
+      - name: Add download links to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOWORK: 'off'
+        run: go run ./cmd/neorecall-release release-download --tag "$NEW_VERSION"
 
   build-cli:
     name: Build CLI & web bundle
@@ -173,37 +155,45 @@ jobs:
       release_tag: ${{ needs.release.outputs.release_tag }}
 
   build-apps:
-    name: Build app binaries
+    name: Build App Binaries
     needs: release
     uses: ./.github/workflows/_build-apps.yml
     with:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}
 
-  publish-app-assets:
-    name: Complete GitHub prerelease
-    # Only the release job (tag + draft release) is required. build-apps is
-    # intentionally not checked: it fans out into independent per-platform
-    # jobs, and _publish-app-assets.yml already tolerates partial platform
-    # failures, only hard-failing if zero assets came through.
-    if: >-
-      always() &&
-      needs.release.result == 'success'
+  publish-docker-image:
+    name: Publish Docker Image
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_publish-docker-image.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
+  publish-release-assets:
+    name: Publish Release Assets
+    if: always() && needs.release.result == 'success'
     needs:
       - release
       - build-cli
       - build-apps
-    uses: ./.github/workflows/_publish-app-assets.yml
+    uses: ./.github/workflows/_publish-release-assets.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}
       release_sha: ${{ needs.release.outputs.release_sha }}
       prerelease: true
+    secrets: inherit
 
   notify-discord:
     name: Notify Discord
     needs:
       - release
-      - publish-app-assets
+      - publish-release-assets
+    if: needs.release.outputs.release_tag != ''
     uses: ./.github/workflows/discord-release.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}

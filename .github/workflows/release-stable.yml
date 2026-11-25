@@ -5,6 +5,9 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
+  packages: write
   id-token: write
 
 concurrency:
@@ -13,26 +16,33 @@ concurrency:
 
 jobs:
   release:
-    name: Prepare stable release
+    name: Promote beta and publish stable release
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.stable_version.outputs.release_tag }}
       release_sha: ${{ steps.capture_release_sha.outputs.release_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
+        with:
+          pub-get: 'false'
 
       - name: Configure Git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Prepare beta promotion
+      - name: Promote beta into main
         id: promotion_source
-        shell: bash
         run: |
           set -euo pipefail
           git fetch origin main beta --tags --force
@@ -41,132 +51,86 @@ jobs:
           if git merge --no-ff origin/beta -m "chore(release): promote beta to main [skip ci]"; then
             exit 0
           fi
-          # Both branches carry their own release commits, so the version fields
-          # of these two files conflict on every promotion. beta's copies are the
-          # right ones: main holds nothing of its own here, and "Set package
-          # version" below overwrites the version moments later anyway. The
-          # lockfile is only ever taken wholesale from a branch -- regenerating
-          # it drops the platform binaries the other jobs install.
           conflicts="$(git diff --name-only --diff-filter=U)"
           if [[ -z "$conflicts" ]]; then
             echo "::error::The promotion merge failed without leaving conflicts to resolve."
             exit 1
           fi
-          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'internal/config/config\.go' || true)"
+          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'internal/config/config\.go|flutter_app/build/web/.*' || true)"
           if [[ -n "$unexpected" ]]; then
-            echo "::error::beta and main conflict outside internal/config/config.go; resolve this by hand."
+            echo "::error::beta and main conflict outside release bookkeeping files; resolve this by hand."
             printf '%s\n' "$unexpected" >&2
             git merge --abort
             exit 1
           fi
-          git checkout origin/beta -- internal/config/config.go
-          git add internal/config/config.go
+          while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            git checkout origin/beta -- "$path"
+            git add "$path"
+          done <<< "$conflicts"
           git commit --no-edit
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.47.9'
-          cache: true
-
-      - name: Resolve next stable version
+      - name: Resolve and set stable version
         id: stable_version
-        shell: bash
-        run: |
-          set -euo pipefail
-          file_version="$(sed -nE 's/.*Version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/config/config.go | head -n 1)"
-          file_base="${file_version%%-*}"
-          latest_stable="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1)"
-          latest_stable="${latest_stable:-0.0.0}"
-          IFS=. read -r major minor patch <<< "$latest_stable"
-          stable_next="${major}.${minor}.$((patch + 1))"
-          version="$(printf '%s\n%s\n' "${file_base:-0.1.0}" "$stable_next" | sort -V | tail -n 1)"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v${version}" >> "$GITHUB_OUTPUT"
-
-      - name: Set Go version constant
-        shell: bash
-        run: |
-          sed -i -E 's/(Version[[:space:]]*=[[:space:]]*)"[^"]+"/\1"${{ steps.stable_version.outputs.version }}"/' internal/config/config.go
-
-      - name: Install Flutter dependencies
-        working-directory: flutter_app
-        run: flutter pub get
-
-      - name: Backend tests
         env:
           GOWORK: 'off'
-        run: go vet ./... && go test -race -count=1 ./...
+        run: |
+          set -euo pipefail
+          go run ./cmd/neorecall-release resolve-version --channel stable --github-output
+          version="$(go run ./cmd/neorecall-release resolve-version --channel stable)"
+          go run ./cmd/neorecall-release set-version "$version"
+          echo "NEW_VERSION=v${version}" >> "$GITHUB_ENV"
 
-      - name: Flutter checks
+      - name: Run Go checks
+        env:
+          GOWORK: 'off'
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test -race -count=1 ./...
+
+      - name: Run Flutter checks
         working-directory: flutter_app
-        run: flutter analyze --no-pub && flutter test --no-pub
+        run: flutter pub get && flutter analyze --no-pub && flutter test --no-pub
 
-      # The Git installer clones this branch and runs it directly, so the
-      # release commit has to carry a web client built from that same commit.
       - name: Build bundled web client
-        working-directory: flutter_app
-        run: flutter build web --release --no-pub --base-href /app/
+        uses: ./.github/actions/build-web
 
-      - name: Commit and tag stable release
-        shell: bash
+      - name: Commit, tag, and push stable release atomically
         run: |
           set -euo pipefail
           git add internal/config/config.go
           git add -f flutter_app/build/web
-          git commit -m "chore(release): ${{ steps.stable_version.outputs.release_tag }} [skip ci]"
-          git tag "${{ steps.stable_version.outputs.release_tag }}" -m "Release ${{ steps.stable_version.outputs.release_tag }}"
+          git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+          git tag "$NEW_VERSION" -m "Release ${NEW_VERSION}"
+          remote_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$remote_sha" != "${{ steps.promotion_source.outputs.main_sha }}" ]]; then
+            echo "::error::main advanced to $remote_sha while this release was being prepared."
+            exit 1
+          fi
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/${NEW_VERSION}"
 
       - name: Capture release sha
         id: capture_release_sha
         run: echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Push stable release atomically
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote_sha="$(
-            git ls-remote origin refs/heads/main |
-              awk '{print $1}'
-          )"
-          if [[ "$remote_sha" != "${{ steps.promotion_source.outputs.main_sha }}" ]]; then
-            echo "::error::main advanced to $remote_sha while this release was being prepared."
-            exit 1
-          fi
-          git push \
-            --atomic \
-            origin \
-            HEAD:refs/heads/main \
-            "refs/tags/${{ steps.stable_version.outputs.release_tag }}"
-
       - name: Create draft GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.stable_version.outputs.release_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ steps.capture_release_sha.outputs.release_sha }}
         run: |
           set -euo pipefail
-          # The release tag was already pushed. A transient `gh release
-          # create` failure here must not permanently burn this version
-          # number, so retry with backoff and treat an already-existing
-          # release (e.g. from a prior attempt of this same step, or a
-          # workflow re-run) as success instead of erroring out.
           for attempt in 1 2 3 4 5; do
-            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "Release $RELEASE_TAG already exists; reusing it."
+            if gh release view "$NEW_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $NEW_VERSION already exists; reusing it."
               exit 0
             fi
-            if gh release create "$RELEASE_TAG" \
+            if gh release create "$NEW_VERSION" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --target "$RELEASE_SHA" \
-              --title "Release $RELEASE_TAG" \
+              --title "Release $NEW_VERSION" \
               --generate-notes \
               --draft \
               --latest=false; then
@@ -175,8 +139,13 @@ jobs:
             echo "gh release create failed (attempt ${attempt}); retrying..."
             sleep $((attempt * 5))
           done
-          echo "::error::Failed to create GitHub release $RELEASE_TAG after 5 attempts."
           exit 1
+
+      - name: Add download links to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOWORK: 'off'
+        run: go run ./cmd/neorecall-release release-download --tag "$NEW_VERSION"
 
   build-cli:
     name: Build CLI & web bundle
@@ -187,37 +156,45 @@ jobs:
       release_tag: ${{ needs.release.outputs.release_tag }}
 
   build-apps:
-    name: Build app binaries
+    name: Build App Binaries
     needs: release
     uses: ./.github/workflows/_build-apps.yml
     with:
       ref: ${{ needs.release.outputs.release_sha }}
       release_tag: ${{ needs.release.outputs.release_tag }}
 
-  publish-app-assets:
-    name: Complete GitHub release
-    # Only the release job (tag + draft release) is required. build-apps is
-    # intentionally not checked: it fans out into independent per-platform
-    # jobs, and _publish-app-assets.yml already tolerates partial platform
-    # failures, only hard-failing if zero assets came through.
-    if: >-
-      always() &&
-      needs.release.result == 'success'
+  publish-docker-image:
+    name: Publish Docker Image
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_publish-docker-image.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
+  publish-release-assets:
+    name: Publish Release Assets
+    if: always() && needs.release.result == 'success'
     needs:
       - release
       - build-cli
       - build-apps
-    uses: ./.github/workflows/_publish-app-assets.yml
+    uses: ./.github/workflows/_publish-release-assets.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}
       release_sha: ${{ needs.release.outputs.release_sha }}
       prerelease: false
+    secrets: inherit
 
   notify-discord:
     name: Notify Discord
     needs:
       - release
-      - publish-app-assets
+      - publish-release-assets
+    if: needs.release.outputs.release_tag != ''
     uses: ./.github/workflows/discord-release.yml
     with:
       release_tag: ${{ needs.release.outputs.release_tag }}

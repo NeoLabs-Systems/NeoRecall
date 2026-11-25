@@ -1,0 +1,19 @@
+name: Build web client
+description: >
+  Builds the Flutter web client into flutter_app/build/web (served at /app/) and
+  verifies the bundled Opus runtime assets. Requires Flutter set up first.
+
+runs:
+  using: composite
+  steps:
+    - name: Build bundled web client
+      shell: bash
+      working-directory: flutter_app
+      run: flutter build web --release --no-pub --base-href /app/
+
+    - name: Verify web Opus runtime
+      shell: bash
+      working-directory: flutter_app
+      run: |
+        test -s build/web/assets/packages/opus_codec_web/assets/libopus.js
+        test -s build/web/assets/packages/opus_codec_web/assets/libopus.wasm

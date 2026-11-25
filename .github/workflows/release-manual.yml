@@ -1,0 +1,176 @@
+name: Release Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: write
+  id-token: write
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    with:
+      compile_gates: false
+      upload_web: true
+
+  release:
+    name: Bump version and publish manual release
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.bump.outputs.release_tag }}
+      release_sha: ${{ steps.capture_release_sha.outputs.release_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clean existing web bundle directory
+        run: rm -rf flutter_app/build/web && mkdir -p flutter_app/build/web
+
+      - name: Download bundled web client from CI
+        id: dl_web
+        uses: actions/download-artifact@v4
+        with:
+          name: neorecall-ci-web-bundle
+          path: flutter_app/build/web
+        continue-on-error: true
+
+      - name: Fallback web client build
+        if: steps.dl_web.outcome != 'success'
+        uses: ./.github/actions/setup-flutter
+
+      - name: Fallback compile web client
+        if: steps.dl_web.outcome != 'success'
+        uses: ./.github/actions/build-web
+
+      - name: Resolve latest tag and bump version
+        id: bump
+        env:
+          GOWORK: 'off'
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          LATEST_TAG="$(git tag --list "v[0-9]*.[0-9]*.[0-9]*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          LATEST_VERSION="${LATEST_TAG#v}"
+          LATEST_VERSION="${LATEST_VERSION:-0.1.0}"
+          IFS=. read -r major minor patch <<< "$LATEST_VERSION"
+          case "${{ github.event.inputs.version_bump }}" in
+            major) NEW_VERSION="$((major + 1)).0.0" ;;
+            minor) NEW_VERSION="${major}.$((minor + 1)).0" ;;
+            *) NEW_VERSION="${major}.${minor}.$((patch + 1))" ;;
+          esac
+
+          go run ./cmd/neorecall-release set-version "$NEW_VERSION"
+          git add internal/config/config.go
+          git add -f flutter_app/build/web
+          git commit -m "chore(release): v${NEW_VERSION} [skip ci]"
+          git tag "v${NEW_VERSION}" -m "chore(release): v${NEW_VERSION}"
+          git push --atomic origin "HEAD:${{ github.ref_name }}" "refs/tags/v${NEW_VERSION}"
+
+          echo "NEW_VERSION=v${NEW_VERSION}" >> "$GITHUB_ENV"
+          echo "release_tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Capture release sha
+        id: capture_release_sha
+        run: echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.capture_release_sha.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --target "$RELEASE_SHA" \
+            --title "Release $NEW_VERSION" \
+            --generate-notes \
+            --draft \
+            --latest=false
+
+      - name: Add download links to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOWORK: 'off'
+        run: go run ./cmd/neorecall-release release-download --tag "$NEW_VERSION"
+
+  build-cli:
+    name: Build CLI & web bundle
+    needs: release
+    uses: ./.github/workflows/_build-cli.yml
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
+  build-apps:
+    name: Build App Binaries
+    needs: release
+    uses: ./.github/workflows/_build-apps.yml
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
+  publish-docker-image:
+    name: Publish Docker Image
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_publish-docker-image.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.release.outputs.release_sha }}
+      release_tag: ${{ needs.release.outputs.release_tag }}
+
+  publish-release-assets:
+    name: Publish Release Assets
+    if: always() && needs.release.result == 'success'
+    needs:
+      - release
+      - build-cli
+      - build-apps
+    uses: ./.github/workflows/_publish-release-assets.yml
+    with:
+      release_tag: ${{ needs.release.outputs.release_tag }}
+      release_sha: ${{ needs.release.outputs.release_sha }}
+      prerelease: false
+    secrets: inherit
+
+  notify-discord:
+    name: Notify Discord
+    needs:
+      - release
+      - publish-release-assets
+    if: needs.release.outputs.release_tag != ''
+    uses: ./.github/workflows/discord-release.yml
+    with:
+      release_tag: ${{ needs.release.outputs.release_tag }}
+    secrets:
+      DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}

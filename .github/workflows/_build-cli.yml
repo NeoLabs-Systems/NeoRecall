@@ -13,38 +13,44 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-cli:
-    name: Build CLI binaries and web runtime bundle
+    name: Build CLI binaries and web bundle
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
+        uses: ./.github/actions/setup-go
 
-      - name: Build static CLI binaries
+      - name: Build static CLI binaries and web bundle
         env:
           CGO_ENABLED: '0'
           GOWORK: 'off'
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          VERSION="${{ inputs.release_tag }}"
-          VERSION="${VERSION#v}"
+          VERSION="${RELEASE_TAG#v}"
           LDFLAGS="-s -w -X github.com/NeoLabs-Systems/neorecall/internal/config.Version=${VERSION}"
-          go build -trimpath -ldflags "$LDFLAGS" -o dist/neorecall-cli-linux-x64 ./cmd/neorecall
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o dist/neorecall-cli-linux-arm64 ./cmd/neorecall
-          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/neorecall-cli-macos-x64 ./cmd/neorecall
-          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o dist/neorecall-cli-macos-arm64 ./cmd/neorecall
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/neorecall-cli-windows-x64.exe ./cmd/neorecall
+
+          for target in \
+            linux/amd64:neorecall-cli-linux-x64 \
+            linux/arm64:neorecall-cli-linux-arm64 \
+            darwin/amd64:neorecall-cli-macos-x64 \
+            darwin/arm64:neorecall-cli-macos-arm64 \
+            windows/amd64:neorecall-cli-windows-x64.exe
+          do
+            os_arch="${target%%:*}"
+            out_name="${target##*:}"
+            GOOS="${os_arch%/*}" GOARCH="${os_arch#*/}" \
+              go build -trimpath -ldflags "$LDFLAGS" -o "dist/${out_name}" ./cmd/neorecall
+          done
 
           tar -czf "dist/neorecall-web-${VERSION}.tar.gz" \
             flutter_app/build/web \
@@ -58,3 +64,12 @@ jobs:
           name: neorecall-cli-bundle
           path: dist/*
           if-no-files-found: error
+
+      - name: Attach CLI and web bundle to release
+        if: inputs.release_tag != ''
+        uses: ./.github/actions/attach-release-assets
+        with:
+          release_tag: ${{ inputs.release_tag }}
+          files: |
+            dist/neorecall-cli-*
+            dist/neorecall-web-*.tar.gz

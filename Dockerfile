@@ -1,13 +1,5 @@
 # syntax=docker/dockerfile:1
 
-FROM ghcr.io/cirruslabs/flutter:3.35.5 AS flutter-builder
-WORKDIR /build/flutter_app
-COPY flutter_app/pubspec.yaml flutter_app/pubspec.lock ./
-COPY flutter_app/third_party ./third_party
-RUN flutter pub get
-COPY flutter_app .
-RUN flutter build web --release --base-href /app/
-
 FROM golang:1.27-trixie AS go-builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -33,10 +25,11 @@ RUN groupadd --gid 1000 neorecall \
 
 WORKDIR /app
 COPY --from=go-builder /out/neorecall /usr/local/bin/neorecall
+COPY LICENSE ./
 COPY models ./models
 COPY test/fixtures ./test/fixtures
 COPY landing ./landing
-COPY --from=flutter-builder /build/flutter_app/build/web ./flutter_app/build/web
+COPY flutter_app/build/web ./flutter_app/build/web
 
 ENV NEORECALL_HOME=/data \
     NEORECALL_APP_DIR=/app \

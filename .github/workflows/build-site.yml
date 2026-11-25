@@ -2,7 +2,7 @@ name: Build Site
 
 on:
   push:
-    branches: [beta]
+    branches: [beta, main]
     paths: [docs/**, landing/**, README.md, .github/workflows/build-site.yml]
   workflow_dispatch:
 
@@ -19,8 +19,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm

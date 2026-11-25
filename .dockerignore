@@ -6,7 +6,8 @@ node_modules
 docs/node_modules
 docs/build
 flutter_app/.dart_tool
-flutter_app/build
+flutter_app/build/*
+!flutter_app/build/web
 coverage
 *.sqlite*
 *.log
