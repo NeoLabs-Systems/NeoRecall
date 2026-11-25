@@ -98,7 +98,7 @@ jobs:
       - name: Commit and push beta release
         run: |
           set -euo pipefail
-          git add internal/config/config.go
+          git add internal/config/config.go package.json
           git add -f flutter_app/build/web
           git commit -m "chore(beta-release): ${NEW_VERSION} [skip ci]"
           git tag "$NEW_VERSION" -m "chore(beta-release): ${NEW_VERSION}"

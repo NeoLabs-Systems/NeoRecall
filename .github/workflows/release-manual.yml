@@ -87,7 +87,7 @@ jobs:
           esac
 
           go run ./cmd/neorecall-release set-version "$NEW_VERSION"
-          git add internal/config/config.go
+          git add internal/config/config.go package.json
           git add -f flutter_app/build/web
           git commit -m "chore(release): v${NEW_VERSION} [skip ci]"
           git tag "v${NEW_VERSION}" -m "chore(release): v${NEW_VERSION}"

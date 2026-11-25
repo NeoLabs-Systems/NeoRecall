@@ -30,10 +30,11 @@ const (
 )
 
 var (
-	versionPattern   = regexp.MustCompile(`^\d+\.\d+\.\d+(-beta\.\d+)?$`)
-	goVersionLine    = regexp.MustCompile(`(Version\s*=\s*)"[^"]*"`)
-	stableTagPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
-	betaTagPattern   = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$`)
+	versionPattern     = regexp.MustCompile(`^\d+\.\d+\.\d+(-beta\.\d+)?$`)
+	goVersionLine      = regexp.MustCompile(`(Version\s*=\s*)"[^"]*"`)
+	packageVersionLine = regexp.MustCompile(`("version":\s*)"[^"]*"`)
+	stableTagPattern   = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+	betaTagPattern     = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$`)
 )
 
 type appSlot struct {
@@ -141,11 +142,22 @@ func ReadVersion(root string) (string, error) {
 	return strings.TrimSpace(string(m[1])), nil
 }
 
-// SetVersion validates and writes version into internal/config/config.go.
+// SetVersion validates and writes version into internal/config/config.go and package.json.
 func SetVersion(root, version string) error {
 	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if !versionPattern.MatchString(version) {
 		return fmt.Errorf("invalid version %q: want MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-beta.N", version)
+	}
+	pkgPath := filepath.Join(root, "package.json")
+	if pkg, err := os.ReadFile(pkgPath); err == nil {
+		if !packageVersionLine.Match(pkg) {
+			return fmt.Errorf("%s has no version field", pkgPath)
+		}
+		if err := os.WriteFile(pkgPath, packageVersionLine.ReplaceAll(pkg, []byte(`${1}"`+version+`"`)), 0o644); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	p := filepath.Join(root, configFile)
 	b, err := os.ReadFile(p)

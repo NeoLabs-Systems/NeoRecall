@@ -133,6 +133,9 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 	if err := initial.Paths.Ensure(); err != nil {
 		return nil, err
 	}
+	if _, err := schema.EnsurePlaintextLegacyDB(ctx, initial.Paths.Database, initial.Paths.SecretKey, initial.AppDir, initial.Paths.Home); err != nil {
+		return nil, err
+	}
 	db, err := dbx.Open(ctx, initial.Paths.Database, dbx.Options{})
 	if err != nil {
 		return nil, err

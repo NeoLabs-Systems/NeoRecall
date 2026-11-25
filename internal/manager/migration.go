@@ -29,6 +29,7 @@ import (
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
 	"github.com/NeoLabs-Systems/neorecall/internal/models"
+	"github.com/NeoLabs-Systems/neorecall/internal/schema"
 	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 )
 
@@ -206,11 +207,19 @@ func (m *Manager) migrateLegacyJSState(ctx context.Context, cfg config.Config, s
 		if appDir := strings.TrimSpace(vals["NEORECALL_APP_DIR"]); appDir != "" {
 			_, hasWeb := os.Stat(filepath.Join(appDir, "flutter_app", "build", "web", "index.html"))
 			_, hasLegacyServer := os.Stat(filepath.Join(appDir, "server", "index.js"))
-			_, hasLegacyPkg := os.Stat(filepath.Join(appDir, "package.json"))
-			if hasWeb != nil || hasLegacyServer == nil || hasLegacyPkg == nil {
+			_, hasLegacyBin := os.Stat(filepath.Join(appDir, "bin", "neorecall.js"))
+			if hasWeb != nil || hasLegacyServer == nil || hasLegacyBin == nil {
 				_, _ = envfile.Remove(cfg.Paths.EnvFile, "NEORECALL_APP_DIR")
 				_ = os.Unsetenv("NEORECALL_APP_DIR")
 			}
+		}
+	}
+
+	if _, serr := os.Stat(cfg.Paths.Database); serr == nil {
+		if converted, derr := schema.EnsurePlaintextLegacyDB(ctx, cfg.Paths.Database, cfg.Paths.SecretKey, cfg.AppDir, cfg.Paths.Home); derr != nil {
+			return "", derr
+		} else if converted {
+			m.UI.OK("Unlocked encrypted legacy NeoRecall database with secret.key")
 		}
 	}
 

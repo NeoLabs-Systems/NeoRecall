@@ -104,6 +104,9 @@ func (m *Manager) withDB(ctx context.Context, fn func(context.Context, *dbx.DB, 
 	if err := cfg.Paths.Ensure(); err != nil {
 		return err
 	}
+	if _, err := schema.EnsurePlaintextLegacyDB(ctx, cfg.Paths.Database, cfg.Paths.SecretKey, cfg.AppDir, cfg.Paths.Home); err != nil {
+		return err
+	}
 	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
 	if err != nil {
 		return err

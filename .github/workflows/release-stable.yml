@@ -56,7 +56,7 @@ jobs:
             echo "::error::The promotion merge failed without leaving conflicts to resolve."
             exit 1
           fi
-          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'internal/config/config\.go|flutter_app/build/web/.*' || true)"
+          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'internal/config/config\.go|package\.json|flutter_app/build/web/.*' || true)"
           if [[ -n "$unexpected" ]]; then
             echo "::error::beta and main conflict outside release bookkeeping files; resolve this by hand."
             printf '%s\n' "$unexpected" >&2
@@ -100,7 +100,7 @@ jobs:
       - name: Commit, tag, and push stable release atomically
         run: |
           set -euo pipefail
-          git add internal/config/config.go
+          git add internal/config/config.go package.json
           git add -f flutter_app/build/web
           git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
           git tag "$NEW_VERSION" -m "Release ${NEW_VERSION}"
