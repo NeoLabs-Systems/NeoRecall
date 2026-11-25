@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoAuthBackdrop, NeoCredentialField, NeoCredentialFields;
 
 import 'main_controller.dart';
 import 'main_local_install.dart';
@@ -22,6 +24,11 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
   final _confirm = TextEditingController();
   final _server = TextEditingController();
   final _twoFactor = TextEditingController();
+  final _usernameFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _confirmFocus = FocusNode();
+  bool _obscurePassword = true;
   bool registerMode = false;
   bool serverSetup = false;
   bool localInstall = false;
@@ -61,6 +68,14 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
       _twoFactor,
     ]) {
       value.dispose();
+    }
+    for (final node in <FocusNode>[
+      _usernameFocus,
+      _emailFocus,
+      _passwordFocus,
+      _confirmFocus,
+    ]) {
+      node.dispose();
     }
     super.dispose();
   }
@@ -179,64 +194,67 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   const SizedBox(height: 16),
                 ],
                 AutofillGroup(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      TextField(
-                        controller: awaitingTwoFactor ? _twoFactor : _username,
-                        keyboardType: awaitingTwoFactor
-                            ? TextInputType.visiblePassword
-                            : TextInputType.text,
-                        autofillHints: awaitingTwoFactor
-                            ? const <String>[AutofillHints.oneTimeCode]
-                            : const <String>[AutofillHints.username],
-                        decoration: InputDecoration(
-                          labelText: awaitingTwoFactor
-                              ? strings.authTwoFactorFieldLabel
-                              : strings.authUsernameLabel,
-                        ),
-                      ),
-                      if (registerMode && !awaitingTwoFactor) ...<Widget>[
-                        const SizedBox(height: 14),
-                        TextField(
-                          controller: _email,
-                          keyboardType: TextInputType.emailAddress,
-                          autofillHints: const <String>[AutofillHints.email],
-                          decoration: InputDecoration(
-                            labelText: strings.authEmailLabel,
-                          ),
-                        ),
-                      ],
-                      if (!awaitingTwoFactor) ...<Widget>[
-                        const SizedBox(height: 14),
-                        TextField(
-                          controller: _password,
-                          obscureText: true,
-                          autofillHints: <String>[
-                            registerMode
-                                ? AutofillHints.newPassword
-                                : AutofillHints.password,
+                  child: awaitingTwoFactor
+                      ? TextField(
+                          controller: _twoFactor,
+                          keyboardType: TextInputType.visiblePassword,
+                          autofillHints: const <String>[
+                            AutofillHints.oneTimeCode,
                           ],
-                          onSubmitted: registerMode ? null : (_) => _submit(),
                           decoration: InputDecoration(
-                            labelText: strings.authPasswordLabel,
+                            labelText: strings.authTwoFactorFieldLabel,
                           ),
-                        ),
-                        if (registerMode) ...<Widget>[
-                          const SizedBox(height: 14),
-                          TextField(
-                            controller: _confirm,
-                            obscureText: true,
-                            autofillHints: const <String>[AutofillHints.newPassword],
-                            onSubmitted: (_) => _submit(),
-                            decoration: InputDecoration(
-                              labelText: strings.authConfirmPasswordLabel,
+                        )
+                      : NeoCredentialFields(
+                          register: registerMode,
+                          username: _username,
+                          email: _email,
+                          password: _password,
+                          confirmPassword: _confirm,
+                          usernameFocus: _usernameFocus,
+                          emailFocus: _emailFocus,
+                          passwordFocus: _passwordFocus,
+                          confirmPasswordFocus: _confirmFocus,
+                          obscurePassword: _obscurePassword,
+                          onChanged: (_) {},
+                          onSubmit: () => _submit(),
+                          decoration: (field, suffix) => InputDecoration(
+                            labelText: switch (field) {
+                              NeoCredentialField.username =>
+                                strings.authUsernameLabel,
+                              NeoCredentialField.email =>
+                                strings.authEmailLabel,
+                              NeoCredentialField.password =>
+                                strings.authPasswordLabel,
+                              NeoCredentialField.confirmPassword =>
+                                strings.authConfirmPasswordLabel,
+                            },
+                            suffixIcon: suffix,
+                          ),
+                          labeledField: (label, child, trailing) =>
+                              trailing == null
+                              ? child
+                              : Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: <Widget>[child, trailing],
+                                ),
+                          usernameLabel: strings.authUsernameLabel,
+                          usernameOrEmailLabel: strings.authUsernameLabel,
+                          emailLabel: strings.authEmailLabel,
+                          passwordLabel: strings.authPasswordLabel,
+                          confirmPasswordLabel: strings.authConfirmPasswordLabel,
+                          passwordToggle: IconButton(
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
                             ),
                           ),
-                        ],
-                      ],
-                    ],
-                  ),
+                        ),
                 ),
                 const SizedBox(height: 20),
                 FilledButton(
@@ -301,7 +319,8 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
       // scaffold shows the native window's own background.
       backgroundColor: palette.bgPrimary,
       resizeToAvoidBottomInset: true,
-      body: AppBackdrop(
+      body: NeoAuthBackdrop(
+        palette: palette,
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) => SingleChildScrollView(

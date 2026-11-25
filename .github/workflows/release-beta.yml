@@ -38,11 +38,10 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || 'beta' }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          node-version: 20
-          cache: npm
+          go-version: '1.27'
 
       - name: Configure Git identity
         run: |
@@ -65,10 +64,26 @@ jobs:
 
       - name: Resolve next beta version
         id: beta_version
-        run: node scripts/next_release_version.js beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          file_version="$(sed -nE 's/.*Version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/config/config.go | head -n 1)"
+          file_base="${file_version%%-*}"
+          latest_stable="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1)"
+          latest_stable="${latest_stable:-0.0.0}"
+          IFS=. read -r major minor patch <<< "$latest_stable"
+          stable_next="${major}.${minor}.$((patch + 1))"
+          base="$(printf '%s\n%s\n' "${file_base:-0.1.0}" "$stable_next" | sort -V | tail -n 1)"
+          last_beta="$(git tag --list "v${base}-beta.*" | sed -nE "s/^v${base//./\\.}-beta\.([0-9]+)$/\1/p" | sort -n | tail -n 1)"
+          next=$(( ${last_beta:--1} + 1 ))
+          version="${base}-beta.${next}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${version}" >> "$GITHUB_OUTPUT"
 
-      - name: Set package version
-        run: npm version "${{ steps.beta_version.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Set Go version constant
+        shell: bash
+        run: |
+          sed -i -E 's/(Version[[:space:]]*=[[:space:]]*)"[^"]+"/\1"${{ steps.beta_version.outputs.version }}"/' internal/config/config.go
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -77,14 +92,6 @@ jobs:
           flutter-version: '3.47.9'
           cache: true
 
-      - name: Install dependencies
-        # onnxruntime-node's postinstall pulls the optional CUDA add-on from a
-        # Microsoft feed on linux/x64; CI never runs on a GPU, and that download
-        # timing out was failing installs. The CPU runtime ships in the package.
-        env:
-          ONNXRUNTIME_NODE_INSTALL: skip
-        run: npm ci
-
       - name: Install Flutter dependencies
         working-directory: flutter_app
         run: flutter pub get
@@ -92,13 +99,15 @@ jobs:
       # The Git installer clones this branch and runs it directly, so the
       # release commit has to carry a web client built from that same commit.
       - name: Build bundled web client
-        run: npm run build:web
+        working-directory: flutter_app
+        run: flutter build web --release --no-pub --base-href /app/
 
       - name: Commit and tag beta release
         shell: bash
         run: |
           set -euo pipefail
-          git add package.json package-lock.json flutter_app/build/web
+          git add internal/config/config.go
+          git add -f flutter_app/build/web
           git commit -m "chore(beta-release): v${{ steps.beta_version.outputs.version }} [skip ci]"
           git tag "${{ steps.beta_version.outputs.release_tag }}" -m "chore(beta-release): v${{ steps.beta_version.outputs.version }}"
 

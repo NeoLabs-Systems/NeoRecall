@@ -1,57 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoLabsPalette, paletteFor;
 
 import 'main_spacing.dart';
 
-/// Canonical color tokens for the shared "Control Surface" design system.
-///
-/// These values are identical to NeoAgent's `lib/src/theme/palette.dart`: the
-/// two apps are one product family, so a color that drifts here is a bug, not a
-/// style choice. `theme_test.dart` pins the accents for exactly that reason.
-class NeoRecallPalette {
-  const NeoRecallPalette({
-    required this.bgPrimary,
-    required this.bgSecondary,
-    required this.bgTertiary,
-    required this.bgCard,
-    required this.textPrimary,
-    required this.textSecondary,
-    required this.textMuted,
-    required this.accent,
-    required this.accentHover,
-    required this.accentAlt,
-    required this.accentMuted,
-    required this.secondary,
-    required this.border,
-    required this.borderLight,
-    required this.success,
-    required this.warning,
-    required this.danger,
-    required this.info,
-    required this.onAccent,
-    required this.shadow,
-  });
+export 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoLabsPalette, darkPalette, lightPalette, paletteFor, paletteOf;
 
-  final Color bgPrimary;
-  final Color bgSecondary;
-  final Color bgTertiary;
-  final Color bgCard;
-  final Color textPrimary;
-  final Color textSecondary;
-  final Color textMuted;
-  final Color accent;
-  final Color accentHover;
-  final Color accentAlt;
-  final Color accentMuted;
-  final Color secondary;
-  final Color border;
-  final Color borderLight;
-  final Color success;
-  final Color warning;
-  final Color danger;
-  final Color info;
-  final Color onAccent;
-  final Color shadow;
+/// Canonical color tokens for the shared "Control Surface" design system,
+/// sourced directly from `neolabs_flutter` so all NeoLabs apps stay in sync.
+typedef NeoRecallPalette = NeoLabsPalette;
+
+extension NeoRecallPaletteTokens on NeoLabsPalette {
+  bool get isDark => bgPrimary.computeLuminance() < 0.5;
+  Color get secondary =>
+      isDark ? const Color(0xFFDE8A78) : const Color(0xFFAE473C);
+  Color get onAccent =>
+      isDark ? const Color(0xFF0E1511) : const Color(0xFFFFFFFF);
+  Color get shadow =>
+      isDark ? const Color(0x2E000000) : const Color(0x1F000000);
 
   // Back-compat aliases used across the app.
   Color get scaffold => bgPrimary;
@@ -63,57 +31,10 @@ class NeoRecallPalette {
   Color get accentStrong => accentHover;
   Color get accentSoft => accentMuted;
   Color get error => danger;
-  bool get isDark => bgPrimary.computeLuminance() < 0.5;
 }
 
-const NeoRecallPalette _darkPalette = NeoRecallPalette(
-  bgPrimary: Color(0xFF0E1511),
-  bgSecondary: Color(0xFF171F1A),
-  bgTertiary: Color(0xFF1C261F),
-  bgCard: Color(0xFF171F1A),
-  textPrimary: Color(0xFFECEFE5),
-  textSecondary: Color(0xFFAEB7A6),
-  textMuted: Color(0xFF7E8877),
-  accent: Color(0xFFE1B052),
-  accentHover: Color(0xFFEAC272),
-  accentAlt: Color(0xFF84BA87),
-  accentMuted: Color(0x24E1B052),
-  secondary: Color(0xFFDE8A78),
-  border: Color(0x14E0F0E0),
-  borderLight: Color(0x24E0F0E0),
-  success: Color(0xFF74C07C),
-  warning: Color(0xFFD9A24B),
-  danger: Color(0xFFDE8A78),
-  info: Color(0xFF6FB0A4),
-  onAccent: Color(0xFF0E1511),
-  shadow: Color(0x2E000000),
-);
-
-const NeoRecallPalette _lightPalette = NeoRecallPalette(
-  bgPrimary: Color(0xFFF4F1E8),
-  bgSecondary: Color(0xFFEDE9DC),
-  bgTertiary: Color(0xFFF1EDE1),
-  bgCard: Color(0xFFFDFCF8),
-  textPrimary: Color(0xFF1C2117),
-  textSecondary: Color(0xFF49503F),
-  textMuted: Color(0xFF7E8470),
-  accent: Color(0xFFB07D2B),
-  accentHover: Color(0xFFC8943F),
-  accentAlt: Color(0xFF5E6B4C),
-  accentMuted: Color(0x24B07D2B),
-  secondary: Color(0xFFAE473C),
-  border: Color(0x1A1C2117),
-  borderLight: Color(0x291C2117),
-  success: Color(0xFF527C4F),
-  warning: Color(0xFF9A6B1E),
-  danger: Color(0xFFAE473C),
-  info: Color(0xFF2F7D6E),
-  onAccent: Color(0xFFFFFFFF),
-  shadow: Color(0x1F000000),
-);
-
 NeoRecallPalette neoRecallPaletteFor(Brightness brightness) =>
-    brightness == Brightness.dark ? _darkPalette : _lightPalette;
+    paletteFor(brightness);
 
 NeoRecallPalette neoRecallPaletteOf(BuildContext context) =>
     neoRecallPaletteFor(Theme.of(context).brightness);

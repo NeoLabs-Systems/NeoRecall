@@ -445,6 +445,15 @@ packages:
       url: "https://github.com/Telosnex/minimp3_dart.git"
     source: git
     version: "0.0.1-dev"
+  neolabs_flutter:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: "9452769c0cf4187a9c1baab24ae5c617315f83eb"
+      resolved-ref: "9452769c0cf4187a9c1baab24ae5c617315f83eb"
+      url: "https://github.com/NeoLabs-Systems/neolabs-flutter.git"
+    source: git
+    version: "0.1.0"
   nm:
     dependency: transitive
     description:
@@ -660,6 +669,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  qr:
+    dependency: transitive
+    description:
+      name: qr
+      sha256: "2c0189dca64a3ab08dda7acd7911c89af2374f08eb4eaded3e8ef4609f3b9c8b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.3"
+  qr_flutter:
+    dependency: transitive
+    description:
+      name: qr_flutter
+      sha256: "5095f0fc6e3f71d08adef8feccc8cea4f12eec18a2e31c2e8d82cb6019f4b097"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.0"
   record:
     dependency: "direct main"
     description:
@@ -1138,5 +1163,5 @@ packages:
     source: hosted
     version: "6.6.1"
 sdks:
-  dart: ">=3.9.0 <4.0.0"
+  dart: ">=3.9.2 <4.0.0"
   flutter: ">=3.35.0"

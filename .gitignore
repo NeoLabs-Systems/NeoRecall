@@ -1,10 +1,25 @@
-node_modules/
+# Go build and test output
+/bin/
+/neorecall
+/neorecall.exe
+/dist/
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# Logs, process files, and local env
+logs/
+*.log
+*.pid
 .env
 .env.*
 !.env.example
 !.env.*.example
-*.log
-.DS_Store
+
+# Node/Python/tooling artifacts
+node_modules/
 __pycache__/
 *.py[cod]
 .venv*/
@@ -12,6 +27,9 @@ __pycache__/
 coverage/
 docs/build/
 docs/.docusaurus/
+.DS_Store
+
+# Flutter
 flutter_app/.dart_tool/
 # The Git installer clones this repository and runs it directly, so the built
 # web client has to travel with the checkout. Every other build output stays
@@ -19,6 +37,13 @@ flutter_app/.dart_tool/
 flutter_app/build/*
 !flutter_app/build/web/
 flutter_app/.flutter-plugins*
+flutter_app/neorecall.iml
+flutter_app/.idea/
+/flutter_app/android/.kotlin
+# Written by `flutter gen-l10n`; the generated Dart under lib/l10n/gen is committed.
+flutter_app/l10n_untranslated.json
+
+# Local runtime/temp data (never version-controlled)
 runtime-data/
 models/downloads/
 *.sqlite*
@@ -27,10 +52,8 @@ models/downloads/
 *.mp3
 !test/fixtures/*.wav
 /tmp
-/flutter_app/android/.kotlin
+/tmp/
+/artifacts
 .claude/worktrees/
 hardware/neorecall-desk/last-deploy-report.txt
-
-# Written by `flutter gen-l10n`; the generated Dart under lib/l10n/gen is committed.
-flutter_app/l10n_untranslated.json
 /videos

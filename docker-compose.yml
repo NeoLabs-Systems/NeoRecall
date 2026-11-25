@@ -34,9 +34,9 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
       ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
     volumes:
-      - neorecall-data:/root/.neorecall
+      - neorecall-data:/data
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4500/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "neorecall", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

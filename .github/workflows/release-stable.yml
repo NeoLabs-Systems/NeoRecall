@@ -52,22 +52,21 @@ jobs:
             echo "::error::The promotion merge failed without leaving conflicts to resolve."
             exit 1
           fi
-          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'package\.json|package-lock\.json' || true)"
+          unexpected="$(printf '%s\n' "$conflicts" | grep -vxE 'internal/config/config\.go' || true)"
           if [[ -n "$unexpected" ]]; then
-            echo "::error::beta and main conflict outside the version files; resolve this by hand."
+            echo "::error::beta and main conflict outside internal/config/config.go; resolve this by hand."
             printf '%s\n' "$unexpected" >&2
             git merge --abort
             exit 1
           fi
-          git checkout origin/beta -- package.json package-lock.json
-          git add package.json package-lock.json
+          git checkout origin/beta -- internal/config/config.go
+          git add internal/config/config.go
           git commit --no-edit
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          node-version: 20
-          cache: npm
+          go-version: '1.27'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

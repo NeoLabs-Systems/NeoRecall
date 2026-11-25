@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart' show NeoSettingsLayout;
 
 import 'main_controller.dart';
 import 'main_devices.dart';
@@ -359,85 +360,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final query = _search.text.trim();
     final section = _section;
 
-    if (compact && (section == null || query.isNotEmpty)) {
-      return Padding(
-        padding: padding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            ScreenHeader(title: strings.settingsTitle),
-            Expanded(
-              child: SettingsNavigation(
-                selected: null,
-                compact: true,
-                onSelected: _select,
-                searchController: _search,
-                onSearchChanged: () => setState(() {}),
-                watchSupported: watchSupported,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (compact) {
-      // On a phone a page sits on top of the list: back returns to it.
-      return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _showList();
-        },
-        child: Padding(
-          padding: padding.copyWith(top: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _showList,
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
-                  label: Text(strings.settingsTitle),
-                ),
-              ),
-              _pageHeader(section!, compact: true),
-              Expanded(child: _content(section)),
-            ],
+    final shown = section ?? SettingsSection.general;
+    final navigation = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ScreenHeader(title: strings.settingsTitle),
+        Expanded(
+          child: SettingsNavigation(
+            selected: !compact && query.isEmpty ? shown : null,
+            compact: compact,
+            onSelected: _select,
+            searchController: _search,
+            onSearchChanged: () => setState(() {}),
+            watchSupported: watchSupported,
           ),
         ),
-      );
-    }
+      ],
+    );
 
-    final shown = section ?? SettingsSection.general;
-    return Padding(
-      padding: padding,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SizedBox(
-            width: 240,
+    final Widget detailContent = compact
+        ? PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop) _showList();
+            },
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                ScreenHeader(title: strings.settingsTitle),
-                Expanded(
-                  child: SettingsNavigation(
-                    selected: query.isEmpty ? shown : null,
-                    compact: false,
-                    onSelected: _select,
-                    searchController: _search,
-                    onSearchChanged: () => setState(() {}),
-                    watchSupported: watchSupported,
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _showList,
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                    label: Text(strings.settingsTitle),
                   ),
                 ),
+                _pageHeader(shown, compact: true),
+                Expanded(child: _content(shown)),
               ],
             ),
-          ),
-          const SizedBox(width: AppSpacing.xl),
-          // Capped, not stretched: a settings row spanning a 2000px window is
-          // unreadable.
-          Expanded(
+          )
+        : Padding(
+            padding: const EdgeInsets.only(left: AppSpacing.xl),
             child: Align(
               alignment: Alignment.topLeft,
               child: ConstrainedBox(
@@ -461,8 +425,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
               ),
             ),
-          ),
-        ],
+          );
+
+    return Padding(
+      padding: compact && !(section == null || query.isNotEmpty)
+          ? padding.copyWith(top: 8)
+          : padding,
+      child: NeoSettingsLayout(
+        breakpoint: AppBreakpoints.rail,
+        railWidth: 240,
+        railColor: Colors.transparent,
+        borderColor: Colors.transparent,
+        showNavigationOnCompact: section == null || query.isNotEmpty,
+        navigation: navigation,
+        content: detailContent,
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart' show NeoSidebarButton;
 
 import 'main_admin.dart';
 import 'main_controller.dart';
@@ -443,7 +444,7 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _SidebarButton extends StatefulWidget {
+class _SidebarButton extends StatelessWidget {
   const _SidebarButton({
     required this.selected,
     required this.icon,
@@ -461,72 +462,17 @@ class _SidebarButton extends StatefulWidget {
   final bool compact;
 
   @override
-  State<_SidebarButton> createState() => _SidebarButtonState();
-}
-
-class _SidebarButtonState extends State<_SidebarButton> {
-  bool hovering = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = neoRecallPaletteOf(context);
-    final radius = BorderRadius.circular(AppRadius.tag);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => hovering = true),
-        onExit: (_) => setState(() => hovering = false),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: radius,
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: double.infinity,
-              padding: EdgeInsets.symmetric(
-                horizontal: 11,
-                vertical: widget.compact ? 7 : 9,
-              ),
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                color: widget.selected
-                    ? palette.accentMuted
-                    : hovering
-                    ? palette.bgTertiary
-                    : Colors.transparent,
-              ),
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    widget.icon,
-                    size: widget.compact ? 16 : 19,
-                    color: widget.selected ? palette.accent : palette.textMuted,
-                  ),
-                  SizedBox(width: widget.compact ? 9 : 11),
-                  Expanded(
-                    child: Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: widget.selected
-                            ? palette.textPrimary
-                            : palette.textSecondary,
-                        fontSize: widget.compact ? 13 : 13.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (widget.trailing != null) widget.trailing!,
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => NeoSidebarButton(
+    palette: neoRecallPaletteOf(context),
+    label: label,
+    icon: icon,
+    active: selected,
+    iconSize: compact ? 16 : 19,
+    fontSize: compact ? 13 : 13.5,
+    compact: compact,
+    trailing: trailing,
+    onTap: onTap,
+  );
 }
 
 /// Persistent, cross-screen status strip: offline, background-capture risk,
