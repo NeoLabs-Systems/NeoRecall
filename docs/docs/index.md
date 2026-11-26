@@ -51,6 +51,5 @@ The developer guide explains the implementation rather than the product
 setup. Start with [Architecture](architecture.md).
 
 Contributors must also follow
-[GUIDELINES.md](https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/GUIDELINES.md),
-[AGENTS.md](https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/AGENTS.md), and
-[CONTRIBUTING.md](https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/CONTRIBUTING.md).
+[GUIDELINES.md](https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/.github/GUIDELINES.md) and
+[CONTRIBUTING.md](https://github.com/NeoLabs-Systems/NeoRecall/blob/beta/.github/CONTRIBUTING.md).

@@ -185,7 +185,7 @@ def test_audio_is_kept_until_the_server_proves_it_is_safe_to_delete(appliance):
     if stored is not None and stored.state == L.STATE_UPLOADED:
         # No transcription provider is configured here, so the receipt never
         # turns terminal — and the local audio must therefore still be on disk.
-        # This is the invariant from AGENTS.md, checked against the real server's
+        # This is the invariant from .github/GUIDELINES.md, checked against the real server's
         # real receipt rather than a fixture.
         assert row.path.exists()
         assert not L.proves_safe_audio_release(stored.receipt)

@@ -115,7 +115,7 @@ Then open **http://localhost:4500** once `neorecall status` reports a running se
 | --- | --- | --- |
 | [Installation](docs/docs/installation.md) | [Recording](docs/docs/recording.md) | [Configuration](docs/docs/configuration.md) |
 | [Privacy and consent](docs/docs/privacy-and-consent.md) | [NeoRecall Desk](docs/docs/desk-appliance.md) | [Troubleshooting](docs/docs/troubleshooting.md) |
-| [Architecture](docs/docs/architecture.md) | [Contributing](CONTRIBUTING.md) | [Security](SECURITY.md) |
+| [Architecture](docs/docs/architecture.md) | [Contributing](.github/CONTRIBUTING.md) | [Security](SECURITY.md) |
 
 Full docs: **[neolabs-systems.github.io/NeoRecall/docs](https://neolabs-systems.github.io/NeoRecall/docs/)**
 

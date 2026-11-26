@@ -6,7 +6,7 @@
 //
 // Design goals, in priority order:
 //   1. Stream audio reliably. Capture runs 24/7 and uploads ASAP. Terminal
-//      receipts still prove transcript persistence (AGENTS.md). On this board
+//      receipts still prove transcript persistence (.github/GUIDELINES.md). On this board
 //      there is no durable store: failed/stale audio is abandoned with a
 //      truthful capture gap rather than left "pending" forever.
 //   2. Stay up. Every long-running activity is an independent supervised task

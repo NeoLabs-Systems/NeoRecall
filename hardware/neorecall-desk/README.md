@@ -34,7 +34,7 @@ cargo test --workspace
 
 ### The reliability invariant, enforced in code
 
-`AGENTS.md`: *a client may release audio only after a terminal receipt
+`.github/GUIDELINES.md`: *a client may release audio only after a terminal receipt
 proves transcript persistence and server-side audio deletion.* Concretely:
 
 - `nrd-proto::Receipt::proves_safe_audio_release()` is the single predicate
@@ -59,7 +59,7 @@ gadget configfs/systemd work) all require either real Linux audio/display
 hardware or the armv7 cross-compilation container described as Risk R5 in
 the project plan — neither is available in this environment. Rather than
 write PipeWire/Slint/BlueZ code that cannot be compiled or exercised here
-(which this repo's `AGENTS.md` rules out: "do not add fake implementations
+(which this repo's `.github/GUIDELINES.md` rules out: "do not add fake implementations
 or unfinished placeholder behavior"), that work is left for the hardware-
 in-the-loop phase, where it can be built and verified for real. The crates
 above were deliberately chosen because they are exactly the design's own

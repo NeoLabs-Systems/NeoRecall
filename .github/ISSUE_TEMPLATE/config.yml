@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://neolabs-systems.github.io/NeoRecall/docs/
+    about: Check setup, configuration, and operations documentation.
+  - name: Security report
+    url: https://github.com/NeoLabs-Systems/NeoRecall/security/advisories/new
+    about: Report suspected vulnerabilities privately.

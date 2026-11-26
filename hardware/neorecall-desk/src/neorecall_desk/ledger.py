@@ -1,6 +1,6 @@
 """The durable chunk ledger.
 
-This module owns the reliability invariant from ``AGENTS.md``: a chunk's audio
+This module owns the reliability invariant from ``.github/GUIDELINES.md``: a chunk's audio
 may only be deleted once a terminal receipt proves both that the transcript was
 persisted and that the server deleted its own copy. Everything else in the
 appliance is allowed to crash, be killed, or lose power at any instant; what
