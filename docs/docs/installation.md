@@ -5,28 +5,23 @@ title: Installation
 
 # Install NeoRecall
 
-NeoRecall requires Node.js 20 or newer and a supported 64-bit host. It does not install or run speech-recognition or language-model weights. Before processing recordings, configure a hosted provider or separately deploy compatible transcription and language-model endpoints.
+NeoRecall is a single program for macOS (x64, ARM64), Linux (x64, ARM64) and Windows (x64). It needs `ffmpeg` on the host. It does not install or run speech-recognition or language-model weights. Before processing recordings, configure a hosted provider or separately deploy compatible transcription and language-model endpoints.
 
 ## Repository installer
 
-NeoRecall is no longer published to the npm registry. The repository installer
-clones NeoRecall from GitHub, links the global `neorecall` command to that
-checkout, and runs the guided install:
+On macOS and Linux, the installer downloads the `neorecall` binary for this
+computer from the newest release on the chosen channel, checks its published
+SHA-256, puts it in `~/.local/bin` (or `NEORECALL_BIN_DIR`) and runs
+`neorecall install`:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 ```
 
-It asks for two things:
-
-- **Install directory** — defaults to `~/NeoRecall`. The directory must be empty
-  or already be a NeoRecall checkout.
-- **Release channel** — `stable` tracks the `main` branch, `beta` tracks `beta`.
-  The choice is written to `~/.neorecall/.env` and reused by later updates.
-
-Git, Node.js 20 or newer, and npm are required. The checkout ships the built web
-client, so the Flutter SDK is only needed to develop the clients, not to run the
-server.
+It asks for the **release channel**: `stable` or `beta` (set
+`NEORECALL_RELEASE_CHANNEL` to skip the question). The choice is written to
+`~/.neorecall/.env` and reused by later updates. Neither Git nor Node.js is
+needed.
 
 The install then creates `~/.neorecall`, runs database migrations, downloads and
 verifies the small models NeoRecall runs itself — multilingual search embeddings,
@@ -42,12 +37,10 @@ network.
 
 ## Install from the desktop app
 
-The macOS and Windows apps can perform the whole setup without a terminal.
-On the server screen, choose **Set up NeoRecall on this computer**: the app
-checks for Git, Node.js, and npm, clones the selected channel, installs
-dependencies, links the CLI, starts the service, and connects to it — showing
-each step as it runs. If a prerequisite is missing, the app names it and links to
-the download instead of failing silently.
+The desktop apps can perform the whole setup without a terminal. On the server
+screen, choose **Set up NeoRecall on this computer** and pick a channel: the app
+downloads the `neorecall` binary, checks its published SHA-256, runs `neorecall
+install`, waits for the service and connects to it, showing each step as it runs.
 
 Next it asks you to create your account. The first account on a server is its
 admin, so right after signing up the app opens **Admin › Providers** for the two
@@ -93,41 +86,35 @@ API keys and OAuth tokens are refused there. Because an admin session can
 change where recordings are sent for transcription, turn on two-factor
 authentication for admin accounts.
 
-## Manual checkout
-
-```bash
-git clone --branch main https://github.com/NeoLabs-Systems/NeoRecall.git ~/NeoRecall
-cd ~/NeoRecall
-npm install --omit=dev
-npm link
-neorecall channel stable
-neorecall install
-```
-
 ## Updating
 
 ```bash
-neorecall update --notes    # what a waiting update changes, without installing it
-neorecall update            # latest commit on the configured channel
+neorecall update --notes    # say whether a newer version is ready, without installing it
+neorecall update            # newest release on the configured channel
 neorecall update beta       # switch channel and update
 ```
 
-`update` fetches the channel branch, discards local changes to tracked files,
-backs up runtime data, reinstalls dependencies, re-verifies the local models, and
-restarts the service. If any step after the download fails, it puts the previous
-version back and restarts that instead. When you are already on the latest
-version it says so and changes nothing.
+`update` backs up your data, downloads and verifies the signed release, and
+restarts the service. If the new version does not start, it puts the previous one
+back. When you are already on the latest version it says so. `--check` and
+`--json` report the same information as JSON; none of the three changes anything,
+and an unknown option is refused.
+
+## Moving from the Node.js version
+
+Updating a Node.js installation hands over to the binary by itself on macOS and
+Linux. You can also run the repository installer: it backs up the data, migrates
+the database and keeps `~/.neorecall`.
 
 `neorecall` on its own shows a menu of the common actions; `neorecall status
 --details` adds the install folder, data folder, versions and port, and
-`neorecall help --all` lists every command. An older global package installation is migrated to a Git
-checkout on the first `neorecall update`; runtime data in `~/.neorecall` is kept.
+`neorecall help` lists every command.
 
 ## Docker Compose
 
 ```bash
 docker compose build
-docker compose run --rm neorecall node bin/neorecall.js setup
+docker compose run --rm neorecall neorecall setup
 docker compose up -d
 ```
 

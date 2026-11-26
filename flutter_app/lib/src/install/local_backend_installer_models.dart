@@ -1,24 +1,14 @@
-/// Release channel the local install tracks. `stable` follows the `main`
-/// branch, `beta` follows `beta` — the same two channels the CLI persists in
-/// `~/.neorecall/.env`.
+/// Release channel the local install tracks: the same two channels the CLI
+/// persists in `~/.neorecall/.env`.
 enum LocalBackendChannel { stable, beta }
 
 extension LocalBackendChannelNames on LocalBackendChannel {
   String get cliName => this == LocalBackendChannel.beta ? 'beta' : 'stable';
-  String get gitBranch => this == LocalBackendChannel.beta ? 'beta' : 'main';
 }
 
 /// Ordered stages of a local install. The UI shows the current stage message;
 /// the progress bar uses the fractions the installer emits with each event.
-enum LocalBackendInstallStage {
-  prepare,
-  download,
-  dependencies,
-  link,
-  install,
-  connect,
-  complete,
-}
+enum LocalBackendInstallStage { prepare, download, install, connect, complete }
 
 class LocalBackendInstallEvent {
   const LocalBackendInstallEvent({
@@ -47,20 +37,17 @@ class LocalBackendInstallEvent {
 class LocalBackendInstallResult {
   const LocalBackendInstallResult({
     required this.backendUrl,
-    required this.sourceDirectory,
+    required this.commandPath,
     required this.channel,
     required this.serverVersion,
-    this.cliLinked = true,
   });
 
   final String backendUrl;
-  final String sourceDirectory;
+
+  /// Where the `neorecall` command was installed.
+  final String commandPath;
   final LocalBackendChannel channel;
   final String serverVersion;
-
-  /// False when the global `neorecall` command could not be linked. The server
-  /// still runs; only the terminal shortcut is missing.
-  final bool cliLinked;
 }
 
 class LocalBackendInstallerException implements Exception {
@@ -81,35 +68,3 @@ class LocalBackendInstallerException implements Exception {
   @override
   String toString() => message;
 }
-
-/// A prerequisite command the installer needs on the host.
-class LocalBackendRequirement {
-  const LocalBackendRequirement({
-    required this.command,
-    required this.label,
-    required this.downloadUrl,
-  });
-
-  final String command;
-  final String label;
-  final String downloadUrl;
-}
-
-const List<LocalBackendRequirement> localBackendRequirements =
-    <LocalBackendRequirement>[
-      LocalBackendRequirement(
-        command: 'git',
-        label: 'Git',
-        downloadUrl: 'https://git-scm.com/downloads',
-      ),
-      LocalBackendRequirement(
-        command: 'node',
-        label: 'Node.js 20+',
-        downloadUrl: 'https://nodejs.org',
-      ),
-      LocalBackendRequirement(
-        command: 'npm',
-        label: 'npm',
-        downloadUrl: 'https://nodejs.org',
-      ),
-    ];

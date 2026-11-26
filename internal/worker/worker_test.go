@@ -67,7 +67,7 @@ func TestWorkerTranscribeCleanupAndDetectBoundaries(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	authSvc := &auth.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn}
-	regU, _, err := authSvc.Register(ctx, "worku", nil, "StrongPassword!1", auth.RequestContext{IPAddress: "127.0.0.1"})
+	regU, _, err := authSvc.Register(ctx, "worku", nil, "Orchid-Tram-58-Lagoon", auth.RequestContext{IPAddress: "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}

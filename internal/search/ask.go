@@ -337,7 +337,7 @@ type Routes struct {
 func (rt *Routes) Mount(mux *http.ServeMux) {
 	c := rt.Search.cfg()
 	burstLimit := max(1, c.AskBurstPerMinute)
-	askLimiter := httperr.NewSlidingLimiter(time.Minute, burstLimit, "ASK_BURST_LIMITED", func(r *http.Request) string {
+	askLimiter := httperr.NewLimiter(time.Minute, burstLimit, "ASK_BURST_LIMITED", func(r *http.Request) string {
 		if a := auth.FromContext(r.Context()); a.UserID != "" {
 			return a.UserID
 		}

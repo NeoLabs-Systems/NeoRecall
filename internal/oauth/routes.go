@@ -23,10 +23,10 @@ type Routes struct {
 	Auth *auth.Authenticator
 	Log  *slog.Logger
 
-	companionLim *httperr.SlidingLimiter
-	registerLim  *httperr.SlidingLimiter
-	signInLim    *httperr.SlidingLimiter
-	tokenLim     *httperr.SlidingLimiter
+	companionLim *httperr.Limiter
+	registerLim  *httperr.Limiter
+	signInLim    *httperr.Limiter
+	tokenLim     *httperr.Limiter
 }
 
 func NewRoutes(svc *Service, authenticator *auth.Authenticator, log *slog.Logger) *Routes {
@@ -35,10 +35,10 @@ func NewRoutes(svc *Service, authenticator *auth.Authenticator, log *slog.Logger
 	}
 	return &Routes{
 		Svc: svc, Auth: authenticator, Log: log,
-		companionLim: httperr.NewSlidingLimiter(15*time.Minute, 80, "RATE_LIMITED", keyIP),
-		registerLim:  httperr.NewSlidingLimiter(15*time.Minute, 80, "RATE_LIMITED", keyIP),
-		signInLim:    httperr.NewSlidingLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
-		tokenLim:     httperr.NewSlidingLimiter(time.Minute, 60, "RATE_LIMITED", keyIP),
+		companionLim: httperr.NewLimiter(15*time.Minute, 80, "RATE_LIMITED", keyIP),
+		registerLim:  httperr.NewLimiter(15*time.Minute, 80, "RATE_LIMITED", keyIP),
+		signInLim:    httperr.NewLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
+		tokenLim:     httperr.NewLimiter(time.Minute, 60, "RATE_LIMITED", keyIP),
 	}
 }
 
@@ -288,7 +288,7 @@ func (rt *Routes) handlePostSignIn(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		stay2FA := hasPending && errors.As(err, &he) && (he.Code == "INVALID_TWO_FACTOR" || he.Code == "TWO_FACTOR_LOCKED")
+		stay2FA := hasPending && errors.As(err, &he) && (he.Code == "INVALID_TWO_FACTOR" || he.Code == "LOGIN_LOCKED")
 		displayAcct := acctVal
 		if stay2FA && pAccount != "" {
 			displayAcct = pAccount

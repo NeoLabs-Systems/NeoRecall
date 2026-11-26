@@ -34,12 +34,10 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   _LocalInstallPhase _phase = _LocalInstallPhase.choose;
   LocalBackendChannel _channel = LocalBackendChannel.stable;
   late final LocalBackendInstaller _installer;
-  late final TextEditingController _directory;
   StreamSubscription<LocalBackendInstallEvent>? _subscription;
   final List<LocalBackendInstallEvent> _events = <LocalBackendInstallEvent>[];
   LocalBackendInstallEvent? _current;
   LocalBackendInstallResult? _result;
-  List<LocalBackendRequirement> _missing = const <LocalBackendRequirement>[];
   String? _errorMessage;
   String? _errorRemedy;
   bool _showDetails = false;
@@ -49,9 +47,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   void initState() {
     super.initState();
     _installer = LocalBackendInstaller();
-    _directory = TextEditingController(
-      text: _installer.defaultInstallDirectory,
-    );
     _subscription = _installer.events.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -69,14 +64,12 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         }
       });
     });
-    unawaited(_refreshRequirements());
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
     _installer.dispose();
-    _directory.dispose();
     super.dispose();
   }
 
@@ -84,12 +77,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
   static String? _progressSubject(String message) {
     final match = RegExp(r'^(.+): \d+(\.\d+)?%$').firstMatch(message.trim());
     return match?.group(1);
-  }
-
-  Future<void> _refreshRequirements() async {
-    final missing = await _installer.missingRequirements();
-    if (!mounted) return;
-    setState(() => _missing = missing);
   }
 
   Future<void> _install() async {
@@ -101,18 +88,13 @@ class _LocalInstallViewState extends State<LocalInstallView> {
       _errorRemedy = null;
     });
     try {
-      final result = await _installer.install(
-        channel: _channel,
-        installDirectory: _directory.text,
-      );
+      final result = await _installer.install(channel: _channel);
       if (!mounted) return;
       setState(() {
         _result = result;
         _phase = _LocalInstallPhase.done;
       });
     } on LocalBackendInstallerException catch (error) {
-      if (!mounted) return;
-      await _refreshRequirements();
       if (!mounted) return;
       setState(() {
         _errorMessage = '${error.message} (${error.code})';
@@ -228,7 +210,6 @@ class _LocalInstallViewState extends State<LocalInstallView> {
 
   Widget _buildChoose(NeoRecallPalette palette) {
     final strings = AppL10n.of(context);
-    final blocked = _missing.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -254,40 +235,9 @@ class _LocalInstallViewState extends State<LocalInstallView> {
           description: strings.installChannelBetaDescription,
           onTap: () => setState(() => _channel = LocalBackendChannel.beta),
         ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _directory,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: strings.installDirectoryLabel,
-            prefixIcon: const Icon(Icons.folder_outlined),
-          ),
-        ),
-        if (blocked) ...<Widget>[
-          const SizedBox(height: 16),
-          InlineMessage(
-            message: strings.installMissingRequirements(
-              _missing.map((item) => item.label).join(', '),
-            ),
-            error: true,
-            action: TextButton(
-              onPressed: _refreshRequirements,
-              child: Text(strings.installCheckAgain),
-            ),
-          ),
-          const SizedBox(height: 8),
-          for (final requirement in _missing)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${requirement.label} — ${requirement.downloadUrl}',
-                style: TextStyle(color: palette.textMuted, fontSize: 12),
-              ),
-            ),
-        ],
         const SizedBox(height: 20),
         FilledButton.icon(
-          onPressed: blocked ? null : _install,
+          onPressed: _install,
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           icon: const Icon(Icons.auto_awesome_rounded),
           label: Text(strings.installStart(_channel.cliName)),
@@ -412,16 +362,9 @@ class _LocalInstallViewState extends State<LocalInstallView> {
         if (result != null) ...<Widget>[
           const SizedBox(height: 10),
           Text(
-            '${result.backendUrl} · ${result.sourceDirectory}',
+            '${result.backendUrl} · ${result.commandPath}',
             style: TextStyle(color: palette.textMuted, fontSize: 12),
           ),
-          if (!result.cliLinked) ...<Widget>[
-            const SizedBox(height: 12),
-            InlineMessage(
-              message: strings.installCliNotLinked(result.sourceDirectory),
-              icon: Icons.info_outline,
-            ),
-          ],
         ],
         if (widget.controller.error != null) ...<Widget>[
           const SizedBox(height: 12),

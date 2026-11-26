@@ -270,12 +270,8 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		return rerr
 	}
 
-	a.Auth = &auth.Service{
-		DB:          db,
-		Cfg:         cfgFn,
-		MasterKey:   keyFn,
-		RemoveIndex: embeddings.RemoveForUserTx,
-	}
+	a.Auth = auth.NewService(db, cfgFn, keyFn)
+	a.Auth.RemoveIndex = embeddings.RemoveForUserTx
 	if _, err := a.Auth.ApplyEnvAdminGrants(ctx); err != nil {
 		log.Warn("Admin role sync skipped", "error", err)
 	}

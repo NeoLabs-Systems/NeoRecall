@@ -15,7 +15,7 @@
   <a href="https://github.com/NeoLabs-Systems/NeoRecall/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/NeoLabs-Systems/NeoRecall?style=flat-square&label=release&color=111827&include_prereleases"></a>
   <a href="LICENSE"><img alt="AGPL-3.0 license" src="https://img.shields.io/badge/license-AGPL--3.0-a855f7?style=flat-square"></a>
   <a href="docs/docs/installation.md#docker-compose"><img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2496ed?style=flat-square&logo=docker&logoColor=white"></a>
-  <a href="https://nodejs.org"><img alt="Node.js 20 or newer" src="https://img.shields.io/badge/node-20%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white"></a>
+  <a href="go.mod"><img alt="Written in Go" src="https://img.shields.io/badge/built_with-Go-00add8?style=flat-square&logo=go&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -63,7 +63,7 @@ https://github.com/user-attachments/assets/eb40bc78-905b-459a-bdea-a49aba3c9c09
 | --- | --- | --- |
 | 🖥️ **Desktop app** | macOS 13+ and Windows 10/11. **Set up NeoRecall on this computer** installs the server for you, no terminal. | [Download](https://github.com/NeoLabs-Systems/NeoRecall/releases/latest) |
 | 🐳 **Docker** | Home servers, NAS boxes and VPS. | [Guide](docs/docs/installation.md#docker-compose) |
-| 📜 **Script** | Linux or macOS with Git and Node.js 20+. | [Guide](docs/docs/installation.md) |
+| 📜 **Script** | Linux or macOS, x64 or ARM64. Needs `curl`. | [Guide](docs/docs/installation.md) |
 
 **Script**
 

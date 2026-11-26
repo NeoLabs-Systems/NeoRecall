@@ -225,7 +225,7 @@ func (m *Manager) commands() []cli.Command {
 		{Name: "models", Usage: "models [download|verify|prune]", Summary: "Download, verify, or prune pinned ML models", Run: m.cmdModels},
 		{Name: "verify-no-audio", Usage: "verify-no-audio", Summary: "Verify zero unreferenced or retained source audio remains", Run: m.cmdVerifyNoAudio},
 		{Name: "channel", Usage: "channel [stable|beta]", Summary: "Show or switch the update channel", Run: m.cmdChannel},
-		{Name: "update", Usage: "update [stable|beta]", Summary: "Check or apply updates", Run: m.cmdUpdate},
+		{Name: "update", Usage: "update [stable|beta] [--notes|--check] [--json]", Summary: "Check or apply updates", Run: m.cmdUpdate},
 		{Name: "env", Usage: "env [list|get|set|unset]", Summary: "Read and change settings in the .env file", Run: m.cmdEnv},
 		{Name: "admin", Usage: "admin [list|grant|revoke] <user> [--json]", Summary: "Manage admin accounts", Run: m.cmdAdmin},
 		{Name: "account", Usage: "account create --username U --password P [--admin]", Summary: "Create a user account from CLI", Run: m.cmdAccount},
@@ -893,7 +893,36 @@ func (m *Manager) cmdChannel(_ context.Context, args []string) error {
 	return nil
 }
 
+// printUpdateNotes is `update --notes`: what is waiting, in words.
+func (m *Manager) printUpdateNotes(status map[string]any) error {
+	if failed, _ := status["checkFailed"].(bool); failed {
+		return errors.New("NeoRecall couldn't reach GitHub to look for updates; check the internet connection and try again")
+	}
+	current, _ := status["version"].(string)
+	available, _ := status["available"].(map[string]any)
+	version, _ := available["version"].(string)
+	if version == "" {
+		m.UI.OK(fmt.Sprintf("You have the latest version (%s)", current))
+		return nil
+	}
+	m.UI.OK(fmt.Sprintf("%s is ready; you have %s. Get it with neorecall update.", version, current))
+	return nil
+}
+
 func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
+	// A mistyped flag must never fall through to a real update.
+	requested := ""
+	for _, arg := range args {
+		switch arg {
+		case "--notes", "--check", "--json", "--details", "--quiet", "--apply", "--force", "--refresh-web":
+		default:
+			if requested != "" || release.ParseChannel(arg) == "" {
+				return errors.New("usage: neorecall update [stable|beta] [--notes|--check] [--json]")
+			}
+			requested = release.ParseChannel(arg)
+		}
+	}
+	readOnly := cli.HasFlag(args, "--notes") || cli.HasFlag(args, "--check") || cli.HasFlag(args, "--json")
 	cfg, err := m.loadConfig()
 	if err != nil {
 		return err
@@ -944,20 +973,26 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		return err
 	}
 
-	pos := cli.Positionals(args)
-	if len(pos) > 0 {
-		if ch := release.ParseChannel(pos[0]); ch != "" {
-			if _, serr := uSvc.SetChannel(ch); serr != nil {
-				return failJob(serr, false)
+	if readOnly {
+		// Look at the requested channel for this run only; nothing is saved.
+		if requested != "" {
+			if err := os.Setenv("NEORECALL_RELEASE_CHANNEL", requested); err != nil {
+				return err
 			}
-			cfg, _ = m.loadConfig()
 		}
-	}
-	if cli.HasFlag(args, "--check") || cli.HasFlag(args, "--json") {
 		chk := uSvc.Check()
+		if cli.HasFlag(args, "--notes") && !cli.HasFlag(args, "--json") {
+			return m.printUpdateNotes(chk)
+		}
 		b, _ := json.MarshalIndent(chk, "", "  ")
 		fmt.Fprintln(m.Out, string(b))
 		return nil
+	}
+	if requested != "" {
+		if _, serr := uSvc.SetChannel(requested); serr != nil {
+			return failJob(serr, false)
+		}
+		cfg, _ = m.loadConfig()
 	}
 
 	// If an earlier install left an unmigrated Node.js DB/service behind, finish migrating it before restarting.
@@ -1330,7 +1365,7 @@ func (m *Manager) cmdResetPassword(ctx context.Context, args []string) error {
 		pw = pos[1]
 	} else if m.UI.Interactive() {
 		var err error
-		pw, err = m.UI.AskSecret("New password (at least 12 characters)", "")
+		pw, err = m.UI.AskSecret("New password", "")
 		if err != nil {
 			return err
 		}
@@ -1338,9 +1373,6 @@ func (m *Manager) cmdResetPassword(ctx context.Context, args []string) error {
 		br := bufio.NewReader(m.In)
 		line, _ := br.ReadString('\n')
 		pw = strings.TrimRight(line, "\r\n")
-	}
-	if len(pw) < 12 {
-		return errors.New("password must be at least 12 characters")
 	}
 	return m.withDB(ctx, func(ctx context.Context, db *dbx.DB, _ config.Config) error {
 		var id, uname string
@@ -1351,22 +1383,8 @@ func (m *Manager) cmdResetPassword(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		hash, err := crypto.HashPassword(pw)
-		if err != nil {
-			return err
-		}
-		tx, err := db.W.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=?`, hash, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE user_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, timeutil.NowISO(), id); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+		// The same policy and sign-out as a password changed in the app.
+		if err := auth.NewService(db, m.configOrZero, nil).SetPassword(ctx, id, pw); err != nil {
 			return err
 		}
 		m.UI.OK(fmt.Sprintf("New password set for %s; existing sessions revoked.", uname))
@@ -1490,3 +1508,8 @@ var (
 	_ = tar.ErrHeader
 	_ = gzip.ErrHeader
 )
+
+func (m *Manager) configOrZero() config.Config {
+	cfg, _ := m.loadConfig()
+	return cfg
+}

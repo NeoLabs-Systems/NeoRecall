@@ -84,7 +84,7 @@ func TestNeoRouterProvidersProcessingAndRecordings(t *testing.T) {
 	defer srv.Close()
 
 	res, err := http.Post(srv.URL+"/api/v1/auth/register", "application/json",
-		strings.NewReader(`{"username":"admin1","email":"a@example.com","password":"very-long-password-123"}`))
+		strings.NewReader(`{"username":"admin1","email":"a@example.com","password":"Orchid-Tram-58-Lagoon"}`))
 	if err != nil || res.StatusCode != 201 {
 		t.Fatalf("register: %v", err)
 	}

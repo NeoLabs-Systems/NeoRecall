@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
@@ -559,12 +560,7 @@ func (rt *Routes) handleListKeys(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Routes) handleKeysOptions(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	rp, err := rt.AuthSvc.ResolveRelyingParty(r)
-	if err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	cid, opts, err := rt.AuthSvc.BeginWebAuthnRegistration(r.Context(), a.UserID, a.User.Username, rp)
+	cid, opts, err := rt.AuthSvc.BeginWebAuthnRegistration(r.Context(), r, a.UserID)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -587,17 +583,22 @@ func (rt *Routes) handleRegisterKey(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "The request is invalid."))
 		return
 	}
-	rp, err := rt.AuthSvc.ResolveRelyingParty(r)
-	if err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	creds, err := rt.AuthSvc.CompleteWebAuthnRegistration(r.Context(), a.UserID, body.ChallengeID, body.Response, body.Label, rp)
+	creds, err := rt.AuthSvc.CompleteWebAuthnRegistration(r.Context(), r, a.UserID, body.ChallengeID, body.Response, body.Label)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"credentials": creds})
+}
+
+// keyID is the security key a path names.
+func (rt *Routes) keyID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusNotFound, "CREDENTIAL_NOT_FOUND", "This security key does not exist."))
+		return 0, false
+	}
+	return id, true
 }
 
 func (rt *Routes) handleRenameKey(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +614,11 @@ func (rt *Routes) handleRenameKey(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "The request is invalid."))
 		return
 	}
-	creds, err := rt.AuthSvc.RenameWebAuthnCredential(r.Context(), a.UserID, r.PathValue("id"), body.Label)
+	id, ok := rt.keyID(w, r)
+	if !ok {
+		return
+	}
+	creds, err := rt.AuthSvc.RenameWebAuthnCredential(r.Context(), a.UserID, id, body.Label)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -623,7 +628,11 @@ func (rt *Routes) handleRenameKey(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Routes) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	creds, err := rt.AuthSvc.DeleteWebAuthnCredential(r.Context(), a.UserID, r.PathValue("id"))
+	id, ok := rt.keyID(w, r)
+	if !ok {
+		return
+	}
+	creds, err := rt.AuthSvc.DeleteWebAuthnCredential(r.Context(), a.UserID, id)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return

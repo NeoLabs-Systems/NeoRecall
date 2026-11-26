@@ -5083,24 +5083,6 @@ abstract class AppL10n {
   /// **'New features first, with the rough edges that come with them.'**
   String get installChannelBetaDescription;
 
-  /// No description provided for @installDirectoryLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Install directory'**
-  String get installDirectoryLabel;
-
-  /// No description provided for @installMissingRequirements.
-  ///
-  /// In en, this message translates to:
-  /// **'Install {items} on this computer first, then check again.'**
-  String installMissingRequirements(String items);
-
-  /// No description provided for @installCheckAgain.
-  ///
-  /// In en, this message translates to:
-  /// **'Check again'**
-  String get installCheckAgain;
-
   /// No description provided for @installStart.
   ///
   /// In en, this message translates to:
@@ -5148,12 +5130,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **' ({version})'**
   String installVersionSuffix(String version);
-
-  /// No description provided for @installCliNotLinked.
-  ///
-  /// In en, this message translates to:
-  /// **'The neorecall terminal command was not linked. NeoRecall runs anyway; run \"npm link\" in {directory} if you want the command.'**
-  String installCliNotLinked(String directory);
 
   /// No description provided for @actionRetry.
   ///
@@ -7721,6 +7697,210 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'NeoRouter was not approved in time. Start again.'**
   String get neoRouterSignInTimedOut;
+
+  /// No description provided for @authForgotPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot password?'**
+  String get authForgotPassword;
+
+  /// No description provided for @authResetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset password'**
+  String get authResetTitle;
+
+  /// No description provided for @authResetDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your username or account email. A reset link is sent to the email on the account.'**
+  String get authResetDescription;
+
+  /// No description provided for @authResetAccountLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Username or email'**
+  String get authResetAccountLabel;
+
+  /// No description provided for @authResetAccountMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your username or email.'**
+  String get authResetAccountMissing;
+
+  /// No description provided for @authResetSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Send link'**
+  String get authResetSubmit;
+
+  /// No description provided for @authResetSent.
+  ///
+  /// In en, this message translates to:
+  /// **'If that account has an email address, a reset link is on its way.'**
+  String get authResetSent;
+
+  /// No description provided for @qrSignInHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Or scan this code with NeoRecall on a signed-in phone: Settings, Security.'**
+  String get qrSignInHint;
+
+  /// No description provided for @qrSignInWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve the sign-in on {device}.'**
+  String qrSignInWaiting(String device);
+
+  /// No description provided for @qrSignInNewCode.
+  ///
+  /// In en, this message translates to:
+  /// **'New code'**
+  String get qrSignInNewCode;
+
+  /// No description provided for @qrSignInDeclined.
+  ///
+  /// In en, this message translates to:
+  /// **'The sign-in was declined on the phone.'**
+  String get qrSignInDeclined;
+
+  /// No description provided for @qrSignInUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The server sent no usable sign-in code.'**
+  String get qrSignInUnavailable;
+
+  /// No description provided for @qrApproveEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'QR SIGN-IN'**
+  String get qrApproveEyebrow;
+
+  /// No description provided for @qrApproveCardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in another device'**
+  String get qrApproveCardTitle;
+
+  /// No description provided for @qrApproveCardDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan the QR code on the sign-in screen of a computer or browser to sign it in to your account.'**
+  String get qrApproveCardDescription;
+
+  /// No description provided for @qrApproveScanAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan QR code'**
+  String get qrApproveScanAction;
+
+  /// No description provided for @qrApproveDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve this sign-in?'**
+  String get qrApproveDialogTitle;
+
+  /// No description provided for @qrApproveRequestedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Requested at {time}'**
+  String qrApproveRequestedAt(String time);
+
+  /// No description provided for @qrApproveWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'This device gets full access to your account. Approve only a code you opened yourself.'**
+  String get qrApproveWarning;
+
+  /// No description provided for @qrApproveAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve'**
+  String get qrApproveAction;
+
+  /// No description provided for @qrApproveDecline.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline'**
+  String get qrApproveDecline;
+
+  /// No description provided for @qrApproveDone.
+  ///
+  /// In en, this message translates to:
+  /// **'The other device is signing in.'**
+  String get qrApproveDone;
+
+  /// No description provided for @qrScanTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan QR code'**
+  String get qrScanTitle;
+
+  /// No description provided for @qrScanPrimeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera access'**
+  String get qrScanPrimeTitle;
+
+  /// No description provided for @qrScanPrimeBody.
+  ///
+  /// In en, this message translates to:
+  /// **'NeoRecall uses the camera only to read the sign-in code. Nothing is recorded.'**
+  String get qrScanPrimeBody;
+
+  /// No description provided for @qrScanPrimeAllow.
+  ///
+  /// In en, this message translates to:
+  /// **'Open camera'**
+  String get qrScanPrimeAllow;
+
+  /// No description provided for @qrScanHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Point the camera at the code on the sign-in screen.'**
+  String get qrScanHint;
+
+  /// No description provided for @qrScanWrongCode.
+  ///
+  /// In en, this message translates to:
+  /// **'That is not a NeoRecall sign-in code.'**
+  String get qrScanWrongCode;
+
+  /// No description provided for @qrScanDeniedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera access is off'**
+  String get qrScanDeniedTitle;
+
+  /// No description provided for @qrScanDeniedBodyIos.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow camera access for NeoRecall in Settings.'**
+  String get qrScanDeniedBodyIos;
+
+  /// No description provided for @qrScanDeniedBodyAndroid.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow camera access in Android settings: Apps, NeoRecall, Permissions.'**
+  String get qrScanDeniedBodyAndroid;
+
+  /// No description provided for @qrScanOpenSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Settings'**
+  String get qrScanOpenSettings;
+
+  /// No description provided for @qrScanFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The camera could not start'**
+  String get qrScanFailedTitle;
+
+  /// No description provided for @qrScanFailedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Close other apps that use the camera and try again.'**
+  String get qrScanFailedBody;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

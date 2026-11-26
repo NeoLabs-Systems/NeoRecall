@@ -3193,17 +3193,6 @@ class AppL10nDe extends AppL10n {
       'Neue Funktionen zuerst – mit den Ecken und Kanten, die dazugehören.';
 
   @override
-  String get installDirectoryLabel => 'Installationsverzeichnis';
-
-  @override
-  String installMissingRequirements(String items) {
-    return 'Installieren Sie zuerst $items auf diesem Computer und prüfen Sie dann erneut.';
-  }
-
-  @override
-  String get installCheckAgain => 'Erneut prüfen';
-
-  @override
   String installStart(String channel) {
     return 'Kanal „$channel“ installieren';
   }
@@ -3234,11 +3223,6 @@ class AppL10nDe extends AppL10n {
   @override
   String installVersionSuffix(String version) {
     return ' ($version)';
-  }
-
-  @override
-  String installCliNotLinked(String directory) {
-    return 'Der Terminalbefehl „neorecall“ wurde nicht verknüpft. NeoRecall läuft trotzdem; führen Sie „npm link“ in $directory aus, wenn Sie den Befehl möchten.';
   }
 
   @override
@@ -4866,4 +4850,123 @@ class AppL10nDe extends AppL10n {
   @override
   String get neoRouterSignInTimedOut =>
       'NeoRouter wurde nicht rechtzeitig genehmigt. Bitte starten Sie erneut.';
+
+  @override
+  String get authForgotPassword => 'Passwort vergessen?';
+
+  @override
+  String get authResetTitle => 'Passwort zurücksetzen';
+
+  @override
+  String get authResetDescription =>
+      'Gib deinen Benutzernamen oder die E-Mail-Adresse deines Kontos ein. Der Link zum Zurücksetzen geht an die E-Mail-Adresse des Kontos.';
+
+  @override
+  String get authResetAccountLabel => 'Benutzername oder E-Mail';
+
+  @override
+  String get authResetAccountMissing =>
+      'Gib deinen Benutzernamen oder deine E-Mail-Adresse ein.';
+
+  @override
+  String get authResetSubmit => 'Link senden';
+
+  @override
+  String get authResetSent =>
+      'Falls das Konto eine E-Mail-Adresse hat, ist ein Link zum Zurücksetzen unterwegs.';
+
+  @override
+  String get qrSignInHint =>
+      'Oder scanne diesen Code mit NeoRecall auf einem angemeldeten Telefon: Einstellungen, Sicherheit.';
+
+  @override
+  String qrSignInWaiting(String device) {
+    return 'Bestätige die Anmeldung auf $device.';
+  }
+
+  @override
+  String get qrSignInNewCode => 'Neuer Code';
+
+  @override
+  String get qrSignInDeclined =>
+      'Die Anmeldung wurde auf dem Telefon abgelehnt.';
+
+  @override
+  String get qrSignInUnavailable =>
+      'Der Server hat keinen verwendbaren Anmeldecode geschickt.';
+
+  @override
+  String get qrApproveEyebrow => 'QR-ANMELDUNG';
+
+  @override
+  String get qrApproveCardTitle => 'Anderes Gerät anmelden';
+
+  @override
+  String get qrApproveCardDescription =>
+      'Scanne den QR-Code auf dem Anmeldebildschirm eines Computers oder Browsers, um ihn bei deinem Konto anzumelden.';
+
+  @override
+  String get qrApproveScanAction => 'QR-Code scannen';
+
+  @override
+  String get qrApproveDialogTitle => 'Diese Anmeldung bestätigen?';
+
+  @override
+  String qrApproveRequestedAt(String time) {
+    return 'Angefragt um $time';
+  }
+
+  @override
+  String get qrApproveWarning =>
+      'Dieses Gerät erhält vollen Zugriff auf dein Konto. Bestätige nur einen Code, den du selbst geöffnet hast.';
+
+  @override
+  String get qrApproveAction => 'Bestätigen';
+
+  @override
+  String get qrApproveDecline => 'Ablehnen';
+
+  @override
+  String get qrApproveDone => 'Das andere Gerät wird angemeldet.';
+
+  @override
+  String get qrScanTitle => 'QR-Code scannen';
+
+  @override
+  String get qrScanPrimeTitle => 'Kamerazugriff';
+
+  @override
+  String get qrScanPrimeBody =>
+      'NeoRecall nutzt die Kamera nur, um den Anmeldecode zu lesen. Es wird nichts aufgezeichnet.';
+
+  @override
+  String get qrScanPrimeAllow => 'Kamera öffnen';
+
+  @override
+  String get qrScanHint =>
+      'Richte die Kamera auf den Code auf dem Anmeldebildschirm.';
+
+  @override
+  String get qrScanWrongCode => 'Das ist kein NeoRecall-Anmeldecode.';
+
+  @override
+  String get qrScanDeniedTitle => 'Kamerazugriff ist deaktiviert';
+
+  @override
+  String get qrScanDeniedBodyIos =>
+      'Erlaube NeoRecall in den Einstellungen den Kamerazugriff.';
+
+  @override
+  String get qrScanDeniedBodyAndroid =>
+      'Erlaube den Kamerazugriff in den Android-Einstellungen: Apps, NeoRecall, Berechtigungen.';
+
+  @override
+  String get qrScanOpenSettings => 'Einstellungen öffnen';
+
+  @override
+  String get qrScanFailedTitle => 'Die Kamera konnte nicht gestartet werden';
+
+  @override
+  String get qrScanFailedBody =>
+      'Schließe andere Apps, die die Kamera verwenden, und versuche es erneut.';
 }

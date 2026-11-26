@@ -1,5 +1,5 @@
 // Package httperr defines NeoRecall's JSON error envelope, request ID middleware,
-// JSON decode helpers, and sliding-window rate limiter matching the Node API.
+// JSON decode helpers, and request limiting.
 package httperr
 
 import (
@@ -9,14 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/apperr"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
 	"github.com/NeoLabs-Systems/neolabs-go/publicerr"
+	"github.com/NeoLabs-Systems/neolabs-go/ratelimit"
 	"github.com/google/uuid"
 )
 
@@ -139,78 +138,33 @@ func ClientIP(r *http.Request, trustProxy bool) string {
 	return httpx.ClientIP(r, trustProxy)
 }
 
-// SlidingLimiter reproduces server/middleware/rate_limit.js per-key sliding windows.
-type SlidingLimiter struct {
-	window  time.Duration
-	limit   int
-	code    string
-	keyFn   func(*http.Request) string
-	mu      sync.Mutex
-	entries map[string][]time.Time
+// Limiter is neolabs-go's fixed-window limiter answering in NeoRecall's error
+// envelope, usable from inside a handler.
+type Limiter struct {
+	code  string
+	inner *ratelimit.Limiter
 }
 
-func NewSlidingLimiter(window time.Duration, limit int, code string, keyFn func(*http.Request) string) *SlidingLimiter {
-	if code == "" {
-		code = "RATE_LIMITED"
+// NewLimiter allows limit requests per window for each key. A limit of zero
+// switches the operation off.
+func NewLimiter(window time.Duration, limit int, code string, keyFn func(*http.Request) string) *Limiter {
+	l := &Limiter{code: code}
+	if limit > 0 {
+		l.inner = ratelimit.New(ratelimit.Config{
+			Window: window, Max: limit, Key: keyFn,
+			Message: map[string]any{"error": map[string]string{"code": code, "message": "Too many requests. Please try again later."}},
+		})
 	}
-	return &SlidingLimiter{
-		window:  window,
-		limit:   limit,
-		code:    code,
-		keyFn:   keyFn,
-		entries: make(map[string][]time.Time),
-	}
+	return l
 }
 
-func (l *SlidingLimiter) Clear() {
-	l.mu.Lock()
-	l.entries = make(map[string][]time.Time)
-	l.mu.Unlock()
-}
-
-func (l *SlidingLimiter) Allow(w http.ResponseWriter, r *http.Request, log *slog.Logger) bool {
-	if l.limit == 0 {
+// Allow answers the request itself and returns false when it is over the limit.
+func (l *Limiter) Allow(w http.ResponseWriter, r *http.Request, log *slog.Logger) bool {
+	if l.inner == nil {
 		WriteError(w, r, log, New(http.StatusTooManyRequests, l.code, "This operation is disabled."))
 		return false
 	}
-	now := time.Now()
-	cutoff := now.Add(-l.window)
-	key := l.keyFn(r)
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	prev := l.entries[key]
-	recent := prev[:0]
-	for _, ts := range prev {
-		if ts.After(cutoff) {
-			recent = append(recent, ts)
-		}
-	}
-	if len(recent) >= l.limit {
-		retryAfter := int((recent[0].Add(l.window).Sub(now) + time.Second - 1) / time.Second)
-		if retryAfter < 1 {
-			retryAfter = 1
-		}
-		l.entries[key] = recent
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-		WriteError(w, r, log, New(http.StatusTooManyRequests, l.code, "Too many requests. Please try again later.", map[string]int{"retryAfterSeconds": retryAfter}))
-		return false
-	}
-	recent = append(recent, now)
-	l.entries[key] = recent
-	if len(l.entries) > 10_000 {
-		for k, timestamps := range l.entries {
-			alive := false
-			for _, ts := range timestamps {
-				if ts.After(cutoff) {
-					alive = true
-					break
-				}
-			}
-			if !alive {
-				delete(l.entries, k)
-			}
-		}
-	}
-	return true
+	allowed := false
+	l.inner.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { allowed = true })).ServeHTTP(w, r)
+	return allowed
 }

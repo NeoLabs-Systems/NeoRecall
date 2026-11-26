@@ -8,6 +8,9 @@ part of '../../main_controller.dart';
 /// `_webAuthn`) and its published state. Splitting the file is what was needed;
 /// splitting the privacy boundary was not.
 mixin AuthController on ChangeNotifier {
+  /// The shared NeoLabs auth endpoints over this app's transport.
+  NeoAuthClient get _auth => NeoAuthClient(neoAuthPost(api));
+
   /// The controller's translations, for the messages this mixin produces.
   AppL10n get strings;
   // Provided by NeoRecallController.
@@ -55,17 +58,12 @@ mixin AuthController on ChangeNotifier {
   }) async {
     return _run(
       () async {
-        final payload =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/login',
-                  body: <String, dynamic>{
-                    'account': account,
-                    'password': password,
-                    'twoFactorCode': ?twoFactorCode,
-                  },
-                )
-                as Map;
+        final payload = await NeoAuthClient(
+          neoAuthPost(
+            api,
+            extra: <String, dynamic>{'twoFactorCode': ?twoFactorCode},
+          ),
+        ).login(api.baseUrl, account, password);
         await _acceptSession(payload);
         _pendingAccount = null;
         _pendingPassword = null;
@@ -178,7 +176,7 @@ mixin AuthController on ChangeNotifier {
     return registered;
   }
 
-  Future<bool> renameSecurityKey(String id, String label) => _run(() async {
+  Future<bool> renameSecurityKey(int id, String label) => _run(() async {
     final response =
         await api.request(
               'PUT',
@@ -189,7 +187,7 @@ mixin AuthController on ChangeNotifier {
     securityKeys = _securityKeyList(response);
   });
 
-  Future<bool> removeSecurityKey(String id) => _run(() async {
+  Future<bool> removeSecurityKey(int id) => _run(() async {
     final response =
         await api.request('DELETE', '/api/v1/settings/security-keys/$id')
             as Map;
@@ -224,17 +222,12 @@ mixin AuthController on ChangeNotifier {
 
   Future<bool> register(String usernameValue, String? email, String password) =>
       _run(() async {
-        final payload =
-            await api.request(
-                  'POST',
-                  '/api/v1/auth/register',
-                  body: <String, dynamic>{
-                    'username': usernameValue,
-                    if (email?.isNotEmpty ?? false) 'email': email,
-                    'password': password,
-                  },
-                )
-                as Map;
+        final payload = await _auth.register(
+          api.baseUrl,
+          usernameValue,
+          email ?? '',
+          password,
+        );
         await _acceptSession(payload);
         await refreshAll(silent: true);
       });

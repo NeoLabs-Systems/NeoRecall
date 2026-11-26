@@ -239,7 +239,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("/app/", flutterApp(func() string { return d.cfg().WebDir }, d.analyticsOn()))
 	mux.Handle("/", landingHandler(func() string { return d.cfg().Landing }, d.analyticsOn()))
 
-	lim := httperr.NewSlidingLimiter(apiRateWindow, apiRateLimit, "RATE_LIMITED", func(r *http.Request) string {
+	lim := httperr.NewLimiter(apiRateWindow, apiRateLimit, "RATE_LIMITED", func(r *http.Request) string {
 		if a := auth.FromContext(r.Context()); a != nil && a.UserID != "" {
 			return a.UserID
 		}
@@ -320,7 +320,7 @@ func NewHTTPServer(addr string, h http.Handler, log *slog.Logger) *http.Server {
 	}
 }
 
-func apiRateMiddleware(lim *httperr.SlidingLimiter, log *slog.Logger) func(http.Handler) http.Handler {
+func apiRateMiddleware(lim *httperr.Limiter, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/api/v1") {

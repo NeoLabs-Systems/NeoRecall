@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
 	"math"
 	"os"
 	"path/filepath"
@@ -117,12 +118,14 @@ type Config struct {
 	WebDir  string
 	Landing string
 
-	Role                string
-	Host                string
-	Port                int
-	PublicURL           string
-	AllowedOrigins      string
-	TrustProxy          bool
+	Role           string
+	Host           string
+	Port           int
+	PublicURL      string
+	AllowedOrigins string
+	TrustProxy     bool
+	// Mail sends password reset links (NEORECALL_EMAIL_*).
+	Mail                servicemail.Config
 	Production          bool
 	ContainerImage      bool
 	LogLevel            string
@@ -256,8 +259,6 @@ type Config struct {
 	EventOutboxKeepaliveMs     int
 	OAuthPendingTwoFactorTTLMs int64
 	OAuthBrowserGrantTTLMs     int64
-	TwoFactorLockAfterFailures int
-	TwoFactorLockMs            int64
 	TwoFactorRecoveryCodeCount int
 	FTSMaxTerms                int
 	JobRetryBaseMs             int64
@@ -511,6 +512,7 @@ func Load(getenv func(string) string, userHome, cwd string) (Config, error) {
 	c.PublicURL = stripTrailingSlashes(getenv("NEORECALL_PUBLIC_URL"))
 	c.AllowedOrigins = strings.TrimSpace(getenv("NEORECALL_ALLOWED_ORIGINS"))
 	c.TrustProxy = r.bool("NEORECALL_TRUST_PROXY", false)
+	c.Mail = servicemail.LoadConfig("NEORECALL", getenv, "NeoRecall", c.PublicURL)
 	c.LogLevel = r.str("NEORECALL_LOG_LEVEL", "info")
 	c.SessionTTLMs = r.int64("NEORECALL_SESSION_TTL_MS", 30*24*60*60*1000, 60_000, math.MaxInt64)
 	c.RegistrationEnabled = r.bool("NEORECALL_REGISTRATION_ENABLED", true)
@@ -661,8 +663,6 @@ func Load(getenv func(string) string, userHome, cwd string) (Config, error) {
 	c.EventOutboxKeepaliveMs = r.int("NEORECALL_EVENT_OUTBOX_KEEPALIVE_MS", 15_000, 1_000, math.MaxInt)
 	c.OAuthPendingTwoFactorTTLMs = r.int64("NEORECALL_OAUTH_PENDING_2FA_TTL_MS", 5*60_000, 30_000, math.MaxInt64)
 	c.OAuthBrowserGrantTTLMs = r.int64("NEORECALL_OAUTH_BROWSER_GRANT_TTL_MS", 15*60_000, 30_000, math.MaxInt64)
-	c.TwoFactorLockAfterFailures = r.int("NEORECALL_TWO_FACTOR_LOCK_AFTER_FAILURES", 5, 1, 50)
-	c.TwoFactorLockMs = r.int64("NEORECALL_TWO_FACTOR_LOCK_MS", 5*60_000, 1_000, math.MaxInt64)
 	c.TwoFactorRecoveryCodeCount = r.int("NEORECALL_TWO_FACTOR_RECOVERY_CODE_COUNT", 10, 1, 50)
 	c.FTSMaxTerms = r.int("NEORECALL_FTS_MAX_TERMS", 30, 1, 200)
 	c.JobRetryBaseMs = r.int64("NEORECALL_JOB_RETRY_BASE_MS", 5_000, 100, math.MaxInt64)

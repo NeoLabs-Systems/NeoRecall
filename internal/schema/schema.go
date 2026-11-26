@@ -56,6 +56,46 @@ CREATE INDEX IF NOT EXISTS idx_search_embedding_bands_lookup
 `)
 		return err
 	})
+	// Step 39: the tables the shared lockout, QR sign-in and account email
+	// packages use, and whether a security key verified its user.
+	steps = append(steps, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+CREATE TABLE login_failures (account_key TEXT NOT NULL, kind TEXT NOT NULL, failed_at_ms INTEGER NOT NULL);
+CREATE INDEX idx_login_failures_key ON login_failures(account_key, failed_at_ms);
+ALTER TABLE user_webauthn_credentials ADD COLUMN user_verified INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE user_email_tokens (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	type TEXT NOT NULL,
+	email TEXT NOT NULL,
+	token_hash TEXT UNIQUE NOT NULL,
+	created_at TEXT DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	consumed_at TEXT
+);
+CREATE TABLE user_qr_login_challenges (
+	id TEXT PRIMARY KEY,
+	poll_token_hash TEXT UNIQUE NOT NULL,
+	approve_secret_hash TEXT NOT NULL,
+	status TEXT DEFAULT 'pending',
+	request_user_agent TEXT,
+	request_ip_address TEXT,
+	request_location_label TEXT,
+	request_location_json TEXT DEFAULT '{}',
+	request_metadata_json TEXT DEFAULT '{}',
+	approved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+	approved_session_hash TEXT,
+	approved_metadata_json TEXT DEFAULT '{}',
+	scanned_metadata_json TEXT DEFAULT '{}',
+	expires_at TEXT NOT NULL,
+	scanned_at TEXT,
+	approved_at TEXT,
+	claimed_at TEXT,
+	created_at TEXT DEFAULT (datetime('now'))
+);
+`)
+		return err
+	})
 	return steps
 }
 

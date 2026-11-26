@@ -1,109 +1,22 @@
 #!/usr/bin/env bash
 # NeoRecall installer: downloads the neorecall binary for this computer from the
-# latest GitHub release and runs `neorecall install`. Existing Node.js or Go
-# installations under $NEORECALL_HOME (or ~/.neorecall) keep all data and are
-# automatically backed up and migrated.
+# latest GitHub release and runs `neorecall install`. Existing data, including a
+# Node.js installation's, is backed up and kept. The steps live in the shared
+# NeoLabs installer; this only names the app.
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/NeoLabs-Systems/NeoRecall/main/install.sh)
 
 set -euo pipefail
 
-REPOSITORY="NeoLabs-Systems/NeoRecall"
+export APP_NAME=NeoRecall
+export APP_CMD=neorecall
+export APP_REPO=NeoLabs-Systems/NeoRecall
+export APP_ENV=NEORECALL
+export APP_DATA=data/neorecall.sqlite3
+export APP_TARGETS="macos-x64 macos-arm64 linux-x64 linux-arm64"
 
-if [[ -t 1 ]]; then
-  BOLD='\033[1m'; RESET='\033[0m'; RED='\033[1;31m'; GRN='\033[1;32m'
-  CYN='\033[1;36m'; DIM='\033[2m'
-else
-  BOLD=''; RESET=''; RED=''; GRN=''; CYN=''; DIM=''
-fi
-
-ok()   { echo -e "  ${GRN}✓${RESET}  $*"; }
-info() { echo -e "  ${CYN}→${RESET}  $*"; }
-err()  { echo -e "  ${RED}✗${RESET}  $*" >&2; }
-
-echo -e "${CYN}${BOLD}NeoRecall installer${RESET}"
-echo
-
-case "$(uname -s)" in
-  Darwin) OS="macos" ;;
-  Linux)  OS="linux" ;;
-  *) err "This installer supports macOS and Linux. On Windows, download neorecall-cli-windows-x64.exe from the release page."; exit 1 ;;
-esac
-case "$(uname -m)" in
-  x86_64|amd64)  ARCH="x64" ;;
-  arm64|aarch64) ARCH="arm64" ;;
-  *) err "NeoRecall is not available for this processor ($(uname -m))."; exit 1 ;;
-esac
-command -v curl &>/dev/null || { err "curl is required."; exit 1; }
-
-CHANNEL="${NEORECALL_RELEASE_CHANNEL:-}"
-if [[ -z "$CHANNEL" && -r /dev/tty && -t 1 ]]; then
-  echo -ne "  ${CYN}?${RESET}  Release channel (stable/beta) ${DIM}[stable]${RESET} "
-  read -r CHANNEL </dev/tty || true
-fi
-CHANNEL="$(echo "${CHANNEL:-stable}" | tr '[:upper:]' '[:lower:]')"
-[[ "$CHANNEL" == "beta" ]] || CHANNEL="stable"
-ok "Channel: ${CHANNEL}"
-
-RUNTIME_DIR="${NEORECALL_HOME:-$HOME/.neorecall}"
-if [[ -f "$RUNTIME_DIR/data/neorecall.sqlite3" || -f "$RUNTIME_DIR/.env" ]]; then
-  info "Existing NeoRecall data found at ${RUNTIME_DIR}; it will be backed up and preserved."
-fi
-
-info "Looking up the latest release..."
-SELECTOR="https://raw.githubusercontent.com/NeoLabs-Systems/neolabs-go/7d84f7fdafa98e04f5e9de4ad32e3dd30904d804/scripts/select-release-asset.sh"
-if ! ASSET="$(curl -fsSL "$SELECTOR" | bash -s -- "$REPOSITORY" "$CHANNEL" "neorecall-cli-${OS}-${ARCH}")"; then
-  err "Could not find a published ${CHANNEL} CLI build for ${OS}-${ARCH}. Check the network and try again."
+SHARED="https://raw.githubusercontent.com/NeoLabs-Systems/neolabs-go/851626c3fb469a8bca9cee8aaa0e05aa30777df9/scripts/install-cli.sh"
+if ! INSTALLER="$(curl -fsSL "$SHARED")" || [[ -z "$INSTALLER" ]]; then
+  echo "Could not download the installer. Check the network and try again." >&2
   exit 1
 fi
-read -r URL DIGEST <<< "$ASSET"
-
-BIN_DIR="${NEORECALL_BIN_DIR:-$HOME/.local/bin}"
-mkdir -p "$BIN_DIR"
-TMP="$(mktemp "${BIN_DIR}/.neorecall.XXXXXX")"
-trap 'rm -f "$TMP"' EXIT
-info "Downloading ${URL##*/}..."
-curl -fSL --proto '=https' --progress-bar -o "$TMP" "$URL"
-if [[ "$DIGEST" == sha256:* ]]; then
-  if command -v sha256sum &>/dev/null; then SUM="$(sha256sum "$TMP" | awk '{print $1}')"; else SUM="$(shasum -a 256 "$TMP" | awk '{print $1}')"; fi
-  if [[ "sha256:${SUM}" != "$DIGEST" ]]; then
-    err "The download did not match its published checksum; nothing was installed."
-    exit 1
-  fi
-  ok "Checksum verified"
-fi
-chmod 755 "$TMP"
-if [[ "$OS" == "macos" ]]; then
-  xattr -d com.apple.quarantine "$TMP" 2>/dev/null || true
-fi
-mv -f "$TMP" "$BIN_DIR/neorecall"
-trap - EXIT
-ok "Installed ${BIN_DIR}/neorecall"
-
-# Remove any stale npm symlink from the previous Node.js CLI so it cannot shadow Go.
-OLD_CLI="$(command -v neorecall 2>/dev/null || true)"
-if [[ -n "$OLD_CLI" && "$OLD_CLI" != "$BIN_DIR/neorecall" && -L "$OLD_CLI" ]]; then
-  case "$(readlink "$OLD_CLI")" in
-    *bin/neo*call.js|*bin/neorecall.js) rm -f "$OLD_CLI"; info "Removed the legacy Node.js neorecall command at ${OLD_CLI}" ;;
-  esac
-fi
-
-case ":${PATH}:" in
-  *":${BIN_DIR}:"*) ;;
-  *)
-    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-      if [[ -f "$rc" || "$rc" == "$HOME/.bashrc" ]] && ! grep -qs "${BIN_DIR}" "$rc"; then
-        printf '\n# Added by the neorecall installer\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$rc"
-      fi
-    done
-    if [[ -d "$HOME/.config/fish" ]]; then
-      mkdir -p "$HOME/.config/fish/conf.d"
-      printf 'fish_add_path %s\n' "$BIN_DIR" > "$HOME/.config/fish/conf.d/neorecall.fish"
-    fi
-    export PATH="${BIN_DIR}:$PATH"
-    info "Added ${BIN_DIR} to PATH (open a new terminal to use neorecall there)"
-    ;;
-esac
-hash -r
-
-echo
-exec "$BIN_DIR/neorecall" install --channel "$CHANNEL"
+exec bash -c "$INSTALLER" neorecall-install

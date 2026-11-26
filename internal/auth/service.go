@@ -2,16 +2,18 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/lockout"
 	"github.com/NeoLabs-Systems/neolabs-go/passhash"
+	"github.com/NeoLabs-Systems/neolabs-go/pwpolicy"
+	"github.com/NeoLabs-Systems/neolabs-go/qrlogin"
+	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
 	"github.com/NeoLabs-Systems/neolabs-go/totp"
 	"github.com/NeoLabs-Systems/neorecall/internal/audit"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
@@ -20,8 +22,6 @@ import (
 	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 	"github.com/google/uuid"
 )
-
-const recoveryAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 // User is the public account projection returned by /auth endpoints.
 type User struct {
@@ -55,6 +55,19 @@ type Service struct {
 	Cfg         func() config.Config
 	MasterKey   func() ([]byte, error)
 	RemoveIndex func(ctx context.Context, tx *sql.Tx, userID string) error
+	QR          *qrlogin.Store
+	Mailer      servicemail.Mailer
+
+	resetTries servicemail.AttemptLimiter
+}
+
+// NewService wires the shared sign-in packages to NeoRecall's database.
+func NewService(db *dbx.DB, cfg func() config.Config, masterKey func() ([]byte, error)) *Service {
+	return &Service{
+		DB: db, Cfg: cfg, MasterKey: masterKey,
+		QR:     &qrlogin.Store{DB: db},
+		Mailer: servicemail.Sender{Cfg: cfg().Mail},
+	}
 }
 
 func (s *Service) cfg() config.Config {
@@ -112,8 +125,12 @@ func (s *Service) Register(ctx context.Context, username string, email *string, 
 	if len(normUser) < 3 || len(normUser) > 64 {
 		return User{}, SessionToken{}, httperr.New(http.StatusBadRequest, "INVALID_USERNAME", "Username must contain 3 to 64 characters.")
 	}
-	if len(password) < 12 {
-		return User{}, SessionToken{}, httperr.New(http.StatusBadRequest, "WEAK_PASSWORD", "Password must contain at least 12 characters.")
+	var emailText string
+	if email != nil {
+		emailText = strings.TrimSpace(*email)
+	}
+	if err := ValidateNewPassword(password, normUser, emailText); err != nil {
+		return User{}, SessionToken{}, err
 	}
 	var normEmail *string
 	if email != nil && strings.TrimSpace(*email) != "" {
@@ -235,14 +252,42 @@ func (s *Service) consumeRecoveryCode(ctx context.Context, userID, code string) 
 	return true
 }
 
+// ValidateNewPassword applies the NeoLabs password policy.
+func ValidateNewPassword(password, username, email string) error {
+	strength := pwpolicy.Evaluate(password, pwpolicy.Context{Username: username, Email: email})
+	if !strength.IsAcceptable {
+		return httperr.New(http.StatusBadRequest, "WEAK_PASSWORD", pwpolicy.Error(strength))
+	}
+	return nil
+}
+
+// confirm runs a check of a password or code under the shared per-account
+// lockout: the try counts before the secret is compared, and a success takes
+// its failures back.
+func (s *Service) confirm(ctx context.Context, userID, kind string, check func() error) error {
+	store := lockout.Store{DB: s.DB.W}
+	key := lockout.ConfirmKey(userID)
+	if err := store.Check(ctx, key); err != nil {
+		var locked *lockout.LockedError
+		if errors.As(err, &locked) {
+			return httperr.New(locked.Status(), locked.Code(), locked.Error())
+		}
+		return err
+	}
+	if err := store.Record(ctx, key, kind); err != nil {
+		return err
+	}
+	if err := check(); err != nil {
+		return err
+	}
+	return store.Clear(ctx, key, kind)
+}
+
 // VerifySecondFactor validates a pending 2FA challenge if enabled for userID.
 func (s *Service) VerifySecondFactor(ctx context.Context, userID, rawCode string) error {
 	var secretEnc string
-	var pending, failedAttempts int
-	var lockedUntil sql.NullString
-	err := s.DB.R.QueryRowContext(ctx, `SELECT secret_encrypted, pending, failed_attempts, locked_until
-		FROM user_two_factor WHERE user_id = ? AND pending = 0`, userID).
-		Scan(&secretEnc, &pending, &failedAttempts, &lockedUntil)
+	err := s.DB.R.QueryRowContext(ctx, `SELECT secret_encrypted FROM user_two_factor WHERE user_id = ? AND pending = 0`, userID).
+		Scan(&secretEnc)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -256,42 +301,35 @@ func (s *Service) VerifySecondFactor(ctx context.Context, userID, rawCode string
 		he.Extra = map[string]any{"userId": userID}
 		return he
 	}
-	if lockedUntil.Valid {
-		if t, perr := timeutil.ParseISO(lockedUntil.String); perr == nil && t.After(time.Now()) {
-			return httperr.New(http.StatusTooManyRequests, "TWO_FACTOR_LOCKED", "Two-factor authentication is temporarily locked.")
+	return s.confirm(ctx, userID, "second_factor", func() error {
+		key, err := s.MasterKey()
+		if err != nil {
+			return err
 		}
-	}
+		secret, err := crypto.DecryptString(key, secretEnc)
+		if err != nil {
+			return err
+		}
+		if totp.Verify(secret, code, time.Now()) || s.consumeRecoveryCode(ctx, userID, code) {
+			return nil
+		}
+		return httperr.New(http.StatusUnauthorized, "INVALID_TWO_FACTOR", "The two-factor authentication code is invalid.")
+	})
+}
 
-	key, err := s.MasterKey()
-	if err != nil {
-		return err
-	}
-	secret, err := crypto.DecryptString(key, secretEnc)
-	if err != nil {
-		return err
-	}
-	valid := totp.Verify(secret, code, time.Now()) || s.consumeRecoveryCode(ctx, userID, code)
-	if valid {
-		_, _ = s.DB.W.ExecContext(ctx, `UPDATE user_two_factor SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?`, userID)
+// verifyPassword asks a signed-in account for its password again.
+func (s *Service) verifyPassword(ctx context.Context, userID, password, refusal string) error {
+	return s.confirm(ctx, userID, "password", func() error {
+		var hash string
+		err := s.DB.R.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&hash)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err != nil || !passhash.Verify(hash, password) {
+			return httperr.New(http.StatusUnauthorized, "INVALID_PASSWORD", refusal)
+		}
 		return nil
-	}
-
-	c := s.cfg()
-	lockAfter := c.TwoFactorLockAfterFailures
-	if lockAfter <= 0 {
-		lockAfter = 5
-	}
-	lockMs := c.TwoFactorLockMs
-	if lockMs <= 0 {
-		lockMs = 5 * 60_000
-	}
-	attempts := failedAttempts + 1
-	var nextLocked sql.NullString
-	if attempts >= lockAfter {
-		nextLocked = sql.NullString{String: timeutil.FormatISO(timeutil.AddMillis(time.Now(), lockMs)), Valid: true}
-	}
-	_, _ = s.DB.W.ExecContext(ctx, `UPDATE user_two_factor SET failed_attempts = ?, locked_until = ? WHERE user_id = ?`, attempts, nextLocked, userID)
-	return httperr.New(http.StatusUnauthorized, "INVALID_TWO_FACTOR", "The two-factor authentication code is invalid.")
+	})
 }
 
 // AuthenticateCredentials verifies username/email + password + optional TOTP/recovery code.
@@ -388,19 +426,34 @@ func (s *Service) LogoutAll(ctx context.Context, userID string) error {
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
-	var pwHash string
-	err := s.DB.R.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&pwHash)
-	if err != nil || !crypto.VerifyPassword(currentPassword, pwHash) {
-		return httperr.New(http.StatusUnauthorized, "INVALID_PASSWORD", "The current password is incorrect.")
+	if err := s.verifyPassword(ctx, userID, currentPassword, "The current password is incorrect."); err != nil {
+		return err
 	}
-	if len(newPassword) < 12 {
-		return httperr.New(http.StatusBadRequest, "WEAK_PASSWORD", "Password must contain at least 12 characters.")
-	}
-	nextHash, err := crypto.HashPassword(newPassword)
+	return s.SetPassword(ctx, userID, newPassword)
+}
+
+// SetPassword stores a new password that satisfies the policy and signs the
+// account out everywhere.
+func (s *Service) SetPassword(ctx context.Context, userID, newPassword string) error {
+	user, err := s.FindUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if _, err := s.DB.W.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, nextHash, userID); err != nil {
+	if user == nil {
+		return httperr.New(http.StatusNotFound, "USER_NOT_FOUND", "This account does not exist.")
+	}
+	var email string
+	if user.Email != nil {
+		email = *user.Email
+	}
+	if err := ValidateNewPassword(newPassword, user.Username, email); err != nil {
+		return err
+	}
+	hash, err := crypto.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.W.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, userID); err != nil {
 		return err
 	}
 	return s.LogoutAll(ctx, userID)
@@ -451,7 +504,7 @@ func (s *Service) BeginTwoFactor(ctx context.Context, userID, username string) (
 	}
 	_, err = s.DB.W.ExecContext(ctx, `INSERT INTO user_two_factor (user_id, secret_encrypted, pending)
 		VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET secret_encrypted=excluded.secret_encrypted,
-		pending=1, failed_attempts=0, locked_until=NULL, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+		pending=1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		userID, enc)
 	if err != nil {
 		return TwoFactorSetup{}, err
@@ -465,17 +518,12 @@ func generateRecoveryCodes(n int) ([]string, error) {
 		n = 10
 	}
 	out := make([]string, n)
-	buf := make([]byte, 10)
-	for i := 0; i < n; i++ {
-		if _, err := rand.Read(buf); err != nil {
+	for i := range out {
+		code, err := totp.NewRecoveryCode()
+		if err != nil {
 			return nil, err
 		}
-		var b strings.Builder
-		for j := 0; j < 10; j++ {
-			b.WriteByte(recoveryAlphabet[buf[j]&31])
-		}
-		raw := b.String()
-		out[i] = raw[:5] + "-" + raw[5:]
+		out[i] = code
 	}
 	return out, nil
 }
@@ -523,7 +571,7 @@ func (s *Service) ActivateTwoFactor(ctx context.Context, userID, code string) ([
 }
 
 func (s *Service) DisableTwoFactor(ctx context.Context, userID, password, code string) error {
-	if _, err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
 		return err
 	}
 	tx, err := s.DB.W.BeginTx(ctx, nil)
@@ -537,7 +585,7 @@ func (s *Service) DisableTwoFactor(ctx context.Context, userID, password, code s
 }
 
 func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID, password, code string) ([]string, error) {
-	if _, err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
 		return nil, err
 	}
 	codes, err := generateRecoveryCodes(s.cfg().TwoFactorRecoveryCodeCount)
@@ -561,16 +609,11 @@ func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID, password,
 	return codes, nil
 }
 
-func (s *Service) verifyIdentity(ctx context.Context, userID, password, code string) (string, error) {
-	var pwHash string
-	err := s.DB.R.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&pwHash)
-	if err != nil || !passhash.Verify(pwHash, password) {
-		return "", httperr.New(http.StatusUnauthorized, "INVALID_PASSWORD", "The password is incorrect.")
+func (s *Service) verifyIdentity(ctx context.Context, userID, password, code string) error {
+	if err := s.verifyPassword(ctx, userID, password, "The password is incorrect."); err != nil {
+		return err
 	}
-	if err := s.VerifySecondFactor(ctx, userID, code); err != nil {
-		return "", err
-	}
-	return pwHash, nil
+	return s.VerifySecondFactor(ctx, userID, code)
 }
 
 var contentTables = []string{
@@ -628,7 +671,7 @@ func (s *Service) storedFilePaths(ctx context.Context, userID string) ([]string,
 
 // EraseContent unlinks all user audio/media files BEFORE wiping all user content rows.
 func (s *Service) EraseContent(ctx context.Context, userID, password, code string, unlinkStrict func(string) error) (EraseResult, error) {
-	if _, err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
 		return EraseResult{}, err
 	}
 	paths, err := s.storedFilePaths(ctx, userID)
@@ -671,7 +714,7 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password, code stri
 		return httperr.New(http.StatusForbidden, "ADMIN_SELF_DELETE",
 			"Admin accounts can’t delete themselves. Ask whoever runs this server to revoke admin with `neorecall admin revoke <username>` first.")
 	}
-	if _, err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
 		return err
 	}
 	paths, err := s.storedFilePaths(ctx, userID)
@@ -707,6 +750,3 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password, code stri
 	}
 	return tx.Commit()
 }
-
-// Unused import sanity helper kept cleanly.
-var _ = slices.Contains[[]string, string]

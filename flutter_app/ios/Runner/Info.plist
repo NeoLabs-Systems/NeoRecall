@@ -35,6 +35,8 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>NeoRecall uses the camera to scan the QR code of a screen you want to sign in.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NeoRecall uses the microphone while visible or background-authorized recording is active so it can create local transcripts and memories.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>

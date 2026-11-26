@@ -4,6 +4,7 @@ import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_spacing.dart';
 import '../../main_theme.dart';
+import '../auth/qr_scanner_page.dart';
 import '../../l10n/gen/app_l10n.dart';
 
 /// How the Settings pages are grouped in the list. Every page names its group
@@ -114,6 +115,11 @@ final List<_SettingsEntry> _settingsEntries = <_SettingsEntry>[
     'sign out',
     'logout',
   ]),
+  if (qrScannerSupported)
+    _SettingsEntry(SettingsSection.security, (l) => l.qrApproveCardTitle, [
+      'qr',
+      'scan',
+    ]),
   _SettingsEntry(SettingsSection.recording, (l) => l.settingsUnmeteredTitle, [
     'wifi',
     'wi-fi',

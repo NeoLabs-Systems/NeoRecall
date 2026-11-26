@@ -21,10 +21,12 @@ type Routes struct {
 	UsageFn   func(ctx context.Context, userID string) (any, error)
 	ExportFn  func(ctx context.Context, userID string) ([]byte, error)
 	UnlinkFn  func(path string) error
-	registerL *httperr.SlidingLimiter
-	loginL    *httperr.SlidingLimiter
-	webauthnL *httperr.SlidingLimiter
-	exportL   *httperr.SlidingLimiter
+	registerL *httperr.Limiter
+	loginL    *httperr.Limiter
+	webauthnL *httperr.Limiter
+	exportL   *httperr.Limiter
+	// QR sign-in and password reset.
+	qrChallengeL, qrPollL, resetL *httperr.Limiter
 }
 
 func NewRoutes(svc *Service, authenticator *Authenticator, log *slog.Logger) *Routes {
@@ -37,10 +39,14 @@ func NewRoutes(svc *Service, authenticator *Authenticator, log *slog.Logger) *Ro
 	}
 	return &Routes{
 		Svc: svc, Auth: authenticator, Log: log,
-		registerL: httperr.NewSlidingLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
-		loginL:    httperr.NewSlidingLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
-		webauthnL: httperr.NewSlidingLimiter(time.Minute, 20, "RATE_LIMITED", keyIP),
-		exportL:   httperr.NewSlidingLimiter(15*time.Minute, 5, "RATE_LIMITED", keyUser),
+		registerL: httperr.NewLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
+		loginL:    httperr.NewLimiter(time.Minute, 10, "RATE_LIMITED", keyIP),
+		webauthnL: httperr.NewLimiter(time.Minute, 20, "RATE_LIMITED", keyIP),
+		exportL:   httperr.NewLimiter(15*time.Minute, 5, "RATE_LIMITED", keyUser),
+
+		qrChallengeL: httperr.NewLimiter(time.Minute, 20, "RATE_LIMITED", keyIP),
+		qrPollL:      httperr.NewLimiter(time.Minute, 120, "RATE_LIMITED", keyIP),
+		resetL:       httperr.NewLimiter(15*time.Minute, 10, "RATE_LIMITED", keyIP),
 	}
 }
 
@@ -50,6 +56,7 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 		return reqAuth(rt.Auth.RequireSession(h))
 	}
 
+	rt.mountSignIn(mux)
 	mux.HandleFunc("POST /api/v1/auth/register", rt.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", rt.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/webauthn/options", rt.handleWebAuthnOptions)
@@ -119,12 +126,16 @@ func (rt *Routes) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Account       string `json:"account"`
+		Username      string `json:"username"` // the shared NeoLabs client's name for it
 		Password      string `json:"password"`
 		TwoFactorCode string `json:"twoFactorCode"`
 	}
 	if err := httperr.DecodeJSON(r, &body); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
+	}
+	if body.Account == "" {
+		body.Account = body.Username
 	}
 	if strings.TrimSpace(body.Account) == "" || len(body.Account) > 320 || len(body.Password) > 1024 || len(body.TwoFactorCode) > 64 {
 		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "The request is invalid."))
@@ -149,12 +160,7 @@ func (rt *Routes) handleWebAuthnOptions(w http.ResponseWriter, r *http.Request) 
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	rp, err := rt.Svc.ResolveRelyingParty(r)
-	if err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	cid, opts, err := rt.Svc.BeginWebAuthnAuthentication(r.Context(), body.Account, rp)
+	cid, opts, err := rt.Svc.BeginWebAuthnAuthentication(r.Context(), r, body.Account)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -179,12 +185,7 @@ func (rt *Routes) handleWebAuthnVerify(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "The request is invalid."))
 		return
 	}
-	rp, err := rt.Svc.ResolveRelyingParty(r)
-	if err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	u, sess, err := rt.Svc.CompleteWebAuthnAuthentication(r.Context(), body.ChallengeID, body.Response, body.TwoFactorCode, rp, rt.reqCtx(r))
+	u, sess, err := rt.Svc.CompleteWebAuthnAuthentication(r.Context(), r, body.ChallengeID, body.Response, body.TwoFactorCode, rt.reqCtx(r))
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -224,8 +225,8 @@ func (rt *Routes) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	if len(body.NewPassword) < 12 || len(body.NewPassword) > 1024 {
-		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "Password must contain between 12 and 1024 characters."))
+	if len(body.NewPassword) > 1024 {
+		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "The password is too long."))
 		return
 	}
 	if err := rt.Svc.ChangePassword(r.Context(), a.UserID, body.CurrentPassword, body.NewPassword); err != nil {

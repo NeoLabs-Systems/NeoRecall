@@ -100,7 +100,7 @@ func TestAppWiringHealthMetaStatusCSPAndSPA(t *testing.T) {
 	}
 
 	// 4. Register user and call /api/v1/meta & /api/v1/sources
-	regBody := `{"username":"alice","password":"StrongPassword!1"}`
+	regBody := `{"username":"alice","password":"Orchid-Tram-58-Lagoon"}`
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(regBody))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()

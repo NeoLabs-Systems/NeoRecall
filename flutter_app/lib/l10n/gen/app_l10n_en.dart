@@ -3162,17 +3162,6 @@ class AppL10nEn extends AppL10n {
       'New features first, with the rough edges that come with them.';
 
   @override
-  String get installDirectoryLabel => 'Install directory';
-
-  @override
-  String installMissingRequirements(String items) {
-    return 'Install $items on this computer first, then check again.';
-  }
-
-  @override
-  String get installCheckAgain => 'Check again';
-
-  @override
   String installStart(String channel) {
     return 'Install the $channel channel';
   }
@@ -3203,11 +3192,6 @@ class AppL10nEn extends AppL10n {
   @override
   String installVersionSuffix(String version) {
     return ' ($version)';
-  }
-
-  @override
-  String installCliNotLinked(String directory) {
-    return 'The neorecall terminal command was not linked. NeoRecall runs anyway; run \"npm link\" in $directory if you want the command.';
   }
 
   @override
@@ -4821,4 +4805,120 @@ class AppL10nEn extends AppL10n {
   @override
   String get neoRouterSignInTimedOut =>
       'NeoRouter was not approved in time. Start again.';
+
+  @override
+  String get authForgotPassword => 'Forgot password?';
+
+  @override
+  String get authResetTitle => 'Reset password';
+
+  @override
+  String get authResetDescription =>
+      'Enter your username or account email. A reset link is sent to the email on the account.';
+
+  @override
+  String get authResetAccountLabel => 'Username or email';
+
+  @override
+  String get authResetAccountMissing => 'Enter your username or email.';
+
+  @override
+  String get authResetSubmit => 'Send link';
+
+  @override
+  String get authResetSent =>
+      'If that account has an email address, a reset link is on its way.';
+
+  @override
+  String get qrSignInHint =>
+      'Or scan this code with NeoRecall on a signed-in phone: Settings, Security.';
+
+  @override
+  String qrSignInWaiting(String device) {
+    return 'Approve the sign-in on $device.';
+  }
+
+  @override
+  String get qrSignInNewCode => 'New code';
+
+  @override
+  String get qrSignInDeclined => 'The sign-in was declined on the phone.';
+
+  @override
+  String get qrSignInUnavailable => 'The server sent no usable sign-in code.';
+
+  @override
+  String get qrApproveEyebrow => 'QR SIGN-IN';
+
+  @override
+  String get qrApproveCardTitle => 'Sign in another device';
+
+  @override
+  String get qrApproveCardDescription =>
+      'Scan the QR code on the sign-in screen of a computer or browser to sign it in to your account.';
+
+  @override
+  String get qrApproveScanAction => 'Scan QR code';
+
+  @override
+  String get qrApproveDialogTitle => 'Approve this sign-in?';
+
+  @override
+  String qrApproveRequestedAt(String time) {
+    return 'Requested at $time';
+  }
+
+  @override
+  String get qrApproveWarning =>
+      'This device gets full access to your account. Approve only a code you opened yourself.';
+
+  @override
+  String get qrApproveAction => 'Approve';
+
+  @override
+  String get qrApproveDecline => 'Decline';
+
+  @override
+  String get qrApproveDone => 'The other device is signing in.';
+
+  @override
+  String get qrScanTitle => 'Scan QR code';
+
+  @override
+  String get qrScanPrimeTitle => 'Camera access';
+
+  @override
+  String get qrScanPrimeBody =>
+      'NeoRecall uses the camera only to read the sign-in code. Nothing is recorded.';
+
+  @override
+  String get qrScanPrimeAllow => 'Open camera';
+
+  @override
+  String get qrScanHint =>
+      'Point the camera at the code on the sign-in screen.';
+
+  @override
+  String get qrScanWrongCode => 'That is not a NeoRecall sign-in code.';
+
+  @override
+  String get qrScanDeniedTitle => 'Camera access is off';
+
+  @override
+  String get qrScanDeniedBodyIos =>
+      'Allow camera access for NeoRecall in Settings.';
+
+  @override
+  String get qrScanDeniedBodyAndroid =>
+      'Allow camera access in Android settings: Apps, NeoRecall, Permissions.';
+
+  @override
+  String get qrScanOpenSettings => 'Open Settings';
+
+  @override
+  String get qrScanFailedTitle => 'The camera could not start';
+
+  @override
+  String get qrScanFailedBody =>
+      'Close other apps that use the camera and try again.';
 }

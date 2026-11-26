@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
 	No app-sandbox entitlement. NeoRecall installs and supervises a NeoRecall
-	server on this machine: it clones with git, installs npm dependencies,
-	links the CLI, and registers a LaunchAgent. A sandbox redirects HOME into
-	the app container, turns /usr/bin/git into an xcrun shim that refuses to
-	run, and denies every one of those writes. Hardened Runtime still applies,
+	server on this machine: it downloads the neorecall command, runs it, and it
+	registers a LaunchAgent. A sandbox redirects HOME into
+	the app container and
+	denies every one of those writes. Hardened Runtime still applies,
 	which is what notarization requires; the sandbox is only mandatory for Mac
 	App Store distribution, and NeoRecall ships as a DMG from GitHub. The
 	remaining sandbox-era keys are inert without it and kept so that re-enabling

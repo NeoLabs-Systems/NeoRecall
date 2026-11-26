@@ -1,11 +1,5 @@
-github.com/NeoLabs-Systems/neolabs-go v0.3.4 h1:WnTPnmR+uHCedRyNn97g/txKp8mhzJfzM36gjQybr8w=
-github.com/NeoLabs-Systems/neolabs-go v0.3.4/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125185441-1cd3668653c9 h1:phMxB/C2hfoou9mrH0AxJELbtytwzTtjKqQf2XJtWPw=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125185441-1cd3668653c9/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125213758-3085ab96fa3f h1:/cwImViCYAjEED2m1p5v14HGYmX5X3n5tXiMBnZdeiI=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125213758-3085ab96fa3f/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125214733-d36e724c413a h1:LdBf4ss1qDc8MxEq68MJ7X+He8xcAPm9y5maVFRwYYA=
-github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261125214733-d36e724c413a/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
+github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261126094655-f8c24e6c485d h1:LweFOT2sJ7xgsC12GOgVT4WUhJtcF+HKxiN0Ji8JHQI=
+github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261126094655-f8c24e6c485d/go.mod h1:0buWNj1NgQRg0mo1wWdDq+MJf8FTwDlYZnwd+jjDNqA=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/ebitengine/purego v0.11.3 h1:OB+JLpdm7ioymhyA+6s5kbb/uOuYycAgL8NNTFc5MLg=
@@ -44,6 +38,8 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/tinylib/msgp v1.6.4 h1:mOwYbyYDLPj35mkA2BjjYejgJk9BuHxDdvRnb6v2ZcQ=
 github.com/tinylib/msgp v1.6.4/go.mod h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=
+github.com/wneessen/go-mail v0.8.2 h1:JVeSmRX9oPjYFH77irWIFy8t1vJRDU/+ri4H38FMAK8=
+github.com/wneessen/go-mail v0.8.2/go.mod h1:rJb+LDvSMcOzSeNZ4rFyS7PLMy0DEFz/uU3A0T5JY50=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=

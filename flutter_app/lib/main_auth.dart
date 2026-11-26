@@ -1,12 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:neolabs_flutter/neolabs_flutter.dart'
-    show NeoAuthBackdrop, NeoCredentialField, NeoCredentialFields;
+    show
+        NeoAuthBackdrop,
+        NeoCredentialField,
+        NeoCredentialFields,
+        NeoForgotPasswordDialog;
 
 import 'main_controller.dart';
 import 'main_local_install.dart';
 import 'main_shared.dart';
 import 'main_theme.dart';
+import 'src/auth/qr_sign_in_panel.dart';
 import 'src/install/local_backend_installer.dart';
 import 'l10n/gen/app_l10n.dart';
 
@@ -55,6 +62,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     super.initState();
     _server.text = widget.controller.backendUrl;
     serverSetup = widget.controller.requiresBackendUrlSetup;
+    if (!serverSetup) unawaited(widget.controller.loadAuthOptions());
   }
 
   @override
@@ -78,6 +86,39 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
       node.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _showForgotPassword() async {
+    final strings = AppL10n.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final palette = neoRecallPaletteOf(context);
+    await showDialog<void>(
+      context: context,
+      builder: (context) => NeoForgotPasswordDialog(
+        initialAccount: _username.text.trim(),
+        title: strings.authResetTitle,
+        description: strings.authResetDescription,
+        accountLabel: strings.authResetAccountLabel,
+        emptyError: strings.authResetAccountMissing,
+        cancelLabel: strings.actionCancel,
+        submitLabel: strings.authResetSubmit,
+        onSubmit: (account) async {
+          final sent = await widget.controller.requestPasswordReset(account);
+          // A failure closes nothing; say why above the open dialog's barrier.
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                sent ? strings.authResetSent : widget.controller.error ?? '',
+              ),
+            ),
+          );
+          return sent;
+        },
+        errorBuilder: (message) => InlineMessage(message: message, error: true),
+        backgroundColor: palette.bgCard,
+        textColor: palette.textSecondary,
+      ),
+    );
   }
 
   Future<void> _signInWithSecurityKey() async {
@@ -129,6 +170,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
           serverSetup = false;
           registerMode = true;
           widget.controller.openProvidersAfterSignIn();
+          unawaited(widget.controller.loadAuthOptions());
         }),
       );
     }
@@ -243,7 +285,19 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                           usernameOrEmailLabel: strings.authUsernameLabel,
                           emailLabel: strings.authEmailLabel,
                           passwordLabel: strings.authPasswordLabel,
-                          confirmPasswordLabel: strings.authConfirmPasswordLabel,
+                          confirmPasswordLabel:
+                              strings.authConfirmPasswordLabel,
+                          forgotPassword: controller.passwordResetAvailable
+                              ? Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: controller.loading
+                                        ? null
+                                        : _showForgotPassword,
+                                    child: Text(strings.authForgotPassword),
+                                  ),
+                                )
+                              : null,
                           passwordToggle: IconButton(
                             onPressed: () => setState(
                               () => _obscurePassword = !_obscurePassword,
@@ -289,20 +343,23 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                   alignment: WrapAlignment.spaceBetween,
                   runSpacing: 4,
                   children: <Widget>[
-                    TextButton(
-                      onPressed: awaitingTwoFactor
-                          ? widget.controller.cancelTwoFactor
-                          : () => setState(() {
-                              registerMode = !registerMode;
-                            }),
-                      child: Text(
-                        awaitingTwoFactor
-                            ? strings.authSwitchToSignIn
-                            : registerMode
-                            ? strings.authSwitchToSignIn
-                            : strings.authSwitchToRegister,
+                    if (awaitingTwoFactor ||
+                        registerMode ||
+                        controller.registrationOpen)
+                      TextButton(
+                        onPressed: awaitingTwoFactor
+                            ? widget.controller.cancelTwoFactor
+                            : () => setState(() {
+                                registerMode = !registerMode;
+                              }),
+                        child: Text(
+                          awaitingTwoFactor
+                              ? strings.authSwitchToSignIn
+                              : registerMode
+                              ? strings.authSwitchToSignIn
+                              : strings.authSwitchToRegister,
+                        ),
                       ),
-                    ),
                     if (_canConfigureServer)
                       TextButton(
                         onPressed: () => setState(() => serverSetup = true),
@@ -310,6 +367,12 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
                       ),
                   ],
                 ),
+                if (!registerMode &&
+                    !awaitingTwoFactor &&
+                    qrSignInSupported) ...<Widget>[
+                  const SizedBox(height: 12),
+                  QrSignInPanel(controller: controller),
+                ],
               ],
             ),
     );
@@ -440,7 +503,10 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
         if (!controller.requiresBackendUrlSetup) ...<Widget>[
           const SizedBox(height: 8),
           TextButton(
-            onPressed: () => setState(() => serverSetup = false),
+            onPressed: () {
+              setState(() => serverSetup = false);
+              unawaited(widget.controller.loadAuthOptions());
+            },
             child: Text(strings.authBackToSignIn),
           ),
         ],
@@ -456,6 +522,7 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     }
     if (mounted && widget.controller.initializationError == null) {
       setState(() => serverSetup = false);
+      unawaited(widget.controller.loadAuthOptions());
     }
   }
 }

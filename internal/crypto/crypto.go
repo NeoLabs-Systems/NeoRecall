@@ -11,7 +11,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -43,19 +42,10 @@ var (
 )
 
 // RandomToken returns n random bytes encoded as unpadded base64url.
-func RandomToken(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
+func RandomToken(n int) (string, error) { return passhash.RandomToken(n) }
 
 // SHA256Hex returns the lowercase hexadecimal SHA-256 digest of s.
-func SHA256Hex(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
+func SHA256Hex(s string) string { return passhash.DigestToken(s) }
 
 // SHA256File hashes path in streaming blocks without buffering the whole file.
 func SHA256File(path string) (string, error) {
@@ -71,13 +61,8 @@ func SHA256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// TimingSafeStringEqual compares two strings in constant time when lengths match.
-func TimingSafeStringEqual(left, right string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
-}
+// TimingSafeStringEqual compares two strings in constant time.
+func TimingSafeStringEqual(left, right string) bool { return passhash.Equal(left, right) }
 
 // HashPassword hashes password with bcrypt cost 12.
 func HashPassword(password string) (string, error) {

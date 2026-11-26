@@ -127,7 +127,7 @@ func TestCLIAccountAdminBackupRestoreResetPasswordAndVerifyNoAudio(t *testing.T)
 	t.Setenv("NEORECALL_REGISTRATION_ENABLED", "true")
 
 	// 1. Create admin account via CLI.
-	if err := manager.Run(ctx, []string{"account", "create", "--username", "cliadmin", "--password", "StrongPassword!1", "--admin"}, nil); err != nil {
+	if err := manager.Run(ctx, []string{"account", "create", "--username", "cliadmin", "--password", "Orchid-Tram-58-Lagoon", "--admin"}, nil); err != nil {
 		t.Fatalf("account create failed: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestCLIAccountAdminBackupRestoreResetPasswordAndVerifyNoAudio(t *testing.T)
 	if err := manager.Run(ctx, []string{"verify-no-audio"}, nil); err != nil {
 		t.Fatalf("verify-no-audio failed: %v", err)
 	}
-	if err := manager.Run(ctx, []string{"reset-password", "cliadmin", "UpdatedPassword!99"}, nil); err != nil {
+	if err := manager.Run(ctx, []string{"reset-password", "cliadmin", "Copper-Vane-73-Meadow"}, nil); err != nil {
 		t.Fatalf("reset-password failed: %v", err)
 	}
 

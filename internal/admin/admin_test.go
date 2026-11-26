@@ -55,7 +55,7 @@ func TestAdminSourcesStatusAndUpdates(t *testing.T) {
 	authSvc := &auth.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn}
 	authn := &auth.Authenticator{Service: authSvc, Log: log}
 
-	regUser, sessTok, err := authSvc.Register(ctx, "boss", nil, "StrongPassword!1", auth.RequestContext{IPAddress: "127.0.0.1"})
+	regUser, sessTok, err := authSvc.Register(ctx, "boss", nil, "Orchid-Tram-58-Lagoon", auth.RequestContext{IPAddress: "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}

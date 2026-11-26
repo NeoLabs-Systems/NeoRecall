@@ -103,7 +103,7 @@ func newTestStack(t *testing.T, maxUploadBytes int64) *testStack {
 func registerUserAndDevice(t *testing.T, baseURL string) (token, userID, deviceID string) {
 	t.Helper()
 	res, err := http.Post(baseURL+"/api/v1/auth/register", "application/json",
-		strings.NewReader(`{"username":"ingester","email":"ing@example.com","password":"very-long-password-123"}`))
+		strings.NewReader(`{"username":"ingester","email":"ing@example.com","password":"Orchid-Tram-58-Lagoon"}`))
 	if err != nil || res.StatusCode != 201 {
 		t.Fatalf("register failed: %v %v", err, res)
 	}

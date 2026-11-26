@@ -1809,16 +1809,6 @@
   "installChannelRecommended": "Recommended",
   "installChannelBeta": "Beta",
   "installChannelBetaDescription": "New features first, with the rough edges that come with them.",
-  "installDirectoryLabel": "Install directory",
-  "installMissingRequirements": "Install {items} on this computer first, then check again.",
-  "@installMissingRequirements": {
-    "placeholders": {
-      "items": {
-        "type": "String"
-      }
-    }
-  },
-  "installCheckAgain": "Check again",
   "installStart": "Install the {channel} channel",
   "@installStart": {
     "placeholders": {
@@ -1851,14 +1841,6 @@
   "@installVersionSuffix": {
     "placeholders": {
       "version": {
-        "type": "String"
-      }
-    }
-  },
-  "installCliNotLinked": "The neorecall terminal command was not linked. NeoRecall runs anyway; run \"npm link\" in {directory} if you want the command.",
-  "@installCliNotLinked": {
-    "placeholders": {
-      "directory": {
         "type": "String"
       }
     }
@@ -2808,5 +2790,41 @@
       }
     }
   },
-  "neoRouterSignInTimedOut": "NeoRouter was not approved in time. Start again."
+  "neoRouterSignInTimedOut": "NeoRouter was not approved in time. Start again.",
+  "authForgotPassword": "Forgot password?",
+  "authResetTitle": "Reset password",
+  "authResetDescription": "Enter your username or account email. A reset link is sent to the email on the account.",
+  "authResetAccountLabel": "Username or email",
+  "authResetAccountMissing": "Enter your username or email.",
+  "authResetSubmit": "Send link",
+  "authResetSent": "If that account has an email address, a reset link is on its way.",
+  "qrSignInHint": "Or scan this code with NeoRecall on a signed-in phone: Settings, Security.",
+  "qrSignInWaiting": "Approve the sign-in on {device}.",
+  "@qrSignInWaiting": {"placeholders": {"device": {"type": "String"}}},
+  "qrSignInNewCode": "New code",
+  "qrSignInDeclined": "The sign-in was declined on the phone.",
+  "qrSignInUnavailable": "The server sent no usable sign-in code.",
+  "qrApproveEyebrow": "QR SIGN-IN",
+  "qrApproveCardTitle": "Sign in another device",
+  "qrApproveCardDescription": "Scan the QR code on the sign-in screen of a computer or browser to sign it in to your account.",
+  "qrApproveScanAction": "Scan QR code",
+  "qrApproveDialogTitle": "Approve this sign-in?",
+  "qrApproveRequestedAt": "Requested at {time}",
+  "@qrApproveRequestedAt": {"placeholders": {"time": {"type": "String"}}},
+  "qrApproveWarning": "This device gets full access to your account. Approve only a code you opened yourself.",
+  "qrApproveAction": "Approve",
+  "qrApproveDecline": "Decline",
+  "qrApproveDone": "The other device is signing in.",
+  "qrScanTitle": "Scan QR code",
+  "qrScanPrimeTitle": "Camera access",
+  "qrScanPrimeBody": "NeoRecall uses the camera only to read the sign-in code. Nothing is recorded.",
+  "qrScanPrimeAllow": "Open camera",
+  "qrScanHint": "Point the camera at the code on the sign-in screen.",
+  "qrScanWrongCode": "That is not a NeoRecall sign-in code.",
+  "qrScanDeniedTitle": "Camera access is off",
+  "qrScanDeniedBodyIos": "Allow camera access for NeoRecall in Settings.",
+  "qrScanDeniedBodyAndroid": "Allow camera access in Android settings: Apps, NeoRecall, Permissions.",
+  "qrScanOpenSettings": "Open Settings",
+  "qrScanFailedTitle": "The camera could not start",
+  "qrScanFailedBody": "Close other apps that use the camera and try again."
 }

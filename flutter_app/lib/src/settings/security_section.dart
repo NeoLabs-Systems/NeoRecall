@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
+import '../auth/qr_scanner_page.dart';
 import 'destructive_confirm_dialog.dart';
+import 'qr_approval_card.dart';
 import 'settings_section_list.dart';
 import '../../l10n/gen/app_l10n.dart';
 
@@ -125,6 +127,11 @@ class _SecuritySectionState extends State<SecuritySection> {
           eyebrow: strings.securityKeysEyebrow,
           child: _securityKeysCard(palette, ctrl),
         ),
+        if (qrScannerSupported)
+          SectionCard(
+            eyebrow: strings.qrApproveEyebrow,
+            child: QrApprovalCard(controller: ctrl),
+          ),
         SectionCard(
           eyebrow: strings.securityExportEyebrow,
           child: _exportCard(palette, ctrl),
@@ -239,7 +246,7 @@ class _SecuritySectionState extends State<SecuritySection> {
             icon: Icon(Icons.more_horiz_rounded, color: palette.textSecondary),
             onSelected: (action) => action == 'rename'
                 ? _renameSecurityKey(ctrl, key)
-                : ctrl.removeSecurityKey(key['id'] as String),
+                : ctrl.removeSecurityKey(key['id'] as int),
             itemBuilder: (context) => <PopupMenuEntry<String>>[
               PopupMenuItem<String>(
                 value: 'rename',
@@ -416,7 +423,7 @@ class _SecuritySectionState extends State<SecuritySection> {
       AppL10n.of(context).securityRenameKeyMessage('${key['label']}'),
     );
     if (label == null || label.trim().isEmpty) return;
-    await ctrl.renameSecurityKey(key['id'] as String, label.trim());
+    await ctrl.renameSecurityKey(key['id'] as int, label.trim());
     if (ctrl.error != null && mounted) {
       ScaffoldMessenger.of(
         context,

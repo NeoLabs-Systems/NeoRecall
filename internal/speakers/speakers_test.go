@@ -89,7 +89,7 @@ func TestResolveConversationMergesAndVoiceprintSealing(t *testing.T) {
 
 	// Register user.
 	res, err := http.Post(srv.URL+"/api/v1/auth/register", "application/json",
-		strings.NewReader(`{"username":"spkuser","email":"spk@example.com","password":"very-long-password-123"}`))
+		strings.NewReader(`{"username":"spkuser","email":"spk@example.com","password":"Orchid-Tram-58-Lagoon"}`))
 	if err != nil || res.StatusCode != 201 {
 		t.Fatalf("register failed: %v", err)
 	}

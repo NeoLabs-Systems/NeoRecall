@@ -21,6 +21,30 @@ NeoRecall reads `~/.neorecall/.env` and process environment variables. See the c
 | `NEORECALL_REQUIRE_VECTOR` | Fail without the tested sqlite-vec extension | production: `true` |
 | `NEORECALL_PLAUD_CLIENT_ID` / `NEORECALL_PLAUD_CLIENT_SECRET` | Partner credentials so iOS and Android can bind Plaud Note Pro / NotePin S over BLE | unset (pairing hidden) |
 
+## Accounts and sign-in
+
+Passwords follow the NeoLabs policy: at least 8 characters and strong enough that
+common words, sequences and the account's own name are refused. Five wrong
+passwords or codes in 15 minutes slow further confirmations down; ten lock them
+until the window passes.
+
+The sign-in screen of the desktop and web apps shows a QR code. A phone that is
+already signed in scans it under **Settings › Security** and approves it. Security
+keys and passkeys can be added there too.
+
+**Forgot password** appears once account email is configured:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `NEORECALL_EMAIL_SMTP_HOST` | SMTP server | |
+| `NEORECALL_EMAIL_FROM` | Sender address | |
+| `NEORECALL_EMAIL_SMTP_PORT` | SMTP port | `587` |
+| `NEORECALL_EMAIL_SMTP_USER` / `_SMTP_PASS` | SMTP sign-in | |
+| `NEORECALL_EMAIL_PUBLIC_URL` | Address used in the links | `NEORECALL_PUBLIC_URL` |
+
+Set a public URL when the server is reachable under another name than the request
+shows. `neorecall reset-password <user>` works without email.
+
 ## External inference providers
 
 By default NeoRecall does not install or run a transcription or language model: both are external services, and provider settings can come from `.env` or from encrypted live overrides on the app's **Admin › Providers** page. Keys saved there are never returned to the app, and **Use the server’s own configuration** restores `.env` as the source of truth.
@@ -89,7 +113,7 @@ Consolidating a whole occasion at once handles the ordinary case, but it can onl
 
 `NEORECALL_MEMORY_DEDUPE_ENABLED` defaults to `true`. Each pass reads the cards written since the last pass, finds those close enough in time and alike enough in wording to be worth a question, and asks the model whether they describe the same occasion. Cards it says are the same are folded into one, keeping every highlight, topic, entity and transcript line; a card whose wording you edited yourself keeps your words and is not rewritten.
 
-`NEORECALL_MEMORY_DEDUPE_WINDOW_MS` defaults to six hours and is the guard that matters most: two lessons of one course or two calls about one project read almost identically, and only time separates them, so nothing outside this window is ever considered. `NEORECALL_MEMORY_DEDUPE_SIMILARITY_THRESHOLD` defaults to `0.88` and decides which pairs inside it are worth asking about — nothing is merged on this number alone. Multilingual-e5 similarities sit high even between unrelated text, so set it against your own recordings rather than by intuition: `node scripts/memory_dedupe_report.js` prints the pairs and where their scores fall without asking the model anything or changing a card. `NEORECALL_MEMORY_DEDUPE_MAX_PAIRS_PER_RUN` (default `20`) and `NEORECALL_MEMORY_DEDUPE_NEIGHBOURS` (default `5`) bound what one sweep can cost.
+`NEORECALL_MEMORY_DEDUPE_WINDOW_MS` defaults to six hours and is the guard that matters most: two lessons of one course or two calls about one project read almost identically, and only time separates them, so nothing outside this window is ever considered. `NEORECALL_MEMORY_DEDUPE_SIMILARITY_THRESHOLD` defaults to `0.88` and decides which pairs inside it are worth asking about — nothing is merged on this number alone. Multilingual-e5 similarities sit high even between unrelated text, so set it against your own recordings rather than by intuition. `NEORECALL_MEMORY_DEDUPE_MAX_PAIRS_PER_RUN` (default `20`) and `NEORECALL_MEMORY_DEDUPE_NEIGHBOURS` (default `5`) bound what one sweep can cost.
 
 `NEORECALL_MEMORY_MERGE_MAX_ITEMS` defaults to `100` and bounds a manual merge request. The server advertises the effective value to clients, combines the selected evidence immediately, and leaves the optional title and summary rewrite to a background job.
 
@@ -465,8 +489,8 @@ withheld for any chunk that turned out to carry more than one voice: the stream
 still belongs to the person it names, so their label stands, but a second person
 audible behind an open microphone must not be learned as them.
 
-`npm run speakers:report` shows how many profiles were identified this way rather
-than by voice. A high share is the cheapest accuracy an installation can have.
+A high share of profiles identified this way rather
+than by voice is the cheapest accuracy an installation can have.
 
 ### Looking again once the conversation ends
 
@@ -531,12 +555,8 @@ a voice enrolled, deleted, merged, renamed or re-enabled, one of the thresholds
 above moved, a new version of the pass shipped, or more speech landing in the
 conversation itself.
 
-`npm run speakers:report` prints what this actually looks like on an
-installation — how many profiles are duplicates of each other, how much speech
-carries no durable identity, and where the similarity scores really fall.
 Thresholds here were chosen against a two-speaker measurement, which is a guess
-about anybody else's recordings; run the report before changing one and again
-afterwards.
+about anybody else's recordings; compare results before and after changing one.
 
 Consolidation then identifies people from the transcript — a self-introduction,
 or another speaker naming them — and names that speaker's voiceprint from the

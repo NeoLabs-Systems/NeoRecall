@@ -561,3 +561,13 @@ func mustLocalRelease(t *testing.T, api *httptest.Server, dist, version string) 
 	}
 	return githubRelease{TagName: "v" + version, Prerelease: true, Assets: assets}
 }
+
+func TestUpdateRefusesUnknownArgumentsBeforeDoingAnything(t *testing.T) {
+	// A zero Manager would panic if the command got past argument checking.
+	for _, args := range [][]string{{"--dry-run"}, {"--chek"}, {"nightly"}, {"beta", "stable"}} {
+		err := (&Manager{}).cmdUpdate(context.Background(), args)
+		if err == nil || !strings.HasPrefix(err.Error(), "usage:") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+}

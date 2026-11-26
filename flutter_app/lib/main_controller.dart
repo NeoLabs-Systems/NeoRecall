@@ -5,12 +5,16 @@ import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoAuthClient, NeoQrPolling, QrChallengeAction;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import 'l10n/gen/app_l10n.dart';
 import 'src/api_client.dart';
+import 'src/auth/auth_transport.dart';
+import 'src/auth/qr_login.dart';
 import 'src/auth/webauthn_client.dart';
 import 'src/background/background_capture_service.dart';
 import 'src/capture/capture_defaults.dart';
@@ -60,6 +64,7 @@ import 'src/watch/watch_digest.dart';
 import 'src/watch/watch_digest_publisher.dart';
 
 part 'src/controller/auth_controller.dart';
+part 'src/controller/sign_in_controller.dart';
 part 'src/controller/ask_controller.dart';
 part 'src/controller/diagnostics_controller.dart';
 part 'src/controller/device_sync_controller.dart';
@@ -115,6 +120,7 @@ bool canRestoreSessionForBackend({
 class NeoRecallController extends ChangeNotifier
     with
         AuthController,
+        SignInController,
         AskController,
         DeviceSyncController,
         DiagnosticsController,
@@ -1560,6 +1566,10 @@ class NeoRecallController extends ChangeNotifier
       }
       _preferences ??= await SharedPreferences.getInstance();
       await _preferences!.setString('backendUrl', normalized);
+      // A code and the sign-in options belong to the server that issued them.
+      _resetQrLogin();
+      passwordResetAvailable = false;
+      registrationOpen = true;
       return true;
     } on ApiException catch (exception) {
       api.baseUrl = previous;
@@ -1579,6 +1589,7 @@ class NeoRecallController extends ChangeNotifier
   Future<void> _acceptSession(Map payload) async {
     final session = payload['session'] as Map;
     final user = payload['user'] as Map;
+    _resetQrLogin();
     api.token = session['token'] as String;
     accountId = user['id'] as String;
     username = user['username'] as String;
@@ -3897,6 +3908,7 @@ class NeoRecallController extends ChangeNotifier
     sync.close();
     disposeRecordingContext();
     disposeCloud();
+    disposeSignIn();
     recorder.dispose();
     if (recorder is! MobileRecallRecorder) {
       unawaited(_disposeExternalDeviceRuntime());

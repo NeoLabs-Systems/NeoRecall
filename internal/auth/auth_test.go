@@ -56,11 +56,7 @@ func setupTestStack(t *testing.T, adminUsers ...string) (*http.ServeMux, *dbx.DB
 	keyFn := func() ([]byte, error) {
 		return crypto.MasterKey(cfg.Paths.SecretKey)
 	}
-	svc := &auth.Service{
-		DB:        db,
-		Cfg:       func() config.Config { return cfg },
-		MasterKey: keyFn,
-	}
+	svc := auth.NewService(db, func() config.Config { return cfg }, keyFn)
 	oauthSvc := &oauth.Service{
 		DB:        db,
 		Auth:      svc,
@@ -86,7 +82,7 @@ func TestAuthAndOAuthPKCEFlow(t *testing.T) {
 
 	// 1. Reserved admin name cannot be registered.
 	res, _ := http.Post(srv.URL+"/api/v1/auth/register", "application/json",
-		strings.NewReader(`{"username":"reservedadmin","password":"very-long-password-123"}`))
+		strings.NewReader(`{"username":"reservedadmin","password":"Orchid-Tram-58-Lagoon"}`))
 	if res.StatusCode != 409 {
 		t.Fatalf("expected 409 for reserved admin username, got %d", res.StatusCode)
 	}
@@ -94,7 +90,7 @@ func TestAuthAndOAuthPKCEFlow(t *testing.T) {
 
 	// 2. First registered user becomes admin.
 	res, err := http.Post(srv.URL+"/api/v1/auth/register", "application/json",
-		strings.NewReader(`{"username":"alice","email":"Alice@Example.com","password":"very-long-password-123"}`))
+		strings.NewReader(`{"username":"alice","email":"Alice@Example.com","password":"Orchid-Tram-58-Lagoon"}`))
 	if err != nil || res.StatusCode != 201 {
 		t.Fatalf("register failed: status=%v err=%v", res.StatusCode, err)
 	}
@@ -144,7 +140,7 @@ func TestAuthAndOAuthPKCEFlow(t *testing.T) {
 	}
 
 	res, _ = http.Post(srv.URL+"/api/v1/auth/login", "application/json",
-		strings.NewReader(`{"account":"alice","password":"very-long-password-123"}`))
+		strings.NewReader(`{"account":"alice","password":"Orchid-Tram-58-Lagoon"}`))
 	if res.StatusCode != 401 {
 		t.Fatalf("expected 401 TWO_FACTOR_REQUIRED, got %d", res.StatusCode)
 	}
@@ -169,7 +165,7 @@ func TestAuthAndOAuthPKCEFlow(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	form := url.Values{"account": {"alice"}, "password": {"very-long-password-123"}, "two_factor_code": {recCodes[0]}, "continue": {"/oauth/authorize"}}
+	form := url.Values{"account": {"alice"}, "password": {"Orchid-Tram-58-Lagoon"}, "two_factor_code": {recCodes[0]}, "continue": {"/oauth/authorize"}}
 	res, _ = jarClient.PostForm(srv.URL+"/oauth/sign-in", form)
 	if res.StatusCode != 302 {
 		b, _ := io.ReadAll(res.Body)
