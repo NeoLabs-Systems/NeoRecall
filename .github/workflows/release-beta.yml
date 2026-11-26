@@ -15,11 +15,30 @@ permissions:
 
 concurrency:
   group: release-beta-${{ github.ref }}
-  cancel-in-progress: ${{ github.actor != 'github-actions[bot]' }}
+  # A push waits for the running release instead of cancelling it half way. A
+  # release that has not tagged yet stops itself when beta has moved on, and the
+  # waiting run releases the newer commit.
+  cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Check signing key
+    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+
+      - name: Check the update signing key
+        uses: ./.github/actions/check-signing-key
+        with:
+          private_key: ${{ secrets.NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY }}
+
   ci:
     name: CI
+    needs: preflight
     if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
     uses: ./.github/workflows/ci.yml
     secrets: inherit
@@ -145,6 +164,12 @@ jobs:
           GOWORK: 'off'
         run: go run ./cmd/neorecall-release release-download --tag "$NEW_VERSION"
 
+      - name: Discard the draft of a cancelled run
+        if: cancelled()
+        uses: ./.github/actions/discard-draft-release
+        with:
+          release_tag: ${{ steps.beta_version.outputs.release_tag }}
+
   build-cli:
     name: Build CLI & web bundle
     needs: release
@@ -176,7 +201,9 @@ jobs:
 
   publish-release-assets:
     name: Publish Release Assets
-    if: always() && needs.release.result == 'success'
+    # Runs when a build failed, since the publisher itself refuses an incomplete
+    # runtime set, but never after a cancel.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     needs:
       - release
       - build-cli
@@ -187,6 +214,26 @@ jobs:
       release_sha: ${{ needs.release.outputs.release_sha }}
       prerelease: true
     secrets: inherit
+
+  discard-draft-release:
+    name: Discard the draft of a cancelled run
+    if: ${{ cancelled() && needs.release.outputs.release_tag != '' }}
+    needs:
+      - release
+      - build-cli
+      - build-apps
+      - publish-release-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.release_sha || github.sha }}
+
+      - name: Discard the draft release
+        uses: ./.github/actions/discard-draft-release
+        with:
+          release_tag: ${{ needs.release.outputs.release_tag }}
 
   notify-discord:
     name: Notify Discord

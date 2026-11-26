@@ -1,0 +1,41 @@
+name: Check update signing key
+description: >
+  Fails a release before anything is committed, tagged or published when its
+  runtime archives could not be signed: the secret is missing, the public key is
+  missing, or the two are not a pair. Needs a checkout.
+
+inputs:
+  private_key:
+    description: The NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY secret
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check the signing key pair
+      shell: bash
+      env:
+        SIGNING_KEY: ${{ inputs.private_key }}
+      run: |
+        set -euo pipefail
+        public_file=internal/signing/public_key.txt
+        howto="Commit the public key to ${public_file} and store the matching private key as that secret."
+        if [[ -z "$SIGNING_KEY" ]]; then
+          echo "::error::The NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY secret is not set. ${howto}"
+          exit 1
+        fi
+        if [[ ! -s "$public_file" ]] || [[ -z "$(tr -d '[:space:]' < "$public_file")" ]]; then
+          echo "::error::${public_file} holds no public key. ${howto}"
+          exit 1
+        fi
+        # The last 32 bytes of the key, raw or DER encoded, are the Ed25519 key.
+        expected="$(tr -d '[:space:]' < "$public_file" | base64 -d | tail -c 32 | base64)"
+        if ! actual="$(printf '%s' "$SIGNING_KEY" | tr -d '[:space:]' | base64 -d \
+          | openssl pkey -inform DER -pubout -outform DER | tail -c 32 | base64)"; then
+          echo "::error::NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY is not a base64 PKCS#8 private key. ${howto}"
+          exit 1
+        fi
+        if [[ "$actual" != "$expected" ]]; then
+          echo "::error::NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY does not match ${public_file}. ${howto}"
+          exit 1
+        fi

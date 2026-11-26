@@ -21,8 +21,21 @@ permissions:
   id-token: write
 
 jobs:
+  preflight:
+    name: Check signing key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check the update signing key
+        uses: ./.github/actions/check-signing-key
+        with:
+          private_key: ${{ secrets.NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY }}
+
   ci:
     name: CI
+    needs: preflight
     uses: ./.github/workflows/ci.yml
     secrets: inherit
     with:
@@ -121,6 +134,12 @@ jobs:
           GOWORK: 'off'
         run: go run ./cmd/neorecall-release release-download --tag "$NEW_VERSION"
 
+      - name: Discard the draft of a cancelled run
+        if: cancelled()
+        uses: ./.github/actions/discard-draft-release
+        with:
+          release_tag: ${{ steps.bump.outputs.release_tag }}
+
   build-cli:
     name: Build CLI & web bundle
     needs: release
@@ -152,7 +171,9 @@ jobs:
 
   publish-release-assets:
     name: Publish Release Assets
-    if: always() && needs.release.result == 'success'
+    # Runs when a build failed, since the publisher itself refuses an incomplete
+    # runtime set, but never after a cancel.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     needs:
       - release
       - build-cli
@@ -163,6 +184,26 @@ jobs:
       release_sha: ${{ needs.release.outputs.release_sha }}
       prerelease: false
     secrets: inherit
+
+  discard-draft-release:
+    name: Discard the draft of a cancelled run
+    if: ${{ cancelled() && needs.release.outputs.release_tag != '' }}
+    needs:
+      - release
+      - build-cli
+      - build-apps
+      - publish-release-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.release_sha || github.sha }}
+
+      - name: Discard the draft release
+        uses: ./.github/actions/discard-draft-release
+        with:
+          release_tag: ${{ needs.release.outputs.release_tag }}
 
   notify-discord:
     name: Notify Discord

@@ -1,0 +1,25 @@
+name: Discard draft release
+description: >
+  Deletes a release that is still a draft, so a cancelled run leaves none behind.
+  Published releases and tags are never touched. Needs a checkout.
+
+inputs:
+  release_tag:
+    description: Tag of the draft release
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Delete the draft release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+      run: |
+        set -euo pipefail
+        draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)"
+        if [[ "$draft" == "true" ]]; then
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          echo "Deleted the draft release ${RELEASE_TAG}."
+        fi
