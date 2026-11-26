@@ -558,7 +558,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final palette = neoRecallPaletteOf(context);
     final strings = AppL10n.of(context);
     return _sectionList(<Widget>[
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionGeneral,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,7 +654,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final minimum = (current['chunkMinMs'] as int) / 1000;
     final maximum = (current['chunkMaxMs'] as int) / 1000;
     return _sectionList(<Widget>[
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionAlwaysOn,
         child: Column(
           children: <Widget>[
@@ -728,7 +728,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionRecording,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -780,7 +780,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionTranscription,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -845,7 +845,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionRecordingContext,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -970,7 +970,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final chosenHours = (chosen / hour).round().clamp(floorHours, 24);
 
     return _sectionList(<Widget>[
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionMemory,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1088,7 +1088,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         icon: Icons.auto_awesome_outlined,
         message: strings.settingsInstructionsIntro,
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionEverywhere,
         child: _instructionField(
           key: 'instructionsGlobal',
@@ -1098,7 +1098,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           helper: strings.settingsInstructionsGlobalHelper,
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionMemories,
         child: _instructionField(
           key: 'instructionsMemories',
@@ -1108,7 +1108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           helper: strings.settingsInstructionsMemoriesHelper,
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionSummaries,
         child: _instructionField(
           key: 'instructionsSummaries',
@@ -1118,7 +1118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           helper: strings.settingsInstructionsSummariesHelper,
         ),
       ),
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionAsk,
         child: _instructionField(
           key: 'instructionsAsk',
@@ -1143,7 +1143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // when unavailable these switches are shown off instead of left to flip.
     final available = current['speakerIdentityAvailable'] as bool? ?? true;
     return _sectionList(<Widget>[
-      SectionCard(
+      SettingsCard(
         eyebrow: strings.settingsSectionSpeakers,
         child: Column(
           children: <Widget>[

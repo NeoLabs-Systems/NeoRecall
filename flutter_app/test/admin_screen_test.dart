@@ -423,7 +423,7 @@ void main() {
                 .widget<AnimatedContainer>(
                   find
                       .ancestor(
-                        of: find.text('BACKUPS'),
+                        of: find.text('Every 24 hours'),
                         matching: find.byType(AnimatedContainer),
                       )
                       .first,

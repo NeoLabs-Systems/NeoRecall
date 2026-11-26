@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoUpdateBanner, NeoUpdateController;
 
 import 'main_controller.dart';
 import 'main_provider_setup.dart';
@@ -13,6 +16,7 @@ import 'src/admin/admin_neorouter_client.dart';
 import 'src/admin/admin_client.dart';
 import 'src/admin/admin_overview_section.dart';
 import 'src/admin/admin_update.dart';
+import 'src/admin/page_reload.dart';
 import 'src/admin/admin_processing_section.dart';
 import 'src/admin/admin_provider_client.dart';
 import 'src/admin/admin_users_section.dart';
@@ -239,7 +243,9 @@ class _AdminScreenState extends State<AdminScreen> {
 
   NeoRecallController get controller => widget.controller;
 
-  late final UpdateWatcher _updates = UpdateWatcher(controller.api);
+  late final NeoUpdateController _updates = adminUpdateController(
+    controller.api,
+  );
 
   @override
   void initState() {
@@ -299,7 +305,15 @@ class _AdminScreenState extends State<AdminScreen> {
                   title: strings.adminTitle,
                   description: strings.adminDescription,
                 ),
-                UpdateBanner(watcher: _updates),
+                NeoUpdateBanner(
+                  palette: neoRecallPaletteOf(context),
+                  controller: _updates,
+                  strings: adminUpdateStrings(
+                    strings,
+                    (time) => adminDate(context, time),
+                  ),
+                  onReload: kIsWeb ? reloadPage : null,
+                ),
                 _searchField(strings),
                 const SizedBox(height: 14),
                 if (searching)

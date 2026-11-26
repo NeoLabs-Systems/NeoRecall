@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart' show NeoSettingsGroup;
 
 import 'main_spacing.dart';
 import 'main_theme.dart';
@@ -631,6 +632,30 @@ class MetaPill extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A block of Settings or Admin: the shared heading over a card.
+class SettingsCard extends StatelessWidget {
+  const SettingsCard({
+    super.key,
+    required this.eyebrow,
+    required this.child,
+    this.trailing,
+  });
+  final String eyebrow;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => NeoSettingsGroup(
+    palette: neoRecallPaletteOf(context),
+    title: eyebrow,
+    trailing: trailing,
+    gap: AppSpacing.sm,
+    children: <Widget>[
+      Padding(padding: const EdgeInsets.all(AppSpacing.md + 2), child: child),
+    ],
+  );
 }
 
 class SectionCard extends StatelessWidget {

@@ -49,29 +49,20 @@ class AdminSearchTarget extends InheritedWidget {
       card != oldWidget.card;
 }
 
-/// A card on the Admin page. When a search result targets [id], the card
-/// scrolls into view once it exists and is outlined for a moment, so the eye
-/// lands on it. Both are the answer to the tap that opened it; nothing moves
-/// on its own afterwards.
-class AdminCard extends StatefulWidget {
-  const AdminCard({
-    super.key,
-    required this.id,
-    required this.eyebrow,
-    required this.child,
-    this.trailing,
-  });
+/// When a search result targets [id], the child scrolls into view once it
+/// exists and is outlined for a moment, so the eye lands on it. Both are the
+/// answer to the tap that opened it; nothing moves on its own afterwards.
+class AdminSearchOutline extends StatefulWidget {
+  const AdminSearchOutline({super.key, required this.id, required this.child});
 
   final String id;
-  final String eyebrow;
   final Widget child;
-  final Widget? trailing;
 
   @override
-  State<AdminCard> createState() => _AdminCardState();
+  State<AdminSearchOutline> createState() => _AdminSearchOutlineState();
 }
 
-class _AdminCardState extends State<AdminCard> {
+class _AdminSearchOutlineState extends State<AdminSearchOutline> {
   static const Duration _outlineFor = Duration(milliseconds: 1600);
 
   bool _handled = false;
@@ -116,13 +107,31 @@ class _AdminCardState extends State<AdminCard> {
           width: 2,
         ),
       ),
-      child: SectionCard(
-        eyebrow: widget.eyebrow,
-        trailing: widget.trailing,
-        child: widget.child,
-      ),
+      child: widget.child,
     );
   }
+}
+
+/// A card on the Admin page, reachable from search as [id].
+class AdminCard extends StatelessWidget {
+  const AdminCard({
+    super.key,
+    required this.id,
+    required this.eyebrow,
+    required this.child,
+    this.trailing,
+  });
+
+  final String id;
+  final String eyebrow;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => AdminSearchOutline(
+    id: id,
+    child: SettingsCard(eyebrow: eyebrow, trailing: trailing, child: child),
+  );
 }
 
 /// Loads one area's data and shows it, a spinner, or what went wrong with a

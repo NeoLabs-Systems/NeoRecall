@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart'
+    show NeoUpdateController, NeoUpdateSettings;
 
 import '../../main_controller.dart';
 import '../../main_spacing.dart';
@@ -19,7 +21,7 @@ class AdminOverviewSection extends StatelessWidget {
 
   final NeoRecallController controller;
   final AdminClient client;
-  final UpdateWatcher updates;
+  final NeoUpdateController updates;
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +33,17 @@ class AdminOverviewSection extends StatelessWidget {
         children: <Widget>[
           _status(context, stats, reload),
           const SizedBox(height: AppSpacing.sm + 2),
-          AdminUpdatesCard(watcher: updates),
+          AdminSearchOutline(
+            id: 'overview.updates',
+            child: NeoUpdateSettings(
+              palette: neoRecallPaletteOf(context),
+              controller: updates,
+              strings: adminUpdateStrings(
+                AppL10n.of(context),
+                (time) => adminDate(context, time),
+              ),
+            ),
+          ),
           _workers(context, stats),
         ],
       ),

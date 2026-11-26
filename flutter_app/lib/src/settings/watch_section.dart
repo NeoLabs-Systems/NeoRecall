@@ -85,7 +85,7 @@ class _WatchSectionState extends State<WatchSection> {
     return SettingsSectionList(
       controller: widget.controller,
       children: <Widget>[
-        SectionCard(
+        SettingsCard(
           eyebrow: 'Wear OS',
           trailing: _refreshing
               ? const SizedBox(
@@ -232,7 +232,7 @@ class _InstallGuide extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final strings = AppL10n.of(context);
-    return SectionCard(
+    return SettingsCard(
       eyebrow: strings.watchInstallEyebrow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -107,7 +107,7 @@ class _UsageSectionState extends State<UsageSection> {
     return SettingsSectionList(
       controller: widget.controller,
       children: <Widget>[
-        SectionCard(
+        SettingsCard(
           eyebrow: strings.usageSectionEyebrow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

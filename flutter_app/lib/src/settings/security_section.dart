@@ -47,7 +47,7 @@ class _SecuritySectionState extends State<SecuritySection> {
     return SettingsSectionList(
       controller: widget.controller,
       children: <Widget>[
-        SectionCard(
+        SettingsCard(
           eyebrow: strings.securitySectionEyebrow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -123,22 +123,22 @@ class _SecuritySectionState extends State<SecuritySection> {
             ],
           ),
         ),
-        SectionCard(
+        SettingsCard(
           eyebrow: strings.securityKeysEyebrow,
           child: _securityKeysCard(palette, ctrl),
         ),
         if (qrScannerSupported)
-          SectionCard(
+          SettingsCard(
             eyebrow: strings.qrApproveEyebrow,
             child: QrApprovalCard(controller: ctrl),
           ),
-        SectionCard(
+        SettingsCard(
           eyebrow: strings.securityExportEyebrow,
           child: _exportCard(palette, ctrl),
         ),
         // The only sign-out on a phone; on desktop it replaces the icon that
         // sat next to the Settings button in the rail.
-        SectionCard(
+        SettingsCard(
           eyebrow: strings.shellSignOut,
           child: Row(
             children: <Widget>[
@@ -362,7 +362,7 @@ class _SecuritySectionState extends State<SecuritySection> {
   Widget _dangerZone(NeoRecallController ctrl) {
     final palette = neoRecallPaletteOf(context);
     final strings = AppL10n.of(context);
-    return SectionCard(
+    return SettingsCard(
       eyebrow: strings.securityDangerZone,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

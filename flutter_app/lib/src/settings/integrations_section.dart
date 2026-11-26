@@ -33,7 +33,7 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
       controller: ctrl,
       children: <Widget>[
         CloudBackupSectionCard(controller: ctrl),
-        SectionCard(
+        SettingsCard(
           eyebrow: AppL10n.of(context).integrationsMcpEyebrow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,7 +80,7 @@ class _IntegrationsSectionState extends State<IntegrationsSection> {
             ],
           ),
         ),
-        SectionCard(
+        SettingsCard(
           eyebrow: AppL10n.of(context).integrationsConnectedEyebrow,
           child: _connectedApps(palette, ctrl),
         ),

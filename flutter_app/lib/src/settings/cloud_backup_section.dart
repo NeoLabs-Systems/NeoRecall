@@ -42,7 +42,7 @@ class _CloudBackupSectionCardState extends State<CloudBackupSectionCard> {
   Widget build(BuildContext context) {
     final palette = neoRecallPaletteOf(context);
     final l10n = AppL10n.of(context);
-    return SectionCard(
+    return SettingsCard(
       eyebrow: l10n.cloudEyebrow,
       child: AnimatedBuilder(
         animation: ctrl,
