@@ -1,16 +1,17 @@
 package context
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
+	"github.com/google/uuid"
 )
 
 type Routes struct {
@@ -20,31 +21,29 @@ type Routes struct {
 }
 
 func (rt *Routes) Mount(mux *http.ServeMux) {
-	reqAuth := rt.Auth.RequireAuth
+	route := func(pattern, scope string, h http.HandlerFunc) {
+		mux.Handle(pattern, rt.Auth.RequireAuth(rt.Auth.RequireScope(scope, h)))
+	}
+	// The same item operations hang off a recording session and off a memory.
+	for _, target := range []struct {
+		base, read, write string
+		list, create      http.HandlerFunc
+	}{
+		{"/api/v1/ingest/sessions/{sessionId}/context", "recordings:read", "ingest:write", rt.handleSessionList, rt.handleSessionCreate},
+		{"/api/v1/memories/{memoryId}/context", "memories:read", "memories:write", rt.handleMemoryList, rt.handleMemoryCreate},
+	} {
+		route("GET "+target.base, target.read, target.list)
+		route("PUT "+target.base+"/{itemId}", target.write, target.create)
+		route("PATCH "+target.base+"/{itemId}", target.write, rt.handleUpdate)
+		route("DELETE "+target.base+"/{itemId}", target.write, rt.handleDelete)
+		route("POST "+target.base+"/{itemId}/retry", target.write, rt.handleRetry)
+		route("GET "+target.base+"/{itemId}/original", target.read, rt.handleOriginal)
+	}
+	route("POST /api/v1/memories/{memoryId}/context/rewrite", "memories:write", rt.handleMemoryRewrite)
+}
 
-	// Session-scoped context endpoints (/api/v1/ingest/sessions/:sessionId/context)
-	sessRead := reqAuth(rt.Auth.RequireScope("recordings:read", http.HandlerFunc(rt.handleSessionList)))
-	sessWrite := reqAuth(rt.Auth.RequireScope("ingest:write", http.HandlerFunc(rt.handleSessionCreate)))
-	sessDel := reqAuth(rt.Auth.RequireScope("ingest:write", http.HandlerFunc(rt.handleDelete)))
-	sessDL := reqAuth(rt.Auth.RequireScope("recordings:read", http.HandlerFunc(rt.handleDownload)))
-
-	mux.Handle("GET /api/v1/ingest/sessions/{sessionId}/context", sessRead)
-	mux.Handle("POST /api/v1/ingest/sessions/{sessionId}/context", sessWrite)
-	mux.Handle("DELETE /api/v1/ingest/sessions/{sessionId}/context/{itemId}", sessDel)
-	mux.Handle("GET /api/v1/ingest/sessions/{sessionId}/context/{itemId}/download", sessDL)
-
-	// Memory-scoped context endpoints (/api/v1/memories/:memoryId/context)
-	memRead := reqAuth(rt.Auth.RequireScope("memories:read", http.HandlerFunc(rt.handleMemoryList)))
-	memWrite := reqAuth(rt.Auth.RequireScope("memories:write", http.HandlerFunc(rt.handleMemoryCreate)))
-	memDel := reqAuth(rt.Auth.RequireScope("memories:write", http.HandlerFunc(rt.handleDelete)))
-	memDL := reqAuth(rt.Auth.RequireScope("memories:read", http.HandlerFunc(rt.handleDownload)))
-	memRewrite := reqAuth(rt.Auth.RequireScope("memories:write", http.HandlerFunc(rt.handleMemoryRewrite)))
-
-	mux.Handle("GET /api/v1/memories/{memoryId}/context", memRead)
-	mux.Handle("POST /api/v1/memories/{memoryId}/context", memWrite)
-	mux.Handle("DELETE /api/v1/memories/{memoryId}/context/{itemId}", memDel)
-	mux.Handle("GET /api/v1/memories/{memoryId}/context/{itemId}/download", memDL)
-	mux.Handle("POST /api/v1/memories/{memoryId}/context/rewrite", memRewrite)
+func targetOf(r *http.Request) Target {
+	return Target{SessionID: r.PathValue("sessionId"), MemoryPublicID: r.PathValue("memoryId")}
 }
 
 func (rt *Routes) handleSessionList(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +67,10 @@ func (rt *Routes) handleMemoryList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Routes) parseCreateInput(w http.ResponseWriter, r *http.Request) (CreateInput, error) {
+	id := r.PathValue("itemId")
+	if _, err := uuid.Parse(id); err != nil || len(id) != 36 {
+		return CreateInput{}, httperr.New(http.StatusBadRequest, "INVALID_CONTEXT_ID", "Context id must be a UUID.")
+	}
 	maxBytes := rt.Svc.cfg().ContextMaxFileBytes + 64*1024
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
@@ -76,6 +79,7 @@ func (rt *Routes) parseCreateInput(w http.ResponseWriter, r *http.Request) (Crea
 			return CreateInput{}, httperr.New(http.StatusBadRequest, "VALIDATION_ERROR", "Malformed multipart context upload.")
 		}
 		in := CreateInput{
+			ID:       id,
 			Kind:     strings.TrimSpace(r.FormValue("kind")),
 			NoteText: r.FormValue("noteText"),
 		}
@@ -99,6 +103,9 @@ func (rt *Routes) parseCreateInput(w http.ResponseWriter, r *http.Request) (Crea
 				in.FileName = hdr.Filename
 				in.ContentType = hdr.Header.Get("Content-Type")
 			}
+			if declared := r.FormValue("contentType"); declared != "" && (in.ContentType == "" || in.ContentType == "application/octet-stream") {
+				in.ContentType = declared
+			}
 		}
 		return in, nil
 	}
@@ -112,6 +119,7 @@ func (rt *Routes) parseCreateInput(w http.ResponseWriter, r *http.Request) (Crea
 		return CreateInput{}, err
 	}
 	return CreateInput{
+		ID:               id,
 		Kind:             body.Kind,
 		NoteText:         body.NoteText,
 		CapturedOffsetMs: body.CapturedOffsetMs,
@@ -149,18 +157,45 @@ func (rt *Routes) handleMemoryCreate(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"item": item, "rewriteQueued": queued})
 }
 
-func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request) {
+func (rt *Routes) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	if err := rt.Svc.DeleteItem(r.Context(), a.UserID, r.PathValue("itemId")); err != nil {
+	var body struct {
+		NoteText string `json:"noteText"`
+	}
+	if err := httperr.DecodeJSON(r, &body); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	item, err := rt.Svc.UpdateNote(r.Context(), a.UserID, r.PathValue("itemId"), targetOf(r), body.NoteText)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"item": item})
 }
 
-func (rt *Routes) handleDownload(w http.ResponseWriter, r *http.Request) {
+func (rt *Routes) handleRetry(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	it, plain, err := rt.Svc.ReadOriginal(r.Context(), a.UserID, r.PathValue("itemId"))
+	item, err := rt.Svc.Retry(r.Context(), a.UserID, r.PathValue("itemId"), targetOf(r))
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"item": item})
+}
+
+func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	if err := rt.Svc.DeleteItem(r.Context(), a.UserID, r.PathValue("itemId"), targetOf(r)); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (rt *Routes) handleOriginal(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	it, plain, err := rt.Svc.ReadOriginal(r.Context(), a.UserID, r.PathValue("itemId"), targetOf(r))
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -171,11 +206,11 @@ func (rt *Routes) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	name := "attachment"
 	if it.OriginalName != nil && *it.OriginalName != "" {
-		name = strings.ReplaceAll(*it.OriginalName, `"`, "")
+		name = *it.OriginalName
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
 	w.Header().Set("Content-Length", strconv.Itoa(len(plain)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(plain)

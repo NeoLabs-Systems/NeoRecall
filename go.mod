@@ -3,7 +3,7 @@ module github.com/NeoLabs-Systems/neorecall
 go 1.27
 
 require (
-	github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261126111110-da67b435ffae
+	github.com/NeoLabs-Systems/neolabs-go v0.3.5-0.20261126160922-341f2eb7e11e
 	github.com/ebitengine/purego v0.11.3
 	github.com/google/uuid v1.6.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
@@ -20,7 +20,10 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/ncruces/go-sqlite3 v0.38.1 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v6 v6.7.35401 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
@@ -28,6 +31,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/term v0.48.0 // indirect
+	lukechampine.com/adiantum v1.1.1 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

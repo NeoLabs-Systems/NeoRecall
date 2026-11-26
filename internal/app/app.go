@@ -133,10 +133,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 	if err := initial.Paths.Ensure(); err != nil {
 		return nil, err
 	}
-	if _, err := schema.EnsurePlaintextLegacyDB(ctx, initial.Paths.Database, initial.Paths.SecretKey, initial.AppDir, initial.Paths.Home); err != nil {
-		return nil, err
-	}
-	db, err := dbx.Open(ctx, initial.Paths.Database, dbx.Options{})
+	db, err := schema.Open(ctx, initial.Paths, initial.AppDir)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +155,9 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 	// Provider endpoints are configured by the operator and may run on a LAN.
 	providerHTTP := opts.HTTPClient
 	if providerHTTP == nil {
-		providerHTTP = ssrf.NewClient(ssrf.Options{AllowPrivate: true, Timeout: 60 * time.Second})
+		// Each request carries its own deadline; this only has to outlast them.
+		providerTimeout := time.Duration(max(initial.TranscriptionTimeoutMs, initial.AITimeoutMs)) * time.Millisecond
+		providerHTTP = ssrf.NewClient(ssrf.Options{AllowPrivate: true, Timeout: providerTimeout})
 	}
 	version := opts.Version
 	if version == "" {
@@ -378,8 +377,9 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		MasterKey: keyFn,
 		Jobs:      a.Jobs,
 		Settings:  a.Settings,
-		HTTP:      httpClient,
-		Log:       log,
+		// Nil outside tests: cloud then uses its own client, which reaches LAN servers.
+		HTTP: opts.HTTPClient,
+		Log:  log,
 	}
 	a.Ingest.FinalizeSess = a.Cloud.FinalizeSession
 
@@ -392,6 +392,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		Usage:      a.Usage,
 		Backups:    a.Backups,
 		Updates:    a.Updates,
+		Version:    version,
 		Log:        log,
 	}
 	a.Status = &status.Service{
@@ -406,12 +407,12 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 		Log:       log,
 	}
 	a.MCP = &mcp.Server{
-		Auth:     a.Authenticator,
-		Search:   a.Search,
-		Ask:      a.Ask,
-		Memories: a.Memories,
-		Log:      log,
-		Version:  version,
+		Auth:          a.Authenticator,
+		Search:        a.Search,
+		Memories:      a.Memories,
+		Conversations: a.Conversations,
+		Log:           log,
+		Version:       version,
 	}
 
 	a.Runner = &worker.Runner{
@@ -479,7 +480,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 			&events.Routes{Svc: a.Events, Auth: a.Authenticator},
 			&diagnostics.Routes{Svc: a.Diagnostics, Auth: a.Authenticator, Log: log},
 			&status.Routes{Svc: a.Status, Auth: a.Authenticator, Log: log},
-			&sources.Routes{Auth: a.Authenticator},
+			&sources.Routes{DB: db, Auth: a.Authenticator, Log: log},
 			&cloud.Routes{Svc: a.Cloud, Auth: a.Authenticator, Log: log},
 			&admin.Routes{Svc: a.Admin, Auth: a.Authenticator, Log: log},
 			&providers.Routes{Svc: a.Providers, Auth: a.Authenticator, Log: log},

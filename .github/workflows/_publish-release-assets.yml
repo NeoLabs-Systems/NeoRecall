@@ -65,6 +65,35 @@ jobs:
           name: neorecall-cli-bundle
         continue-on-error: true
 
+      # Installed servers update from the signed manifest, so a release without
+      # every platform's runtime stays a draft. App builds may attach later.
+      - name: Require a complete signed runtime set
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          manifest="dist/neorecall-runtime-manifest-${version}.json"
+          for file in "$manifest" "$manifest.sig"; do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::Not publishing ${RELEASE_TAG}: ${file#dist/} was not built."
+              exit 1
+            fi
+          done
+          for target in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+            name="neorecall-runtime-${target}-${version}.zip"
+            if [[ ! -s "dist/$name" ]]; then
+              echo "::error::Not publishing ${RELEASE_TAG}: $name was not built."
+              exit 1
+            fi
+            sum="$(sha256sum "dist/$name" | cut -d' ' -f1)"
+            if ! jq --exit-status --arg name "$name" --arg sum "$sum" \
+              '.artifacts | any(.assetName == $name and .sha256 == $sum)' "$manifest" >/dev/null; then
+              echo "::error::Not publishing ${RELEASE_TAG}: the manifest does not match $name."
+              exit 1
+            fi
+          done
+
       - name: Verify and upload missing release assets
         id: app_assets
         env:

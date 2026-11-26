@@ -571,3 +571,22 @@ func TestUpdateRefusesUnknownArgumentsBeforeDoingAnything(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAGoCheckoutSkipsTheRuntime(t *testing.T) {
+	dir := t.TempDir()
+	if goSourceCheckout(dir) {
+		t.Fatal("a plain directory is not a checkout")
+	}
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if goSourceCheckout(dir) {
+		t.Fatal("a Node.js checkout still needs the runtime")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !goSourceCheckout(dir) {
+		t.Fatal("a Go checkout runs from its tree")
+	}
+}

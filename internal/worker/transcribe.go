@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,8 +62,10 @@ func (r *Runner) handleTranscribe(ctx context.Context, j *jobs.Job) error {
 
 	var deviceID, corrStartedAt string
 	if err := r.DB.R.QueryRowContext(ctx, `SELECT device_id, corrected_started_at FROM recording_sessions WHERE id=? AND user_id=?`,
-		ck.sessionID, ck.userID).Scan(&deviceID, &corrStartedAt); err != nil {
+		ck.sessionID, ck.userID).Scan(&deviceID, &corrStartedAt); errors.Is(err, sql.ErrNoRows) {
 		return &codedErr{code: "SESSION_MISSING", msg: "Recording session no longer exists.", retryable: false}
+	} else if err != nil {
+		return err
 	}
 
 	c := r.cfg()
@@ -109,7 +113,7 @@ func (r *Runner) handleTranscribe(ctx context.Context, j *jobs.Job) error {
 			if prov != nil {
 				reason = prov.NotReadyReason()
 			}
-			return &transcription.ProviderError{Code: "TRANSCRIPTION_NOT_CONFIGURED", Message: reason, Retryable: true}
+			return &transcription.ProviderError{Code: "TRANSCRIPTION_NOT_CONFIGURED", Message: reason}
 		}
 		if r.Usage != nil && prov.Metered() {
 			secs := usage.TranscriptionSecondsFor(ck.durationMs)
@@ -124,8 +128,11 @@ func (r *Runner) handleTranscribe(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 		plainBytes, err := crypto.ReadSealedFile(key, ck.temporaryPath.String)
+		if errors.Is(err, fs.ErrNotExist) {
+			return &codedErr{code: "AUDIO_REUPLOAD_REQUIRED", msg: "Server audio is missing and must be uploaded again.", retryable: false}
+		}
 		if err != nil {
-			return &codedErr{code: "AUDIO_REUPLOAD_REQUIRED", msg: "Audio file unreadable.", retryable: false}
+			return err
 		}
 		ext := filepath.Ext(ck.temporaryPath.String)
 		if ext == "" {
@@ -171,6 +178,8 @@ func (r *Runner) handleTranscribe(ctx context.Context, j *jobs.Job) error {
 				ChannelLayout:               ck.channelLayout,
 				Vocabulary:                  vocab,
 				VocabularyCorrectionEnabled: vocabCorr,
+				Timeout:                     time.Duration(c.TranscriptionTimeoutMs) * time.Millisecond,
+				PollInterval:                time.Duration(c.TranscriptionPollIntervalMs) * time.Millisecond,
 			})
 			if err != nil {
 				return err

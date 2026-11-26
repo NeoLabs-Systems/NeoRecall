@@ -156,7 +156,7 @@ func (r *Runner) handleJob(ctx context.Context, j *jobs.Job) error {
 		if r.Backups == nil {
 			return nil
 		}
-		_, err := r.Backups.Create(ctx)
+		_, err := r.Backups.Run(ctx, "scheduled")
 		return err
 	case "cloud_put":
 		if r.Cloud == nil {
@@ -347,7 +347,9 @@ func (r *Runner) handleProcessImport(ctx context.Context, j *jobs.Job) error {
 
 	ff := transcription.ResolveFFmpegPath()
 	if ff == "" {
-		return failImport("IMPORT_DECODE_FAILED", fmt.Errorf("ffmpeg is not available to decode import"))
+		// A missing decoder is the installation's fault: leave the import
+		// assembled so the retry, or a fixed install, can still use the upload.
+		return &codedErr{code: "IMPORT_DECODE_FAILED", msg: "ffmpeg is not available to decode import", retryable: true}
 	}
 	key, err := r.MasterKey()
 	if err != nil {
@@ -355,7 +357,7 @@ func (r *Runner) handleProcessImport(ctx context.Context, j *jobs.Job) error {
 	}
 	plainSrc, err := crypto.ReadSealedFile(key, tempPath.String)
 	if err != nil {
-		return failImport("IMPORT_DECODE_FAILED", err)
+		return err
 	}
 	workDir := filepath.Join(c.Paths.AudioTmp, "import-"+id)
 	if err := os.MkdirAll(workDir, 0o700); err != nil {

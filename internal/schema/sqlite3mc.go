@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/dbx/cryptdb"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
 	"golang.org/x/crypto/chacha20"
 	"golang.org/x/crypto/pbkdf2"
@@ -151,6 +152,10 @@ func EnsurePlaintextLegacyDB(ctx context.Context, dbPath, secretKeyPath, appDir,
 	rawKey, err := crypto.MasterKey(secretKeyPath)
 	if err != nil {
 		return false, fmt.Errorf("read secret.key to unlock legacy database: %w", err)
+	}
+	// Already NeoRecall's own encryption: nothing of the old format to unlock.
+	if cryptdb.Readable(ctx, dbPath, rawKey) {
+		return false, nil
 	}
 
 	rawBak := dbPath + ".pre-decrypt.bak"

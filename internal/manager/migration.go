@@ -25,7 +25,6 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/cli/envfile"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/release"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/service"
-	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neorecall/internal/backup"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
@@ -299,7 +298,7 @@ func (m *Manager) migrateLegacyJSState(ctx context.Context, cfg config.Config, s
 
 	if _, serr := os.Stat(cfg.Paths.Database); serr == nil && !st.MigratedMarker {
 		if rerr := m.UI.Step("Backing up existing NeoRecall database before upgrade", "Saved pre-upgrade backup", func() error {
-			db, oerr := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+			db, oerr := schema.Open(ctx, cfg.Paths, cfg.AppDir)
 			if oerr != nil {
 				return oerr
 			}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/schema"
 )
 
@@ -100,5 +101,37 @@ func TestLegacyEncryptedWALRequiresNodeModule(t *testing.T) {
 	got, err = os.ReadFile(dbPath)
 	if err != nil || !bytes.Equal(got, fixture) {
 		t.Fatalf("database changed: %v", err)
+	}
+}
+
+// An upgrade from the Node.js server ends encrypted again, in one step.
+func TestOpenTurnsANodeEncryptedDatabaseIntoOurEncryption(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	paths := config.Paths{Home: dir, Database: filepath.Join(dir, "neorecall.sqlite3"), SecretKey: filepath.Join(dir, "secret.key")}
+	fixture, err := os.ReadFile(filepath.Join("testdata", "bsmc_sample.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.Database, fixture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.SecretKey, bytes.Repeat([]byte{0x37}, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		db, err := schema.Open(ctx, paths, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var username string
+		if err := db.R.QueryRowContext(ctx, `SELECT username FROM users WHERE id='u-real'`).Scan(&username); err != nil || username != "real-bsmc-user" {
+			t.Fatal(username, err)
+		}
+		db.Close()
+		raw, err := os.ReadFile(paths.Database)
+		if err != nil || bytes.Contains(raw, []byte("real-bsmc-user")) || bytes.HasPrefix(raw, []byte("SQLite format 3")) {
+			t.Fatal("not encrypted at rest", err)
+		}
 	}
 }

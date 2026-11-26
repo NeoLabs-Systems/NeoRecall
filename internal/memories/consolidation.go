@@ -90,10 +90,9 @@ func (cs *ConsolidationService) userTimezone(ctx context.Context, userID string)
 
 func (cs *ConsolidationService) Request(ctx context.Context, userID string, manual bool) (bool, string, error) {
 	db := cs.Memories.DB
-	c := cs.Memories.cfg()
 	if cs.Memories.AI == nil || !cs.Memories.AI.Ready(ctx) {
 		if manual {
-			return false, "", httperr.New(http.StatusConflict, "AI_NOT_CONFIGURED", "No language model is configured.")
+			return false, "", httperr.New(http.StatusServiceUnavailable, "AI_NOT_CONFIGURED", "No language model is configured.")
 		}
 		return false, "", nil
 	}
@@ -112,12 +111,43 @@ func (cs *ConsolidationService) Request(ctx context.Context, userID string, manu
 		return false, activeRun, nil
 	}
 
-	convs, err := conversations.ListByState(ctx, db.R, userID, []string{"closed"}, false)
-	if err != nil {
+	eligible, totalChars, err := cs.candidates(ctx, userID, manual)
+	if err != nil || len(eligible) == 0 {
 		return false, "", err
 	}
+
+	runID := uuid.NewString()
+	nowISO := timeutil.NowISO()
+	convIDs := make([]string, len(eligible))
+	for i, cv := range eligible {
+		convIDs[i] = cv.ID
+	}
+	if _, err := db.W.ExecContext(ctx, `INSERT INTO consolidation_runs
+		(id, user_id, candidate_started_at, candidate_ended_at, material_characters, material_conversations, state, reserved_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`,
+		runID, userID, eligible[0].StartedAt, eligible[len(eligible)-1].EndedAt, totalChars, len(eligible), nowISO); err != nil {
+		return false, "", err
+	}
+	if cs.Memories.Jobs != nil {
+		_, _ = cs.Memories.Jobs.Enqueue(ctx, jobs.EnqueueInput{
+			UserID: userID, ResourceType: "consolidation", ResourceID: runID,
+			Type: "consolidate_memories", Priority: 30,
+			Payload: map[string]any{"runId": runID, "conversationIds": convIDs, "manual": manual},
+		})
+	}
+	return true, runID, nil
+}
+
+// candidates picks the closed conversations the next consolidation would send.
+func (cs *ConsolidationService) candidates(ctx context.Context, userID string, manual bool) ([]conversations.ConversationRow, int, error) {
+	db := cs.Memories.DB
+	c := cs.Memories.cfg()
+	convs, err := conversations.ListByState(ctx, db.R, userID, []string{"closed"}, false)
+	if err != nil {
+		return nil, 0, err
+	}
 	if len(convs) == 0 {
-		return false, "", nil
+		return nil, 0, nil
 	}
 
 	now := time.Now().UTC()
@@ -148,29 +178,9 @@ func (cs *ConsolidationService) Request(ctx context.Context, userID string, manu
 		totalChars += ch
 	}
 	if len(eligible) == 0 {
-		return false, "", nil
+		return nil, 0, nil
 	}
-
-	runID := uuid.NewString()
-	nowISO := timeutil.NowISO()
-	convIDs := make([]string, len(eligible))
-	for i, cv := range eligible {
-		convIDs[i] = cv.ID
-	}
-	if _, err := db.W.ExecContext(ctx, `INSERT INTO consolidation_runs
-		(id, user_id, candidate_started_at, candidate_ended_at, material_characters, material_conversations, state, reserved_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`,
-		runID, userID, eligible[0].StartedAt, eligible[len(eligible)-1].EndedAt, totalChars, len(eligible), nowISO); err != nil {
-		return false, "", err
-	}
-	if cs.Memories.Jobs != nil {
-		_, _ = cs.Memories.Jobs.Enqueue(ctx, jobs.EnqueueInput{
-			UserID: userID, ResourceType: "consolidation", ResourceID: runID,
-			Type: "consolidate_memories", Priority: 30,
-			Payload: map[string]any{"runId": runID, "conversationIds": convIDs, "manual": manual},
-		})
-	}
-	return true, runID, nil
+	return eligible, totalChars, nil
 }
 
 func (cs *ConsolidationService) Execute(ctx context.Context, userID, runID string, convIDs []string) error {

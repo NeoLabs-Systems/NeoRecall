@@ -1,6 +1,7 @@
 // Command neorecall-release is the release tooling CI runs: resolving and
-// bumping semantic versions in internal/config/config.go and rendering the
-// shields.io download badge section in GitHub release notes.
+// bumping semantic versions in internal/config/config.go, building the signed
+// runtime bundles with their native libraries, and rendering the shields.io
+// download badge section in GitHub release notes.
 //
 //	go run ./cmd/neorecall-release <command> [flags]
 package main
@@ -62,7 +63,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: neorecall-release <version|resolve-version|set-version|release-download> [flags]")
+		return errors.New("usage: neorecall-release <version|resolve-version|set-version|release-download|runtime-bundles|native-libs> [flags]")
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	channel := fs.String("channel", "beta", "")
@@ -72,6 +73,8 @@ func run(ctx context.Context, args []string) error {
 	dryRun := fs.Bool("dry-run", false, "")
 	output := fs.String("output", "dist", "")
 	version := fs.String("version", "", "")
+	platform := fs.String("platform", "", "")
+	arch := fs.String("arch", "", "")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -81,7 +84,9 @@ func run(ctx context.Context, args []string) error {
 		if *version == "" {
 			return errors.New("--version is required")
 		}
-		return runtimebundle.Build(".", *output, *version, os.Getenv("NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY"))
+		return runtimebundle.Build(ctx, ".", *output, *version, os.Getenv("NEORECALL_RUNTIME_SIGNING_PRIVATE_KEY"))
+	case "native-libs":
+		return runtimebundle.FetchLibraries(ctx, *platform, *arch, *output)
 	case "version":
 		v, err := ReadVersion(".")
 		if err != nil {

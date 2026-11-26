@@ -34,7 +34,6 @@ type ImportView struct {
 	ID            string           `json:"id"`
 	UserID        string           `json:"user_id"`
 	DeviceID      *string          `json:"device_id"`
-	SessionID     *string          `json:"session_id"`
 	OriginalName  string           `json:"original_name"`
 	ContentType   string           `json:"content_type"`
 	TotalSize     int64            `json:"total_size"`
@@ -45,7 +44,6 @@ type ImportView struct {
 	State         string           `json:"state"`
 	TemporaryPath *string          `json:"temporary_path"`
 	ErrorCode     *string          `json:"error_code"`
-	ErrorMessage  *string          `json:"error_message"`
 	ExpiresAt     *string          `json:"expires_at"`
 	CreatedAt     string           `json:"created_at"`
 	UpdatedAt     string           `json:"updated_at"`
@@ -77,12 +75,12 @@ func nullStringPtr(n sql.NullString) *string {
 
 func (s *ImportService) Get(ctx context.Context, userID, id string) (ImportView, error) {
 	var v ImportView
-	var devID, sessID, capTime, tz, tmpPath, ec, em, exp sql.NullString
-	err := s.DB.R.QueryRowContext(ctx, `SELECT id, user_id, device_id, session_id, original_name, content_type, total_size, sha256,
-		part_size, capture_time, timezone, state, temporary_path, error_code, error_message, expires_at, created_at, updated_at
+	var devID, capTime, tz, tmpPath, ec, exp sql.NullString
+	err := s.DB.R.QueryRowContext(ctx, `SELECT id, user_id, device_id, original_name, content_type, total_size, sha256,
+		part_size, capture_time, timezone, state, temporary_path, error_code, expires_at, created_at, updated_at
 		FROM imports WHERE id=? AND user_id=?`, id, userID).
-		Scan(&v.ID, &v.UserID, &devID, &sessID, &v.OriginalName, &v.ContentType, &v.TotalSize, &v.SHA256,
-			&v.PartSize, &capTime, &tz, &v.State, &tmpPath, &ec, &em, &exp, &v.CreatedAt, &v.UpdatedAt)
+		Scan(&v.ID, &v.UserID, &devID, &v.OriginalName, &v.ContentType, &v.TotalSize, &v.SHA256,
+			&v.PartSize, &capTime, &tz, &v.State, &tmpPath, &ec, &exp, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ImportView{}, httperr.New(http.StatusNotFound, "NOT_FOUND", "Import not found.")
 	}
@@ -90,12 +88,10 @@ func (s *ImportService) Get(ctx context.Context, userID, id string) (ImportView,
 		return ImportView{}, err
 	}
 	v.DeviceID = nullStringPtr(devID)
-	v.SessionID = nullStringPtr(sessID)
 	v.CaptureTime = nullStringPtr(capTime)
 	v.Timezone = nullStringPtr(tz)
 	v.TemporaryPath = nullStringPtr(tmpPath)
 	v.ErrorCode = nullStringPtr(ec)
-	v.ErrorMessage = nullStringPtr(em)
 	v.ExpiresAt = nullStringPtr(exp)
 
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT part_number, range_start, range_end, byte_size, sha256

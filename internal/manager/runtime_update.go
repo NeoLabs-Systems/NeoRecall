@@ -60,15 +60,11 @@ func (m *Manager) bootstrapSignedRuntime(ctx context.Context, args []string) (st
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(cfg.Paths.Database); err == nil {
+	// A Go source checkout runs from its own tree. A Node.js one, which has no
+	// go.mod, is being replaced and needs the runtime like a new install: it
+	// carries the web client, the native libraries and ffmpeg.
+	if goSourceCheckout(cfg.AppDir) {
 		return "", nil
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	if _, err := os.Stat(filepath.Join(cfg.AppDir, ".git")); err == nil {
-		return "", nil
-	} else if !os.IsNotExist(err) {
-		return "", err
 	}
 	if _, err := os.Stat(filepath.Join(runtimeStore(cfg).Root, "current.json")); err == nil {
 		return "", nil
@@ -98,6 +94,12 @@ func (m *Manager) bootstrapSignedRuntime(ctx context.Context, args []string) (st
 		return "", err
 	}
 	return version, nil
+}
+
+func goSourceCheckout(dir string) bool {
+	_, gitErr := os.Stat(filepath.Join(dir, ".git"))
+	_, modErr := os.Stat(filepath.Join(dir, "go.mod"))
+	return gitErr == nil && modErr == nil
 }
 
 // runtimeSource is where NeoRecall's signed runtimes are published, with the

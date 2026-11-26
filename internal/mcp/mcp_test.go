@@ -20,7 +20,6 @@ import (
 	"github.com/NeoLabs-Systems/neorecall/internal/memories"
 	"github.com/NeoLabs-Systems/neorecall/internal/schema"
 	"github.com/NeoLabs-Systems/neorecall/internal/search"
-	"github.com/NeoLabs-Systems/neorecall/internal/usage"
 )
 
 func TestMCPOAuthChallengeAndToolsCall(t *testing.T) {
@@ -51,14 +50,18 @@ func TestMCPOAuthChallengeAndToolsCall(t *testing.T) {
 	cfgFn := func() config.Config { return cfg }
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	authSvc := &auth.Service{DB: db, Cfg: cfgFn}
-	authn := &auth.Authenticator{Service: authSvc, Log: log}
+	authn := &auth.Authenticator{Service: authSvc, Log: log, OAuth: func(_ context.Context, token string) *auth.AuthContext {
+		if token != "nro_test" {
+			return nil
+		}
+		return &auth.AuthContext{Type: "oauth", UserID: uid, Scopes: []string{"memories:read", "search:read"}}
+	}}
 	emb := &embeddings.Service{DB: db, Cfg: cfgFn}
 	srch := &search.Service{DB: db, Cfg: cfgFn, Embeddings: emb, Log: log}
-	ask := &search.AskService{Search: srch, Usage: &usage.Service{DB: db}}
 	mems := &memories.Service{DB: db, Cfg: cfgFn, Jobs: &jobs.Service{DB: db}, Log: log}
 
 	mux := http.NewServeMux()
-	(&mcp.Server{Auth: authn, Search: srch, Ask: ask, Memories: mems, Log: log, Version: "1.2.3"}).Mount(mux)
+	(&mcp.Server{Auth: authn, Search: srch, Memories: mems, Log: log, Version: "1.2.3"}).Mount(mux)
 
 	// Unauthenticated -> 401 with WWW-Authenticate Bearer resource_metadata.
 	unauthReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
@@ -69,11 +72,22 @@ func TestMCPOAuthChallengeAndToolsCall(t *testing.T) {
 		t.Fatalf("expected 401 with resource_metadata header, got %d %q", unauthRec.Code, unauthRec.Header().Get("WWW-Authenticate"))
 	}
 
-	key, _ := authSvc.CreateAPIKey(ctx, uid, "mcp", []string{"memories:read", "search:read"}, nil)
+	// Only OAuth tokens reach MCP: an API key with the same scopes is refused.
+	key, err := authSvc.CreateAPIKey(ctx, uid, "mcp", []string{"memories:read", "search:read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	keyReq.Header.Set("Authorization", "Bearer "+key.Token)
+	keyRec := httptest.NewRecorder()
+	mux.ServeHTTP(keyRec, keyReq)
+	if keyRec.Code != http.StatusUnauthorized {
+		t.Fatalf("api key reached MCP: %d %s", keyRec.Code, keyRec.Body.String())
+	}
 
 	callRPC := func(payload string) map[string]any {
 		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(payload))
-		req.Header.Set("Authorization", "Bearer "+key.Token)
+		req.Header.Set("Authorization", "Bearer nro_test")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -86,11 +100,24 @@ func TestMCPOAuthChallengeAndToolsCall(t *testing.T) {
 
 	listRes := callRPC(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	tools := listRes["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 6 {
-		t.Fatalf("expected 6 MCP tools, got %d", len(tools))
+	var names []string
+	for _, tool := range tools {
+		def := tool.(map[string]any)
+		if def["inputSchema"].(map[string]any)["additionalProperties"] != false {
+			t.Fatalf("open input schema: %v", def)
+		}
+		names = append(names, def["name"].(string))
+	}
+	if got := strings.Join(names, ","); got != "search,list_memories,get_memory,list_mini_memories,list_daily_summaries,list_conversations,get_conversation" {
+		t.Fatalf("MCP tools: %s", got)
+	}
+	// list_conversations needs recordings:read, which this token lacks.
+	denied := callRPC(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_conversations","arguments":{}}}`)
+	if denied["result"].(map[string]any)["isError"] != true {
+		t.Fatalf("scope not enforced: %v", denied)
 	}
 
-	callRes := callRPC(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_recent_memories","arguments":{"limit":5}}}`)
+	callRes := callRPC(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_memories","arguments":{"limit":5}}}`)
 	content := callRes["result"].(map[string]any)["content"].([]any)
 	text := content[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, `"items":[]`) {

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
@@ -21,6 +23,7 @@ import (
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
 	"github.com/NeoLabs-Systems/neorecall/internal/jobs"
 	"github.com/NeoLabs-Systems/neorecall/internal/speakers"
+	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 	"github.com/NeoLabs-Systems/neorecall/internal/transcripts"
 	"github.com/NeoLabs-Systems/neorecall/internal/updates"
 	"github.com/NeoLabs-Systems/neorecall/internal/usage"
@@ -35,6 +38,7 @@ type Service struct {
 	Usage      *usage.Service
 	Backups    *backup.Service
 	Updates    *updates.Service
+	Version    string
 	Log        *slog.Logger
 }
 
@@ -62,54 +66,79 @@ func dirBytes(dir string) int64 {
 	return total
 }
 
-func (s *Service) Stats(ctx context.Context) map[string]any {
+func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
+	var failed error
 	count := func(q string) int {
 		var n int
-		_ = s.DB.R.QueryRowContext(ctx, q).Scan(&n)
+		failed = errors.Join(failed, s.DB.R.QueryRowContext(ctx, q).Scan(&n))
 		return n
 	}
-	groupCount := func(q string) []map[string]any {
-		rows, err := s.DB.R.QueryContext(ctx, q)
-		if err != nil {
-			return []map[string]any{}
-		}
-		defer rows.Close()
-		out := []map[string]any{}
-		for rows.Next() {
-			var k string
-			var cnt int
-			if rows.Scan(&k, &cnt) == nil {
-				out = append(out, map[string]any{"key": k, "count": cnt})
-			}
-		}
+	list := func(q string, args ...any) []map[string]any {
+		out, err := s.rows(ctx, q, args...)
+		failed = errors.Join(failed, err)
 		return out
 	}
+	var oldestQueued sql.NullString
+	failed = errors.Join(failed, s.DB.R.QueryRowContext(ctx, `SELECT MIN(created_at) FROM jobs WHERE status='queued'`).Scan(&oldestQueued))
 
 	c := s.cfg()
-	tempBytes := dirBytes(c.Paths.AudioTmp) + dirBytes(c.Paths.ImportTmp) + dirBytes(c.Paths.CloudPending)
-	return map[string]any{
-		"users":          count(`SELECT COUNT(*) FROM users`),
-		"activeUsers":    count(`SELECT COUNT(*) FROM users WHERE disabled_at IS NULL`),
-		"sessions":       count(`SELECT COUNT(*) FROM recording_sessions`),
-		"chunksByState":  groupCount(`SELECT state, COUNT(*) FROM audio_chunks GROUP BY state`),
-		"jobsByStatus":   groupCount(`SELECT status, COUNT(*) FROM jobs GROUP BY status`),
-		"conversations":  count(`SELECT COUNT(*) FROM conversations`),
-		"quarantined":    count(`SELECT COUNT(*) FROM conversations WHERE quarantined_at IS NOT NULL`),
-		"memories":       count(`SELECT COUNT(*) FROM memories`),
-		"miniMemories":   count(`SELECT COUNT(*) FROM mini_memories`),
-		"voiceprints":    count(`SELECT COUNT(*) FROM voiceprints`),
-		"searchDocs":     count(`SELECT COUNT(*) FROM search_documents`),
-		"embeddings":     count(`SELECT COUNT(*) FROM search_embeddings`),
-		"aiRequests":     count(`SELECT COUNT(*) FROM ai_requests`),
-		"temporaryBytes": tempBytes,
+	chunkBytes, importBytes := dirBytes(c.Paths.AudioTmp), dirBytes(c.Paths.ImportTmp)
+	stats := map[string]any{
+		"version":              s.Version,
+		"users":                count(`SELECT COUNT(*) FROM users`),
+		"devices":              count(`SELECT COUNT(*) FROM devices WHERE revoked_at IS NULL`),
+		"recordings":           count(`SELECT COUNT(*) FROM recording_sessions`),
+		"queue":                list(`SELECT status, COUNT(*) AS count FROM jobs GROUP BY status`),
+		"oldestQueuedAt":       nullStr(oldestQueued),
+		"workers":              list(`SELECT * FROM worker_heartbeats ORDER BY heartbeat_at DESC`),
+		"temporaryAudioBytes":  chunkBytes + importBytes,
+		"temporaryChunkBytes":  chunkBytes,
+		"temporaryImportBytes": importBytes,
+		"cleanupPending":       count(`SELECT COUNT(*) FROM audio_chunks WHERE state='persisted_cleanup_pending'`),
+		"vector":               map[string]any{"ready": s.Embeddings != nil && s.Embeddings.VectorReady(), "version": nil},
+		"ai": list(`SELECT purpose, COUNT(*) AS attempts, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+			COALESCE(SUM(completion_tokens),0) AS completion_tokens FROM ai_requests GROUP BY purpose`),
+		"processing": list(`SELECT metric, AVG(value) AS average, MAX(value) AS maximum, unit FROM processing_metrics
+			WHERE created_at>? GROUP BY metric, unit`, timeutil.FormatISO(time.Now().Add(-24*time.Hour))),
 	}
+	return stats, failed
+}
+
+// rows reads a query into objects keyed by column name.
+func (s *Service) rows(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
+	rows, err := s.DB.R.QueryContext(ctx, query, args...)
+	if err != nil {
+		return []map[string]any{}, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return []map[string]any{}, err
+	}
+	out := []map[string]any{}
+	for rows.Next() {
+		values := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			return out, err
+		}
+		row := make(map[string]any, len(columns))
+		for i, column := range columns {
+			row[column] = values[i]
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) Users(ctx context.Context, limitRaw string) ([]map[string]any, error) {
 	lim := transcripts.PageLimit(limitRaw, 200, 50)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT id, username, email, role, disabled_at, created_at, last_login_at,
-		(SELECT COUNT(*) FROM memories m WHERE m.user_id=users.id) AS memory_count,
-		(SELECT COUNT(*) FROM devices d WHERE d.user_id=users.id AND d.revoked_at IS NULL) AS device_count
+		(SELECT COUNT(*) FROM recording_sessions r WHERE r.user_id=users.id) AS recording_count,
+		(SELECT COUNT(*) FROM devices d WHERE d.user_id=users.id) AS device_count
 		FROM users ORDER BY created_at DESC LIMIT ?`, lim)
 	if err != nil {
 		return nil, err
@@ -119,45 +148,49 @@ func (s *Service) Users(ctx context.Context, limitRaw string) ([]map[string]any,
 	for rows.Next() {
 		var id, uname, role, created string
 		var email, disAt, lastLogin sql.NullString
-		var mc, dc int
-		if rows.Scan(&id, &uname, &email, &role, &disAt, &created, &lastLogin, &mc, &dc) == nil {
+		var recordings, dc int
+		if rows.Scan(&id, &uname, &email, &role, &disAt, &created, &lastLogin, &recordings, &dc) == nil {
 			out = append(out, map[string]any{
-				"id":            id,
-				"username":      uname,
-				"email":         nullStr(email),
-				"role":          role,
-				"disabled_at":   nullStr(disAt),
-				"created_at":    created,
-				"last_login_at": nullStr(lastLogin),
-				"memoryCount":   mc,
-				"deviceCount":   dc,
+				"id":              id,
+				"username":        uname,
+				"email":           nullStr(email),
+				"role":            role,
+				"disabled_at":     nullStr(disAt),
+				"created_at":      created,
+				"last_login_at":   nullStr(lastLogin),
+				"recording_count": recordings,
+				"device_count":    dc,
 			})
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) SetUserDisabled(ctx context.Context, actorID, userID string, disabled bool) (map[string]any, error) {
-	if actorID == userID && disabled {
-		return nil, httperr.New(http.StatusBadRequest, "CANNOT_DISABLE_SELF", "An admin cannot disable their own account.")
+// SetUserDisabled refuses admin accounts, the caller's own included: admin is
+// granted and revoked by the operator, so locking one out has to start there.
+func (s *Service) SetUserDisabled(ctx context.Context, actorID, userID string, disabled bool) error {
+	var role string
+	if err := s.DB.R.QueryRowContext(ctx, `SELECT role FROM users WHERE id=?`, userID).Scan(&role); errors.Is(err, sql.ErrNoRows) {
+		return httperr.New(http.StatusNotFound, "NOT_FOUND", "User not found.")
+	} else if err != nil {
+		return err
 	}
-	var res sql.Result
+	if disabled && role == "admin" {
+		return httperr.New(http.StatusForbidden, "ADMIN_ACCOUNT", "Admin accounts can’t be disabled here. Revoke admin with `neorecall admin revoke <username>` first.")
+	}
 	var err error
 	if disabled {
-		res, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, userID)
+		_, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, userID)
 		if err == nil {
 			// Disabled accounts are refused on every request; this also ends the
 			// sessions so re-enabling does not revive them.
 			_, _ = s.DB.W.ExecContext(ctx, `DELETE FROM sessions WHERE CAST(json_extract(sess, '$.userId') AS TEXT)=?`, userID)
 		}
 	} else {
-		res, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=NULL WHERE id=?`, userID)
+		_, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=NULL WHERE id=?`, userID)
 	}
 	if err != nil {
-		return nil, err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, httperr.New(http.StatusNotFound, "USER_NOT_FOUND", "User not found.")
+		return err
 	}
 	action := "admin.user_enabled"
 	if disabled {
@@ -167,7 +200,7 @@ func (s *Service) SetUserDisabled(ctx context.Context, actorID, userID string, d
 		ActorType: "admin", ActorID: actorID, AffectedUserID: userID,
 		Action: action, ResourceType: "user", ResourceID: userID,
 	})
-	return map[string]any{"id": userID, "disabled": disabled}, nil
+	return nil
 }
 
 func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitRaw string) ([]map[string]any, error) {
@@ -188,7 +221,8 @@ func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitR
 	}
 	args = append(args, lim)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT id, user_id, resource_type, resource_id, type, status, priority,
-		attempts, max_attempts, next_attempt_at, last_error_code, last_error_message, created_at, updated_at, completed_at
+		attempts, max_attempts, next_attempt_at, last_error_code, last_error_message, created_at, updated_at, completed_at,
+		lease_owner, lease_expires_at, payload_json, started_at
 		FROM jobs `+where+` ORDER BY created_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
@@ -197,9 +231,10 @@ func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitR
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, jtype, st, runAfter, created, updated string
-		var uid, rtype, rid, ec, em, compAt sql.NullString
+		var uid, rtype, rid, ec, em, compAt, leaseOwner, leaseExpires, startedAt sql.NullString
+		var payload string
 		var prio, att, maxAtt int
-		if rows.Scan(&id, &uid, &rtype, &rid, &jtype, &st, &prio, &att, &maxAtt, &runAfter, &ec, &em, &created, &updated, &compAt) == nil {
+		if rows.Scan(&id, &uid, &rtype, &rid, &jtype, &st, &prio, &att, &maxAtt, &runAfter, &ec, &em, &created, &updated, &compAt, &leaseOwner, &leaseExpires, &payload, &startedAt) == nil {
 			out = append(out, map[string]any{
 				"id":                 id,
 				"user_id":            nullStr(uid),
@@ -216,24 +251,28 @@ func (s *Service) ListJobs(ctx context.Context, statusFilter, typeFilter, limitR
 				"created_at":         created,
 				"updated_at":         updated,
 				"completed_at":       nullStr(compAt),
+				"lease_owner":        nullStr(leaseOwner),
+				"lease_expires_at":   nullStr(leaseExpires),
+				"payload_json":       payload,
+				"started_at":         nullStr(startedAt),
 			})
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) RetryJob(ctx context.Context, id string) (map[string]any, error) {
+func (s *Service) RetryJob(ctx context.Context, id string) error {
 	if !s.Jobs.Retry(ctx, id) {
-		return nil, httperr.New(http.StatusNotFound, "JOB_NOT_FOUND", "Job not found or not retryable.")
+		return httperr.New(http.StatusConflict, "JOB_NOT_RETRYABLE", "Job is not in a retryable state.")
 	}
-	return map[string]any{"id": id, "status": "queued"}, nil
+	return nil
 }
 
-func (s *Service) CancelJob(ctx context.Context, id string) (map[string]any, error) {
+func (s *Service) CancelJob(ctx context.Context, id string) error {
 	if !s.Jobs.Cancel(ctx, id) {
-		return nil, httperr.New(http.StatusNotFound, "JOB_NOT_FOUND", "Job not found or already terminal.")
+		return httperr.New(http.StatusConflict, "JOB_NOT_CANCELLABLE", "Job is not in a cancellable state.")
 	}
-	return map[string]any{"id": id, "status": "cancelled"}, nil
+	return nil
 }
 
 func (s *Service) AIRequests(ctx context.Context, limitRaw string) ([]map[string]any, error) {
@@ -377,7 +416,12 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 }
 
 func (rt *Routes) handleStats(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, rt.Svc.Stats(r.Context()))
+	stats, err := rt.Svc.Stats(r.Context())
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, stats)
 }
 
 func (rt *Routes) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -402,12 +446,11 @@ func (rt *Routes) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	res, err := rt.Svc.SetUserDisabled(r.Context(), a.UserID, r.PathValue("id"), *body.Disabled)
-	if err != nil {
+	if err := rt.Svc.SetUserDisabled(r.Context(), a.UserID, r.PathValue("id"), *body.Disabled); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rt *Routes) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -421,21 +464,19 @@ func (rt *Routes) handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Routes) handleRetryJob(w http.ResponseWriter, r *http.Request) {
-	res, err := rt.Svc.RetryJob(r.Context(), r.PathValue("id"))
-	if err != nil {
+	if err := rt.Svc.RetryJob(r.Context(), r.PathValue("id")); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rt *Routes) handleCancelJob(w http.ResponseWriter, r *http.Request) {
-	res, err := rt.Svc.CancelJob(r.Context(), r.PathValue("id"))
-	if err != nil {
+	if err := rt.Svc.CancelJob(r.Context(), r.PathValue("id")); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rt *Routes) handleAIRequests(w http.ResponseWriter, r *http.Request) {
@@ -543,25 +584,33 @@ func (rt *Routes) handleSpeakerReevaluate(w http.ResponseWriter, r *http.Request
 }
 
 func (rt *Routes) handleBackupsStatus(w http.ResponseWriter, r *http.Request) {
-	if rt.Svc.Backups == nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"enabled": false, "items": []any{}})
-		return
-	}
-	res, err := rt.Svc.Backups.Status()
+	status, err := rt.Svc.Backups.Overview(r.Context())
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	history, err := rt.Svc.Backups.History(r.Context(), transcripts.PageLimit(r.URL.Query().Get("limit"), 100, 20))
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": status, "history": history})
 }
 
 func (rt *Routes) handleBackupCreate(w http.ResponseWriter, r *http.Request) {
-	art, err := rt.Svc.Backups.Create(r.Context())
+	a := auth.FromContext(r.Context())
+	result, err := rt.Svc.Backups.Run(r.Context(), "manual")
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusCreated, art)
+	if err := audit.Record(r.Context(), rt.Svc.DB, audit.Entry{
+		ActorType: "admin", ActorID: a.UserID, Action: "backup_run", ResourceType: "backup", ResourceID: result.Key,
+	}); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (rt *Routes) handleBackupDownload(w http.ResponseWriter, r *http.Request) {

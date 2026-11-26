@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neorecall/internal/admin"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/backup"
@@ -40,7 +39,7 @@ func TestAdminSourcesStatusAndUpdates(t *testing.T) {
 	}
 	_ = cfg.Paths.Ensure()
 
-	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+	db, err := schema.Open(ctx, cfg.Paths, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +82,7 @@ func TestAdminSourcesStatusAndUpdates(t *testing.T) {
 	mux := http.NewServeMux()
 	(&admin.Routes{Svc: admSvc, Auth: authn, Log: log}).Mount(mux)
 	(&status.Routes{Svc: stSvc, Auth: authn, Log: log}).Mount(mux)
-	(&sources.Routes{Auth: authn}).Mount(mux)
+	(&sources.Routes{DB: db, Auth: authn, Log: log}).Mount(mux)
 
 	get := func(path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -119,7 +118,7 @@ func TestAdminSourcesStatusAndUpdates(t *testing.T) {
 	bakReq.Header.Set("Authorization", "Bearer "+sessTok.Token)
 	bakRec := httptest.NewRecorder()
 	mux.ServeHTTP(bakRec, bakReq)
-	if bakRec.Code != http.StatusCreated {
+	if bakRec.Code != http.StatusOK {
 		t.Fatalf("POST /admin/backups failed: %d %s", bakRec.Code, bakRec.Body.String())
 	}
 	var art backup.Artifact

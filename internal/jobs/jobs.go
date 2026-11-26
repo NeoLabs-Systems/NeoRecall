@@ -233,10 +233,10 @@ func (s *Service) Complete(ctx context.Context, id, workerID string) bool {
 	return n == 1
 }
 
-func (s *Service) Fail(ctx context.Context, id, workerID, errCode, errMsg string, retryable bool) (willRetry bool) {
+func (s *Service) Fail(ctx context.Context, id, workerID, errCode, errMsg string, retryable bool) (willRetry bool, err error) {
 	tx, err := s.DB.W.BeginTx(ctx, nil)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer tx.Rollback()
 
@@ -244,7 +244,7 @@ func (s *Service) Fail(ctx context.Context, id, workerID, errCode, errMsg string
 	err = tx.QueryRowContext(ctx, `SELECT attempts, max_attempts FROM jobs WHERE id=? AND status='leased' AND lease_owner=?`, id, workerID).
 		Scan(&attempts, &maxAttempts)
 	if err != nil {
-		return false
+		return false, err
 	}
 	shouldRetry := retryable && attempts < maxAttempts
 	c := s.cfg()
@@ -277,13 +277,17 @@ func (s *Service) Fail(ctx context.Context, id, workerID, errCode, errMsg string
 	if _, err := tx.ExecContext(ctx, `UPDATE jobs SET status=?, lease_owner=NULL, lease_expires_at=NULL, next_attempt_at=?,
 		last_error_code=?, last_error_message=?, completed_at=?, updated_at=? WHERE id=?`,
 		status, timeutil.FormatISO(timeutil.AddMillis(now, delayMs)), errCode, errMsg, compAt, nowISO, id); err != nil {
-		return false
+		return false, err
 	}
-	return tx.Commit() == nil && shouldRetry
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return shouldRetry, nil
 }
 
-// Defer returns a leased job back to queued without burning attempts (e.g. rolling quota pause).
-func (s *Service) Defer(ctx context.Context, id, workerID, nextAttemptAt string) bool {
+// Defer returns a leased job back to queued without burning attempts, recording
+// why it is waiting (a usage window, or a fix only the user can make).
+func (s *Service) Defer(ctx context.Context, id, workerID, nextAttemptAt, code, reason string) bool {
 	when := timeutil.FormatISO(time.Now().Add(time.Minute))
 	if t, err := timeutil.ParseISO(nextAttemptAt); err == nil {
 		when = timeutil.FormatISO(t)
@@ -299,9 +303,9 @@ func (s *Service) Defer(ctx context.Context, id, workerID, nextAttemptAt string)
 		return false
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL,
-		attempts=MAX(0, attempts-1), next_attempt_at=?, last_error_code='USAGE_LIMIT_EXCEEDED',
-		last_error_message='Waiting for the account usage window to open.', completed_at=NULL, updated_at=? WHERE id=?`,
-		when, nowISO, id); err != nil {
+		attempts=MAX(0, attempts-1), next_attempt_at=?, last_error_code=?,
+		last_error_message=?, completed_at=NULL, updated_at=? WHERE id=?`,
+		when, code, reason, nowISO, id); err != nil {
 		return false
 	}
 	return tx.Commit() == nil

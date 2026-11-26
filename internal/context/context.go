@@ -58,43 +58,48 @@ func (s *Service) cfg() config.Config {
 	return config.Config{}
 }
 
+// Item is a context item as the apps and the memory detail read it.
 type Item struct {
 	ID                   string  `json:"id"`
-	UserID               string  `json:"user_id"`
-	SessionID            *string `json:"session_id"`
-	MemoryID             *int64  `json:"memory_id"`
 	Kind                 string  `json:"kind"`
-	CapturedOffsetMs     *int64  `json:"captured_offset_ms"`
-	CapturedAt           *string `json:"captured_at"`
-	NoteText             *string `json:"note_text"`
-	OriginalName         *string `json:"original_name"`
-	ContentType          *string `json:"content_type"`
-	ByteSize             *int64  `json:"byte_size"`
-	SHA256               *string `json:"sha256"`
-	OriginalDeletedAt    *string `json:"original_deleted_at"`
-	AnalysisText         *string `json:"analysis_text"`
-	AnalysisState        string  `json:"analysis_state"`
-	AnalysisErrorCode    *string `json:"analysis_error_code"`
-	AnalysisErrorMessage *string `json:"analysis_error_message"`
-	HasOriginal          bool    `json:"has_original"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
+	SessionID            *string `json:"sessionId"`
+	MemoryPublicID       *string `json:"memoryId"`
+	CapturedOffsetMs     *int64  `json:"capturedOffsetMs"`
+	CapturedAt           *string `json:"capturedAt"`
+	NoteText             *string `json:"noteText"`
+	OriginalName         *string `json:"originalName"`
+	ContentType          *string `json:"contentType"`
+	ByteSize             *int64  `json:"byteSize"`
+	OriginalAvailable    bool    `json:"originalAvailable"`
+	OriginalDeletedAt    *string `json:"originalDeletedAt"`
+	ExtractedText        *string `json:"extractedText"`
+	AnalysisText         *string `json:"analysisText"`
+	AnalysisState        string  `json:"analysisState"`
+	AnalysisErrorCode    *string `json:"analysisErrorCode"`
+	AnalysisErrorMessage *string `json:"analysisErrorMessage"`
+	UsedByAI             bool    `json:"usedByAi"`
+	CreatedAt            string  `json:"createdAt"`
+	UpdatedAt            string  `json:"updatedAt"`
 
+	UserID       string  `json:"-"`
+	MemoryID     *int64  `json:"-"`
+	SHA256       *string `json:"-"`
 	originalPath *string
-	extracted    *string
 }
 
 const itemCols = `id, user_id, session_id, memory_id, kind, captured_offset_ms, captured_at,
 	note_text, original_name, content_type, byte_size, sha256, original_path, original_deleted_at,
-	extracted_text, analysis_text, analysis_state, analysis_error_code, analysis_error_message, created_at, updated_at`
+	extracted_text, analysis_text, analysis_state, analysis_error_code, analysis_error_message, created_at, updated_at,
+	(SELECT public_id FROM memories WHERE memories.id=recording_context_items.memory_id),
+	COALESCE((SELECT MAX(used_by_ai) FROM memory_context_sources WHERE context_item_id=recording_context_items.id), 0)`
 
 func scanItem(s interface{ Scan(...any) error }) (Item, error) {
 	var it Item
-	var sess, capAt, note, origName, ct, sha, origPath, origDel, extr, anTxt, errCode, errMsg sql.NullString
+	var sess, capAt, note, origName, ct, sha, origPath, origDel, extr, anTxt, errCode, errMsg, memPublic sql.NullString
 	var memID, capOff, byteSz sql.NullInt64
 	if err := s.Scan(&it.ID, &it.UserID, &sess, &memID, &it.Kind, &capOff, &capAt,
 		&note, &origName, &ct, &byteSz, &sha, &origPath, &origDel,
-		&extr, &anTxt, &it.AnalysisState, &errCode, &errMsg, &it.CreatedAt, &it.UpdatedAt); err != nil {
+		&extr, &anTxt, &it.AnalysisState, &errCode, &errMsg, &it.CreatedAt, &it.UpdatedAt, &memPublic, &it.UsedByAI); err != nil {
 		return Item{}, err
 	}
 	if sess.Valid {
@@ -134,7 +139,7 @@ func scanItem(s interface{ Scan(...any) error }) (Item, error) {
 		it.OriginalDeletedAt = &origDel.String
 	}
 	if extr.Valid {
-		it.extracted = &extr.String
+		it.ExtractedText = &extr.String
 	}
 	if anTxt.Valid {
 		it.AnalysisText = &anTxt.String
@@ -145,7 +150,10 @@ func scanItem(s interface{ Scan(...any) error }) (Item, error) {
 	if errMsg.Valid {
 		it.AnalysisErrorMessage = &errMsg.String
 	}
-	it.HasOriginal = it.originalPath != nil && *it.originalPath != "" && it.OriginalDeletedAt == nil
+	if memPublic.Valid {
+		it.MemoryPublicID = &memPublic.String
+	}
+	it.OriginalAvailable = it.originalPath != nil && *it.originalPath != "" && it.OriginalDeletedAt == nil
 	return it, nil
 }
 
@@ -188,6 +196,7 @@ func (s *Service) sealContextFile(userID, itemID string, data []byte) (string, e
 }
 
 type CreateInput struct {
+	ID               string // chosen by the client so a retried upload is idempotent
 	Kind             string
 	NoteText         string
 	CapturedOffsetMs *int64
@@ -218,6 +227,9 @@ func (s *Service) CreateForSession(ctx context.Context, userID, sessionID string
 	if err != nil {
 		return Item{}, err
 	}
+	if existing, found, err := s.existingItem(ctx, userID, &sessionID, nil, in); found || err != nil {
+		return existing, err
+	}
 	var cnt int
 	_ = s.DB.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM recording_context_items WHERE user_id=? AND session_id=?`, userID, sessionID).Scan(&cnt)
 	if cnt >= s.cfg().ContextMaxItems {
@@ -239,8 +251,11 @@ func (s *Service) CreateForMemory(ctx context.Context, userID, memoryPublicID st
 	if err != nil {
 		return Item{}, false, err
 	}
+	if existing, found, err := s.existingItem(ctx, userID, nil, &memID, in); found || err != nil {
+		return existing, false, err
+	}
 	var cnt int
-	_ = s.DB.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM recording_context_items WHERE user_id=? AND memory_id=?`, userID, memID).Scan(&cnt)
+	_ = s.DB.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM recording_context_items WHERE user_id=? AND `+memoryLinked, userID, memID, memID).Scan(&cnt)
 	if cnt >= s.cfg().ContextMaxItems {
 		return Item{}, false, httperr.New(http.StatusConflict, "CONTEXT_LIMIT_REACHED", "This memory has reached the maximum number of context items.")
 	}
@@ -277,7 +292,10 @@ func (s *Service) resolveCapturedAt(anchor string, explicit *string, offsetMs *i
 
 func (s *Service) createItem(ctx context.Context, userID string, sessionID *string, memoryID *int64, capAt string, in CreateInput) (Item, error) {
 	c := s.cfg()
-	id := uuid.NewString()
+	id := in.ID
+	if id == "" {
+		id = uuid.NewString()
+	}
 	now := timeutil.NowISO()
 
 	var kind string
@@ -364,6 +382,12 @@ func (s *Service) createItem(ctx context.Context, userID string, sessionID *stri
 		return Item{}, err
 	}
 
+	if memoryID != nil {
+		if _, err := s.DB.W.ExecContext(ctx, `INSERT OR IGNORE INTO memory_context_sources (memory_id, context_item_id) VALUES (?, ?)`, *memoryID, id); err != nil {
+			return Item{}, err
+		}
+	}
+
 	if analysisState == "pending" && s.Jobs != nil {
 		_, _ = s.Jobs.Enqueue(ctx, jobs.EnqueueInput{
 			UserID: userID, ResourceType: "context_item", ResourceID: id,
@@ -397,7 +421,7 @@ func (s *Service) ListForMemory(ctx context.Context, userID, memoryPublicID stri
 	if err != nil {
 		return nil, err
 	}
-	return s.listWhere(ctx, `user_id=? AND memory_id=? ORDER BY COALESCE(captured_at, created_at)`, userID, memID)
+	return s.listWhere(ctx, `user_id=? AND `+memoryLinked+` ORDER BY COALESCE(captured_at, created_at)`, userID, memID, memID)
 }
 
 func (s *Service) listWhere(ctx context.Context, where string, args ...any) ([]Item, error) {
@@ -415,39 +439,204 @@ func (s *Service) listWhere(ctx context.Context, where string, args ...any) ([]I
 	return items, nil
 }
 
-func (s *Service) DeleteItem(ctx context.Context, userID, itemID string) error {
+// memoryLinked matches items attached to a memory directly or carried over from
+// the recording it was written from. It takes the memory's row id twice.
+const memoryLinked = `(memory_id=? OR EXISTS (SELECT 1 FROM memory_context_sources s
+	WHERE s.context_item_id=recording_context_items.id AND s.memory_id=?))`
+
+// Target is the recording or memory a request addresses an item through.
+type Target struct {
+	SessionID      string
+	MemoryPublicID string
+}
+
+// owned returns the item only when it belongs to the addressed target.
+func (s *Service) owned(ctx context.Context, userID, itemID string, target Target) (Item, error) {
 	it, err := s.GetItem(ctx, userID, itemID)
 	if err != nil {
-		return err
+		return Item{}, err
 	}
-	res, err := s.DB.W.ExecContext(ctx, `DELETE FROM recording_context_items WHERE id=? AND user_id=?`, itemID, userID)
+	notFound := httperr.New(http.StatusNotFound, "NOT_FOUND", "Context item not found.")
+	if target.SessionID != "" && (it.SessionID == nil || *it.SessionID != target.SessionID) {
+		return Item{}, notFound
+	}
+	if target.MemoryPublicID != "" {
+		memID, _, err := s.verifyMemory(ctx, userID, target.MemoryPublicID)
+		if err != nil {
+			return Item{}, err
+		}
+		var linked int
+		if err := s.DB.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM recording_context_items WHERE id=? AND `+memoryLinked,
+			itemID, memID, memID).Scan(&linked); err != nil {
+			return Item{}, err
+		}
+		if linked == 0 {
+			return Item{}, notFound
+		}
+	}
+	return it, nil
+}
+
+func (s *Service) existingItem(ctx context.Context, userID string, sessionID *string, memoryID *int64, in CreateInput) (Item, bool, error) {
+	if in.ID == "" {
+		return Item{}, false, nil
+	}
+	it, err := scanItem(s.DB.R.QueryRowContext(ctx, `SELECT `+itemCols+` FROM recording_context_items WHERE id=?`, in.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Item{}, false, nil
+	}
+	if err != nil {
+		return Item{}, false, err
+	}
+	same := it.UserID == userID
+	if sessionID != nil {
+		same = same && it.SessionID != nil && *it.SessionID == *sessionID
+	}
+	if memoryID != nil {
+		same = same && it.MemoryID != nil && *it.MemoryID == *memoryID
+	}
+	if len(in.FileBytes) > 0 {
+		sum := sha256.Sum256(in.FileBytes)
+		same = same && it.SHA256 != nil && *it.SHA256 == hex.EncodeToString(sum[:])
+	} else {
+		note := ""
+		if it.NoteText != nil {
+			note = *it.NoteText
+		}
+		same = same && it.SHA256 == nil && note == strings.TrimSpace(in.NoteText)
+	}
+	if !same {
+		return Item{}, false, httperr.New(http.StatusConflict, "IDEMPOTENCY_CONFLICT", "That context id already represents different content.")
+	}
+	return it, true, nil
+}
+
+// changed refreshes everything derived from an edited, retried or removed item.
+func (s *Service) changed(ctx context.Context, userID string, sessionID *string, memoryIDs []int64) {
+	if sessionID != nil && s.OnSessionContextChanged != nil {
+		s.OnSessionContextChanged(ctx, userID, *sessionID)
+	}
+	if s.Jobs == nil {
+		return
+	}
+	for _, memID := range memoryIDs {
+		var publicID string
+		if s.DB.R.QueryRowContext(ctx, `SELECT public_id FROM memories WHERE id=? AND user_id=?`, memID, userID).Scan(&publicID) != nil {
+			continue
+		}
+		_, _ = s.Jobs.Enqueue(ctx, jobs.EnqueueInput{
+			UserID: userID, ResourceType: "memory", ResourceID: publicID,
+			Type: "rewrite_memory_with_context", Priority: 60,
+			Payload: map[string]any{"memoryId": memID, "publicId": publicID},
+		})
+	}
+}
+
+func (s *Service) linkedMemories(ctx context.Context, itemID string) ([]int64, error) {
+	rows, err := s.DB.R.QueryContext(ctx, `SELECT memory_id FROM recording_context_items WHERE id=? AND memory_id IS NOT NULL
+		UNION SELECT memory_id FROM memory_context_sources WHERE context_item_id=?`, itemID, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *Service) UpdateNote(ctx context.Context, userID, itemID string, target Target, noteText string) (Item, error) {
+	it, err := s.owned(ctx, userID, itemID, target)
+	if err != nil {
+		return Item{}, err
+	}
+	if it.Kind != "note" {
+		return Item{}, httperr.New(http.StatusConflict, "NOT_EDITABLE", "Only typed notes can be edited.")
+	}
+	text := strings.TrimSpace(noteText)
+	if text == "" || len([]rune(text)) > s.cfg().ContextNoteMaxCharacters {
+		return Item{}, httperr.New(http.StatusBadRequest, "INVALID_NOTE", "The note is empty or too long.")
+	}
+	memories, err := s.linkedMemories(ctx, itemID)
+	if err != nil {
+		return Item{}, err
+	}
+	if _, err := s.DB.W.ExecContext(ctx, `UPDATE recording_context_items SET note_text=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, text, itemID); err != nil {
+		return Item{}, err
+	}
+	s.changed(ctx, userID, it.SessionID, memories)
+	return s.GetItem(ctx, userID, itemID)
+}
+
+func (s *Service) Retry(ctx context.Context, userID, itemID string, target Target) (Item, error) {
+	it, err := s.owned(ctx, userID, itemID, target)
+	if err != nil {
+		return Item{}, err
+	}
+	if !it.OriginalAvailable {
+		return Item{}, httperr.New(http.StatusGone, "ORIGINAL_EXPIRED", "The original file is no longer available for analysis.")
+	}
+	if _, err := s.DB.W.ExecContext(ctx, `UPDATE recording_context_items SET analysis_state='pending',
+		analysis_error_code=NULL, analysis_error_message=NULL WHERE id=?`, itemID); err != nil {
+		return Item{}, err
+	}
+	if s.Jobs != nil {
+		if _, err := s.Jobs.Enqueue(ctx, jobs.EnqueueInput{
+			UserID: userID, ResourceType: "context_item", ResourceID: itemID,
+			Type: "analyze_context_item", Priority: 50,
+		}); err != nil {
+			return Item{}, err
+		}
+	}
+	return s.GetItem(ctx, userID, itemID)
+}
+
+func (s *Service) DeleteItem(ctx context.Context, userID, itemID string, target Target) error {
+	it, err := s.owned(ctx, userID, itemID, target)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return httperr.New(http.StatusNotFound, "NOT_FOUND", "Context item not found.")
+	memories, err := s.linkedMemories(ctx, itemID)
+	if err != nil {
+		return err
 	}
 	if it.originalPath != nil && *it.originalPath != "" {
-		_ = os.Remove(*it.originalPath)
+		if err := os.Remove(*it.originalPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
+	if _, err := s.DB.W.ExecContext(ctx, `DELETE FROM recording_context_items WHERE id=? AND user_id=?`, itemID, userID); err != nil {
+		return err
+	}
+	s.changed(ctx, userID, nil, memories)
 	return nil
 }
 
-func (s *Service) ReadOriginal(ctx context.Context, userID, itemID string) (Item, []byte, error) {
-	it, err := s.GetItem(ctx, userID, itemID)
+func (s *Service) ReadOriginal(ctx context.Context, userID, itemID string, target Target) (Item, []byte, error) {
+	it, err := s.owned(ctx, userID, itemID, target)
 	if err != nil {
 		return Item{}, nil, err
 	}
-	if it.originalPath == nil || *it.originalPath == "" || it.OriginalDeletedAt != nil {
-		return Item{}, nil, httperr.New(http.StatusNotFound, "ORIGINAL_NOT_AVAILABLE", "Original file is no longer available.")
+	gone := httperr.New(http.StatusGone, "ORIGINAL_EXPIRED", "The original file is no longer retained.")
+	if !it.OriginalAvailable {
+		return Item{}, nil, gone
 	}
 	key, err := s.MasterKey()
 	if err != nil {
 		return Item{}, nil, err
 	}
 	plain, err := crypto.ReadSealedFile(key, *it.originalPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return Item{}, nil, gone
+	}
 	if err != nil {
-		return Item{}, nil, httperr.New(http.StatusNotFound, "ORIGINAL_NOT_AVAILABLE", "Original file could not be read.")
+		return Item{}, nil, err
 	}
 	return it, plain, nil
 }
@@ -498,8 +687,8 @@ func (s *Service) AnalyzeItem(ctx context.Context, userID, itemID string) error 
 		}
 	} else {
 		txt := ""
-		if it.extracted != nil {
-			txt = *it.extracted
+		if it.ExtractedText != nil {
+			txt = *it.ExtractedText
 		}
 		if txt == "" {
 			analyzeErr = fmt.Errorf("no extracted text")

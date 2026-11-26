@@ -34,7 +34,7 @@ func TestBackupCreatePruneAndRestore(t *testing.T) {
 	}
 	_ = cfg.Paths.Ensure()
 
-	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+	db, err := schema.Open(ctx, cfg.Paths, "")
 	if err != nil {
 		t.Fatal(err)
 	}

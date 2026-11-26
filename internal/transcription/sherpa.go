@@ -162,6 +162,8 @@ func candidateRuntimeDirs(cfg config.Config) []string {
 
 func libNames() (ortName, sherpaName string) {
 	switch runtime.GOOS {
+	case "windows":
+		return "onnxruntime.dll", "sherpa-onnx-c-api.dll"
 	case "darwin":
 		return "libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"
 	default:

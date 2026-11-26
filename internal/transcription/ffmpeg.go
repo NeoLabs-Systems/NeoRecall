@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,11 +28,23 @@ type DecodedChannel struct {
 	SampleRate int
 }
 
-// ResolveFFmpegPath locates ffmpeg from NEORECALL_FFMPEG_PATH or PATH.
+// ResolveFFmpegPath locates ffmpeg from NEORECALL_FFMPEG_PATH, then beside this
+// program (the runtime ships it, and an updated service may keep an old PATH),
+// then PATH.
 func ResolveFFmpegPath() string {
 	if custom := strings.TrimSpace(os.Getenv("NEORECALL_FFMPEG_PATH")); custom != "" {
 		if _, err := os.Stat(custom); err == nil {
 			return custom
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		name := "ffmpeg"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		beside := filepath.Join(filepath.Dir(exe), name)
+		if info, err := os.Stat(beside); err == nil && info.Mode().IsRegular() {
+			return beside
 		}
 	}
 	p, err := exec.LookPath("ffmpeg")

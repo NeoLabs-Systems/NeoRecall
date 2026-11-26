@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
-	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
@@ -70,7 +69,7 @@ func (s *Service) httpClient() *http.Client {
 	if s.HTTP != nil {
 		return s.HTTP
 	}
-	return ssrf.NewClient(ssrf.Options{AllowPrivate: true})
+	return newInstanceClient()
 }
 
 func (s *Service) encryptSecret(typ, cred string) (string, error) {

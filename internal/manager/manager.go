@@ -133,10 +133,7 @@ func (m *Manager) withDB(ctx context.Context, fn func(context.Context, *dbx.DB, 
 	if err := cfg.Paths.Ensure(); err != nil {
 		return err
 	}
-	if _, err := schema.EnsurePlaintextLegacyDB(ctx, cfg.Paths.Database, cfg.Paths.SecretKey, cfg.AppDir, cfg.Paths.Home); err != nil {
-		return err
-	}
-	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+	db, err := schema.Open(ctx, cfg.Paths, cfg.AppDir)
 	if err != nil {
 		return err
 	}
@@ -1023,7 +1020,11 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 	}
 	_, webStatErr := os.Stat(filepath.Join(cfg.WebDir, "index.html"))
 
-	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") {
+	// An installation without a runtime (migrated from Node.js, or a lone
+	// binary) lacks the files that ship in it, whatever its version says.
+	_, runtimeErr := runtimeStore(cfg).Current()
+	missingRuntime := os.IsNotExist(runtimeErr) && !goSourceCheckout(cfg.AppDir) && hasSignedRuntime(rel, targetVer)
+	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") && !missingRuntime {
 		if cli.HasFlag(args, "--refresh-web") || webStatErr != nil {
 			if _, werr := m.ensureStandaloneWebBundle(ctx, cfg, channel, true); werr != nil {
 				m.UI.Warn("Web UI bundle refresh skipped: " + werr.Error())

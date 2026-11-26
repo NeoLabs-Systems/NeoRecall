@@ -29,6 +29,13 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/memories/consolidations", read(rt.handleConsolidationList))
 	mux.Handle("POST /api/v1/memories/consolidations/run", write(rt.handleConsolidationRun))
 
+	mux.Handle("POST /api/v1/memories/consolidations", write(rt.handleConsolidationStart))
+	mux.Handle("GET /api/v1/memories/consolidations/latest", write(rt.handleConsolidationLatest))
+	mux.Handle("GET /api/v1/memories/daily-summaries", read(rt.handleListDaily))
+	mux.Handle("GET /api/v1/memories/mini", read(rt.handleListMini))
+	mux.Handle("PATCH /api/v1/memories/mini/{id}", write(rt.handlePatchMini))
+	mux.Handle("DELETE /api/v1/memories/mini/{id}", write(rt.handleDeleteMini))
+
 	mux.Handle("GET /api/v1/memories", read(rt.handleList))
 	mux.Handle("GET /api/v1/memories/{id}", read(rt.handleGet))
 	mux.Handle("PATCH /api/v1/memories/{id}", write(rt.handlePatch))
@@ -56,6 +63,8 @@ func (rt *Routes) handleList(w http.ResponseWriter, r *http.Request) {
 		Pinned:   q.Get("pinned"),
 		Archived: q.Get("archived"),
 		Topic:    q.Get("topic"),
+		Entity:   q.Get("entity"),
+		Query:    q.Get("q"),
 	})
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
@@ -166,7 +175,9 @@ func (rt *Routes) handlePatchMini(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Routes) handleListDaily(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	items, err := ListDailySummaries(r.Context(), rt.Svc.DB, a.UserID, r.URL.Query().Get("limit"))
+	items, err := ListDailySummaries(r.Context(), rt.Svc.DB, a.UserID, DailyFilter{
+		Limit: r.URL.Query().Get("limit"), From: r.URL.Query().Get("from"), To: r.URL.Query().Get("to"),
+	})
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
@@ -224,4 +235,29 @@ func (rt *Routes) handleDeleteMini(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (rt *Routes) handleConsolidationStart(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	state, err := rt.Consolidations.Start(r.Context(), a.UserID)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, state)
+}
+
+func (rt *Routes) handleConsolidationLatest(w http.ResponseWriter, r *http.Request) {
+	a := auth.FromContext(r.Context())
+	run, err := rt.Consolidations.Latest(r.Context(), a.UserID)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	eligibility, err := rt.Consolidations.Eligibility(r.Context(), a.UserID)
+	if err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"run": run, "eligibility": eligibility})
 }

@@ -1,8 +1,9 @@
-// Package runtimebundle packages NeoRecall's server and web assets using the
-// signed NeoLabs runtime manifest format.
+// Package runtimebundle packages NeoRecall's server, web assets and native
+// code using the signed NeoLabs runtime manifest format.
 package runtimebundle
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,15 +27,18 @@ var targets = []target{
 var supported = release.Targets{"linux": {"x64", "arm64"}, "macos": {"x64", "arm64"}, "windows": {"x64"}}
 
 // Build generates the same versioned, signed runtime format as NeoAgent.
-func Build(root, dist, version, privateKey string) error {
+func Build(ctx context.Context, root, dist, version, privateKey string) error {
 	publicKey, err := signing.PublicKey()
 	if err != nil {
 		return err
 	}
-	return build(root, dist, version, privateKey, publicKey)
+	return build(ctx, root, dist, version, privateKey, publicKey, fetchNative)
 }
 
-func build(root, dist, version, privateKey, publicKey string) error {
+// nativeFetcher puts a target's native files into its bin directory.
+type nativeFetcher func(ctx context.Context, platform, arch, dir string) error
+
+func build(ctx context.Context, root, dist, version, privateKey, publicKey string, fetch nativeFetcher) error {
 	version = strings.TrimPrefix(version, "v")
 	if _, err := release.NormalizeVersion(version); err != nil {
 		return err
@@ -51,7 +55,7 @@ func build(root, dist, version, privateKey, publicKey string) error {
 		if err != nil {
 			return err
 		}
-		err = buildTarget(root, dist, stage, version, t, &artifacts)
+		err = buildTarget(ctx, root, dist, stage, version, t, fetch, &artifacts)
 		cleanupErr := os.RemoveAll(stage)
 		if err != nil {
 			return err
@@ -71,7 +75,7 @@ func build(root, dist, version, privateKey, publicKey string) error {
 	return release.WriteSigned(filepath.Join(dist, ManifestPrefix+version+".json"), data, privateKey, publicKey)
 }
 
-func buildTarget(root, dist, stage, version string, t target, artifacts *[]release.Artifact) error {
+func buildTarget(ctx context.Context, root, dist, stage, version string, t target, fetch nativeFetcher, artifacts *[]release.Artifact) error {
 	if info, err := os.Stat(filepath.Join(root, "flutter_app", "build", "web", "index.html")); err != nil {
 		return fmt.Errorf("web client is missing: %w", err)
 	} else if !info.Mode().IsRegular() {
@@ -91,6 +95,9 @@ func buildTarget(root, dist, stage, version string, t target, artifacts *[]relea
 	}
 	if err := os.WriteFile(filepath.Join(app, "bin", bin), data, 0o755); err != nil {
 		return err
+	}
+	if err := fetch(ctx, t.platform, t.arch, filepath.Join(app, "bin")); err != nil {
+		return fmt.Errorf("native files for %s-%s: %w", t.platform, t.arch, err)
 	}
 	for _, p := range [][2]string{{"flutter_app/build/web", "flutter_app/build/web"}, {"landing", "landing"}, {"test/fixtures", "test/fixtures"}} {
 		if err := os.CopyFS(filepath.Join(app, filepath.FromSlash(p[1])), os.DirFS(filepath.Join(root, filepath.FromSlash(p[0])))); err != nil {

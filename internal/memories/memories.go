@@ -53,8 +53,10 @@ func (s *Service) cfg() config.Config {
 }
 
 type MiniMemoryRow struct {
-	InternalID          int64          `json:"internal_id,omitempty"`
+	InternalID          int64          `json:"id"`
 	ID                  string         `json:"public_id"`
+	UserID              string         `json:"user_id"`
+	MemoryRowID         int64          `json:"memory_id"`
 	MemoryID            string         `json:"memory_public_id,omitempty"`
 	Memory              map[string]any `json:"memory,omitempty"`
 	TimelineAt          string         `json:"timeline_at,omitempty"`
@@ -72,8 +74,8 @@ type MiniMemoryRow struct {
 }
 
 type MemoryRow struct {
-	InternalID          int64    `json:"internal_id,omitempty"`
-	ID                  string   `json:"id"`
+	InternalID          int64    `json:"id"`
+	ID                  string   `json:"-"`
 	PublicID            string   `json:"public_id"`
 	UserID              string   `json:"user_id"`
 	Type                string   `json:"type"`
@@ -88,6 +90,7 @@ type MemoryRow struct {
 	Pinned              bool     `json:"pinned"`
 	Archived            bool     `json:"archived"`
 	Topics              []string `json:"topics"`
+	MiniCount           int      `json:"mini_count"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
 }
@@ -112,7 +115,7 @@ type MemorySourceItem struct {
 type MemoryDetail struct {
 	MemoryRow
 	Entities     []LinkedEntity     `json:"entities"`
-	MiniMemories []MiniMemoryRow    `json:"mini_memories"`
+	MiniMemories []MiniMemoryRow    `json:"miniMemories"`
 	Sources      []MemorySourceItem `json:"sources"`
 	ContextItems []nctx.Item        `json:"contextItems"`
 }
@@ -123,7 +126,7 @@ func scanMemoryRow(s interface{ Scan(...any) error }) (MemoryRow, error) {
 	var impOv sql.NullFloat64
 	var pinned, archived int
 	if err := s.Scan(&m.InternalID, &m.PublicID, &m.UserID, &m.Type, &m.TitleEn, &m.SummaryEn,
-		&emoji, &m.Importance, &impOv, &m.StartedAt, &m.EndedAt, &pinned, &archived, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		&emoji, &m.Importance, &impOv, &m.StartedAt, &m.EndedAt, &pinned, &archived, &m.CreatedAt, &m.UpdatedAt, &m.MiniCount); err != nil {
 		return MemoryRow{}, err
 	}
 	m.ID = m.PublicID
@@ -143,7 +146,8 @@ func scanMemoryRow(s interface{ Scan(...any) error }) (MemoryRow, error) {
 }
 
 const memoryCols = `id, public_id, user_id, type, title_en, summary_en, emoji, importance, importance_override,
-	started_at, ended_at, pinned, archived, created_at, updated_at`
+	started_at, ended_at, pinned, archived, created_at, updated_at,
+	(SELECT COUNT(*) FROM mini_memories mm WHERE mm.memory_id=memories.id)`
 
 type ListFilter struct {
 	Limit    string
@@ -153,6 +157,8 @@ type ListFilter struct {
 	Pinned   string
 	Archived string
 	Topic    string
+	Entity   string
+	Query    string
 }
 
 func (s *Service) List(ctx context.Context, userID string, f ListFilter) ([]MemoryRow, error) {
@@ -184,6 +190,14 @@ func (s *Service) List(ctx context.Context, userID string, f ListFilter) ([]Memo
 	if f.Topic != "" {
 		conds = append(conds, "EXISTS (SELECT 1 FROM memory_topics mt WHERE mt.memory_id=memories.id AND mt.topic=?)")
 		args = append(args, f.Topic)
+	}
+	if f.Entity != "" {
+		conds = append(conds, "EXISTS (SELECT 1 FROM memory_entities me WHERE me.memory_id=memories.id AND me.entity_id=?)")
+		args = append(args, f.Entity)
+	}
+	if needle := strings.TrimSpace(f.Query); needle != "" {
+		conds = append(conds, "(title_en LIKE ? COLLATE NOCASE OR summary_en LIKE ? COLLATE NOCASE)")
+		args = append(args, "%"+needle+"%", "%"+needle+"%")
 	}
 	args = append(args, lim)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT `+memoryCols+` FROM memories WHERE `+strings.Join(conds, " AND ")+`
@@ -267,6 +281,7 @@ func (s *Service) Get(ctx context.Context, userID, publicID string) (MemoryDetai
 			if mrows.Scan(&mr.InternalID, &mr.ID, &mr.Kind, &mr.TextEn, &mr.Importance, &impOv,
 				&mr.Confidence, &due, &occ, &st, &mr.CreatedAt, &mr.UpdatedAt) == nil {
 				mr.MemoryID = m.PublicID
+				mr.MemoryRowID, mr.UserID = m.InternalID, userID
 				mr.EffectiveImportance = mr.Importance
 				if impOv.Valid {
 					v := impOv.Float64
@@ -828,7 +843,7 @@ func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw s
 	}
 	args = append(args, lim)
 	rows, err := s.DB.R.QueryContext(ctx, `SELECT mm.id, mm.public_id, m.public_id, mm.kind, mm.text_en, mm.importance,
-		mm.importance_override, mm.confidence, mm.due_at, mm.occurred_at, mm.status, mm.created_at, mm.updated_at, m.title_en, m.emoji, m.type, COALESCE(mm.occurred_at,mm.due_at,mm.created_at)
+		mm.importance_override, mm.confidence, mm.due_at, mm.occurred_at, mm.status, mm.created_at, mm.updated_at, m.title_en, m.emoji, m.type, COALESCE(mm.occurred_at,mm.due_at,mm.created_at), mm.user_id, mm.memory_id
 		FROM mini_memories mm JOIN memories m ON m.id=mm.memory_id
 		WHERE `+strings.Join(conds, " AND ")+` ORDER BY COALESCE(mm.occurred_at,mm.due_at,mm.created_at) DESC, mm.id DESC LIMIT ?`, args...)
 	if err != nil {
@@ -842,7 +857,7 @@ func (s *Service) ListMini(ctx context.Context, userID, kind, status, limitRaw s
 		var due, occ, st, emoji sql.NullString
 		var title, memType string
 		if rows.Scan(&r.InternalID, &r.ID, &r.MemoryID, &r.Kind, &r.TextEn, &r.Importance,
-			&impOv, &r.Confidence, &due, &occ, &st, &r.CreatedAt, &r.UpdatedAt, &title, &emoji, &memType, &r.TimelineAt) == nil {
+			&impOv, &r.Confidence, &due, &occ, &st, &r.CreatedAt, &r.UpdatedAt, &title, &emoji, &memType, &r.TimelineAt, &r.UserID, &r.MemoryRowID) == nil {
 			r.Memory = map[string]any{"public_id": r.MemoryID, "title_en": title, "type": memType, "emoji": nil}
 			if emoji.Valid && emoji.String != "" {
 				r.Memory["emoji"] = emoji.String

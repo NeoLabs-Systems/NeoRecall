@@ -1,7 +1,10 @@
 package runtimebundle
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -9,6 +12,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NeoLabs-Systems/neolabs-go/cli/release"
@@ -30,7 +34,7 @@ func TestBuildTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	var artifacts []release.Artifact
-	if err := buildTarget(root, dist, stage, "1.0.0", target, &artifacts); err != nil {
+	if err := buildTarget(context.Background(), root, dist, stage, "1.0.0", target, fakeNative, &artifacts); err != nil {
 		t.Fatal(err)
 	}
 	if len(artifacts) != 1 || artifacts[0].SizeBytes == 0 || len(artifacts[0].SHA256) != 64 {
@@ -45,7 +49,7 @@ func TestBuildTarget(t *testing.T) {
 	for _, f := range archive.File {
 		found[f.Name] = true
 	}
-	for _, name := range []string{"app/bin/neorecall", "app/flutter_app/build/web/index.html", "app/landing/index.html", "app/test/fixtures/sample.wav"} {
+	for _, name := range []string{"app/bin/neorecall", "app/flutter_app/build/web/index.html", "app/landing/index.html", "app/test/fixtures/sample.wav", "app/bin/library"} {
 		if !found[name] {
 			t.Fatalf("missing %s", name)
 		}
@@ -76,7 +80,7 @@ func TestBuildSignsRuntimeManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := build(root, dist, "1.0.0", base64.StdEncoding.EncodeToString(der), base64.StdEncoding.EncodeToString(pub)); err != nil {
+	if err := build(context.Background(), root, dist, "1.0.0", base64.StdEncoding.EncodeToString(der), base64.StdEncoding.EncodeToString(pub), fakeNative); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dist, ManifestPrefix+"1.0.0.json")
@@ -97,5 +101,41 @@ func TestBuildSignsRuntimeManifest(t *testing.T) {
 	}
 	if len(manifest.Artifacts) != len(targets) {
 		t.Fatalf("artifacts: %+v", manifest.Artifacts)
+	}
+}
+
+func fakeNative(_ context.Context, _, _, dir string) error {
+	return os.WriteFile(filepath.Join(dir, "library"), []byte("native"), 0o755)
+}
+
+func TestEveryTargetHasPinnedNativeFiles(t *testing.T) {
+	for _, target := range targets {
+		n, err := nativeFor(target.platform, target.arch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []pin{n.libraries, n.ffmpeg, n.ffmpegLicense, n.ffmpegReadme} {
+			if !strings.HasPrefix(p.url, "https://github.com/") || len(p.sha256) != 64 {
+				t.Fatalf("%s-%s: bad pin %+v", target.platform, target.arch, p)
+			}
+		}
+	}
+}
+
+func TestExtractLibrariesRequiresEveryName(t *testing.T) {
+	var archive bytes.Buffer
+	w := tar.NewWriter(&archive)
+	if err := w.WriteHeader(&tar.Header{Name: "release/lib/one.so", Typeflag: tar.TypeReg, Size: 1, Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := extractLibraries(tar.NewReader(&archive), []string{"one.so", "two.so"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "two.so") {
+		t.Fatalf("err=%v", err)
 	}
 }

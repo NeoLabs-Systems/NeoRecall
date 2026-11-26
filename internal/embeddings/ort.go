@@ -61,6 +61,9 @@ var (
 )
 
 func ortLibName() string {
+	if runtime.GOOS == "windows" {
+		return "onnxruntime.dll"
+	}
 	if runtime.GOOS == "darwin" {
 		return "libonnxruntime.dylib"
 	}

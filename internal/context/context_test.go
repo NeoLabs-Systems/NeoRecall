@@ -139,7 +139,7 @@ func TestExtractSealAnalyzeAndRoutes(t *testing.T) {
 	_, _ = fw.Write(makeMinimalPDF("Project Phoenix"))
 	_ = mw.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessID+"/context", &body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/ingest/sessions/"+sessID+"/context/00000000-0000-0000-0000-000000000034", &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+key.Token)
 	rec := httptest.NewRecorder()
@@ -168,7 +168,7 @@ func TestExtractSealAnalyzeAndRoutes(t *testing.T) {
 	}
 
 	// Download original verifies transparent decryption.
-	dlReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/"+sessID+"/context/"+items[0].ID+"/download", nil)
+	dlReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/"+sessID+"/context/"+items[0].ID+"/original", nil)
 	dlReq.Header.Set("Authorization", "Bearer "+key.Token)
 	dlRec := httptest.NewRecorder()
 	mux.ServeHTTP(dlRec, dlReq)

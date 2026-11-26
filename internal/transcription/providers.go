@@ -32,14 +32,26 @@ type RuntimeProviderConfig struct {
 	NeoRouter      bool
 }
 
+// ProviderError is retried unless Permanent: an error nobody classified must
+// never cost the server its copy of the audio.
 type ProviderError struct {
 	Code      string
 	Status    int
 	Message   string
-	Retryable bool
+	Permanent bool
 }
 
 func (e *ProviderError) Error() string { return e.Message }
+
+// NeedsUserFix reports failures that only a settings or account change can
+// clear, so retrying them must not use up the job's attempts.
+func (e *ProviderError) NeedsUserFix() bool {
+	switch e.Status {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return e.Code == "TRANSCRIPTION_NOT_CONFIGURED" || e.Code == "TRANSCRIPTION_PROVIDER_NOT_CONFIGURED"
+}
 
 type TranscribeInput struct {
 	Filename                    string
@@ -481,7 +493,7 @@ func (b *baseProvider) fetchAssemblyAI(ctx context.Context, in TranscribeInput) 
 		if msg == "" {
 			msg = "AssemblyAI could not transcribe the audio."
 		}
-		return nil, &ProviderError{Code: "TRANSCRIPTION_PROVIDER_ERROR", Message: msg, Retryable: false}
+		return nil, &ProviderError{Code: "TRANSCRIPTION_PROVIDER_ERROR", Message: msg, Permanent: true}
 	}
 	if len(cur.Utterances) > 0 {
 		out := make([]Segment, 0, len(cur.Utterances))

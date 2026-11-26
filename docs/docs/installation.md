@@ -5,7 +5,30 @@ title: Installation
 
 # Install NeoRecall
 
-NeoRecall is a single program for macOS (x64, ARM64), Linux (x64, ARM64) and Windows (x64). It needs `ffmpeg` on the host. It does not install or run speech-recognition or language-model weights. Before processing recordings, configure a hosted provider or separately deploy compatible transcription and language-model endpoints.
+NeoRecall is a single program for macOS (x64, ARM64), Linux (x64, ARM64) and Windows (x64). It does not install or run speech-recognition or language-model weights. Before processing recordings, configure a hosted provider or separately deploy compatible transcription and language-model endpoints.
+
+## What the release bundle brings
+
+The signed runtime for each platform carries, next to the server binary, the
+sherpa-onnx and ONNX Runtime libraries (local search embeddings, voice-activity
+detection, speaker identity) and a static `ffmpeg` with its license. Each is
+pinned to an upstream release and checked by SHA-256 when the bundle is built.
+
+- **macOS**: the ONNX Runtime library needs macOS 15.5 or newer. On older
+  versions local embeddings and speaker identity do not work.
+- **Linux**: a glibc distribution with `libstdc++`. Alpine (musl) is not
+  supported.
+- **Windows**: needs the Microsoft Visual C++ Redistributable (x64).
+- **Without the bundle** (built from source, or just the CLI binary): install
+  `ffmpeg` yourself, and fetch the libraries into a folder named by
+  `NEORECALL_RUNTIME_DIR`:
+
+  ```bash
+  go run ./cmd/neorecall-release native-libs --platform macos --arch arm64 --output ./native
+  ```
+
+`neorecall doctor` looks for `ffmpeg` on your `PATH` only, so it can report it
+missing while the service uses the bundled one.
 
 ## Repository installer
 
@@ -109,6 +132,10 @@ Updating a Node.js installation hands over to the binary by itself on macOS and
 Linux. You can also run the repository installer: it backs up the data, migrates
 the database and keeps `~/.neorecall`.
 
+The signed runtime, with the native libraries and `ffmpeg`, is installed along
+the way. An installation migrated earlier without it gets it from the next
+`neorecall update`.
+
 `neorecall` on its own shows a menu of the common actions; `neorecall status
 --details` adds the install folder, data folder, versions and port, and
 `neorecall help` lists every command.
@@ -121,7 +148,21 @@ docker compose run --rm neorecall neorecall setup
 docker compose up -d
 ```
 
-The compose volume contains the database, local search model, logs, and temporary processing files. Provider credentials come from a local `.env` or encrypted admin settings; no credentials are baked into the image.
+The compose volume contains the database, local search model, logs, and temporary processing files. Provider credentials come from a local `.env` or encrypted admin settings; no credentials are baked into the image. The image includes `ffmpeg` and the native libraries.
+
+The server runs as uid 1000. The container starts as root only to hand the data
+volume to that user, then drops privileges; `docker exec … neorecall` drops them
+too. If you set `user:` yourself, the volume must already belong to that user.
+
+### Upgrading from the Node.js image
+
+Stop the old container cleanly first (`docker compose down`), so the encrypted
+database has no pending write-ahead log: the new image cannot replay one. Back up
+the volume, then use the new `compose.yaml` and run `docker compose up -d`.
+The same named volume now mounts at `/data` instead of `/root/.neorecall`, and
+its root-owned files are handed to uid 1000 on the first start. If you run the
+image with `docker run`, change the mount to `-v <volume>:/data`; the container
+refuses to start when it finds data still mounted at `/root/.neorecall`.
 
 ## Service commands
 

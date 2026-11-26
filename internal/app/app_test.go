@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/NeoLabs-Systems/neorecall/internal/app"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
@@ -45,5 +46,29 @@ func TestConfiguredProviderCanReachLoopback(t *testing.T) {
 	}
 	if _, err := a.HTTPClient.Get(srv.URL); err == nil {
 		t.Fatal("general HTTP client unexpectedly permits loopback")
+	}
+}
+
+// A long transcription or model call is bounded by its own deadline, not cut off
+// by a shorter one on the shared provider client.
+func TestProviderClientOutlastsRequestTimeouts(t *testing.T) {
+	home := t.TempDir()
+	getenv := func(k string) string {
+		if k == "NEORECALL_HOME" {
+			return home
+		}
+		return ""
+	}
+	cfg, err := config.Load(getenv, home, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := app.Open(context.Background(), app.Options{StaticConfig: &cfg, Getenv: getenv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if want := time.Duration(cfg.TranscriptionTimeoutMs) * time.Millisecond; a.Providers.HTTP.Timeout < want {
+		t.Fatalf("provider client timeout %v is shorter than %v", a.Providers.HTTP.Timeout, want)
 	}
 }

@@ -53,7 +53,7 @@
       "files": [
         {
           "path": "diarization/wespeaker_en_voxceleb_CAM++_LM.onnx",
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_CAM%2B%2B_LM.onnx",
+          "url": "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/0743f301363dec56491a490f6d6cbc9d67f9a3bf/wespeaker_en_voxceleb_CAM%2B%2B_LM.onnx",
           "size": 29292687,
           "sha256": "e197af7e9d473030cf486b3124149a19bf37014d0e4485e4c70c483b0ec10cb2"
         }

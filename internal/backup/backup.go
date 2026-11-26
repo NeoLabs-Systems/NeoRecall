@@ -13,9 +13,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
+	"github.com/NeoLabs-Systems/neolabs-go/dbx/cryptdb"
 	"github.com/NeoLabs-Systems/neolabs-go/filebox"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
@@ -146,6 +148,8 @@ type Service struct {
 	Cfg       func() config.Config
 	MasterKey func() ([]byte, error)
 	Log       *slog.Logger
+
+	running sync.Mutex
 }
 
 func (s *Service) cfg() config.Config {
@@ -170,44 +174,56 @@ func ArtifactKey(now time.Time) string {
 	return fmt.Sprintf("neorecall-%s-%s.nrbak", now.UTC().Format("20060102T150405Z"), hex.EncodeToString(b[:]))
 }
 
+// Create writes an artifact without recording it, for the CLI paths that run
+// with the server stopped.
 func (s *Service) Create(ctx context.Context) (Artifact, error) {
 	dst, err := s.Destination()
 	if err != nil {
 		return Artifact{}, err
 	}
+	art, _, _, err := s.create(ctx, dst)
+	return art, err
+}
+
+func (s *Service) create(ctx context.Context, dst Destination) (Artifact, string, []string, error) {
 	key, err := s.MasterKey()
 	if err != nil {
-		return Artifact{}, err
+		return Artifact{}, "", nil, err
 	}
 	c := s.cfg()
 	tmpDir, err := os.MkdirTemp(c.Paths.Backups, "bak-")
 	if err != nil {
-		return Artifact{}, err
+		return Artifact{}, "", nil, err
 	}
 	defer os.RemoveAll(tmpDir)
 
 	snapPath := filepath.Join(tmpDir, "snapshot.db")
-	escaped := strings.ReplaceAll(snapPath, `'`, `''`)
-	if _, err := s.DB.W.ExecContext(ctx, `VACUUM INTO '`+escaped+`'`); err != nil {
-		return Artifact{}, fmt.Errorf("snapshot database: %w", err)
+	// The artifact is sealed as a whole, so the snapshot inside is a plain
+	// database that restores on any installation holding the key.
+	if err := cryptdb.Export(ctx, s.DB.W, snapPath); err != nil {
+		return Artifact{}, "", nil, fmt.Errorf("snapshot database: %w", err)
+	}
+	checksum, err := crypto.SHA256File(snapPath)
+	if err != nil {
+		return Artifact{}, "", nil, err
 	}
 	sealedPath := filepath.Join(tmpDir, "sealed.nrbak")
 	if err := crypto.SealFile(key, snapPath, sealedPath, crypto.BackupMagic); err != nil {
-		return Artifact{}, err
+		return Artifact{}, "", nil, err
 	}
 
 	art, err := dst.Store(sealedPath, ArtifactKey(time.Now().UTC()))
 	if err != nil {
-		return Artifact{}, err
+		return Artifact{}, "", nil, err
 	}
-	s.prune(dst, max(1, c.BackupRetain), art.Key)
-	return art, nil
+	return art, checksum, s.prune(dst, max(1, c.BackupRetain), art.Key), nil
 }
 
-func (s *Service) prune(dst Destination, retain int, keepKey string) {
+// prune removes artifacts beyond the retention count and returns their keys.
+func (s *Service) prune(dst Destination, retain int, keepKey string) (removed []string) {
 	items, err := dst.List()
 	if err != nil || len(items) <= retain {
-		return
+		return nil
 	}
 	kept := 0
 	for _, it := range items {
@@ -219,8 +235,11 @@ func (s *Service) prune(dst Destination, retain int, keepKey string) {
 			kept++
 			continue
 		}
-		_ = dst.Remove(it.Key)
+		if dst.Remove(it.Key) == nil {
+			removed = append(removed, it.Key)
+		}
 	}
+	return removed
 }
 
 func (s *Service) Status() (map[string]any, error) {

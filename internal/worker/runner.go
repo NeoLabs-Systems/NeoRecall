@@ -140,12 +140,24 @@ func (r *Runner) RunOnce(ctx context.Context, workerID string) (bool, error) {
 
 	var ule *usage.LimitExceededError
 	if errors.As(err, &ule) {
-		r.Jobs.Defer(ctx, j.ID, workerID, ule.RetryAt)
+		r.Jobs.Defer(ctx, j.ID, workerID, ule.RetryAt, "USAGE_LIMIT_EXCEEDED", "Waiting for the account usage window to open.")
 		return true, nil
 	}
 
 	code, msg, retryable := classifyJobError(err)
-	willRetry := r.Jobs.Fail(ctx, j.ID, workerID, code, msg, retryable)
+	var pe *transcription.ProviderError
+	if j.Type == "transcribe_chunk" && errors.As(err, &pe) && pe.NeedsUserFix() {
+		retryAt := timeutil.FormatISO(timeutil.AddMillis(time.Now().UTC(), r.cfg().JobRetryMaxMs))
+		if r.Jobs.Defer(ctx, j.ID, workerID, retryAt, code, msg) {
+			r.markChunkFailure(ctx, j, code, msg, true)
+		}
+		return true, nil
+	}
+	willRetry, failErr := r.Jobs.Fail(ctx, j.ID, workerID, code, msg, retryable)
+	if failErr != nil {
+		// The job still holds its place in the queue, so its audio must too.
+		return true, failErr
+	}
 	r.markChunkFailure(ctx, j, code, msg, willRetry)
 	return true, nil
 }
@@ -209,7 +221,7 @@ func classifyJobError(err error) (code, msg string, retryable bool) {
 	}
 	var pe *transcription.ProviderError
 	if errors.As(err, &pe) {
-		return pe.Code, pe.Message, pe.Retryable
+		return pe.Code, pe.Message, !pe.Permanent
 	}
 	var ae *ai.AIError
 	if errors.As(err, &ae) && ae.Code != "" {

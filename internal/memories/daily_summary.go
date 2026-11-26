@@ -45,11 +45,18 @@ func scanDailySummary(s interface{ Scan(...any) error }) (DailySummaryRow, error
 	return r, nil
 }
 
-func ListDailySummaries(ctx context.Context, db *dbx.DB, userID, limitRaw string) ([]DailySummaryRow, error) {
-	lim := transcripts.PageLimit(limitRaw, 200, 50)
+type DailyFilter struct {
+	Limit string
+	From  string
+	To    string
+}
+
+func ListDailySummaries(ctx context.Context, db *dbx.DB, userID string, f DailyFilter) ([]DailySummaryRow, error) {
+	lim := transcripts.PageLimit(f.Limit, 200, 50)
 	rows, err := db.R.QueryContext(ctx, `SELECT id, user_id, local_date, timezone, summary_en,
 		coverage_started_at, coverage_ended_at, revision, state, source_count, consolidation_run_id, created_at, updated_at
-		FROM daily_summaries WHERE user_id=? ORDER BY local_date DESC LIMIT ?`, userID, lim)
+		FROM daily_summaries WHERE user_id=? AND (?='' OR local_date>=?) AND (?='' OR local_date<=?)
+		ORDER BY local_date DESC LIMIT ?`, userID, f.From, f.From, f.To, f.To, lim)
 	if err != nil {
 		return nil, err
 	}

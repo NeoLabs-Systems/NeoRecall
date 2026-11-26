@@ -115,7 +115,8 @@ session, and they live inside the same page-encrypted database as everything
 else.
 
 The SQLite file itself is encrypted at rest with that installation key
-(ChaCha20-Poly1305 page encryption). Transcripts, memories, search tokens,
+(Adiantum page encryption, which hides the content but does not by itself detect
+tampering). Transcripts, memories, search tokens,
 vectors, and settings are ciphertext on disk. A process that has `secret.key`
 decrypts pages in memory so search, matching, and generation keep working
 without a new password or a change in the product. Temporary audio, import
