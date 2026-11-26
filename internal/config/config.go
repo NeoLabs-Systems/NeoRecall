@@ -18,7 +18,7 @@ import (
 )
 
 // Version is the NeoRecall build version (mutable var so -ldflags -X overrides it cleanly).
-var Version = "0.1.4-beta.26"
+var Version = "0.1.4-beta.27"
 
 const (
 	LLMPromptReserveTokens = 512
