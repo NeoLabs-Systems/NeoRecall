@@ -39,8 +39,11 @@ network.
 
 The desktop apps can perform the whole setup without a terminal. On the server
 screen, choose **Set up NeoRecall on this computer** and pick a channel: the app
-downloads the `neorecall` binary, checks its published SHA-256, runs `neorecall
-install`, waits for the service and connects to it, showing each step as it runs.
+downloads the signed server runtime, verifies its signature and checksum, runs
+`neorecall install` from it, waits for the service and connects, showing each
+step as it runs. If setup fails, the previous version is put back. The runtime
+lives under `~/.neorecall`; desktop installs do not put `neorecall` on your
+`PATH`.
 
 Next it asks you to create your account. The first account on a server is its
 admin, so right after signing up the app opens **Admin › Providers** for the two

@@ -8,7 +8,15 @@ extension LocalBackendChannelNames on LocalBackendChannel {
 
 /// Ordered stages of a local install. The UI shows the current stage message;
 /// the progress bar uses the fractions the installer emits with each event.
-enum LocalBackendInstallStage { prepare, download, install, connect, complete }
+enum LocalBackendInstallStage {
+  prepare,
+  download,
+  verify,
+  install,
+  service,
+  connect,
+  complete,
+}
 
 class LocalBackendInstallEvent {
   const LocalBackendInstallEvent({
@@ -44,7 +52,7 @@ class LocalBackendInstallResult {
 
   final String backendUrl;
 
-  /// Where the `neorecall` command was installed.
+  /// The installed server binary, which is also the command line tool.
   final String commandPath;
   final LocalBackendChannel channel;
   final String serverVersion;

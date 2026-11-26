@@ -5,11 +5,7 @@ import 'local_backend_installer_models.dart';
 const bool supportsLocalBackendInstall = false;
 
 class LocalBackendInstaller {
-  LocalBackendInstaller({
-    Object? client,
-    Uri? releases,
-    Map<String, String>? environment,
-  });
+  LocalBackendInstaller({Object? client});
 
   Stream<LocalBackendInstallEvent> get events =>
       const Stream<LocalBackendInstallEvent>.empty();
