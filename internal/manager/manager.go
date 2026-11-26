@@ -27,6 +27,7 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/cli/envfile"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/release"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/service"
+	"github.com/NeoLabs-Systems/neolabs-go/cli/update"
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
 	"github.com/NeoLabs-Systems/neolabs-go/ssrf"
@@ -1029,7 +1030,7 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 			}
 		}
 		recordJob("completed", 100, "NeoRecall is up to date ("+curVer+" on "+channel+").", "completed", curVer, false)
-		m.UI.OK(fmt.Sprintf("NeoRecall is up to date (%s on %s).", curVer, channel))
+		update.UpToDate(m.UI, curVer, channel)
 		return nil
 	}
 	if hasSignedRuntime(rel, targetVer) {

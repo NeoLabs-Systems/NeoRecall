@@ -281,7 +281,8 @@ func (m *Manager) updateSignedRuntime(ctx context.Context, cfg config.Config, re
 	if err := store.Prune(version, previous); err != nil {
 		m.UI.Warn("Old runtime cleanup failed: " + err.Error())
 	}
-	m.UI.OK(fmt.Sprintf("NeoRecall %s is ready", version))
+	update.Ready(m.UI, "NeoRecall", version, fmt.Sprintf("http://localhost:%d", cfg.Port),
+		"Your recordings, memories and accounts were kept.")
 	return false, nil
 }
 
