@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +36,25 @@ func TestEnsureFreshAndIdempotent(t *testing.T) {
 	var bandsTable string
 	if err := db.R.QueryRowContext(ctx, `SELECT name FROM sqlite_schema WHERE type='table' AND name='search_embedding_bands'`).Scan(&bandsTable); err != nil {
 		t.Fatalf("missing search_embedding_bands: %v", err)
+	}
+}
+
+func TestColumnsSkipsLegacyVectorTable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "legacy_vec0.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "vector.sqlite3")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := dbx.Open(context.Background(), path, dbx.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := columns(context.Background(), db.W, map[string]map[string]bool{}); err != nil {
+		t.Fatalf("inspect database with legacy vec0 table: %v", err)
 	}
 }
 

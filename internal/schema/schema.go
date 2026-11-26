@@ -240,11 +240,11 @@ func Verify(ctx context.Context, db *sql.DB) error {
 	if _, err := ref.ExecContext(ctx, baseline); err != nil {
 		return fmt.Errorf("schema: build reference: %w", err)
 	}
-	want, err := columns(ctx, ref)
+	want, err := columns(ctx, ref, nil)
 	if err != nil {
 		return err
 	}
-	have, err := columns(ctx, db)
+	have, err := columns(ctx, db, want)
 	if err != nil {
 		return err
 	}
@@ -269,7 +269,7 @@ func Verify(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func columns(ctx context.Context, db *sql.DB) (map[string]map[string]bool, error) {
+func columns(ctx context.Context, db *sql.DB, required map[string]map[string]bool) (map[string]map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
 	if err != nil {
 		return nil, err
@@ -289,6 +289,13 @@ func columns(ctx context.Context, db *sql.DB) (map[string]map[string]bool, error
 	}
 	out := make(map[string]map[string]bool, len(names))
 	for _, table := range names {
+		// Ignore tables outside the baseline. In particular, opening an old
+		// sqlite-vec virtual table requires an extension the Go runtime lacks.
+		if required != nil {
+			if _, ok := required[table]; !ok {
+				continue
+			}
+		}
 		colRows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info("%s")`, strings.ReplaceAll(table, `"`, `""`)))
 		if err != nil {
 			return nil, err
