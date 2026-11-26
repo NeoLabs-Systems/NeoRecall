@@ -96,6 +96,15 @@ CREATE TABLE user_qr_login_challenges (
 `)
 		return err
 	})
+	// Step 40: sessions move to neolabs-go/sessionx. Tokens of the old table
+	// cannot be carried over, so every client signs in once more.
+	steps = append(steps, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS sessions (sid TEXT NOT NULL PRIMARY KEY, sess JSON NOT NULL, expire TEXT NOT NULL);
+DELETE FROM user_sessions;
+`)
+		return err
+	})
 	return steps
 }
 

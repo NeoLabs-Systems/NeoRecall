@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
@@ -14,6 +15,7 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/pwpolicy"
 	"github.com/NeoLabs-Systems/neolabs-go/qrlogin"
 	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
+	"github.com/NeoLabs-Systems/neolabs-go/sessionx"
 	"github.com/NeoLabs-Systems/neolabs-go/totp"
 	"github.com/NeoLabs-Systems/neorecall/internal/audit"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
@@ -59,6 +61,8 @@ type Service struct {
 	Mailer      servicemail.Mailer
 
 	resetTries servicemail.AttemptLimiter
+	storeMu    sync.Mutex
+	store      *sessionx.Store
 }
 
 // NewService wires the shared sign-in packages to NeoRecall's database.
@@ -92,27 +96,40 @@ func nullPtr(v sql.NullString) *string {
 	return &cp
 }
 
-// CreateSession issues an nrs_ bearer session stored as SHA-256 hash.
+// sessions is the shared session store; the apps' tokens are bearer sessions.
+func (s *Service) sessions(ctx context.Context) (*sessionx.Store, error) {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.store == nil {
+		store, err := sessionx.NewStore(ctx, s.DB.W)
+		if err != nil {
+			return nil, err
+		}
+		s.store = store
+	}
+	return s.store, nil
+}
+
+// CreateSession issues an nrs_ bearer session.
 func (s *Service) CreateSession(ctx context.Context, userID string, rc RequestContext) (SessionToken, error) {
-	tokSuffix, err := crypto.RandomToken(32)
+	store, err := s.sessions(ctx)
 	if err != nil {
 		return SessionToken{}, err
 	}
-	token := "nrs_" + tokSuffix
-	id := uuid.NewString()
 	ttlMs := s.cfg().SessionTTLMs
 	if ttlMs <= 0 {
 		ttlMs = 30 * 24 * 60 * 60 * 1000
 	}
-	expiresAt := timeutil.FormatISO(timeutil.AddMillis(time.Now(), ttlMs))
-	_, err = s.DB.W.ExecContext(ctx, `INSERT INTO user_sessions
-		(id, user_id, token_hash, expires_at, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, userID, crypto.SHA256Hex(token), expiresAt, nullableStr(rc.IPAddress), nullableStr(rc.UserAgent),
-	)
+	if err := store.ClearExpired(ctx); err != nil {
+		return SessionToken{}, err
+	}
+	token, expires, err := store.IssueBearer(ctx, "nrs_", map[string]any{
+		"userId": userID, "ipAddress": rc.IPAddress, "userAgent": rc.UserAgent,
+	}, time.Duration(ttlMs)*time.Millisecond)
 	if err != nil {
 		return SessionToken{}, err
 	}
-	return SessionToken{Token: token, ExpiresAt: expiresAt}, nil
+	return SessionToken{Token: token, ExpiresAt: timeutil.FormatISO(expires)}, nil
 }
 
 // Register creates a user account (first user becomes admin unless NEORECALL_ADMIN_USERS reserves the name).
@@ -391,24 +408,29 @@ func (s *Service) Login(ctx context.Context, account, password, twoFactorCode st
 
 // AuthenticateSessionToken resolves an nrs_ session token, reading user role live from DB.
 func (s *Service) AuthenticateSessionToken(ctx context.Context, token string) *AuthContext {
-	if strings.TrimSpace(token) == "" {
+	if !strings.HasPrefix(token, "nrs_") {
 		return nil
 	}
-	now := timeutil.NowISO()
-	var sessID, userID, username, role, createdAt string
+	store, err := s.sessions(ctx)
+	if err != nil {
+		return nil
+	}
+	sessionID, data, err := store.Bearer(ctx, token)
+	userID, _ := data["userId"].(string)
+	if err != nil || userID == "" {
+		return nil
+	}
+	var username, role, createdAt string
 	var email, disabledAt sql.NullString
-	err := s.DB.R.QueryRowContext(ctx, `SELECT s.id, s.user_id, u.username, u.email, u.role, u.disabled_at, u.created_at
-		FROM user_sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?`,
-		crypto.SHA256Hex(token), now).Scan(&sessID, &userID, &username, &email, &role, &disabledAt, &createdAt)
+	err = s.DB.R.QueryRowContext(ctx, `SELECT username, email, role, disabled_at, created_at FROM users WHERE id = ?`, userID).
+		Scan(&username, &email, &role, &disabledAt, &createdAt)
 	if err != nil || (disabledAt.Valid && disabledAt.String != "") {
 		return nil
 	}
-	_, _ = s.DB.W.ExecContext(ctx, `UPDATE user_sessions SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`, sessID)
 	u := User{ID: userID, Username: username, Email: nullPtr(email), Role: role, CreatedAt: createdAt}
 	return &AuthContext{
 		Type:      "session",
-		SessionID: sessID,
+		SessionID: sessionID,
 		UserID:    userID,
 		Scopes:    []string{"*"},
 		User:      u,
@@ -416,13 +438,19 @@ func (s *Service) AuthenticateSessionToken(ctx context.Context, token string) *A
 }
 
 func (s *Service) Logout(ctx context.Context, sessionID string) error {
-	_, err := s.DB.W.ExecContext(ctx, `UPDATE user_sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`, sessionID)
-	return err
+	store, err := s.sessions(ctx)
+	if err != nil {
+		return err
+	}
+	return store.Destroy(ctx, sessionID)
 }
 
 func (s *Service) LogoutAll(ctx context.Context, userID string) error {
-	_, err := s.DB.W.ExecContext(ctx, `UPDATE user_sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id = ? AND revoked_at IS NULL`, userID)
-	return err
+	store, err := s.sessions(ctx)
+	if err != nil {
+		return err
+	}
+	return store.DestroyForUser(ctx, userID)
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
@@ -748,5 +776,8 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password, code stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.LogoutAll(ctx, userID)
 }

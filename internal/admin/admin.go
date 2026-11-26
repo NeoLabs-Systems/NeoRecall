@@ -146,7 +146,9 @@ func (s *Service) SetUserDisabled(ctx context.Context, actorID, userID string, d
 	if disabled {
 		res, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, userID)
 		if err == nil {
-			_, _ = s.DB.W.ExecContext(ctx, `DELETE FROM user_sessions WHERE user_id=?`, userID)
+			// Disabled accounts are refused on every request; this also ends the
+			// sessions so re-enabling does not revive them.
+			_, _ = s.DB.W.ExecContext(ctx, `DELETE FROM sessions WHERE CAST(json_extract(sess, '$.userId') AS TEXT)=?`, userID)
 		}
 	} else {
 		res, err = s.DB.W.ExecContext(ctx, `UPDATE users SET disabled_at=NULL WHERE id=?`, userID)
