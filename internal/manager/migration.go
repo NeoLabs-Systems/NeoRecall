@@ -500,34 +500,6 @@ func ExtractTarGZSafe(archivePath, dstDir string) error {
 	}
 }
 
-func cliAssetNameForHost() (string, error) {
-	var osName string
-	switch runtime.GOOS {
-	case "darwin":
-		osName = "macos"
-	case "linux":
-		osName = "linux"
-	case "windows":
-		osName = "windows"
-	default:
-		return "", fmt.Errorf("unsupported operating system %s", runtime.GOOS)
-	}
-	var archName string
-	switch runtime.GOARCH {
-	case "amd64":
-		archName = "x64"
-	case "arm64":
-		archName = "arm64"
-	default:
-		return "", fmt.Errorf("unsupported architecture %s", runtime.GOARCH)
-	}
-	name := fmt.Sprintf("neorecall-cli-%s-%s", osName, archName)
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return name, nil
-}
-
 func (m *Manager) ensureStandaloneWebBundle(ctx context.Context, cfg config.Config, channel string, force bool) (string, error) {
 	if !force {
 		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err == nil {

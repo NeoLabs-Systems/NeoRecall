@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/cli/envfile"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/release"
 	"github.com/NeoLabs-Systems/neolabs-go/cli/service"
+	"github.com/NeoLabs-Systems/neolabs-go/cli/update"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/runtimebundle"
 	"github.com/NeoLabs-Systems/neorecall/internal/signing"
@@ -100,99 +100,78 @@ func (m *Manager) bootstrapSignedRuntime(ctx context.Context, args []string) (st
 	return version, nil
 }
 
-// stageSignedRuntime verifies the signed manifest and archive before touching
-// the active version. It deliberately refuses an incomplete signed release.
-func (m *Manager) stageSignedRuntime(ctx context.Context, cfg config.Config, rel githubRelease, version string) error {
+// runtimeSource is where NeoRecall's signed runtimes are published, with the
+// key that verifies them.
+func (m *Manager) runtimeSource() (update.Source, error) {
 	publicKey := strings.TrimSpace(m.RuntimePublicKey)
 	if publicKey == "" {
 		var err error
 		publicKey, err = signing.PublicKey()
 		if err != nil {
-			return err
+			return update.Source{}, err
 		}
 	}
 	client := &release.Client{HTTP: m.HTTP, UserAgent: "NeoRecall CLI " + m.Version}
 	if m.ReleaseClientFactory != nil {
 		client = m.ReleaseClientFactory()
 	}
-	return stageRuntimeFromManifest(ctx, cfg, rel, version, publicKey, client)
+	return runtimeSourceFor(publicKey, client), nil
 }
 
-func stageRuntimeFromManifest(ctx context.Context, cfg config.Config, rel githubRelease, version, publicKey string, client *release.Client) error {
-	name := runtimebundle.ManifestPrefix + version + ".json"
-	signed := release.Release{Tag: rel.TagName, ManifestName: name, Assets: map[string]string{}}
+func runtimeSourceFor(publicKey string, client *release.Client) update.Source {
+	return update.Source{
+		Client: client, ManifestPrefix: runtimebundle.ManifestPrefix, PublicKey: publicKey, SchemaVersion: 1,
+		Targets: release.Targets{"linux": {"x64", "arm64"}, "macos": {"x64", "arm64"}, "windows": {"x64"}},
+	}
+}
+
+// selectRuntime verifies a release's signed manifest and picks this computer's
+// runtime.
+func selectRuntime(ctx context.Context, source update.Source, rel githubRelease, version string) (update.Candidate, error) {
+	signed := release.Release{Tag: rel.TagName, ManifestName: runtimebundle.ManifestPrefix + version + ".json", Assets: map[string]string{}}
 	for _, asset := range rel.Assets {
 		signed.Assets[asset.Name] = asset.BrowserDownloadURL
 	}
-	if signed.Assets[name] == "" || signed.Assets[name+".sig"] == "" {
-		return errors.New("signed runtime manifest or signature is missing")
-	}
-	raw, err := client.FetchVerifiedManifest(ctx, signed, publicKey)
+	return source.Select(ctx, signed)
+}
+
+// stageSignedRuntime verifies the signed manifest and archive before touching
+// the active version. It deliberately refuses an incomplete signed release.
+func (m *Manager) stageSignedRuntime(ctx context.Context, cfg config.Config, rel githubRelease, version string) error {
+	source, err := m.runtimeSource()
 	if err != nil {
 		return err
 	}
-	var manifest release.RuntimeManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return fmt.Errorf("invalid runtime manifest: %w", err)
-	}
-	if manifest.SchemaVersion != 1 || manifest.Version != version {
-		return errors.New("runtime manifest does not match the selected release")
-	}
-	platform := runtime.GOOS
-	if platform == "darwin" {
-		platform = "macos"
-	}
-	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "x64"
-	}
-	supported := release.Targets{"linux": {"x64", "arm64"}, "macos": {"x64", "arm64"}, "windows": {"x64"}}
-	var chosen *release.Artifact
-	for _, artifact := range manifest.Artifacts {
-		if artifact.Platform != platform || artifact.Architecture != arch {
-			continue
-		}
-		if chosen != nil {
-			return errors.New("runtime manifest has duplicate platform artifacts")
-		}
-		normalized, err := release.NormalizeArtifact(artifact, supported)
-		if err != nil {
-			return err
-		}
-		chosen = &normalized
-	}
-	if chosen == nil || signed.Assets[chosen.AssetName] == "" {
-		return errors.New("signed runtime for this computer is missing")
-	}
-	if err := os.MkdirAll(cfg.Paths.RuntimeDir, 0o700); err != nil {
-		return err
-	}
-	temp, err := os.MkdirTemp(cfg.Paths.RuntimeDir, ".runtime-download-*")
+	return stageRuntime(ctx, cfg, source, rel, version)
+}
+
+func stageRuntimeFromManifest(ctx context.Context, cfg config.Config, rel githubRelease, version, publicKey string, client *release.Client) error {
+	return stageRuntime(ctx, cfg, runtimeSourceFor(publicKey, client), rel, version)
+}
+
+func stageRuntime(ctx context.Context, cfg config.Config, source update.Source, rel githubRelease, version string) error {
+	candidate, err := selectRuntime(ctx, source, rel, version)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(temp)
-	archive := filepath.Join(temp, "runtime.zip")
-	if err := client.Download(ctx, signed.Assets[chosen.AssetName], archive, chosen.SizeBytes, chosen.SHA256); err != nil {
+	archive, err := source.Download(ctx, runtimeStore(cfg), candidate)
+	if err != nil {
 		return err
 	}
-	return runtimeStore(cfg).InstallArchive(version, archive)
+	return update.Unpack(runtimeStore(cfg), version, archive, false)
 }
 
 func (m *Manager) updateSignedRuntime(ctx context.Context, cfg config.Config, rel githubRelease, before, version string) (bool, error) {
 	store := runtimeStore(cfg)
-	if current, err := store.Current(); err == nil && current.Version == version {
-		return false, errors.New("the selected runtime is already active")
-	}
-	m.UI.Title("Updating NeoRecall", fmt.Sprintf("%s → %s", before, version))
-	if _, err := os.Stat(cfg.Paths.Database); err == nil {
-		if err := m.UI.Step("Saving a backup of your data", "Saved a backup of your data", func() error { return m.cmdBackup(ctx, nil) }); err != nil {
-			return false, err
+	previous := ""
+	if current, err := store.Current(); err == nil {
+		if current.Version == version {
+			return false, errors.New("the selected runtime is already active")
 		}
-	} else if !os.IsNotExist(err) {
-		return false, err
+		previous = current.Version
 	}
-	if err := m.UI.Step("Downloading the new version", "Downloaded the new version", func() error { return m.stageSignedRuntime(ctx, cfg, rel, version) }); err != nil {
+	source, err := m.runtimeSource()
+	if err != nil {
 		return false, err
 	}
 	sm, err := m.serviceManager(cfg)
@@ -208,82 +187,93 @@ func (m *Manager) updateSignedRuntime(ctx context.Context, cfg config.Config, re
 	if markerErr != nil && !os.IsNotExist(markerErr) {
 		return false, markerErr
 	}
-	previous := ""
-	if current, err := store.Current(); err == nil {
-		previous = current.Version
-	}
 	dir, err := store.RuntimeDir(version)
 	if err != nil {
 		return false, err
 	}
 	appDir := filepath.Join(dir, "app")
 	binary := filepath.Join(appDir, "bin", runtimeBinaryName())
-	rollback := func(cause error) (bool, error) {
+	startupTimeout := m.RuntimeStartupTimeout
+	if startupTimeout <= 0 {
+		startupTimeout = 60 * time.Second
+	}
+	recoveryTimeout := m.RuntimeRollbackTimeout
+	if recoveryTimeout <= 0 {
+		recoveryTimeout = 30 * time.Second
+	}
+	start := func(install bool) error {
+		if !wasInstalled && !wasRunning {
+			return nil
+		}
+		if !wasInstalled {
+			return sm.StartFallback()
+		}
+		if install {
+			return sm.Install()
+		}
+		return sm.Launch()
+	}
+	stop := func() {
 		if wasInstalled || wasRunning {
 			m.stopManagedService(cfg, sm)
 		}
-		restoreErr := restoreRuntimeSnapshot(markerPath, oldMarker, snapshot)
-		sm.Spec = oldSpec
-		if wasInstalled || wasRunning {
-			var err error
-			if wasInstalled {
-				if snapshot.path == "" {
-					err = sm.Install()
-				} else {
-					err = sm.Launch()
-				}
-			} else {
-				err = sm.StartFallback()
+	}
+
+	var backup func(context.Context) error
+	if _, err := os.Stat(cfg.Paths.Database); err == nil {
+		backup = func(ctx context.Context) error { return m.cmdBackup(ctx, nil) }
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	var candidate update.Candidate
+	var archive string
+	err = update.Apply(ctx, m.UI, update.Plan{
+		App: "NeoRecall", From: before, To: version, Backup: backup, RollbackTimeout: recoveryTimeout + 5*time.Second,
+		Download: func(ctx context.Context) (err error) {
+			if candidate, err = selectRuntime(ctx, source, rel, version); err != nil {
+				return err
 			}
-			if err != nil {
-				restoreErr = errors.Join(restoreErr, err)
-			} else {
-				recoveryTimeout := m.RuntimeRollbackTimeout
-				if recoveryTimeout <= 0 {
-					recoveryTimeout = 30 * time.Second
-				}
-				recoveryCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout+5*time.Second)
-				err = m.waitForServerVersion(recoveryCtx, cfg.Port, before, recoveryTimeout)
-				cancel()
-				if err != nil {
-					restoreErr = errors.Join(restoreErr, err)
+			archive, err = source.Download(ctx, store, candidate)
+			return err
+		},
+		Install: func(context.Context) error { return update.Unpack(store, version, archive, false) },
+		Restart: func(context.Context) error {
+			stop()
+			if err := store.Activate(version); err != nil {
+				return err
+			}
+			sm.Spec.Program, sm.Spec.WorkDir = binary, appDir
+			for i := range sm.Spec.Env {
+				if sm.Spec.Env[i].Key == "NEORECALL_APP_DIR" {
+					sm.Spec.Env[i].Value = appDir
 				}
 			}
-		}
-		if restoreErr != nil {
-			return false, errors.Join(cause, fmt.Errorf("rollback failed: %w", restoreErr))
-		}
-		return true, fmt.Errorf("%w; restored NeoRecall %s", cause, before)
-	}
-	if wasInstalled || wasRunning {
-		m.stopManagedService(cfg, sm)
-	}
-	if err := store.Activate(version); err != nil {
-		return rollback(err)
-	}
-	sm.Spec.Program, sm.Spec.WorkDir = binary, appDir
-	for i := range sm.Spec.Env {
-		if sm.Spec.Env[i].Key == "NEORECALL_APP_DIR" {
-			sm.Spec.Env[i].Value = appDir
-		}
-	}
-	if wasInstalled || wasRunning {
-		var err error
-		if wasInstalled {
-			err = sm.Install()
-		} else {
-			err = sm.StartFallback()
-		}
-		if err != nil {
-			return rollback(err)
-		}
-		startupTimeout := m.RuntimeStartupTimeout
-		if startupTimeout <= 0 {
-			startupTimeout = 60 * time.Second
-		}
-		if err := m.waitForServerVersion(ctx, cfg.Port, version, startupTimeout); err != nil {
-			return rollback(err)
-		}
+			return start(true)
+		},
+		Verify: func(ctx context.Context) error {
+			if !wasInstalled && !wasRunning {
+				return nil
+			}
+			return m.waitForServerVersion(ctx, cfg.Port, version, startupTimeout)
+		},
+		Rollback: func(ctx context.Context) error {
+			stop()
+			if err := restoreRuntimeSnapshot(markerPath, oldMarker, snapshot); err != nil {
+				return err
+			}
+			sm.Spec = oldSpec
+			if !wasInstalled && !wasRunning {
+				return nil
+			}
+			// Without a saved service file the old definition is written again.
+			if err := start(snapshot.path == ""); err != nil {
+				return err
+			}
+			return m.waitForServerVersion(ctx, cfg.Port, before, recoveryTimeout)
+		},
+	})
+	if err != nil {
+		return update.RolledBack(err), err
 	}
 	if err := refreshRuntimeLauncher(binary, store.Root); err != nil {
 		m.UI.Warn("NeoRecall updated, but the command-line launcher could not be refreshed: " + err.Error())
@@ -317,22 +307,9 @@ func restoreRuntimeSnapshot(markerPath string, marker []byte, snapshot serviceSn
 }
 
 func refreshRuntimeLauncher(binary, storeRoot string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	binDir := strings.TrimSpace(os.Getenv("NEORECALL_BIN_DIR"))
-	if binDir == "" {
-		binDir = filepath.Join(home, ".local", "bin")
-	}
-	launcher, err := filepath.Abs(filepath.Join(binDir, runtimeBinaryName()))
-	if err != nil {
-		return err
-	}
 	invoked := release.InvocationPath(os.Args[0])
 	if strings.HasPrefix(invoked, filepath.Clean(storeRoot)+string(os.PathSeparator)) {
 		return nil
 	}
-	_, err = release.RefreshCommandLauncher(invoked, launcher, binary)
-	return err
+	return update.RefreshLauncher(invoked, os.Getenv("NEORECALL_BIN_DIR"), runtimeBinaryName(), binary)
 }

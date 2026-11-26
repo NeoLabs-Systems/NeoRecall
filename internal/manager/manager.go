@@ -1020,12 +1020,7 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 	if active, err := runtimeStore(cfg).Current(); err == nil {
 		curVer = active.Version
 	}
-	isGitCheckout := cfg.AppDir != "" && func() bool {
-		st, serr := os.Stat(filepath.Join(cfg.AppDir, ".git"))
-		return serr == nil && st.IsDir()
-	}()
 	_, webStatErr := os.Stat(filepath.Join(cfg.WebDir, "index.html"))
-	needWebRefresh := cli.HasFlag(args, "--refresh-web") || !isGitCheckout || webStatErr != nil
 
 	if release.CompareVersions(targetVer, curVer) <= 0 && !cli.HasFlag(args, "--force") {
 		if cli.HasFlag(args, "--refresh-web") || webStatErr != nil {
@@ -1047,115 +1042,7 @@ func (m *Manager) cmdUpdate(ctx context.Context, args []string) error {
 		recordJob("completed", 100, "Updated NeoRecall to "+targetVer+".", "completed", targetVer, false)
 		return nil
 	}
-	if _, err := runtimeStore(cfg).Current(); err == nil {
-		return failJob(errors.New("the selected release does not contain a signed runtime manifest"), false)
-	}
-
-	assetName, err := cliAssetNameForHost()
-	if err != nil {
-		return failJob(err, false)
-	}
-	var binAsset *githubAsset
-	for i := range rel.Assets {
-		if rel.Assets[i].Name == assetName {
-			binAsset = &rel.Assets[i]
-			break
-		}
-	}
-	if binAsset == nil {
-		return failJob(fmt.Errorf("release %s does not include %s yet", rel.TagName, assetName), false)
-	}
-	m.UI.Title("Updating NeoRecall", fmt.Sprintf("%s → %s · %s", curVer, targetVer, channel))
-	if _, err := os.Stat(cfg.Paths.Database); err == nil {
-		if err := m.UI.Step("Saving a backup of your data", "Saved a backup of your data", func() error {
-			return m.cmdBackup(ctx, nil)
-		}); err != nil {
-			return failJob(err, false)
-		}
-	} else if !os.IsNotExist(err) {
-		return failJob(err, false)
-	}
-
-	recordJob("downloading", 35, "Downloading "+assetName+" ("+targetVer+")", "running", "", false)
-	exe, err := os.Executable()
-	if err != nil {
-		return failJob(err, false)
-	}
-	nextBin := exe + ".next"
-	if err := downloadVerifiedAsset(ctx, m.HTTP, *binAsset, nextBin, 0o755); err != nil {
-		return failJob(err, false)
-	}
-
-	sm, _ := m.serviceManager(cfg)
-	wasRunning := cli.PortOpen(cfg.Port)
-	recordJob("installing", 60, "Installing NeoRecall "+targetVer, "running", "", false)
-	m.stopRunningProcesses(cfg, sm)
-
-	bakBin := exe + ".bak"
-	_ = os.Remove(bakBin)
-	if err := os.Rename(exe, bakBin); err != nil {
-		_ = os.Remove(nextBin)
-		return failJob(err, false)
-	}
-	if err := os.Rename(nextBin, exe); err != nil {
-		if restoreErr := os.Rename(bakBin, exe); restoreErr != nil {
-			return failJob(errors.Join(err, fmt.Errorf("restore previous binary: %w", restoreErr)), false)
-		}
-		return failJob(err, true)
-	}
-	rollback := func(cause error) error {
-		m.stopRunningProcesses(cfg, sm)
-		if err := os.Remove(exe); err != nil && !os.IsNotExist(err) {
-			return failJob(errors.Join(cause, fmt.Errorf("remove updated binary: %w", err)), false)
-		}
-		if err := os.Rename(bakBin, exe); err != nil {
-			return failJob(errors.Join(cause, fmt.Errorf("restore previous binary: %w", err)), false)
-		}
-		if sm != nil && (wasRunning || sm.Installed()) {
-			var err error
-			if sm.Installed() {
-				err = sm.Launch()
-			} else {
-				err = sm.StartFallback()
-			}
-			if err != nil {
-				return failJob(errors.Join(cause, fmt.Errorf("restart previous version: %w", err)), false)
-			}
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-			defer cancel()
-			if err := m.waitForServerVersion(rollbackCtx, cfg.Port, curVer, 30*time.Second); err != nil {
-				return failJob(errors.Join(cause, fmt.Errorf("verify previous version: %w", err)), false)
-			}
-		}
-		return failJob(fmt.Errorf("%w; restored NeoRecall %s", cause, curVer), true)
-	}
-
-	if (wasRunning || (sm != nil && sm.Installed())) && sm != nil {
-		recordJob("restarting", 88, "Restarting NeoRecall service", "running", "", false)
-		var lerr error
-		if sm.Installed() {
-			lerr = sm.Launch()
-		} else {
-			lerr = sm.StartFallback()
-		}
-		if lerr != nil {
-			return rollback(lerr)
-		}
-		if err := m.waitForServerVersion(ctx, cfg.Port, targetVer, 30*time.Second); err != nil {
-			return rollback(fmt.Errorf("updated binary failed healthcheck: %w", err))
-		}
-	}
-	// Keep the previous web bundle intact if download or extraction fails.
-	if needWebRefresh {
-		recordJob("web", 95, "Updating web interface bundle", "running", "", false)
-		if _, werr := m.installWebBundle(ctx, cfg, rel); werr != nil {
-			m.UI.Warn("Web UI bundle update failed: " + werr.Error())
-		}
-	}
-	// Keep the previous binary as a recovery copy until the next update.
-	recordJob("completed", 100, fmt.Sprintf("Updated NeoRecall to %s.", targetVer), "completed", targetVer, false)
-	m.UI.OK(fmt.Sprintf("Updated NeoRecall to %s.", targetVer))
-	return nil
+	return failJob(errors.New("the selected release does not contain a signed runtime manifest"), false)
 }
 
 func (m *Manager) waitForServerVersion(ctx context.Context, port int, version string, timeout time.Duration) error {
