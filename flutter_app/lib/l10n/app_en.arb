@@ -2798,7 +2798,6 @@
   "authResetAccountMissing": "Enter your username or email.",
   "authResetSubmit": "Send link",
   "authResetSent": "If that account has an email address, a reset link is on its way.",
-  "qrSignInHint": "Or scan this code with NeoRecall on a signed-in phone: Settings, Security.",
   "qrSignInWaiting": "Approve the sign-in on {device}.",
   "@qrSignInWaiting": {"placeholders": {"device": {"type": "String"}}},
   "qrSignInNewCode": "New code",
@@ -2826,5 +2825,19 @@
   "qrScanDeniedBodyAndroid": "Allow camera access in Android settings: Apps, NeoRecall, Permissions.",
   "qrScanOpenSettings": "Open Settings",
   "qrScanFailedTitle": "The camera could not start",
-  "qrScanFailedBody": "Close other apps that use the camera and try again."
+  "qrScanFailedBody": "Close other apps that use the camera and try again.",
+  "authSignInHeading": "Sign in to NeoRecall",
+  "authSignInWithPhoneSubtitle": "Scan with your phone or use your password.",
+  "authOrUsePassword": "or use your password",
+  "authUsernameOrEmailLabel": "Username or email",
+  "authSigningInTo": "Signing in to {host}",
+  "@authSigningInTo": {"placeholders": {"host": {"type": "String"}}},
+  "authChangeServer": "Change server",
+  "authForgotAskAdmin": "Forgot your password? Ask your server administrator.",
+  "qrScanOnPhoneTitle": "Scan with NeoRecall on your phone",
+  "qrScanOnPhoneInstructions": "On a signed-in phone, open Settings › Security, tap Scan QR code and approve the sign-in.",
+  "qrRefreshesIn": "Refreshes in {seconds} s",
+  "@qrRefreshesIn": {"placeholders": {"seconds": {"type": "int"}}},
+  "qrWaitingForCode": "Waiting for a code",
+  "qrShowCode": "Show QR code"
 }

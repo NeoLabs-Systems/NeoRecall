@@ -4859,14 +4859,14 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get authResetDescription =>
-      'Gib deinen Benutzernamen oder die E-Mail-Adresse deines Kontos ein. Der Link zum Zurücksetzen geht an die E-Mail-Adresse des Kontos.';
+      'Geben Sie Ihren Benutzernamen oder die E-Mail-Adresse Ihres Kontos ein. Der Link zum Zurücksetzen geht an die E-Mail-Adresse des Kontos.';
 
   @override
   String get authResetAccountLabel => 'Benutzername oder E-Mail';
 
   @override
   String get authResetAccountMissing =>
-      'Gib deinen Benutzernamen oder deine E-Mail-Adresse ein.';
+      'Geben Sie Ihren Benutzernamen oder Ihre E-Mail-Adresse ein.';
 
   @override
   String get authResetSubmit => 'Link senden';
@@ -4876,12 +4876,8 @@ class AppL10nDe extends AppL10n {
       'Falls das Konto eine E-Mail-Adresse hat, ist ein Link zum Zurücksetzen unterwegs.';
 
   @override
-  String get qrSignInHint =>
-      'Oder scanne diesen Code mit NeoRecall auf einem angemeldeten Telefon: Einstellungen, Sicherheit.';
-
-  @override
   String qrSignInWaiting(String device) {
-    return 'Bestätige die Anmeldung auf $device.';
+    return 'Bestätigen Sie die Anmeldung auf $device.';
   }
 
   @override
@@ -4903,7 +4899,7 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrApproveCardDescription =>
-      'Scanne den QR-Code auf dem Anmeldebildschirm eines Computers oder Browsers, um ihn bei deinem Konto anzumelden.';
+      'Scannen Sie den QR-Code auf dem Anmeldebildschirm eines Computers oder Browsers, um ihn bei Ihrem Konto anzumelden.';
 
   @override
   String get qrApproveScanAction => 'QR-Code scannen';
@@ -4918,7 +4914,7 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrApproveWarning =>
-      'Dieses Gerät erhält vollen Zugriff auf dein Konto. Bestätige nur einen Code, den du selbst geöffnet hast.';
+      'Dieses Gerät erhält vollen Zugriff auf Ihr Konto. Bestätigen Sie nur einen Code, den Sie selbst geöffnet haben.';
 
   @override
   String get qrApproveAction => 'Bestätigen';
@@ -4944,7 +4940,7 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrScanHint =>
-      'Richte die Kamera auf den Code auf dem Anmeldebildschirm.';
+      'Richten Sie die Kamera auf den Code auf dem Anmeldebildschirm.';
 
   @override
   String get qrScanWrongCode => 'Das ist kein NeoRecall-Anmeldecode.';
@@ -4954,11 +4950,11 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrScanDeniedBodyIos =>
-      'Erlaube NeoRecall in den Einstellungen den Kamerazugriff.';
+      'Erlauben Sie NeoRecall in den Einstellungen den Kamerazugriff.';
 
   @override
   String get qrScanDeniedBodyAndroid =>
-      'Erlaube den Kamerazugriff in den Android-Einstellungen: Apps, NeoRecall, Berechtigungen.';
+      'Erlauben Sie den Kamerazugriff in den Android-Einstellungen: Apps, NeoRecall, Berechtigungen.';
 
   @override
   String get qrScanOpenSettings => 'Einstellungen öffnen';
@@ -4968,5 +4964,48 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrScanFailedBody =>
-      'Schließe andere Apps, die die Kamera verwenden, und versuche es erneut.';
+      'Schließen Sie andere Apps, die die Kamera verwenden, und versuchen Sie es erneut.';
+
+  @override
+  String get authSignInHeading => 'Bei NeoRecall anmelden';
+
+  @override
+  String get authSignInWithPhoneSubtitle =>
+      'Scannen Sie mit Ihrem Handy oder verwenden Sie Ihr Passwort.';
+
+  @override
+  String get authOrUsePassword => 'oder mit Passwort';
+
+  @override
+  String get authUsernameOrEmailLabel => 'Benutzername oder E-Mail';
+
+  @override
+  String authSigningInTo(String host) {
+    return 'Anmeldung bei $host';
+  }
+
+  @override
+  String get authChangeServer => 'Server ändern';
+
+  @override
+  String get authForgotAskAdmin =>
+      'Passwort vergessen? Wenden Sie sich an die Serveradministration.';
+
+  @override
+  String get qrScanOnPhoneTitle => 'Mit NeoRecall auf Ihrem Telefon scannen';
+
+  @override
+  String get qrScanOnPhoneInstructions =>
+      'Öffnen Sie auf einem angemeldeten Telefon Einstellungen › Sicherheit, tippen Sie auf QR-Code scannen und bestätigen Sie die Anmeldung.';
+
+  @override
+  String qrRefreshesIn(int seconds) {
+    return 'Aktualisiert sich in $seconds s';
+  }
+
+  @override
+  String get qrWaitingForCode => 'Code wird vorbereitet';
+
+  @override
+  String get qrShowCode => 'QR-Code anzeigen';
 }

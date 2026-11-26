@@ -7740,12 +7740,6 @@ abstract class AppL10n {
   /// **'If that account has an email address, a reset link is on its way.'**
   String get authResetSent;
 
-  /// No description provided for @qrSignInHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Or scan this code with NeoRecall on a signed-in phone: Settings, Security.'**
-  String get qrSignInHint;
-
   /// No description provided for @qrSignInWaiting.
   ///
   /// In en, this message translates to:
@@ -7901,6 +7895,78 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Close other apps that use the camera and try again.'**
   String get qrScanFailedBody;
+
+  /// No description provided for @authSignInHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in to NeoRecall'**
+  String get authSignInHeading;
+
+  /// No description provided for @authSignInWithPhoneSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan with your phone or use your password.'**
+  String get authSignInWithPhoneSubtitle;
+
+  /// No description provided for @authOrUsePassword.
+  ///
+  /// In en, this message translates to:
+  /// **'or use your password'**
+  String get authOrUsePassword;
+
+  /// No description provided for @authUsernameOrEmailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Username or email'**
+  String get authUsernameOrEmailLabel;
+
+  /// No description provided for @authSigningInTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Signing in to {host}'**
+  String authSigningInTo(String host);
+
+  /// No description provided for @authChangeServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Change server'**
+  String get authChangeServer;
+
+  /// No description provided for @authForgotAskAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot your password? Ask your server administrator.'**
+  String get authForgotAskAdmin;
+
+  /// No description provided for @qrScanOnPhoneTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan with NeoRecall on your phone'**
+  String get qrScanOnPhoneTitle;
+
+  /// No description provided for @qrScanOnPhoneInstructions.
+  ///
+  /// In en, this message translates to:
+  /// **'On a signed-in phone, open Settings › Security, tap Scan QR code and approve the sign-in.'**
+  String get qrScanOnPhoneInstructions;
+
+  /// No description provided for @qrRefreshesIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Refreshes in {seconds} s'**
+  String qrRefreshesIn(int seconds);
+
+  /// No description provided for @qrWaitingForCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for a code'**
+  String get qrWaitingForCode;
+
+  /// No description provided for @qrShowCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Show QR code'**
+  String get qrShowCode;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

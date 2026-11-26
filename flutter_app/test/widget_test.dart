@@ -587,8 +587,12 @@ void main() {
       find.text('Private audio memory that stays under your control.'),
       findsNothing,
     );
-    expect(find.text('Sign in'), findsNWidgets(2));
+    expect(find.text('Sign in to NeoRecall'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
 
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Need a new account? Register'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Need a new account? Register'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(

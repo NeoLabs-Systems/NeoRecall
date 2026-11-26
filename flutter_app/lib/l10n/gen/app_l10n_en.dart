@@ -4830,10 +4830,6 @@ class AppL10nEn extends AppL10n {
       'If that account has an email address, a reset link is on its way.';
 
   @override
-  String get qrSignInHint =>
-      'Or scan this code with NeoRecall on a signed-in phone: Settings, Security.';
-
-  @override
   String qrSignInWaiting(String device) {
     return 'Approve the sign-in on $device.';
   }
@@ -4921,4 +4917,47 @@ class AppL10nEn extends AppL10n {
   @override
   String get qrScanFailedBody =>
       'Close other apps that use the camera and try again.';
+
+  @override
+  String get authSignInHeading => 'Sign in to NeoRecall';
+
+  @override
+  String get authSignInWithPhoneSubtitle =>
+      'Scan with your phone or use your password.';
+
+  @override
+  String get authOrUsePassword => 'or use your password';
+
+  @override
+  String get authUsernameOrEmailLabel => 'Username or email';
+
+  @override
+  String authSigningInTo(String host) {
+    return 'Signing in to $host';
+  }
+
+  @override
+  String get authChangeServer => 'Change server';
+
+  @override
+  String get authForgotAskAdmin =>
+      'Forgot your password? Ask your server administrator.';
+
+  @override
+  String get qrScanOnPhoneTitle => 'Scan with NeoRecall on your phone';
+
+  @override
+  String get qrScanOnPhoneInstructions =>
+      'On a signed-in phone, open Settings › Security, tap Scan QR code and approve the sign-in.';
+
+  @override
+  String qrRefreshesIn(int seconds) {
+    return 'Refreshes in $seconds s';
+  }
+
+  @override
+  String get qrWaitingForCode => 'Waiting for a code';
+
+  @override
+  String get qrShowCode => 'Show QR code';
 }

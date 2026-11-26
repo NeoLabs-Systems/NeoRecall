@@ -27,6 +27,12 @@ class QrLoginChallenge {
       challengeId.isNotEmpty && pollToken.isNotEmpty && qrPayload.isNotEmpty;
 
   bool get isExpired => expiresAt?.isBefore(DateTime.now()) ?? false;
+
+  /// Whole seconds until the code is replaced; zero when unknown or past.
+  int get secondsRemaining {
+    final left = expiresAt?.difference(DateTime.now()).inSeconds ?? 0;
+    return left > 0 ? left : 0;
+  }
 }
 
 /// What a scanned `neorecall://qr-login` code names.

@@ -5,9 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:neolabs_flutter/neolabs_flutter.dart'
     show
         NeoAuthBackdrop,
-        NeoCredentialField,
+        NeoAuthCard,
+        NeoAuthHeading,
+        NeoAuthPage,
         NeoCredentialFields,
-        NeoForgotPasswordDialog;
+        NeoForgotPasswordDialog,
+        NeoLabeledField,
+        NeoOrDivider,
+        neoAuthInputDecoration,
+        neoAuthLinkStyle;
 
 import 'main_controller.dart';
 import 'main_local_install.dart';
@@ -179,235 +185,267 @@ class _NeoRecallAuthScreenState extends State<NeoRecallAuthScreen> {
     final controller = widget.controller;
     final compact = MediaQuery.sizeOf(context).width < 760;
 
-    final card = AppPanel(
-      radius: serverSetup && _canConfigureServer ? 34 : 32,
-      padding: serverSetup && _canConfigureServer
-          ? EdgeInsets.fromLTRB(
-              compact ? 24 : 34,
-              compact ? 24 : 32,
-              compact ? 24 : 34,
-              compact ? 24 : 30,
-            )
-          : EdgeInsets.fromLTRB(
-              compact ? 18 : 34,
-              compact ? 20 : 30,
-              compact ? 18 : 34,
-              compact ? 20 : 30,
-            ),
-      child: serverSetup && _canConfigureServer
-          ? _serverCard(palette)
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const Center(child: BrandLockup(logoSize: 56)),
-                const SizedBox(height: 26),
-                // No eyebrow: it only ever restated the title underneath it.
-                Text(
-                  awaitingTwoFactor
-                      ? strings.authTwoFactorTitle
-                      : registerMode
-                      ? strings.authRegisterTitle
-                      : strings.authSignInTitle,
-                  style: displayTitleStyle(palette, size: 30),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  awaitingTwoFactor
-                      ? strings.authTwoFactorSubtitle
-                      : registerMode
-                      ? strings.authRegisterSubtitle
-                      : strings.authSignInSubtitle,
-                  style: TextStyle(color: palette.textSecondary, height: 1.5),
-                ),
-                const SizedBox(height: 20),
-                if (controller.error != null) ...<Widget>[
-                  InlineMessage(message: controller.error!, error: true),
-                  const SizedBox(height: 16),
-                ],
-                if (controller.initializationError != null) ...<Widget>[
-                  OutlinedButton.icon(
-                    onPressed: controller.initializing
-                        ? null
-                        : controller.initialize,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: Text(strings.authRetryLocalStartup),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                AutofillGroup(
-                  child: awaitingTwoFactor
-                      ? TextField(
-                          controller: _twoFactor,
-                          keyboardType: TextInputType.visiblePassword,
-                          autofillHints: const <String>[
-                            AutofillHints.oneTimeCode,
-                          ],
-                          decoration: InputDecoration(
-                            labelText: strings.authTwoFactorFieldLabel,
-                          ),
-                        )
-                      : NeoCredentialFields(
-                          register: registerMode,
-                          username: _username,
-                          email: _email,
-                          password: _password,
-                          confirmPassword: _confirm,
-                          usernameFocus: _usernameFocus,
-                          emailFocus: _emailFocus,
-                          passwordFocus: _passwordFocus,
-                          confirmPasswordFocus: _confirmFocus,
-                          obscurePassword: _obscurePassword,
-                          onChanged: (_) {},
-                          onSubmit: () => _submit(),
-                          decoration: (field, suffix) => InputDecoration(
-                            labelText: switch (field) {
-                              NeoCredentialField.username =>
-                                strings.authUsernameLabel,
-                              NeoCredentialField.email =>
-                                strings.authEmailLabel,
-                              NeoCredentialField.password =>
-                                strings.authPasswordLabel,
-                              NeoCredentialField.confirmPassword =>
-                                strings.authConfirmPasswordLabel,
-                            },
-                            suffixIcon: suffix,
-                          ),
-                          labeledField: (label, child, trailing) =>
-                              trailing == null
-                              ? child
-                              : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: <Widget>[child, trailing],
-                                ),
-                          usernameLabel: strings.authUsernameLabel,
-                          usernameOrEmailLabel: strings.authUsernameLabel,
-                          emailLabel: strings.authEmailLabel,
-                          passwordLabel: strings.authPasswordLabel,
-                          confirmPasswordLabel:
-                              strings.authConfirmPasswordLabel,
-                          forgotPassword: controller.passwordResetAvailable
-                              ? Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton(
-                                    onPressed: controller.loading
-                                        ? null
-                                        : _showForgotPassword,
-                                    child: Text(strings.authForgotPassword),
-                                  ),
-                                )
-                              : null,
-                          passwordToggle: IconButton(
-                            onPressed: () => setState(
-                              () => _obscurePassword = !_obscurePassword,
-                            ),
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                ),
-                const SizedBox(height: 20),
-                FilledButton(
-                  onPressed: controller.loading ? null : _submit,
-                  child: controller.loading
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          awaitingTwoFactor
-                              ? strings.authVerify
-                              : registerMode
-                              ? strings.authCreateAccount
-                              : strings.authSignInTitle,
-                        ),
-                ),
-                if (!registerMode &&
-                    !awaitingTwoFactor &&
-                    controller.supportsSecurityKeys) ...<Widget>[
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: controller.loading
-                        ? null
-                        : _signInWithSecurityKey,
-                    icon: const Icon(Icons.key_rounded),
-                    label: Text(strings.authSecurityKeySignIn),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  runSpacing: 4,
-                  children: <Widget>[
-                    if (awaitingTwoFactor ||
-                        registerMode ||
-                        controller.registrationOpen)
-                      TextButton(
-                        onPressed: awaitingTwoFactor
-                            ? widget.controller.cancelTwoFactor
-                            : () => setState(() {
-                                registerMode = !registerMode;
-                              }),
-                        child: Text(
-                          awaitingTwoFactor
-                              ? strings.authSwitchToSignIn
-                              : registerMode
-                              ? strings.authSwitchToSignIn
-                              : strings.authSwitchToRegister,
-                        ),
-                      ),
-                    if (_canConfigureServer)
-                      TextButton(
-                        onPressed: () => setState(() => serverSetup = true),
-                        child: Text(strings.authServerButton),
-                      ),
-                  ],
-                ),
-                if (!registerMode &&
-                    !awaitingTwoFactor &&
-                    qrSignInSupported) ...<Widget>[
-                  const SizedBox(height: 12),
-                  QrSignInPanel(controller: controller),
-                ],
-              ],
-            ),
-    );
-
-    return Scaffold(
-      // Opaque, for the same reason the local-setup screen is: a transparent
-      // scaffold shows the native window's own background.
-      backgroundColor: palette.bgPrimary,
-      resizeToAvoidBottomInset: true,
-      body: NeoAuthBackdrop(
-        palette: palette,
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) => SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: (constraints.maxHeight - 48).clamp(
-                    0,
-                    double.infinity,
-                  ),
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: serverSetup && _canConfigureServer ? 680 : 468,
+    if (serverSetup && _canConfigureServer) {
+      return Scaffold(
+        // Opaque, for the same reason the local-setup screen is: a transparent
+        // scaffold shows the native window's own background.
+        backgroundColor: palette.bgPrimary,
+        resizeToAvoidBottomInset: true,
+        body: NeoAuthBackdrop(
+          palette: palette,
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: (constraints.maxHeight - 48).clamp(
+                      0,
+                      double.infinity,
                     ),
-                    child: card,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: AppPanel(
+                        radius: 34,
+                        padding: EdgeInsets.fromLTRB(
+                          compact ? 24 : 34,
+                          compact ? 24 : 32,
+                          compact ? 24 : 34,
+                          compact ? 24 : 30,
+                        ),
+                        child: _serverCard(palette),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
         ),
+      );
+    }
+
+    final showQr = !registerMode && !awaitingTwoFactor && qrSignInSupported;
+    final showToggle =
+        !awaitingTwoFactor && (registerMode || controller.registrationOpen);
+    // An opaque ground, for the same reason as above.
+    return ColoredBox(
+      color: palette.bgPrimary,
+      child: NeoAuthPage(
+        palette: palette,
+        compact: compact,
+        children: <Widget>[
+          NeoAuthCard(
+            palette: palette,
+            compact: compact,
+            mark: const BrandLockup(logoSize: 76, showName: false),
+            child: _signInContent(
+              palette,
+              awaitingTwoFactor: awaitingTwoFactor,
+              showQr: showQr,
+            ),
+          ),
+          if (awaitingTwoFactor)
+            const SizedBox.shrink()
+          else ...<Widget>[
+            if (showToggle) ...<Widget>[
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: controller.loading
+                    ? null
+                    : () => setState(() => registerMode = !registerMode),
+                child: Text(
+                  registerMode
+                      ? strings.authSwitchToSignIn
+                      : strings.authSwitchToRegister,
+                ),
+              ),
+            ],
+            if (_canConfigureServer) ...<Widget>[
+              const SizedBox(height: 4),
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 2,
+                children: <Widget>[
+                  Text(
+                    strings.authSigningInTo(
+                      Uri.tryParse(controller.backendUrl)?.authority ??
+                          controller.backendUrl,
+                    ),
+                    style: TextStyle(color: palette.textMuted, fontSize: 12),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => serverSetup = true),
+                    style: neoAuthLinkStyle(),
+                    child: Text(strings.authChangeServer),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ],
       ),
+    );
+  }
+
+  Widget _signInContent(
+    NeoRecallPalette palette, {
+    required bool awaitingTwoFactor,
+    required bool showQr,
+  }) {
+    final strings = AppL10n.of(context);
+    final controller = widget.controller;
+    Widget labeled(String label, Widget field, [Widget? trailing]) =>
+        NeoLabeledField(
+          palette: palette,
+          label: label,
+          field: field,
+          trailing: trailing,
+        );
+    final forgotPassword = controller.passwordResetAvailable
+        ? TextButton(
+            onPressed: controller.loading ? null : _showForgotPassword,
+            style: neoAuthLinkStyle(),
+            child: Text(strings.authForgotPassword),
+          )
+        : null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        NeoAuthHeading(
+          palette: palette,
+          title: awaitingTwoFactor
+              ? strings.authTwoFactorTitle
+              : registerMode
+              ? strings.authRegisterTitle
+              : strings.authSignInHeading,
+          subtitle: awaitingTwoFactor
+              ? strings.authTwoFactorSubtitle
+              : registerMode
+              ? strings.authRegisterSubtitle
+              : showQr
+              ? strings.authSignInWithPhoneSubtitle
+              : strings.authSignInSubtitle,
+        ),
+        if (controller.error != null) ...<Widget>[
+          const SizedBox(height: 20),
+          InlineMessage(message: controller.error!, error: true),
+        ],
+        if (controller.initializationError != null) ...<Widget>[
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: controller.initializing ? null : controller.initialize,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(strings.authRetryLocalStartup),
+          ),
+        ],
+        if (showQr) ...<Widget>[
+          const SizedBox(height: 26),
+          QrSignInPanel(controller: controller),
+          const SizedBox(height: 22),
+          NeoOrDivider(palette: palette, label: strings.authOrUsePassword),
+          const SizedBox(height: 16),
+        ] else
+          const SizedBox(height: 24),
+        AutofillGroup(
+          child: awaitingTwoFactor
+              ? labeled(
+                  strings.authTwoFactorFieldLabel,
+                  TextField(
+                    controller: _twoFactor,
+                    autofocus: true,
+                    keyboardType: TextInputType.visiblePassword,
+                    autofillHints: const <String>[AutofillHints.oneTimeCode],
+                    onSubmitted: (_) => _submit(),
+                    decoration: neoAuthInputDecoration(palette),
+                  ),
+                )
+              : NeoCredentialFields(
+                  register: registerMode,
+                  username: _username,
+                  email: _email,
+                  password: _password,
+                  confirmPassword: _confirm,
+                  usernameFocus: _usernameFocus,
+                  emailFocus: _emailFocus,
+                  passwordFocus: _passwordFocus,
+                  confirmPasswordFocus: _confirmFocus,
+                  obscurePassword: _obscurePassword,
+                  onChanged: (_) {},
+                  onSubmit: () => _submit(),
+                  decoration: (field, suffix) =>
+                      neoAuthInputDecoration(palette, suffixIcon: suffix),
+                  labeledField: labeled,
+                  usernameLabel: strings.authUsernameLabel,
+                  usernameOrEmailLabel: strings.authUsernameOrEmailLabel,
+                  emailLabel: strings.authEmailLabel,
+                  passwordLabel: strings.authPasswordLabel,
+                  confirmPasswordLabel: strings.authConfirmPasswordLabel,
+                  forgotPassword: forgotPassword,
+                  passwordToggle: IconButton(
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          onPressed: controller.loading ? null : _submit,
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+          child: controller.loading
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  awaitingTwoFactor
+                      ? strings.authVerify
+                      : registerMode
+                      ? strings.authCreateAccount
+                      : strings.authSignInTitle,
+                ),
+        ),
+        if (awaitingTwoFactor) ...<Widget>[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: controller.cancelTwoFactor,
+            child: Text(strings.authSwitchToSignIn),
+          ),
+        ] else if (!registerMode) ...<Widget>[
+          if (controller.supportsSecurityKeys) ...<Widget>[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: controller.loading ? null : _signInWithSecurityKey,
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+              ),
+              icon: const Icon(Icons.key, size: 18),
+              label: Text(strings.authSecurityKeySignIn),
+            ),
+          ],
+          if (!controller.passwordResetAvailable) ...<Widget>[
+            const SizedBox(height: 14),
+            Text(
+              strings.authForgotAskAdmin,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: palette.textMuted,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ],
+      ],
     );
   }
 
