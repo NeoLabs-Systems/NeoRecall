@@ -83,7 +83,7 @@ func SecurityHeaders(cfg config.Config, analyticsOrigin string) secheaders.Confi
 	if cfg.Production {
 		hsts = 31536000
 	}
-	connectSrc := []string{"'self'", "ws:", "wss:"}
+	connectSrc := []string{"'self'", "ws:", "wss:", "https://www.gstatic.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com"}
 	if analyticsOrigin != "" {
 		connectSrc = append(connectSrc, analyticsOrigin)
 	}
@@ -98,7 +98,7 @@ func SecurityHeaders(cfg config.Config, analyticsOrigin string) secheaders.Confi
 			{Name: "frame-ancestors", Values: []string{"'self'"}},
 			{Name: "img-src", Values: []string{"'self'", "data:", "blob:"}},
 			{Name: "object-src", Values: []string{"'none'"}},
-			{Name: "script-src", Values: []string{"'self'", "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'", "blob:"}},
+			{Name: "script-src", Values: []string{"'self'", "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'", "blob:", "https://www.gstatic.com"}},
 			{Name: "script-src-attr", Values: []string{"'unsafe-inline'"}},
 			{Name: "style-src", Values: []string{"'self'", "'unsafe-inline'", "https://fonts.googleapis.com"}},
 			{Name: "media-src", Values: []string{"'self'", "data:", "blob:"}},

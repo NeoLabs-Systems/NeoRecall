@@ -144,6 +144,25 @@ func TestAppWiringHealthMetaStatusCSPAndSPA(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `<base href="/app/">`) {
 		t.Fatalf("/app/settings=%d %s", rec.Code, rec.Body.String())
 	}
+	// Flutter loads CanvasKit as both a script and WASM fetch, and the font
+	// package fetches font files rather than relying only on font-src.
+	directives := map[string]string{}
+	for _, directive := range strings.Split(rec.Header().Get("Content-Security-Policy"), ";") {
+		fields := strings.Fields(directive)
+		if len(fields) > 0 {
+			directives[fields[0]] = " " + strings.Join(fields[1:], " ") + " "
+		}
+	}
+	for name, origins := range map[string][]string{
+		"script-src":  {"https://www.gstatic.com"},
+		"connect-src": {"https://www.gstatic.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com"},
+	} {
+		for _, origin := range origins {
+			if !strings.Contains(directives[name], " "+origin+" ") {
+				t.Errorf("%s does not allow %s: %q", name, origin, directives[name])
+			}
+		}
+	}
 	rec = httptest.NewRecorder()
 	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/main.dart.js", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Cache-Control"), "no-store") {
