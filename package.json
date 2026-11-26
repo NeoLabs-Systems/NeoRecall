@@ -1,7 +1,7 @@
 {
   "name": "neorecall",
   "private": true,
-  "version": "0.1.4-beta.20",
+  "version": "0.1.4-beta.21",
   "description": "Not a Node.js package. Lets the Node.js updater of older NeoRecall installations hand over to the Go binary (scripts/node-handover.sh); version must equal internal/config/config.go Version.",
   "license": "AGPL-3.0-only",
   "scripts": {
