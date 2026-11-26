@@ -72,6 +72,9 @@ func Ensure(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	} else {
+		if err := migrateNode36(ctx, db); err != nil {
+			return err
+		}
 		if err := syncLegacyUserVersion(ctx, db); err != nil {
 			return err
 		}
@@ -80,6 +83,90 @@ func Ensure(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	return dbx.Migrate(ctx, db, Steps())
+}
+
+// migrateNode36 applies the final Node migration before the Go baseline.
+func migrateNode36(ctx context.Context, db *sql.DB) (retErr error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var uv, exists int
+	if err := conn.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&uv); err != nil {
+		return err
+	}
+	if uv != 0 {
+		return nil
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='schema_migrations'`).Scan(&exists); err != nil || exists == 0 {
+		return err
+	}
+	var count int
+	var min, max sql.NullInt64
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*), MIN(version), MAX(version) FROM schema_migrations`).Scan(&count, &min, &max); err != nil {
+		return err
+	}
+	if !min.Valid || min.Int64 != 1 || !max.Valid || max.Int64 != 36 || count != 36 {
+		return nil
+	}
+	var fk int
+	if err := conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&fk); err != nil {
+		return err
+	}
+	if fk != 0 {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil && retErr == nil {
+				retErr = err
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
+CREATE TABLE cloud_accounts_new (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+ type TEXT NOT NULL CHECK (type IN ('nextcloud','neocloud')), base_url TEXT NOT NULL,
+ username TEXT NOT NULL, secret_encrypted TEXT NOT NULL, folder TEXT NOT NULL DEFAULT 'NeoRecall',
+ audio_enabled INTEGER NOT NULL DEFAULT 0 CHECK (audio_enabled IN (0,1)),
+ data_backup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (data_backup_enabled IN (0,1)),
+ status TEXT NOT NULL DEFAULT 'connected' CHECK (status IN ('connected','error')),
+ last_error TEXT, last_audio_upload_at TEXT, last_data_backup_at TEXT,
+ remote_device_id TEXT, quota_used INTEGER, quota_limit INTEGER,
+ created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+ updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+INSERT INTO cloud_accounts_new (id,user_id,type,base_url,username,secret_encrypted,folder,audio_enabled,data_backup_enabled,status,last_error,last_audio_upload_at,last_data_backup_at,created_at,updated_at)
+ SELECT id,user_id,type,base_url,username,secret_encrypted,folder,audio_enabled,data_backup_enabled,status,last_error,last_audio_upload_at,last_data_backup_at,created_at,updated_at FROM cloud_accounts;
+DROP TABLE cloud_accounts;
+ALTER TABLE cloud_accounts_new RENAME TO cloud_accounts;
+ALTER TABLE cloud_archive_items ADD COLUMN remote_upload_id TEXT;
+ALTER TABLE cloud_archive_items ADD COLUMN captured_at TEXT;
+INSERT INTO schema_migrations(version,name) VALUES (37,'037_cloud_neocloud.js');
+`)
+	if err != nil {
+		return fmt.Errorf("schema: migrate Node version 36: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	violation := rows.Next()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if violation {
+		return fmt.Errorf("schema: Node migration 37 would leave foreign key violations")
+	}
+	return tx.Commit()
 }
 
 func isEmpty(ctx context.Context, db *sql.DB) (bool, error) {
