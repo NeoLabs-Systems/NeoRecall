@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/lockout"
 	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
@@ -120,15 +121,26 @@ func TestPasswordResetLinkChangesThePasswordOnce(t *testing.T) {
 	}
 }
 
-func TestRepeatedWrongConfirmationsLockTheAccount(t *testing.T) {
+func TestWrongConfirmationsCountAndLockTheAccount(t *testing.T) {
 	ctx := context.Background()
-	_, _, svc, _ := setupTestStack(t)
+	_, db, svc, _ := setupTestStack(t)
 	user, _, err := svc.Register(ctx, "ada", nil, "Orchid-Tram-58-Lagoon", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range 5 {
-		_ = svc.ChangePassword(ctx, user.ID, "wrong", "Copper-Vane-73-Meadow")
+	key := lockout.ConfirmKey(user.ID)
+	_ = svc.ChangePassword(ctx, user.ID, "wrong", "Copper-Vane-73-Meadow")
+	var counted int
+	if err := db.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM login_failures WHERE account_key = ?`, key).Scan(&counted); err != nil || counted != 1 {
+		t.Fatal("a wrong password was not counted:", counted, err)
+	}
+	// The backoff between tries is real time, so the failures are written
+	// directly: how long a password hash takes must not decide this test.
+	store := lockout.Store{DB: db.W}
+	for range 10 {
+		if err := store.Record(ctx, key, "password"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	err = svc.ChangePassword(ctx, user.ID, "Orchid-Tram-58-Lagoon", "Copper-Vane-73-Meadow")
 	if err == nil || !strings.Contains(err.Error(), "Too many wrong") {
