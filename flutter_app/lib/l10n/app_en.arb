@@ -846,8 +846,7 @@
   "securityDangerZone": "DANGER ZONE",
   "securityEraseCardDescription": "Empties your library — recordings, transcripts, memories, highlights and voice profiles — and keeps your account, settings and paired devices. This cannot be undone.",
   "securityEraseCardAction": "Erase my data…",
-  "securityDeleteCardDescription": "Removes everything above and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.",
-  "securityDeleteCardAction": "Delete account…",
+  "securityDeleteCardDescription": "Removes everything you have recorded and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.",
   "securityNameKeyTitle": "Name this key",
   "securityNameKeyMessage": "Give the key a name you will recognise, for example \"YubiKey\".",
   "securityKeyDefaultName": "Security key {number}",
@@ -878,7 +877,6 @@
   "securityRecoveryCodesTitle": "Recovery Codes",
   "securityRecoveryCodesBody": "Save these codes in a secure place. They are shown only once.",
   "destructiveYourPassword": "Your password",
-  "destructiveCodeHelper": "A current code, or one of your recovery codes.",
   "destructiveTypeToConfirm": "Type {username} to confirm",
   "@destructiveTypeToConfirm": {
     "placeholders": {
@@ -1521,14 +1519,6 @@
   "controllerWrongPassword": "That password is not correct.",
   "controllerInvalidTwoFactor": "That authentication code is not valid. Codes expire quickly — try the current one.",
   "controllerTwoFactorRequired": "This account needs an authenticator code to confirm.",
-  "controllerDeleteFailed": "The account could not be deleted: {error}",
-  "@controllerDeleteFailed": {
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
   "controllerNoNewRecordings": "No new recordings on {device} to sync.",
   "@controllerNoNewRecordings": {
     "placeholders": {
@@ -2839,5 +2829,41 @@
   "qrRefreshesIn": "Refreshes in {seconds} s",
   "@qrRefreshesIn": {"placeholders": {"seconds": {"type": "int"}}},
   "qrWaitingForCode": "Waiting for a code",
-  "qrShowCode": "Show QR code"
+  "qrShowCode": "Show QR code",
+  "securityExportConfirmTitle": "Download a copy of your data",
+  "securitySessionsEyebrow": "SIGNED-IN DEVICES",
+  "securitySessionsDescription": "Every app and browser signed in to this account.",
+  "securitySessionsCurrent": "This device",
+  "securitySessionsRevoke": "Sign out",
+  "securitySessionsSignOutEverywhere": "Sign out everywhere",
+  "securitySessionsEmpty": "No devices are signed in.",
+  "securitySessionsUnknownDevice": "Unknown device",
+  "securitySessionsSince": "Signed in {date}",
+  "@securitySessionsSince": {"placeholders": {"date": {"type": "String"}}},
+  "securitySessionsConfirmTitle": "Sign out everywhere?",
+  "securitySessionsConfirmBody": "Every device, this one included, is signed out and has to sign in again.",
+  "securityEmailEyebrow": "EMAIL",
+  "securityEmailNone": "No email address",
+  "securityEmailUnconfirmed": "Not confirmed yet",
+  "securityEmailPending": "Waiting for confirmation: {email}",
+  "@securityEmailPending": {"placeholders": {"email": {"type": "String"}}},
+  "securityEmailChange": "Change email",
+  "securityEmailResend": "Send the link again",
+  "securityEmailNewTitle": "New email address",
+  "securityEmailNewMessage": "A confirmation link goes to the new address. The current one stays until that link is opened.",
+  "securityEmailConfirmMessage": "Change the account email to {email}.",
+  "@securityEmailConfirmMessage": {"placeholders": {"email": {"type": "String"}}},
+  "securityEmailSent": "Confirmation link sent to {email}.",
+  "@securityEmailSent": {"placeholders": {"email": {"type": "String"}}},
+  "securityEmailChanged": "The account email is now {email}.",
+  "@securityEmailChanged": {"placeholders": {"email": {"type": "String"}}},
+  "adminDelete": "Delete",
+  "adminDeleteTitle": "Delete {username}?",
+  "@adminDeleteTitle": {"placeholders": {"username": {"type": "String"}}},
+  "adminDeleteBody": "This permanently deletes {username} with every recording, transcript, memory, file and signed-in session. It cannot be undone.",
+  "@adminDeleteBody": {"placeholders": {"username": {"type": "String"}}},
+  "adminDeletedNotice": "{username} was deleted.",
+  "@adminDeletedNotice": {"placeholders": {"username": {"type": "String"}}},
+  "adminCannotDeleteSelf": "Delete your own account from Settings › Security.",
+  "adminCannotDeleteAdmin": "Revoke admin first with “neorecall admin revoke <username>”."
 }

@@ -2560,14 +2560,8 @@ abstract class AppL10n {
   /// No description provided for @securityDeleteCardDescription.
   ///
   /// In en, this message translates to:
-  /// **'Removes everything above and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.'**
+  /// **'Removes everything you have recorded and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.'**
   String get securityDeleteCardDescription;
-
-  /// No description provided for @securityDeleteCardAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Delete account…'**
-  String get securityDeleteCardAction;
 
   /// No description provided for @securityNameKeyTitle.
   ///
@@ -2664,12 +2658,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Your password'**
   String get destructiveYourPassword;
-
-  /// No description provided for @destructiveCodeHelper.
-  ///
-  /// In en, this message translates to:
-  /// **'A current code, or one of your recovery codes.'**
-  String get destructiveCodeHelper;
 
   /// No description provided for @destructiveTypeToConfirm.
   ///
@@ -4230,12 +4218,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'This account needs an authenticator code to confirm.'**
   String get controllerTwoFactorRequired;
-
-  /// No description provided for @controllerDeleteFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'The account could not be deleted: {error}'**
-  String controllerDeleteFailed(String error);
 
   /// No description provided for @controllerNoNewRecordings.
   ///
@@ -7967,6 +7949,174 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Show QR code'**
   String get qrShowCode;
+
+  /// No description provided for @securityExportConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download a copy of your data'**
+  String get securityExportConfirmTitle;
+
+  /// No description provided for @securitySessionsEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'SIGNED-IN DEVICES'**
+  String get securitySessionsEyebrow;
+
+  /// No description provided for @securitySessionsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Every app and browser signed in to this account.'**
+  String get securitySessionsDescription;
+
+  /// No description provided for @securitySessionsCurrent.
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get securitySessionsCurrent;
+
+  /// No description provided for @securitySessionsRevoke.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out'**
+  String get securitySessionsRevoke;
+
+  /// No description provided for @securitySessionsSignOutEverywhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out everywhere'**
+  String get securitySessionsSignOutEverywhere;
+
+  /// No description provided for @securitySessionsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No devices are signed in.'**
+  String get securitySessionsEmpty;
+
+  /// No description provided for @securitySessionsUnknownDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown device'**
+  String get securitySessionsUnknownDevice;
+
+  /// No description provided for @securitySessionsSince.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed in {date}'**
+  String securitySessionsSince(String date);
+
+  /// No description provided for @securitySessionsConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out everywhere?'**
+  String get securitySessionsConfirmTitle;
+
+  /// No description provided for @securitySessionsConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Every device, this one included, is signed out and has to sign in again.'**
+  String get securitySessionsConfirmBody;
+
+  /// No description provided for @securityEmailEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'EMAIL'**
+  String get securityEmailEyebrow;
+
+  /// No description provided for @securityEmailNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No email address'**
+  String get securityEmailNone;
+
+  /// No description provided for @securityEmailUnconfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Not confirmed yet'**
+  String get securityEmailUnconfirmed;
+
+  /// No description provided for @securityEmailPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation: {email}'**
+  String securityEmailPending(String email);
+
+  /// No description provided for @securityEmailChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Change email'**
+  String get securityEmailChange;
+
+  /// No description provided for @securityEmailResend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send the link again'**
+  String get securityEmailResend;
+
+  /// No description provided for @securityEmailNewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New email address'**
+  String get securityEmailNewTitle;
+
+  /// No description provided for @securityEmailNewMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'A confirmation link goes to the new address. The current one stays until that link is opened.'**
+  String get securityEmailNewMessage;
+
+  /// No description provided for @securityEmailConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the account email to {email}.'**
+  String securityEmailConfirmMessage(String email);
+
+  /// No description provided for @securityEmailSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmation link sent to {email}.'**
+  String securityEmailSent(String email);
+
+  /// No description provided for @securityEmailChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'The account email is now {email}.'**
+  String securityEmailChanged(String email);
+
+  /// No description provided for @adminDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get adminDelete;
+
+  /// No description provided for @adminDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {username}?'**
+  String adminDeleteTitle(String username);
+
+  /// No description provided for @adminDeleteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This permanently deletes {username} with every recording, transcript, memory, file and signed-in session. It cannot be undone.'**
+  String adminDeleteBody(String username);
+
+  /// No description provided for @adminDeletedNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'{username} was deleted.'**
+  String adminDeletedNotice(String username);
+
+  /// No description provided for @adminCannotDeleteSelf.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete your own account from Settings › Security.'**
+  String get adminCannotDeleteSelf;
+
+  /// No description provided for @adminCannotDeleteAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke admin first with “neorecall admin revoke <username>”.'**
+  String get adminCannotDeleteAdmin;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

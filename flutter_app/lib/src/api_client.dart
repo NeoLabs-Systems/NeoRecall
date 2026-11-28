@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart' show NeoDownload;
 
 import 'diagnostics/client_diagnostic_log.dart';
 import 'devices/plaud/plaud_session.dart';
@@ -213,21 +214,37 @@ class NeoRecallApiClient {
     );
   }
 
-  Future<Uint8List> downloadAccountExport() async {
-    const path = '/api/v1/auth/account/export';
+  /// A file the server answers with, such as the account export. [body] is
+  /// sent as JSON.
+  Future<NeoDownload> download(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final request = http.Request(method, _resolve(path))
+      ..headers.addAll(<String, String>{
+        ..._headers,
+        'Accept': '*/*',
+        if (body != null) 'Content-Type': 'application/json',
+      });
+    if (body != null) request.body = jsonEncode(body);
     final response = await _waitForResponse(
-      _client.get(
-        _resolve(path),
-        headers: <String, String>{..._headers, 'Accept': 'application/zip'},
-      ),
-      method: 'GET',
+      _client.send(request).then(http.Response.fromStream),
+      method: method,
       path: path,
       timeout: uploadTimeout,
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
     }
-    return response.bodyBytes;
+    return NeoDownload(
+      bytes: response.bodyBytes,
+      filename: NeoDownload.filenameFrom(
+        response.headers['content-disposition'],
+        'neorecall-export',
+      ),
+      mimeType: response.headers['content-type'] ?? 'application/octet-stream',
+    );
   }
 
   Future<http.Response> _waitForResponse(

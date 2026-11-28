@@ -1,127 +1,100 @@
 package cloud
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"database/sql"
-	"encoding/json"
-	"fmt"
+	"io"
 	"strings"
+	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/account"
+	"github.com/NeoLabs-Systems/neolabs-go/userid"
+	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 )
 
-func (s *Service) BuildUserExport(ctx context.Context, userID string) ([]byte, error) {
-	var uID, username, createdAt string
-	var email sql.NullString
-	if err := s.DB.R.QueryRowContext(ctx, `SELECT id, username, email, created_at FROM users WHERE id=?`, userID).
-		Scan(&uID, &username, &email, &createdAt); err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
-	}
-	var st map[string]any
-	if s.Settings != nil {
-		st, _ = s.Settings.Get(ctx, userID)
-	}
-	if st == nil {
-		st = map[string]any{}
-	}
+// exportTables are the account's rows in a data export, in order, each read
+// with the account id as its only argument. Only readable content is
+// selected: no secrets, hashes or other accounts' rows.
+var exportTables = []struct{ key, query string }{
+	{"devices", `SELECT name, platform, kind, created_at, last_heartbeat_at FROM devices WHERE user_id=? AND revoked_at IS NULL`},
+	{"sessions", `SELECT id, client_uuid, device_started_at, device_ended_at, timezone, status, created_at FROM recording_sessions WHERE user_id=?`},
+	{"conversations", `SELECT id, started_at, ended_at, state, title_en, summary_en, topics_json, created_at FROM conversations WHERE user_id=?`},
+	{"transcripts", `SELECT public_id, conversation_id, started_at, ended_at, text, language FROM transcript_segments WHERE user_id=? ORDER BY started_at`},
+	{"memories", `SELECT public_id, type, title_en, summary_en, importance, started_at, ended_at, pinned, archived, created_at FROM memories WHERE user_id=?`},
+	{"miniMemories", `SELECT public_id, kind, text_en, importance, confidence, created_at FROM mini_memories WHERE user_id=?`},
+	{"dailySummaries", `SELECT local_date, timezone, summary_en, coverage_started_at, coverage_ended_at, state, created_at FROM daily_summaries WHERE user_id=?`},
+	{"speakers", `SELECT id, display_name FROM voiceprints WHERE user_id=?`},
+	{"entities", `SELECT kind, canonical_name_en, display_name, created_at FROM entities WHERE user_id=?`},
+	{"context", `SELECT kind, captured_at, note_text, original_name, content_type, extracted_text, analysis_text, created_at FROM recording_context_items WHERE user_id=?`},
+}
 
-	queryRows := func(q string) []map[string]any {
-		rows, err := s.DB.R.QueryContext(ctx, q, userID)
-		if err != nil {
-			return []map[string]any{}
-		}
-		defer rows.Close()
-		cols, _ := rows.Columns()
-		out := []map[string]any{}
-		for rows.Next() {
-			vals := make([]any, len(cols))
-			ptrs := make([]any, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
+// Exporter builds an account's data zip: manifest.json with counts, and
+// data.json with the account, its settings and its rows.
+func (s *Service) Exporter() *account.Exporter {
+	text := func(b []byte) any { return string(b) }
+	sections := []account.Section{
+		{Key: "account", Value: func(ctx context.Context, a account.Account) (any, error) {
+			var createdAt string
+			if err := s.DB.R.QueryRowContext(ctx, `SELECT created_at FROM users WHERE id=?`, string(a.ID)).Scan(&createdAt); err != nil {
+				return nil, err
 			}
-			if rows.Scan(ptrs...) == nil {
-				m := make(map[string]any, len(cols))
-				for i, c := range cols {
-					if b, ok := vals[i].([]byte); ok {
-						m[c] = string(b)
-					} else {
-						m[c] = vals[i]
-					}
+			var email any
+			if a.Email != "" {
+				email = a.Email
+			}
+			return map[string]any{"id": string(a.ID), "username": a.Username, "email": email, "createdAt": createdAt}, nil
+		}},
+		{Key: "settings", Value: func(ctx context.Context, a account.Account) (any, error) {
+			st := map[string]any{}
+			if s.Settings != nil {
+				got, err := s.Settings.Get(ctx, string(a.ID))
+				if err != nil {
+					return nil, err
 				}
-				out = append(out, m)
+				st = got
 			}
-		}
-		return out
+			return st, nil
+		}},
 	}
-
-	devices := queryRows(`SELECT name, platform, kind, created_at, last_heartbeat_at FROM devices WHERE user_id=? AND revoked_at IS NULL`)
-	sessions := queryRows(`SELECT id, client_uuid, device_started_at, device_ended_at, timezone, status, created_at FROM recording_sessions WHERE user_id=?`)
-	convs := queryRows(`SELECT id, started_at, ended_at, state, title_en, summary_en, topics_json, created_at FROM conversations WHERE user_id=?`)
-	transcripts := queryRows(`SELECT public_id, conversation_id, started_at, ended_at, text, language FROM transcript_segments WHERE user_id=? ORDER BY started_at`)
-	mems := queryRows(`SELECT public_id, type, title_en, summary_en, importance, started_at, ended_at, pinned, archived, created_at FROM memories WHERE user_id=?`)
-	minis := queryRows(`SELECT public_id, kind, text_en, importance, confidence, created_at FROM mini_memories WHERE user_id=?`)
-	daily := queryRows(`SELECT local_date, timezone, summary_en, coverage_started_at, coverage_ended_at, state, created_at FROM daily_summaries WHERE user_id=?`)
-	speakers := queryRows(`SELECT id, display_name FROM voiceprints WHERE user_id=?`)
-	entities := queryRows(`SELECT kind, canonical_name_en, display_name, created_at FROM entities WHERE user_id=?`)
-	ctxItems := queryRows(`SELECT kind, captured_at, note_text, original_name, content_type, extracted_text, analysis_text, created_at FROM recording_context_items WHERE user_id=?`)
-
-	var emailVal any
-	if email.Valid {
-		emailVal = email.String
+	for _, t := range exportTables {
+		sections = append(sections, account.Section{Key: t.key, Value: func(_ context.Context, a account.Account) (any, error) {
+			return account.Rows{DB: s.DB.R, Query: t.query, Args: []any{string(a.ID)}, Blob: text}, nil
+		}})
 	}
-	payload := map[string]any{
-		"account":        map[string]any{"id": uID, "username": username, "email": emailVal, "createdAt": createdAt},
-		"settings":       st,
-		"devices":        devices,
-		"sessions":       sessions,
-		"conversations":  convs,
-		"transcripts":    transcripts,
-		"memories":       mems,
-		"miniMemories":   minis,
-		"dailySummaries": daily,
-		"speakers":       speakers,
-		"entities":       entities,
-		"context":        ctxItems,
-	}
-	manifest := map[string]any{
-		"version":    1,
-		"kind":       "neorecall-user-backup",
-		"exportedAt": timeutil.NowISO(),
-		"userId":     uID,
-		"username":   username,
-		"counts": map[string]int{
-			"devices":        len(devices),
-			"sessions":       len(sessions),
-			"conversations":  len(convs),
-			"transcripts":    len(transcripts),
-			"memories":       len(mems),
-			"miniMemories":   len(minis),
-			"dailySummaries": len(daily),
-			"speakers":       len(speakers),
-			"entities":       len(entities),
-			"context":        len(ctxItems),
+	return &account.Exporter{
+		Format: account.Zip,
+		Filename: func(a account.Account, now time.Time) string {
+			return "neorecall-" + a.Username + "-" + now.UTC().Format("2006-01-02") + ".zip"
 		},
+		Head: func(ctx context.Context, a account.Account, now time.Time) ([]account.Field, error) {
+			counts := make(map[string]int, len(exportTables))
+			for _, t := range exportTables {
+				var n int
+				if err := s.DB.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+t.query+`)`, string(a.ID)).Scan(&n); err != nil {
+					return nil, err
+				}
+				counts[t.key] = n
+			}
+			return []account.Field{
+				{Key: "version", Value: 1},
+				{Key: "kind", Value: "neorecall-user-backup"},
+				{Key: "exportedAt", Value: timeutil.FormatISO(now)},
+				{Key: "userId", Value: string(a.ID)},
+				{Key: "username", Value: a.Username},
+				{Key: "counts", Value: counts},
+			}, nil
+		},
+		Sections: sections,
 	}
-	mb, _ := json.MarshalIndent(manifest, "", "  ")
-	pb, _ := json.Marshal(payload)
+}
 
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for _, entry := range []struct {
-		name string
-		data []byte
-	}{
-		{"manifest.json", append(mb, '\n')},
-		{"data.json", append(pb, '\n')},
-	} {
-		if f, err := zw.Create(entry.name); err == nil {
-			_, _ = f.Write(entry.data)
-		}
+// writeUserExport writes the account's data zip.
+func (s *Service) writeUserExport(ctx context.Context, w io.Writer, userID string) error {
+	a, err := auth.Directory{DB: s.DB}.Account(ctx, userid.ID(userID))
+	if err != nil {
+		return err
 	}
-	_ = zw.Close()
-	return buf.Bytes(), nil
+	return s.Exporter().WriteTo(ctx, w, a, time.Now())
 }
 
 func sanitizeKindSlug(s string) string {

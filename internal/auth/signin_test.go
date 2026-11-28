@@ -81,46 +81,63 @@ func TestQRSignInGivesTheOtherDeviceASession(t *testing.T) {
 
 func TestPasswordResetLinkChangesThePasswordOnce(t *testing.T) {
 	ctx := context.Background()
-	_, _, svc, _ := setupTestStack(t)
-	email := "ada@example.com"
-	_, session, err := svc.Register(ctx, "ada", &email, "Orchid-Tram-58-Lagoon", auth.RequestContext{})
+	mux, svc, mail := resetStack(t, "https://recall.example", "")
+	_, session, err := svc.Login(ctx, "ada", "Orchid-Tram-58-Lagoon", "", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mail := make(sentMail, 1)
-	cfg := svc.Cfg()
-	cfg.Mail = servicemail.Config{Enabled: true, TokenTTLHours: 1, PublicURL: "https://recall.example"}
-	svc.Cfg, svc.Mailer = cfgOf(cfg), mail
-
-	if err := svc.RequestPasswordReset(ctx, email); err != nil {
-		t.Fatal(err)
+	if code, body := forgot(t, mux, "recall.example", "ada@example.com"); code != 200 {
+		t.Fatal(code, body)
 	}
-	var link *url.URL
-	select {
-	case m := <-mail:
-		link, err = url.Parse(m.ActionURL)
-	case <-time.After(time.Second):
-		t.Fatal("no email")
-	}
-	if err != nil || !strings.HasSuffix(link.Path, "/password/reset") {
-		t.Fatal(link, err)
+	link := mailedLink(t, mail)
+	if !strings.HasSuffix(link.Path, "/password/reset") {
+		t.Fatal(link)
 	}
 	token := link.Query().Get("token")
-	if err := svc.ResetPassword(ctx, token, "password"); err == nil {
-		t.Fatal("a weak password was accepted")
+	if page := resetSubmit(t, mux, token, "password"); !strings.Contains(page, "password") || strings.Contains(page, "has been changed") {
+		t.Fatal("a weak password was accepted:", page)
 	}
-	if err := svc.ResetPassword(ctx, token, "Copper-Vane-73-Meadow"); err != nil {
-		t.Fatal("the link did not survive a weak attempt:", err)
+	if svc.AuthenticateSessionToken(ctx, session.Token) == nil {
+		t.Fatal("a refused reset signed the account out")
 	}
+	resetSubmit(t, mux, token, "Copper-Vane-73-Meadow")
 	if svc.AuthenticateSessionToken(ctx, session.Token) != nil {
 		t.Fatal("old sessions stayed signed in")
 	}
 	if _, err := svc.AuthenticateCredentials(ctx, "ada", "Copper-Vane-73-Meadow", "", auth.RequestContext{}); err != nil {
-		t.Fatal(err)
+		t.Fatal("the link did not survive a weak attempt:", err)
 	}
-	if err := svc.ResetPassword(ctx, token, "Orchid-Tram-58-Lagoon"); err == nil {
+	resetSubmit(t, mux, token, "Orchid-Tram-58-Lagoon")
+	if _, err := svc.AuthenticateCredentials(ctx, "ada", "Orchid-Tram-58-Lagoon", "", auth.RequestContext{}); err == nil {
 		t.Fatal("a reset link worked twice")
 	}
+}
+
+// mailedLink waits for the next email and returns its link.
+func mailedLink(t *testing.T, mail sentMail) *url.URL {
+	t.Helper()
+	select {
+	case m := <-mail:
+		link, err := url.Parse(m.ActionURL)
+		if err != nil || link.Query().Get("token") == "" {
+			t.Fatal(m.ActionURL, err)
+		}
+		return link
+	case <-time.After(5 * time.Second):
+		t.Fatal("no email")
+	}
+	return nil
+}
+
+// resetSubmit posts the reset form and returns the page it answers with.
+func resetSubmit(t *testing.T, mux http.Handler, token, password string) string {
+	t.Helper()
+	form := url.Values{"token": {token}, "password": {password}, "confirmPassword": {password}}
+	req := httptest.NewRequest("POST", "/api/v1/auth/password/reset", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec.Body.String()
 }
 
 // forgot asks for a reset the way an unauthenticated caller can, with a Host
@@ -188,7 +205,7 @@ func TestNoResetEmailWithoutAPublicURL(t *testing.T) {
 		t.Fatal("a reset email was sent without a configured public URL:", m.ActionURL)
 	case <-time.After(300 * time.Millisecond):
 	}
-	if err := svc.RequestPasswordReset(context.Background(), "ada"); !errors.Is(err, auth.ErrNoMailLinkBase) {
+	if _, err := auth.MailLinkBase(svc.Cfg()); !errors.Is(err, auth.ErrNoMailLinkBase) {
 		t.Fatal("expected ErrNoMailLinkBase, got", err)
 	}
 	// Unknown accounts get the same answer, so the refusal reveals nothing.
@@ -222,8 +239,13 @@ func TestTwoFactorSetupCannotReplaceAnEnabledSecret(t *testing.T) {
 		t.Fatal(code, setup)
 	}
 	secret := setup["secret"].(string)
-	now, _ := totp.Code(secret, time.Now())
-	if _, err := svc.ActivateTwoFactor(ctx, user.ID, now); err != nil {
+	// Each accepted code has to be from a newer step than the last, so the
+	// three uses below take the previous, current and next step's codes.
+	at := steadyStep()
+	prev, _ := totp.Code(secret, at.Add(-30*time.Second))
+	now, _ := totp.Code(secret, at)
+	next, _ := totp.Code(secret, at.Add(30*time.Second))
+	if _, err := svc.ActivateTwoFactor(ctx, user.ID, prev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,7 +266,7 @@ func TestTwoFactorSetupCannotReplaceAnEnabledSecret(t *testing.T) {
 		t.Fatal("the original authenticator stopped working:", err)
 	}
 
-	code, out = call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, map[string]string{"password": password, "code": now})
+	code, out = call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, map[string]string{"password": password, "code": next})
 	if code != 200 || out["secret"] == secret {
 		t.Fatal("re-authenticated setup failed:", code, out)
 	}
@@ -278,3 +300,44 @@ func TestWrongConfirmationsCountAndLockTheAccount(t *testing.T) {
 }
 
 func cfgOf(c config.Config) func() config.Config { return func() config.Config { return c } }
+
+// steadyStep returns now, after waiting out the end of a 30-second TOTP step
+// when it is near, so codes worked out from it stay in the accepted window
+// for the rest of a test.
+func steadyStep() time.Time {
+	if left := 30 - time.Now().Unix()%30; left < 8 {
+		time.Sleep(time.Duration(left) * time.Second)
+	}
+	return time.Now()
+}
+
+func TestAnAcceptedCodeIsRefusedAgain(t *testing.T) {
+	ctx := context.Background()
+	mux, _, svc, _ := setupTestStack(t)
+	password := "Orchid-Tram-58-Lagoon"
+	user, session, err := svc.Register(ctx, "ada", nil, password, auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, setup := call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, nil)
+	secret := setup["secret"].(string)
+	at := steadyStep()
+	prev, _ := totp.Code(secret, at.Add(-30*time.Second))
+	now, _ := totp.Code(secret, at)
+	if _, err := svc.ActivateTwoFactor(ctx, user.ID, prev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AuthenticateCredentials(ctx, "ada", password, prev, auth.RequestContext{}); err == nil {
+		t.Fatal("the code that turned 2FA on signed in again")
+	}
+	if _, err := svc.AuthenticateCredentials(ctx, "ada", password, now, auth.RequestContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AuthenticateCredentials(ctx, "ada", password, now, auth.RequestContext{}); err == nil {
+		t.Fatal("a sign-in code was accepted twice")
+	}
+	body := map[string]string{"password": password, "twoFactorCode": now}
+	if code, out := call(t, mux, "POST", "/api/v1/auth/account/export", session.Token, body); code != 401 {
+		t.Fatal("a used code re-authenticated an export:", code, out)
+	}
+}

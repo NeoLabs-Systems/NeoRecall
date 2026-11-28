@@ -102,7 +102,9 @@ name does not revoke it, and an account revoked with the CLI stays revoked.
 Every start logs which accounts are admins.
 
 Admin accounts can't delete themselves or be disabled from the app; revoke
-admin first. Installs from before this change keep their first account as
+admin first. An admin can delete another (non-admin) account with
+`DELETE /api/v1/admin/users/{id}`; its rows, files and sessions go as in a
+self-service deletion. Installs from before this change keep their first account as
 admin — check the start-up log or `neorecall status` after upgrading. The old
 `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ADMIN_API_KEY` values grant nothing and
 are removed from `~/.neorecall/.env` on the next start. Scripts that called the

@@ -1597,10 +1597,7 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get securityDeleteCardDescription =>
-      'Removes everything above and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.';
-
-  @override
-  String get securityDeleteCardAction => 'Delete account…';
+      'Removes everything you have recorded and closes the account itself, including your sign-in, security keys and connected devices. Nothing identifying you is kept. This cannot be undone.';
 
   @override
   String get securityNameKeyTitle => 'Name this key';
@@ -1657,10 +1654,6 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get destructiveYourPassword => 'Your password';
-
-  @override
-  String get destructiveCodeHelper =>
-      'A current code, or one of your recovery codes.';
 
   @override
   String destructiveTypeToConfirm(String username) {
@@ -2622,11 +2615,6 @@ class AppL10nEn extends AppL10n {
   @override
   String get controllerTwoFactorRequired =>
       'This account needs an authenticator code to confirm.';
-
-  @override
-  String controllerDeleteFailed(String error) {
-    return 'The account could not be deleted: $error';
-  }
 
   @override
   String controllerNoNewRecordings(String device) {
@@ -4960,4 +4948,109 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get qrShowCode => 'Show QR code';
+
+  @override
+  String get securityExportConfirmTitle => 'Download a copy of your data';
+
+  @override
+  String get securitySessionsEyebrow => 'SIGNED-IN DEVICES';
+
+  @override
+  String get securitySessionsDescription =>
+      'Every app and browser signed in to this account.';
+
+  @override
+  String get securitySessionsCurrent => 'This device';
+
+  @override
+  String get securitySessionsRevoke => 'Sign out';
+
+  @override
+  String get securitySessionsSignOutEverywhere => 'Sign out everywhere';
+
+  @override
+  String get securitySessionsEmpty => 'No devices are signed in.';
+
+  @override
+  String get securitySessionsUnknownDevice => 'Unknown device';
+
+  @override
+  String securitySessionsSince(String date) {
+    return 'Signed in $date';
+  }
+
+  @override
+  String get securitySessionsConfirmTitle => 'Sign out everywhere?';
+
+  @override
+  String get securitySessionsConfirmBody =>
+      'Every device, this one included, is signed out and has to sign in again.';
+
+  @override
+  String get securityEmailEyebrow => 'EMAIL';
+
+  @override
+  String get securityEmailNone => 'No email address';
+
+  @override
+  String get securityEmailUnconfirmed => 'Not confirmed yet';
+
+  @override
+  String securityEmailPending(String email) {
+    return 'Waiting for confirmation: $email';
+  }
+
+  @override
+  String get securityEmailChange => 'Change email';
+
+  @override
+  String get securityEmailResend => 'Send the link again';
+
+  @override
+  String get securityEmailNewTitle => 'New email address';
+
+  @override
+  String get securityEmailNewMessage =>
+      'A confirmation link goes to the new address. The current one stays until that link is opened.';
+
+  @override
+  String securityEmailConfirmMessage(String email) {
+    return 'Change the account email to $email.';
+  }
+
+  @override
+  String securityEmailSent(String email) {
+    return 'Confirmation link sent to $email.';
+  }
+
+  @override
+  String securityEmailChanged(String email) {
+    return 'The account email is now $email.';
+  }
+
+  @override
+  String get adminDelete => 'Delete';
+
+  @override
+  String adminDeleteTitle(String username) {
+    return 'Delete $username?';
+  }
+
+  @override
+  String adminDeleteBody(String username) {
+    return 'This permanently deletes $username with every recording, transcript, memory, file and signed-in session. It cannot be undone.';
+  }
+
+  @override
+  String adminDeletedNotice(String username) {
+    return '$username was deleted.';
+  }
+
+  @override
+  String get adminCannotDeleteSelf =>
+      'Delete your own account from Settings › Security.';
+
+  @override
+  String get adminCannotDeleteAdmin =>
+      'Revoke admin first with “neorecall admin revoke <username>”.';
 }

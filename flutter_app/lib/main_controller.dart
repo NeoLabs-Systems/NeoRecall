@@ -6,13 +6,14 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:neolabs_flutter/neolabs_flutter.dart'
-    show NeoAuthClient, NeoQrPolling, QrChallengeAction;
+    show NeoAccountApi, NeoAuthClient, NeoQrPolling, QrChallengeAction;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import 'l10n/gen/app_l10n.dart';
 import 'src/api_client.dart';
+import 'src/settings/account_transport.dart';
 import 'src/auth/auth_transport.dart';
 import 'src/auth/qr_login.dart';
 import 'src/auth/webauthn_client.dart';
@@ -54,7 +55,6 @@ import 'src/sync/pending_audio_preview.dart';
 import 'src/background/home_widget_publisher.dart';
 import 'src/sync/processing_status.dart';
 import 'src/sync/storage_capacity_error.dart';
-import 'src/settings/account_export_save.dart';
 import 'src/settings/usage_section.dart';
 import 'src/sync/retained_audio_store.dart';
 import 'src/sync/sync_coordinator.dart';
@@ -1659,35 +1659,27 @@ class NeoRecallController extends ChangeNotifier
     notifyListeners();
   }
 
-  /// Deletes the account on the server, then erases everything this device
-  /// still holds for it.
+  /// The shared account routes (export, deletion, email, sessions) over this
+  /// client's session.
+  NeoAccountApi get accountApi => NeoAccountApi(
+    RecallAccountTransport(api),
+    routes: recallAccountRoutes,
+    fields: recallAccountFields,
+  );
+
+  /// Erases everything this device still holds for an account the server
+  /// has just deleted, then signs out.
   ///
-  /// Order matters. The server call goes first because it is the one that can
-  /// fail — on a wrong password, a missing code, or no network — and a local
-  /// wipe before a failed request would destroy recordings that still exist and
-  /// still belong to a live account. Once the server has cascaded, the local
-  /// spool is the only remaining copy of anything, so it is cleared
-  /// unconditionally: a failure to erase one file must not leave the user
-  /// signed in to an account that no longer exists.
-  ///
-  /// Returns null on success, or a message to show inside the confirmation
-  /// dialog. This one does not use [_run]: its errors belong in the dialog the
-  /// user is looking at, not in a snackbar behind it.
-  Future<String?> deleteAccount({
-    required String password,
-    String? twoFactorCode,
-  }) async {
+  /// The server call came first because it is the one that can fail — on a
+  /// wrong password, a missing code, or no network — and a local wipe before a
+  /// failed request would destroy recordings that still belong to a live
+  /// account. Once the server has cascaded, the local spool is the only
+  /// remaining copy of anything, so it is cleared unconditionally: a failure to
+  /// erase one file must not leave the user signed in to an account that no
+  /// longer exists.
+  Future<void> forgetDeletedAccount() async {
     try {
       if (isRecording) await stopRecording();
-      await api.request(
-        'DELETE',
-        '/api/v1/auth/account',
-        body: {'password': password, 'twoFactorCode': ?twoFactorCode},
-      );
-    } catch (e) {
-      return _readableError(e);
-    }
-    try {
       await store.purgeAll();
       if (accountId != null) await retainedAudio.purgeAccount(accountId!);
     } catch (_) {
@@ -1696,47 +1688,13 @@ class NeoRecallController extends ChangeNotifier
     }
     await ClientDiagnosticLog.instance.clear();
     await logout();
-    return null;
-  }
-
-  /// Downloads a zip of this account's readable data and offers a save location.
-  ///
-  /// Returns the chosen path or file name, or null when the person cancelled
-  /// or the request failed. Failures set [error] the usual way.
-  Future<String?> downloadAccountExport() async {
-    loading = true;
-    error = null;
-    notifyListeners();
-    try {
-      final bytes = await api.downloadAccountExport();
-      final stamp = DateTime.now().toUtc().toIso8601String().substring(0, 10);
-      final safeName = (username ?? 'account').replaceAll(
-        RegExp(r'[^A-Za-z0-9._-]'),
-        '_',
-      );
-      final saved = await saveAccountExport(
-        bytes,
-        'neorecall-$safeName-$stamp.zip',
-      );
-      return saved;
-    } on ApiException catch (exception) {
-      error = exception.message;
-      return null;
-    } catch (exception) {
-      error = exception.toString();
-      return null;
-    } finally {
-      loading = false;
-      notifyListeners();
-    }
   }
 
   /// Erases everything this account has recorded, keeping the account itself.
   ///
-  /// Same shape as [deleteAccount] — errors are returned for the dialog rather
-  /// than raised into a snackbar behind it — but the session survives, so the
-  /// local spool and the in-memory library are cleared and reloaded instead of
-  /// being thrown away with the sign-in.
+  /// Errors are returned for the confirmation dialog rather than raised into a
+  /// snackbar behind it. The session survives, so the local spool and the
+  /// in-memory library are cleared and reloaded.
   Future<String?> eraseContent({
     required String password,
     String? twoFactorCode,
@@ -1749,7 +1707,7 @@ class NeoRecallController extends ChangeNotifier
         body: {'password': password, 'twoFactorCode': ?twoFactorCode},
       );
     } catch (e) {
-      return _readableError(e);
+      return describeAccountError(e);
     }
     try {
       await store.purgeAll();

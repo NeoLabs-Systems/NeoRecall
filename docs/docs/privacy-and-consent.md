@@ -66,7 +66,8 @@ write-only copies:
   transcripts, conversations, memories, summaries, notes, named speakers,
   entities, settings and device metadata. It is not a snapshot of the server
   and it does not include other users. The same zip is available in the app
-  under **Settings → Security → Your data**.
+  under **Settings → Security → Your data**, after the account password and,
+  when two-factor is on, a current code.
 
 Nothing is read back. Neither destination is a restore path. The copies leave this
 machine because the account asked them to, and they are written as ordinary
@@ -82,15 +83,17 @@ NeoCloud or a removed device stops the uploads with a message saying so.
 
 ## Deleting an account
 
-**Settings → Security → Danger zone** deletes an account permanently. It requires
+**Settings → Security → Your data** deletes an account permanently. It requires
 the account password, an authenticator code when two-factor is enabled, and the
-username typed out in full.
+username typed out in full. **Danger zone** keeps the account and erases what it
+recorded, behind the same checks.
 
-Deletion cascades through every table the account owns: transcripts,
-conversations, memories, entities, search vectors, devices, sessions, security
-keys, voiceprints and speaker previews. Temporary audio files belonging to the
-account are unlinked, and the app erases anything still spooled on the device
-before signing out. Audit rows that mentioned the account keep their
+Deletion cascades through every table the account owns in one transaction:
+transcripts, conversations, memories, entities, search vectors, devices,
+security keys, voiceprints and speaker previews. Once that has committed, the
+account's temporary audio, import and pending cloud files are unlinked and every
+session is signed out; a failed deletion leaves the account whole. The app
+erases anything still spooled on the device before signing out. Audit rows that mentioned the account keep their
 operational action, but lose the account identifier, IP address, and metadata.
 It cannot be undone, and it does not reach backup artifacts taken before the
 deletion, files already copied to NeoCloud or Nextcloud, or data already sent to a

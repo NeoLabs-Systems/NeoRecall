@@ -36,6 +36,10 @@ class AdminClient {
     body: <String, dynamic>{'disabled': disabled},
   );
 
+  /// Deletes another, non-admin account with its data, files and sessions.
+  Future<void> deleteUser(String userId) =>
+      api.request('DELETE', '$_base/users/${Uri.encodeComponent(userId)}');
+
   Future<AdminUserLimits> userLimits(String userId) async =>
       AdminUserLimits.fromJson(await _get('/users/$userId/usage-limits'));
 

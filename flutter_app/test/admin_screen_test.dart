@@ -8,6 +8,7 @@ import 'package:neorecall/main_admin.dart';
 import 'package:neorecall/main_controller.dart';
 import 'package:neorecall/main_navigation.dart';
 import 'package:neorecall/main_theme.dart';
+import 'package:neorecall/src/admin/admin_widgets.dart';
 import 'package:neorecall/src/api_client.dart';
 import 'package:neorecall/l10n/gen/app_l10n.dart';
 
@@ -494,6 +495,74 @@ void main() {
       await tester.pumpAndSettle();
       expect(asked, <String?>['failed', 'queued', null]);
       expect(find.text('No jobs yet.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'an admin deletes another account after naming it, never themselves or an admin',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      var deleted = false;
+      final calls = <String>[];
+      Map<String, dynamic> user(String id, String role) => <String, dynamic>{
+        'id': id,
+        'username': id,
+        'role': role,
+        'created_at': '2026-08-01T00:00:00.000Z',
+      };
+      final controller =
+          _controller((request) async {
+              final path = request.url.path;
+              if (path == '/api/v1/admin/users') {
+                return _json(<String, dynamic>{
+                  'users': <Map<String, dynamic>>[
+                    user('owner', 'admin'),
+                    user('boss', 'admin'),
+                    if (!deleted) user('ada', 'user'),
+                  ],
+                });
+              }
+              if (request.method == 'DELETE') {
+                calls.add(path);
+                deleted = true;
+                return http.Response('', 204);
+              }
+              return _everything(request);
+            })
+            ..isAdmin = true
+            ..accountId = 'owner'
+            ..adminArea = AdminArea.users;
+      addTearDown(controller.dispose);
+      await _pumpAdmin(tester, controller);
+
+      Finder deleteOf(String name) => find.descendant(
+        of: find
+            .ancestor(of: find.text(name), matching: find.byType(AdminListRow))
+            .first,
+        matching: find.widgetWithText(OutlinedButton, 'Delete'),
+      );
+      bool enabled(String name) =>
+          tester.widget<OutlinedButton>(deleteOf(name)).onPressed != null;
+      expect(enabled('owner'), isFalse);
+      expect(enabled('boss'), isFalse);
+      expect(enabled('ada'), isTrue);
+
+      await tester.tap(deleteOf('ada'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete ada?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+
+      await tester.tap(deleteOf('ada'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.pumpAndSettle();
+      expect(calls, <String>['/api/v1/admin/users/ada']);
+      expect(find.text('ada was deleted.'), findsOneWidget);
+      expect(find.widgetWithText(AdminListRow, 'ada'), findsNothing);
     },
   );
 

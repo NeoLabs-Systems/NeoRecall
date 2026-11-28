@@ -231,18 +231,15 @@ mixin AuthController on ChangeNotifier {
         await _acceptSession(payload);
         await refreshAll(silent: true);
       });
-  String _readableError(Object error) {
-    final text = error.toString();
-    if (text.contains('INVALID_PASSWORD')) {
-      return strings.controllerWrongPassword;
-    }
-    if (text.contains('INVALID_TWO_FACTOR')) {
-      return strings.controllerInvalidTwoFactor;
-    }
-    if (text.contains('TWO_FACTOR_REQUIRED')) {
-      return strings.controllerTwoFactorRequired;
-    }
-    return strings.controllerDeleteFailed(text);
+  /// A refusal of an account action, worded for the dialog that asked.
+  String describeAccountError(Object error) {
+    if (error is! ApiException) return error.toString();
+    return switch (error.code) {
+      'INVALID_PASSWORD' => strings.controllerWrongPassword,
+      'INVALID_TWO_FACTOR' => strings.controllerInvalidTwoFactor,
+      'TWO_FACTOR_REQUIRED' => strings.controllerTwoFactorRequired,
+      _ => error.message,
+    };
   }
 
   Future<void> fetchTwoFactorStatus() async {

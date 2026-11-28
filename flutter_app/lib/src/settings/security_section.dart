@@ -2,18 +2,21 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:neolabs_flutter/neolabs_flutter.dart';
 
 import '../../main_controller.dart';
 import '../../main_shared.dart';
 import '../../main_theme.dart';
 import '../auth/qr_scanner_page.dart';
-import 'destructive_confirm_dialog.dart';
+import 'account_email_card.dart';
+import 'account_export_save.dart';
+import 'outcome_list.dart';
 import 'qr_approval_card.dart';
 import 'settings_section_list.dart';
 import '../../l10n/gen/app_l10n.dart';
 
-/// The security area of settings: password, two-factor, security keys,
-/// a copy of the account's data, and account deletion.
+/// The security area of settings: two-factor, security keys, the account's
+/// email and signed-in devices, a copy of its data, and account deletion.
 ///
 /// Its own widget rather than ten more methods on the settings screen — it owns
 /// a self-contained set of flows (enrol a key, enable 2FA, regenerate recovery
@@ -29,6 +32,30 @@ class SecuritySection extends StatefulWidget {
 }
 
 class _SecuritySectionState extends State<SecuritySection> {
+  late final NeoSessionsController sessions;
+
+  @override
+  void initState() {
+    super.initState();
+    final api = widget.controller.accountApi;
+    sessions = NeoSessionsController(
+      load: api.sessions,
+      revoke: api.revokeSession,
+      // The route ends this device's session too, so the app signs out.
+      signOutEverywhere: () async {
+        await api.signOutEverywhere();
+        await widget.controller.logout();
+        return const <NeoAccountSession>[];
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    sessions.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.controller,
@@ -133,9 +160,11 @@ class _SecuritySectionState extends State<SecuritySection> {
             child: QrApprovalCard(controller: ctrl),
           ),
         SettingsCard(
-          eyebrow: strings.securityExportEyebrow,
-          child: _exportCard(palette, ctrl),
+          eyebrow: strings.securityEmailEyebrow,
+          child: AccountEmailCard(controller: ctrl),
         ),
+        _sessionsGroup(palette, ctrl),
+        _accountDataGroup(palette, ctrl),
         // The only sign-out on a phone; on desktop it replaces the icon that
         // sat next to the Settings button in the rail.
         SettingsCard(
@@ -263,69 +292,141 @@ class _SecuritySectionState extends State<SecuritySection> {
     );
   }
 
-  Widget _exportCard(NeoRecallPalette palette, NeoRecallController ctrl) {
+  Widget _sessionsGroup(NeoRecallPalette palette, NeoRecallController ctrl) {
     final strings = AppL10n.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          strings.securityExportTitle,
-          style: TextStyle(
-            color: palette.textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
+    return NeoSessionsGroup(
+      palette: palette,
+      controller: sessions,
+      texts: NeoSessionsTexts(
+        title: strings.securitySessionsEyebrow,
+        description: strings.securitySessionsDescription,
+        currentTag: strings.securitySessionsCurrent,
+        revoke: strings.securitySessionsRevoke,
+        signOutEverywhere: strings.securitySessionsSignOutEverywhere,
+        empty: strings.securitySessionsEmpty,
+      ),
+      label: (s) => s.userAgent ?? strings.securitySessionsUnknownDevice,
+      description: (s) => <String>[
+        ?s.ipAddress,
+        if (s.createdAt != null)
+          strings.securitySessionsSince(
+            MaterialLocalizations.of(
+              context,
+            ).formatMediumDate(s.createdAt!.toLocal()),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          strings.securityExportDescription,
-          style: TextStyle(color: palette.textSecondary, height: 1.45),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: ctrl.loading ? null : () => _downloadExport(ctrl),
-          icon: const Icon(Icons.download_outlined),
-          label: Text(strings.securityExportAction),
-        ),
-      ],
+      ].join(' · '),
+      describeError: ctrl.describeAccountError,
+      confirmSignOutEverywhere: () async =>
+          await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(strings.securitySessionsConfirmTitle),
+              content: Text(strings.securitySessionsConfirmBody),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(strings.actionCancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text(strings.securitySessionsSignOutEverywhere),
+                ),
+              ],
+            ),
+          ) ??
+          false,
     );
   }
 
-  Future<void> _downloadExport(NeoRecallController ctrl) async {
+  /// The export and account deletion, each behind the account's password and,
+  /// when it is on, a 2FA code.
+  Widget _accountDataGroup(NeoRecallPalette palette, NeoRecallController ctrl) {
     final strings = AppL10n.of(context);
-    final saved = await ctrl.downloadAccountExport();
-    if (!mounted) return;
-    if (ctrl.error != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ctrl.error!)));
-      return;
-    }
-    if (saved == null) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(strings.securityExportSaved(saved))));
+    final messenger = ScaffoldMessenger.of(context);
+    return NeoAccountDataGroup(
+      palette: palette,
+      api: ctrl.accountApi,
+      texts: NeoAccountDataTexts(
+        title: strings.securityExportEyebrow,
+        exportLabel: strings.securityExportTitle,
+        exportDescription: strings.securityExportDescription,
+        exportButton: strings.securityExportAction,
+        exportTitle: strings.securityExportConfirmTitle,
+        deleteLabel: strings.securityDeleteAccountTitle,
+        deleteDescription: strings.securityDeleteCardDescription,
+        deleteButton: strings.securityDeleteConfirm,
+        deleteTitle: strings.securityDeleteAccountTitle,
+        deleteMessage: strings.securityDeleteAccountIntro,
+        passwordLabel: strings.destructiveYourPassword,
+        codeLabel: strings.securityAuthenticatorCodeLabel,
+        confirmLabel: strings.destructiveTypeToConfirm,
+        cancel: strings.actionCancel,
+      ),
+      username: ctrl.username ?? strings.securityYourUsername,
+      twoFactor: ctrl.accountTwoFactor['enabled'] == true,
+      save: (file) async {
+        final saved = await saveAccountExport(file.bytes, file.filename);
+        if (saved != null) {
+          messenger.showSnackBar(
+            SnackBar(content: Text(strings.securityExportSaved(saved))),
+          );
+        }
+      },
+      // An admin deleting themselves could leave nobody able to run the
+      // server, so the server refuses it; admin is revoked first.
+      deleteBlocked: ctrl.isAdmin ? strings.securityDeleteAdminBlocked : null,
+      deleteDetails: OutcomeList(
+        erased: <String>[
+          strings.securityDeleteItem1,
+          strings.securityEraseItem3,
+          strings.securityDeleteItem2,
+          strings.securityDeleteItem3,
+          strings.securityDeleteItem4,
+        ],
+      ),
+      onDeleted: () async {
+        await ctrl.forgetDeletedAccount();
+        messenger.showSnackBar(
+          SnackBar(content: Text(strings.securityDeletedNotice)),
+        );
+      },
+      describeError: ctrl.describeAccountError,
+    );
   }
 
-  /// The two irreversible actions, deliberately the last thing in the last
-  /// section. They differ in one respect: whether the account survives.
+  /// Empties the library but keeps the account: the last thing in the last
+  /// section, behind the password, a 2FA code when it is on, and the
+  /// username typed out.
   Future<void> _eraseContent(NeoRecallController ctrl) async {
     final strings = AppL10n.of(context);
-    final erased = await DestructiveConfirmDialog.show(
+    final username = ctrl.username ?? strings.securityYourUsername;
+    final erased = await NeoConfirmIdentityDialog.show(
       context,
-      username: ctrl.username ?? strings.securityYourUsername,
-      twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
-      onConfirm: ctrl.eraseContent,
-      title: strings.securityEraseTitle,
-      intro: strings.securityEraseIntro,
-      erased: <String>[
-        strings.securityEraseItem1,
-        strings.securityEraseItem2,
-        strings.securityEraseItem3,
-        strings.securityEraseItem4,
-      ],
-      kept: <String>[strings.securityKeptItem1, strings.securityKeptItem2],
-      confirmLabel: strings.securityEraseConfirm,
+      NeoConfirmIdentityDialog(
+        title: strings.securityEraseTitle,
+        message: strings.securityEraseIntro,
+        details: OutcomeList(
+          erased: <String>[
+            strings.securityEraseItem1,
+            strings.securityEraseItem2,
+            strings.securityEraseItem3,
+            strings.securityEraseItem4,
+          ],
+          kept: <String>[strings.securityKeptItem1, strings.securityKeptItem2],
+        ),
+        cancelLabel: strings.actionCancel,
+        submitLabel: strings.securityEraseConfirm,
+        destructive: true,
+        passwordLabel: strings.destructiveYourPassword,
+        askCode: ctrl.accountTwoFactor['enabled'] == true,
+        codeLabel: strings.securityAuthenticatorCodeLabel,
+        confirmPhrase: username,
+        confirmLabel: strings.destructiveTypeToConfirm(username),
+        onSubmit: (identity) => ctrl.eraseContent(
+          password: identity.password,
+          twoFactorCode: identity.code.isEmpty ? null : identity.code,
+        ),
+      ),
     );
     if (!erased || !mounted) return;
     ScaffoldMessenger.of(
@@ -333,65 +434,16 @@ class _SecuritySectionState extends State<SecuritySection> {
     ).showSnackBar(SnackBar(content: Text(strings.securityErasedNotice)));
   }
 
-  Future<void> _deleteAccount(NeoRecallController ctrl) async {
-    final strings = AppL10n.of(context);
-    final deleted = await DestructiveConfirmDialog.show(
-      context,
-      username: ctrl.username ?? strings.securityYourUsername,
-      twoFactorEnabled: ctrl.accountTwoFactor['enabled'] == true,
-      onConfirm: ctrl.deleteAccount,
-      title: strings.securityDeleteAccountTitle,
-      intro: strings.securityDeleteAccountIntro,
-      erased: <String>[
-        strings.securityDeleteItem1,
-        strings.securityEraseItem3,
-        strings.securityDeleteItem2,
-        strings.securityDeleteItem3,
-        strings.securityDeleteItem4,
-      ],
-      confirmLabel: strings.securityDeleteConfirm,
-    );
-    if (!deleted || !mounted) return;
-    // logout() has already cleared the session, so the app is back at sign-in.
-    // Confirm what happened rather than dropping the user somewhere silently.
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(strings.securityDeletedNotice)));
-  }
-
   Widget _dangerZone(NeoRecallController ctrl) {
-    final palette = neoRecallPaletteOf(context);
     final strings = AppL10n.of(context);
     return SettingsCard(
       eyebrow: strings.securityDangerZone,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _DangerAction(
-            title: strings.securityEraseTitle,
-            description: strings.securityEraseCardDescription,
-            actionLabel: strings.securityEraseCardAction,
-            icon: Icons.delete_sweep_outlined,
-            onPressed: ctrl.loading ? null : () => _eraseContent(ctrl),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 18),
-            child: Container(height: 1, color: palette.border),
-          ),
-          // An admin deleting themselves could leave nobody able to run the
-          // server, so the server refuses it; admin is revoked first.
-          _DangerAction(
-            title: strings.securityDeleteAccountTitle,
-            description: ctrl.isAdmin
-                ? strings.securityDeleteAdminBlocked
-                : strings.securityDeleteCardDescription,
-            actionLabel: strings.securityDeleteCardAction,
-            icon: Icons.delete_forever_outlined,
-            onPressed: ctrl.loading || ctrl.isAdmin
-                ? null
-                : () => _deleteAccount(ctrl),
-          ),
-        ],
+      child: _DangerAction(
+        title: strings.securityEraseTitle,
+        description: strings.securityEraseCardDescription,
+        actionLabel: strings.securityEraseCardAction,
+        icon: Icons.delete_sweep_outlined,
+        onPressed: ctrl.loading ? null : () => _eraseContent(ctrl),
       ),
     );
   }

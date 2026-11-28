@@ -34,7 +34,7 @@ func BaselineVersion() int {
 // Steps returns the ordered migrations. Entries 0..BaselineVersion()-1 are
 // satisfied by baseline.sql; subsequent Go migrations run via dbx.Migrate.
 func Steps() []dbx.Step {
-	steps := make([]dbx.Step, BaselineVersion(), BaselineVersion()+4)
+	steps := make([]dbx.Step, BaselineVersion(), BaselineVersion()+5)
 	for i := range steps {
 		steps[i] = func(context.Context, *sql.Tx) error { return nil }
 	}
@@ -103,6 +103,22 @@ CREATE TABLE user_qr_login_challenges (
 CREATE TABLE IF NOT EXISTS sessions (sid TEXT NOT NULL PRIMARY KEY, sess JSON NOT NULL, expire TEXT NOT NULL);
 DELETE FROM user_sessions;
 `)
+		return err
+	})
+	// Step 41: when an address was confirmed by an emailed link. Password
+	// reset links already went to the stored addresses, so those count as
+	// confirmed.
+	steps = append(steps, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+ALTER TABLE users ADD COLUMN email_verified_at TEXT;
+UPDATE users SET email_verified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE COALESCE(email, '') <> '';
+`)
+		return err
+	})
+	// Step 42: the newest authenticator time step each account used, so an
+	// accepted code is refused when sent again.
+	steps = append(steps, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `ALTER TABLE user_two_factor ADD COLUMN last_totp_step INTEGER NOT NULL DEFAULT 0`)
 		return err
 	})
 	return steps

@@ -1610,10 +1610,7 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get securityDeleteCardDescription =>
-      'Entfernt alles oben Genannte und schließt das Konto selbst, einschließlich Anmeldung, Sicherheitsschlüsseln und verbundenen Geräten. Nichts, was Sie identifiziert, bleibt erhalten. Das lässt sich nicht rückgängig machen.';
-
-  @override
-  String get securityDeleteCardAction => 'Konto löschen …';
+      'Entfernt alles, was Sie aufgenommen haben, und schließt das Konto selbst, einschließlich Anmeldung, Sicherheitsschlüsseln und verbundenen Geräten. Nichts, was Sie identifiziert, bleibt erhalten. Das lässt sich nicht rückgängig machen.';
 
   @override
   String get securityNameKeyTitle => 'Diesen Schlüssel benennen';
@@ -1672,10 +1669,6 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get destructiveYourPassword => 'Ihr Passwort';
-
-  @override
-  String get destructiveCodeHelper =>
-      'Ein aktueller Code oder einer Ihrer Wiederherstellungscodes.';
 
   @override
   String destructiveTypeToConfirm(String username) {
@@ -2645,11 +2638,6 @@ class AppL10nDe extends AppL10n {
   @override
   String get controllerTwoFactorRequired =>
       'Für dieses Konto ist zur Bestätigung ein Authenticator-Code erforderlich.';
-
-  @override
-  String controllerDeleteFailed(String error) {
-    return 'Das Konto konnte nicht gelöscht werden: $error';
-  }
 
   @override
   String controllerNoNewRecordings(String device) {
@@ -5008,4 +4996,110 @@ class AppL10nDe extends AppL10n {
 
   @override
   String get qrShowCode => 'QR-Code anzeigen';
+
+  @override
+  String get securityExportConfirmTitle =>
+      'Eine Kopie Ihrer Daten herunterladen';
+
+  @override
+  String get securitySessionsEyebrow => 'ANGEMELDETE GERÄTE';
+
+  @override
+  String get securitySessionsDescription =>
+      'Alle Apps und Browser, die bei diesem Konto angemeldet sind.';
+
+  @override
+  String get securitySessionsCurrent => 'Dieses Gerät';
+
+  @override
+  String get securitySessionsRevoke => 'Abmelden';
+
+  @override
+  String get securitySessionsSignOutEverywhere => 'Überall abmelden';
+
+  @override
+  String get securitySessionsEmpty => 'Keine Geräte angemeldet.';
+
+  @override
+  String get securitySessionsUnknownDevice => 'Unbekanntes Gerät';
+
+  @override
+  String securitySessionsSince(String date) {
+    return 'Angemeldet am $date';
+  }
+
+  @override
+  String get securitySessionsConfirmTitle => 'Überall abmelden?';
+
+  @override
+  String get securitySessionsConfirmBody =>
+      'Alle Geräte, auch dieses, werden abgemeldet und müssen sich neu anmelden.';
+
+  @override
+  String get securityEmailEyebrow => 'E-MAIL';
+
+  @override
+  String get securityEmailNone => 'Keine E-Mail-Adresse';
+
+  @override
+  String get securityEmailUnconfirmed => 'Noch nicht bestätigt';
+
+  @override
+  String securityEmailPending(String email) {
+    return 'Wartet auf Bestätigung: $email';
+  }
+
+  @override
+  String get securityEmailChange => 'E-Mail ändern';
+
+  @override
+  String get securityEmailResend => 'Link erneut senden';
+
+  @override
+  String get securityEmailNewTitle => 'Neue E-Mail-Adresse';
+
+  @override
+  String get securityEmailNewMessage =>
+      'Ein Bestätigungslink geht an die neue Adresse. Die bisherige bleibt, bis dieser Link geöffnet wird.';
+
+  @override
+  String securityEmailConfirmMessage(String email) {
+    return 'Die E-Mail-Adresse des Kontos in $email ändern.';
+  }
+
+  @override
+  String securityEmailSent(String email) {
+    return 'Bestätigungslink an $email gesendet.';
+  }
+
+  @override
+  String securityEmailChanged(String email) {
+    return 'Die E-Mail-Adresse des Kontos ist jetzt $email.';
+  }
+
+  @override
+  String get adminDelete => 'Löschen';
+
+  @override
+  String adminDeleteTitle(String username) {
+    return '$username löschen?';
+  }
+
+  @override
+  String adminDeleteBody(String username) {
+    return 'Damit werden $username und alle Aufnahmen, Transkripte, Erinnerungen, Dateien und angemeldeten Sitzungen endgültig gelöscht. Das lässt sich nicht rückgängig machen.';
+  }
+
+  @override
+  String adminDeletedNotice(String username) {
+    return '$username wurde gelöscht.';
+  }
+
+  @override
+  String get adminCannotDeleteSelf =>
+      'Das eigene Konto löschen Sie unter Einstellungen › Sicherheit.';
+
+  @override
+  String get adminCannotDeleteAdmin =>
+      'Entziehen Sie zuerst die Admin-Rechte mit „neorecall admin revoke <username>“.';
 }

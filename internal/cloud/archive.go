@@ -397,6 +397,28 @@ func (s *Service) RefreshQuota(ctx context.Context, userID string) {
 	}
 }
 
+// writeExportFile writes the account's data zip to dest and returns its size
+// and SHA-256.
+func (s *Service) writeExportFile(ctx context.Context, dest, userID string) (int64, string, error) {
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, "", err
+	}
+	defer f.Close()
+	sum := sha256.New()
+	if err := s.writeUserExport(ctx, io.MultiWriter(f, sum), userID); err != nil {
+		return 0, "", err
+	}
+	if err := f.Close(); err != nil {
+		return 0, "", err
+	}
+	info, err := os.Stat(dest)
+	if err != nil {
+		return 0, "", err
+	}
+	return info.Size(), hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 func (s *Service) BackupUserData(ctx context.Context, userID string, force bool) (int, error) {
 	acc, _, err := s.GetAccount(ctx, userID)
 	if err != nil {
@@ -412,16 +434,12 @@ func (s *Service) BackupUserData(ctx context.Context, userID string, force bool)
 	if err != nil {
 		return 0, err
 	}
-	zipBytes, err := s.BuildUserExport(ctx, userID)
-	if err != nil {
-		return 0, err
-	}
 	dest := filepath.Join(s.pendingDir(), uuid.NewString()+".zip")
-	if err := os.WriteFile(dest, zipBytes, 0o600); err != nil {
+	size, sumHex, err := s.writeExportFile(ctx, dest, userID)
+	if err != nil {
+		_ = os.Remove(dest)
 		return 0, err
 	}
-	sum := sha256.Sum256(zipBytes)
-	sumHex := hex.EncodeToString(sum[:])
 	if err := crypto.SealInPlace(key, dest); err != nil {
 		_ = os.Remove(dest)
 		return 0, err
@@ -430,7 +448,7 @@ func (s *Service) BackupUserData(ctx context.Context, userID string, force bool)
 	_, err = s.DB.W.ExecContext(ctx, `INSERT INTO cloud_archive_items
 		(id, user_id, account_id, kind, local_path, remote_path, bytes, sha256, state)
 		VALUES (?, ?, ?, 'data', ?, ?, ?, ?, 'queued')`,
-		uuid.NewString(), userID, acc.ID, dest, remPath, len(zipBytes), sumHex)
+		uuid.NewString(), userID, acc.ID, dest, remPath, size, sumHex)
 	if err != nil {
 		return 0, err
 	}

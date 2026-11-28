@@ -19,8 +19,10 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
 	"github.com/NeoLabs-Systems/neolabs-go/totp"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
+	"github.com/NeoLabs-Systems/neorecall/internal/cloud"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
+	"github.com/NeoLabs-Systems/neorecall/internal/ingest"
 	"github.com/NeoLabs-Systems/neorecall/internal/oauth"
 	"github.com/NeoLabs-Systems/neorecall/internal/schema"
 )
@@ -70,7 +72,10 @@ func setupTestStack(t *testing.T, adminUsers ...string) (*http.ServeMux, *dbx.DB
 		Log:     log,
 	}
 	mux := http.NewServeMux()
-	auth.NewRoutes(svc, authn, log).Mount(mux)
+	routes := auth.NewRoutes(svc, authn, log)
+	routes.Exporter = (&cloud.Service{DB: db, Cfg: func() config.Config { return cfg }}).Exporter()
+	routes.UnlinkFn = ingest.UnlinkStrict
+	routes.Mount(mux)
 	oauth.NewRoutes(oauthSvc, authn, log).Mount(mux)
 	return mux, db, svc, oauthSvc
 }

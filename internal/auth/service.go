@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/account"
 	"github.com/NeoLabs-Systems/neolabs-go/dbx"
-	"github.com/NeoLabs-Systems/neolabs-go/lockout"
-	"github.com/NeoLabs-Systems/neolabs-go/passhash"
 	"github.com/NeoLabs-Systems/neolabs-go/pwpolicy"
 	"github.com/NeoLabs-Systems/neolabs-go/qrlogin"
 	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
 	"github.com/NeoLabs-Systems/neolabs-go/sessionx"
 	"github.com/NeoLabs-Systems/neolabs-go/totp"
+	"github.com/NeoLabs-Systems/neolabs-go/userid"
 	"github.com/NeoLabs-Systems/neorecall/internal/audit"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/crypto"
@@ -124,7 +124,7 @@ func (s *Service) CreateSession(ctx context.Context, userID string, rc RequestCo
 		return SessionToken{}, err
 	}
 	token, expires, err := store.IssueBearer(ctx, "nrs_", map[string]any{
-		"userId": userID, "ipAddress": rc.IPAddress, "userAgent": rc.UserAgent,
+		"userId": userID, "ipAddress": rc.IPAddress, "userAgent": rc.UserAgent, "createdAt": time.Now().UTC().Format(time.RFC3339),
 	}, time.Duration(ttlMs)*time.Millisecond)
 	if err != nil {
 		return SessionToken{}, err
@@ -253,20 +253,20 @@ func recoveryCodeHash(v string) string {
 	return crypto.SHA256Hex(strings.ToUpper(normalizeTwoFactorCode(v)))
 }
 
-func (s *Service) consumeRecoveryCode(ctx context.Context, userID, code string) bool {
+// consumeRecoveryCode spends an unused recovery code in one write, so a code
+// works once even when two requests race.
+func (s *Service) consumeRecoveryCode(ctx context.Context, userID, code string) (bool, error) {
 	if code == "" {
-		return false
+		return false, nil
 	}
-	norm := recoveryCodeHash(code)
-	legacy := crypto.SHA256Hex(strings.ToUpper(code))
-	var id string
-	err := s.DB.R.QueryRowContext(ctx, `SELECT id FROM user_recovery_codes
-		WHERE user_id = ? AND used_at IS NULL AND (code_hash = ? OR code_hash = ?)`, userID, norm, legacy).Scan(&id)
+	res, err := s.DB.W.ExecContext(ctx, `UPDATE user_recovery_codes SET used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE id = (SELECT id FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL AND code_hash IN (?, ?) LIMIT 1)`,
+		userID, recoveryCodeHash(code), crypto.SHA256Hex(strings.ToUpper(code)))
 	if err != nil {
-		return false
+		return false, err
 	}
-	_, _ = s.DB.W.ExecContext(ctx, `UPDATE user_recovery_codes SET used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`, id)
-	return true
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // ValidateNewPassword applies the NeoLabs password policy.
@@ -278,75 +278,20 @@ func ValidateNewPassword(password, username, email string) error {
 	return nil
 }
 
-// confirm runs a check of a password or code under the shared per-account
-// lockout: the try counts before the secret is compared, and a success takes
-// its failures back.
-func (s *Service) confirm(ctx context.Context, userID, kind string, check func() error) error {
-	store := lockout.Store{DB: s.DB.W}
-	key := lockout.ConfirmKey(userID)
-	if err := store.Check(ctx, key); err != nil {
-		var locked *lockout.LockedError
-		if errors.As(err, &locked) {
-			return httperr.New(locked.Status(), locked.Code(), locked.Error())
-		}
-		return err
-	}
-	if err := store.Record(ctx, key, kind); err != nil {
-		return err
-	}
-	if err := check(); err != nil {
-		return err
-	}
-	return store.Clear(ctx, key, kind)
-}
-
-// VerifySecondFactor validates a pending 2FA challenge if enabled for userID.
+// VerifySecondFactor checks the sign-in's 2FA code when 2FA is on, under
+// the per-account confirmation lockout.
 func (s *Service) VerifySecondFactor(ctx context.Context, userID, rawCode string) error {
-	var secretEnc string
-	err := s.DB.R.QueryRowContext(ctx, `SELECT secret_encrypted FROM user_two_factor WHERE user_id = ? AND pending = 0`, userID).
-		Scan(&secretEnc)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	f, err := verifier{s}.Factors(ctx, userid.ID(userID))
+	if err != nil || !f.TwoFactor {
 		return err
 	}
-
-	code := normalizeTwoFactorCode(rawCode)
-	if code == "" {
+	if normalizeTwoFactorCode(rawCode) == "" {
 		he := httperr.New(http.StatusUnauthorized, "TWO_FACTOR_REQUIRED", "A two-factor authentication code is required.")
 		he.Extra = map[string]any{"userId": userID}
 		return he
 	}
-	return s.confirm(ctx, userID, "second_factor", func() error {
-		key, err := s.MasterKey()
-		if err != nil {
-			return err
-		}
-		secret, err := crypto.DecryptString(key, secretEnc)
-		if err != nil {
-			return err
-		}
-		if totp.Verify(secret, code, time.Now()) || s.consumeRecoveryCode(ctx, userID, code) {
-			return nil
-		}
-		return httperr.New(http.StatusUnauthorized, "INVALID_TWO_FACTOR", "The two-factor authentication code is invalid.")
-	})
-}
-
-// verifyPassword asks a signed-in account for its password again.
-func (s *Service) verifyPassword(ctx context.Context, userID, password, refusal string) error {
-	return s.confirm(ctx, userID, "password", func() error {
-		var hash string
-		err := s.DB.R.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&hash)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err != nil || !passhash.Verify(hash, password) {
-			return httperr.New(http.StatusUnauthorized, "INVALID_PASSWORD", refusal)
-		}
-		return nil
-	})
+	codeOnly := only{verifier{s}, account.Factors{TwoFactor: true}}
+	return httpError(s.reauth(codeOnly).Confirm(ctx, userid.ID(userID), "", rawCode, false))
 }
 
 // AuthenticateCredentials verifies username/email + password + optional TOTP/recovery code.
@@ -454,8 +399,9 @@ func (s *Service) LogoutAll(ctx context.Context, userID string) error {
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
-	if err := s.verifyPassword(ctx, userID, currentPassword, "The current password is incorrect."); err != nil {
-		return err
+	passwordOnly := only{verifier{s}, account.Factors{Password: true}}
+	if err := s.reauth(passwordOnly).Confirm(ctx, userid.ID(userID), currentPassword, "", false); err != nil {
+		return httpError(err)
 	}
 	return s.SetPassword(ctx, userID, newPassword)
 }
@@ -463,28 +409,41 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 // SetPassword stores a new password that satisfies the policy and signs the
 // account out everywhere.
 func (s *Service) SetPassword(ctx context.Context, userID, newPassword string) error {
-	user, err := s.FindUserByID(ctx, userID)
+	tx, err := s.DB.W.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if user == nil {
+	defer tx.Rollback()
+	if err := s.setPasswordTx(ctx, tx, userID, newPassword); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.LogoutAll(ctx, userID)
+}
+
+// setPasswordTx checks a new password against the policy and stores its hash
+// in tx.
+func (s *Service) setPasswordTx(ctx context.Context, tx *sql.Tx, userID, newPassword string) error {
+	var username string
+	var email sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT username, email FROM users WHERE id = ?`, userID).Scan(&username, &email)
+	if errors.Is(err, sql.ErrNoRows) {
 		return httperr.New(http.StatusNotFound, "USER_NOT_FOUND", "This account does not exist.")
 	}
-	var email string
-	if user.Email != nil {
-		email = *user.Email
+	if err != nil {
+		return err
 	}
-	if err := ValidateNewPassword(newPassword, user.Username, email); err != nil {
+	if err := ValidateNewPassword(newPassword, username, email.String); err != nil {
 		return err
 	}
 	hash, err := crypto.HashPassword(newPassword)
 	if err != nil {
 		return err
 	}
-	if _, err := s.DB.W.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, userID); err != nil {
-		return err
-	}
-	return s.LogoutAll(ctx, userID)
+	_, err = tx.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, userID)
+	return err
 }
 
 type TwoFactorStatus struct {
@@ -532,7 +491,7 @@ func (s *Service) BeginTwoFactor(ctx context.Context, userID, username, password
 			return TwoFactorSetup{}, httperr.New(http.StatusConflict, "TWO_FACTOR_ALREADY_ENABLED",
 				"Two-factor authentication is already on. Confirm your password and a current code to set it up again.")
 		}
-		if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+		if err := s.Confirm(ctx, userID, password, code); err != nil {
 			return TwoFactorSetup{}, err
 		}
 	}
@@ -587,7 +546,8 @@ func (s *Service) ActivateTwoFactor(ctx context.Context, userID, code string) ([
 		return nil, err
 	}
 	secret, err := crypto.DecryptString(key, secretEnc)
-	if err != nil || !totp.Verify(secret, code, time.Now()) {
+	step, ok := totp.MatchStep(secret, code, time.Now())
+	if err != nil || !ok {
 		return nil, httperr.New(http.StatusBadRequest, "INVALID_TWO_FACTOR", "The two-factor authentication code is invalid.")
 	}
 	codes, err := generateRecoveryCodes(s.cfg().TwoFactorRecoveryCodeCount)
@@ -599,7 +559,7 @@ func (s *Service) ActivateTwoFactor(ctx context.Context, userID, code string) ([
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE user_two_factor SET pending=0, enabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?`, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE user_two_factor SET pending=0, last_totp_step=?, enabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?`, step, userID); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = ?`, userID); err != nil {
@@ -617,7 +577,7 @@ func (s *Service) ActivateTwoFactor(ctx context.Context, userID, code string) ([
 }
 
 func (s *Service) DisableTwoFactor(ctx context.Context, userID, password, code string) error {
-	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.Confirm(ctx, userID, password, code); err != nil {
 		return err
 	}
 	tx, err := s.DB.W.BeginTx(ctx, nil)
@@ -631,7 +591,7 @@ func (s *Service) DisableTwoFactor(ctx context.Context, userID, password, code s
 }
 
 func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID, password, code string) ([]string, error) {
-	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.Confirm(ctx, userID, password, code); err != nil {
 		return nil, err
 	}
 	codes, err := generateRecoveryCodes(s.cfg().TwoFactorRecoveryCodeCount)
@@ -653,13 +613,6 @@ func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID, password,
 		return nil, err
 	}
 	return codes, nil
-}
-
-func (s *Service) verifyIdentity(ctx context.Context, userID, password, code string) error {
-	if err := s.verifyPassword(ctx, userID, password, "The password is incorrect."); err != nil {
-		return err
-	}
-	return s.VerifySecondFactor(ctx, userID, code)
 }
 
 var contentTables = []string{
@@ -685,7 +638,8 @@ var contentTables = []string{
 	"cloud_recording_assemblies",
 }
 
-func (s *Service) storedFilePaths(ctx context.Context, userID string) ([]string, error) {
+// storedFilePaths lists the account's temporary and pending files.
+func storedFilePaths(ctx context.Context, q account.RowsQuerier, userID string) ([]string, error) {
 	queries := []string{
 		`SELECT temporary_path FROM audio_chunks WHERE user_id=? AND temporary_path IS NOT NULL`,
 		`SELECT temporary_path FROM imports WHERE user_id=? AND temporary_path IS NOT NULL`,
@@ -695,8 +649,8 @@ func (s *Service) storedFilePaths(ctx context.Context, userID string) ([]string,
 		`SELECT local_dir FROM cloud_recording_assemblies WHERE user_id=?`,
 	}
 	var out []string
-	for _, q := range queries {
-		rows, err := s.DB.R.QueryContext(ctx, q, userID)
+	for _, query := range queries {
+		rows, err := q.QueryContext(ctx, query, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -717,10 +671,10 @@ func (s *Service) storedFilePaths(ctx context.Context, userID string) ([]string,
 
 // EraseContent unlinks all user audio/media files BEFORE wiping all user content rows.
 func (s *Service) EraseContent(ctx context.Context, userID, password, code string, unlinkStrict func(string) error) (EraseResult, error) {
-	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+	if err := s.Confirm(ctx, userID, password, code); err != nil {
 		return EraseResult{}, err
 	}
-	paths, err := s.storedFilePaths(ctx, userID)
+	paths, err := storedFilePaths(ctx, s.DB.R, userID)
 	if err != nil {
 		return EraseResult{}, err
 	}
@@ -750,52 +704,4 @@ func (s *Service) EraseContent(ctx context.Context, userID, password, code strin
 		return EraseResult{}, err
 	}
 	return EraseResult{Files: len(paths)}, nil
-}
-
-// DeleteAccount permanently deletes a non-admin account, unlinking all audio first
-// and scrubbing PII from audit_log.
-func (s *Service) DeleteAccount(ctx context.Context, userID, password, code string, unlinkStrict func(string) error) error {
-	var role string
-	if err := s.DB.R.QueryRowContext(ctx, `SELECT role FROM users WHERE id = ?`, userID).Scan(&role); err == nil && role == "admin" {
-		return httperr.New(http.StatusForbidden, "ADMIN_SELF_DELETE",
-			"Admin accounts can’t delete themselves. Ask whoever runs this server to revoke admin with `neorecall admin revoke <username>` first.")
-	}
-	if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
-		return err
-	}
-	paths, err := s.storedFilePaths(ctx, userID)
-	if err != nil {
-		return err
-	}
-	for _, p := range paths {
-		if unlinkStrict != nil {
-			if err := unlinkStrict(p); err != nil {
-				return err
-			}
-		}
-	}
-	tx, err := s.DB.W.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if s.RemoveIndex != nil {
-		if err := s.RemoveIndex(ctx, tx, userID); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE audit_log SET actor_id=NULL, ip_address=NULL, metadata_json=NULL, resource_id=NULL
-		WHERE actor_type IN ('user','admin') AND actor_id=?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE audit_log SET ip_address=NULL, metadata_json=NULL WHERE affected_user_id=?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.LogoutAll(ctx, userID)
 }

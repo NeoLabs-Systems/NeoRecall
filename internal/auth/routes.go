@@ -3,23 +3,24 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/NeoLabs-Systems/neolabs-go/account"
 	"github.com/NeoLabs-Systems/neolabs-go/httpx"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
 	"github.com/NeoLabs-Systems/neorecall/internal/timeutil"
 )
 
 type Routes struct {
-	Svc       *Service
-	Auth      *Authenticator
-	Log       *slog.Logger
-	UsageFn   func(ctx context.Context, userID string) (any, error)
-	ExportFn  func(ctx context.Context, userID string) ([]byte, error)
+	Svc     *Service
+	Auth    *Authenticator
+	Log     *slog.Logger
+	UsageFn func(ctx context.Context, userID string) (any, error)
+	// Exporter builds the account's data export.
+	Exporter  *account.Exporter
 	UnlinkFn  func(path string) error
 	registerL *httperr.Limiter
 	loginL    *httperr.Limiter
@@ -57,6 +58,7 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	}
 
 	rt.mountSignIn(mux)
+	rt.mountAccount(mux)
 	mux.HandleFunc("POST /api/v1/auth/register", rt.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", rt.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/webauthn/options", rt.handleWebAuthnOptions)
@@ -65,12 +67,9 @@ func (rt *Routes) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/auth/me", reqAuth(http.HandlerFunc(rt.handleMe)))
 	mux.Handle("POST /api/v1/auth/logout", reqAuth(http.HandlerFunc(rt.handleLogout)))
 
-	mux.Handle("POST /api/v1/auth/logout-all", reqSess(rt.handleLogoutAll))
 	mux.Handle("PUT /api/v1/auth/password", reqSess(rt.handleChangePassword))
-	mux.Handle("DELETE /api/v1/auth/account", reqSess(rt.handleDeleteAccount))
 	mux.Handle("POST /api/v1/auth/account/erase-content", reqSess(rt.handleEraseContent))
 	mux.Handle("GET /api/v1/auth/account/usage", reqSess(rt.handleAccountUsage))
-	mux.Handle("GET /api/v1/auth/account/export", reqSess(rt.handleAccountExport))
 	mux.Handle("POST /api/v1/auth/2fa/setup", reqSess(rt.handle2FASetup))
 	mux.Handle("POST /api/v1/auth/2fa/verify", reqSess(rt.handle2FAVerify))
 	mux.Handle("DELETE /api/v1/auth/2fa", reqSess(rt.handle2FADelete))
@@ -206,15 +205,6 @@ func (rt *Routes) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (rt *Routes) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
-	a := FromContext(r.Context())
-	if err := rt.Svc.LogoutAll(r.Context(), a.UserID); err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (rt *Routes) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	a := FromContext(r.Context())
 	var body struct {
@@ -230,23 +220,6 @@ func (rt *Routes) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := rt.Svc.ChangePassword(r.Context(), a.UserID, body.CurrentPassword, body.NewPassword); err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (rt *Routes) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
-	a := FromContext(r.Context())
-	var body struct {
-		Password      string `json:"password"`
-		TwoFactorCode string `json:"twoFactorCode"`
-	}
-	if err := httperr.DecodeJSON(r, &body); err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	if err := rt.Svc.DeleteAccount(r.Context(), a.UserID, body.Password, body.TwoFactorCode, rt.UnlinkFn); err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
@@ -283,39 +256,6 @@ func (rt *Routes) handleAccountUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, snap)
-}
-
-func (rt *Routes) handleAccountExport(w http.ResponseWriter, r *http.Request) {
-	if !rt.exportL.Allow(w, r, rt.Log) {
-		return
-	}
-	a := FromContext(r.Context())
-	if rt.ExportFn == nil {
-		httperr.WriteError(w, r, rt.Log, httperr.New(http.StatusInternalServerError, "NOT_CONFIGURED", "Export service unavailable."))
-		return
-	}
-	data, err := rt.ExportFn(r.Context(), a.UserID)
-	if err != nil {
-		httperr.WriteError(w, r, rt.Log, err)
-		return
-	}
-	stamp := time.Now().UTC().Format("2006-01-02")
-	var safe strings.Builder
-	for _, ch := range a.User.Username {
-		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-' {
-			safe.WriteRune(ch)
-		} else {
-			safe.WriteByte('_')
-		}
-	}
-	name := safe.String()
-	if name == "" {
-		name = "account"
-	}
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="neorecall-%s-%s.zip"`, name, stamp))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
 }
 
 func (rt *Routes) handle2FASetup(w http.ResponseWriter, r *http.Request) {

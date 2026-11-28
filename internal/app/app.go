@@ -450,7 +450,7 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 
 	authRoutes := auth.NewRoutes(a.Auth, a.Authenticator, log)
 	authRoutes.UsageFn = func(cctx context.Context, uid string) (any, error) { return a.Usage.GetUsageSnapshot(cctx, uid, true) }
-	authRoutes.ExportFn = a.Cloud.BuildUserExport
+	authRoutes.Exporter = a.Cloud.Exporter()
 	authRoutes.UnlinkFn = ingest.UnlinkStrict
 
 	a.Handler = httpserver.New(httpserver.Deps{

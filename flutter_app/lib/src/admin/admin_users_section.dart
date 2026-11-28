@@ -124,6 +124,47 @@ class _AccountsCardState extends State<_AccountsCard> {
     }
   }
 
+  Future<void> _delete(AdminUser user) async {
+    final strings = AppL10n.of(context);
+    final palette = neoRecallPaletteOf(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.adminDeleteTitle(user.username)),
+        content: Text(strings.adminDeleteBody(user.username)),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(strings.actionCancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: palette.danger),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(strings.adminDelete),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busyUserId = user.id);
+    try {
+      await widget.client.deleteUser(user.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(strings.adminDeletedNotice(user.username))),
+      );
+      await widget.reload();
+    } catch (error) {
+      noteAdminFailure(widget.controller, error);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(adminErrorText(error))));
+    } finally {
+      if (mounted) setState(() => _busyUserId = null);
+    }
+  }
+
   Future<void> _editLimits(AdminUser user) async {
     final saved = await showDialog<bool>(
       context: context,
@@ -245,6 +286,27 @@ class _AccountsCardState extends State<_AccountsCard> {
                           child: Text(strings.adminDisable),
                         ),
                       ),
+                    // Your own account is deleted from your settings; admins
+                    // lose the role before they can be deleted.
+                    Tooltip(
+                      message: user.id == widget.controller.accountId
+                          ? strings.adminCannotDeleteSelf
+                          : user.isAdmin
+                          ? strings.adminCannotDeleteAdmin
+                          : '',
+                      child: OutlinedButton(
+                        onPressed:
+                            user.isAdmin ||
+                                user.id == widget.controller.accountId ||
+                                _busyUserId == user.id
+                            ? null
+                            : () => _delete(user),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: palette.danger,
+                        ),
+                        child: Text(strings.adminDelete),
+                      ),
+                    ),
                   ],
                 ),
             ],

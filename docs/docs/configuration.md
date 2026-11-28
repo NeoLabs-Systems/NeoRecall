@@ -49,6 +49,20 @@ Emailed links are built only from `NEORECALL_EMAIL_PUBLIC_URL` or
 **Forgot password**, and the server logs a warning at startup.
 `neorecall reset-password <user>` works without email.
 
+A reset link works once, expires after `NEORECALL_EMAIL_TOKEN_TTL_HOURS` (24), and
+signs the account out everywhere. Opening it only shows the form; the password
+changes when the form is sent.
+
+**Settings › Security › Email** changes the account's address after the
+password (and a 2FA code when it is on). With email configured the new address
+takes effect only when the link mailed to it is opened, and the old address is
+told about the request; without email the address is set at once and stays
+unconfirmed. Addresses stored before this release count as confirmed, since
+reset links already went to them.
+
+**Settings › Security › Signed-in devices** lists the account's sessions, ends
+one, or signs out everywhere (this device included).
+
 ## External inference providers
 
 By default NeoRecall does not install or run a transcription or language model: both are external services, and provider settings can come from `.env` or from encrypted live overrides on the app's **Admin › Providers** page. Keys saved there are never returned to the app, and **Use the server’s own configuration** restores `.env` as the source of truth.
