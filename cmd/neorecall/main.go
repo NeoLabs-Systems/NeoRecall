@@ -18,6 +18,7 @@ import (
 
 	"github.com/NeoLabs-Systems/neolabs-go/runtimecfg"
 	"github.com/NeoLabs-Systems/neorecall/internal/app"
+	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/httpserver"
 	"github.com/NeoLabs-Systems/neorecall/internal/manager"
@@ -103,6 +104,12 @@ func serve(log *slog.Logger) error {
 			}
 		}
 	}()
+
+	if cfg.Mail.Enabled {
+		if _, err := auth.MailLinkBase(cfg); err != nil {
+			log.Warn("SMTP is configured but password reset emails are off until NEORECALL_PUBLIC_URL is set", "error", err)
+		}
+	}
 
 	role := strings.ToLower(strings.TrimSpace(cfg.Role))
 	switch role {

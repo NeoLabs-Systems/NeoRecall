@@ -129,7 +129,7 @@ func TestAuthAndOAuthPKCEFlow(t *testing.T) {
 	res.Body.Close()
 
 	// 4. Enable 2FA & verify login requires TOTP, accepts recovery code.
-	setup, err := svc.BeginTwoFactor(context.Background(), regOut.User.ID, "alice")
+	setup, err := svc.BeginTwoFactor(context.Background(), regOut.User.ID, "alice", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

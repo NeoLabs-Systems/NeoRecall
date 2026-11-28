@@ -177,7 +177,7 @@ func mergeTx(ctx context.Context, tx SQLExecQueryer, key []byte, minPreviewMs in
 	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT conversation_id FROM transcript_segments WHERE user_id=? AND conversation_id IS NOT NULL AND speaker_cluster_id IN (SELECT cluster_id FROM conversation_speakers WHERE voiceprint_id IN (?,?))
-		UNION SELECT DISTINCT conversation_id FROM conversation_speakers WHERE voiceprint_id IN (?,?)`, targetID, sourceID, targetID, sourceID)
+		UNION SELECT DISTINCT conversation_id FROM conversation_speakers WHERE voiceprint_id IN (?,?)`, userID, targetID, sourceID, targetID, sourceID)
 	if err != nil {
 		return err
 	}

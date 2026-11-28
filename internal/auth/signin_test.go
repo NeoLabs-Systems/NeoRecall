@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/NeoLabs-Systems/neolabs-go/lockout"
 	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
+	"github.com/NeoLabs-Systems/neolabs-go/totp"
 	"github.com/NeoLabs-Systems/neorecall/internal/auth"
 	"github.com/NeoLabs-Systems/neorecall/internal/config"
 )
@@ -87,10 +89,10 @@ func TestPasswordResetLinkChangesThePasswordOnce(t *testing.T) {
 	}
 	mail := make(sentMail, 1)
 	cfg := svc.Cfg()
-	cfg.Mail = servicemail.Config{Enabled: true, TokenTTLHours: 1}
+	cfg.Mail = servicemail.Config{Enabled: true, TokenTTLHours: 1, PublicURL: "https://recall.example"}
 	svc.Cfg, svc.Mailer = cfgOf(cfg), mail
 
-	if err := svc.RequestPasswordReset(ctx, email, "https://recall.example"); err != nil {
+	if err := svc.RequestPasswordReset(ctx, email); err != nil {
 		t.Fatal(err)
 	}
 	var link *url.URL
@@ -118,6 +120,133 @@ func TestPasswordResetLinkChangesThePasswordOnce(t *testing.T) {
 	}
 	if err := svc.ResetPassword(ctx, token, "Orchid-Tram-58-Lagoon"); err == nil {
 		t.Fatal("a reset link worked twice")
+	}
+}
+
+// forgot asks for a reset the way an unauthenticated caller can, with a Host
+// header of its choosing.
+func forgot(t *testing.T, mux http.Handler, host, account string) (int, string) {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/auth/password/forgot", strings.NewReader(`{"account":"`+account+`"}`))
+	req.Host = host
+	req.Header.Set("X-Forwarded-Host", host)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
+}
+
+func resetStack(t *testing.T, publicURL, mailPublicURL string) (http.Handler, *auth.Service, sentMail) {
+	t.Helper()
+	mux, _, svc, _ := setupTestStack(t)
+	email := "ada@example.com"
+	if _, _, err := svc.Register(context.Background(), "ada", &email, "Orchid-Tram-58-Lagoon", auth.RequestContext{}); err != nil {
+		t.Fatal(err)
+	}
+	mail := make(sentMail, 4)
+	cfg := svc.Cfg()
+	cfg.PublicURL = publicURL
+	cfg.Mail = servicemail.Config{Enabled: true, TokenTTLHours: 1, PublicURL: mailPublicURL}
+	svc.Cfg, svc.Mailer = cfgOf(cfg), mail
+	return mux, svc, mail
+}
+
+func TestResetLinkIgnoresTheRequestHost(t *testing.T) {
+	for _, tc := range []struct{ name, publicURL, mailURL, want string }{
+		{"public URL", "https://recall.example", "", "https://recall.example/api/v1/auth/password/reset"},
+		{"email public URL wins", "https://recall.example", "https://mail.recall.example/sub/", "https://mail.recall.example/sub/api/v1/auth/password/reset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux, _, mail := resetStack(t, tc.publicURL, tc.mailURL)
+			if code, body := forgot(t, mux, "attacker.example", "ada"); code != 200 {
+				t.Fatal(code, body)
+			}
+			select {
+			case m := <-mail:
+				link, err := url.Parse(m.ActionURL)
+				if err != nil || link.Query().Get("token") == "" {
+					t.Fatal(m.ActionURL, err)
+				}
+				if got := link.Scheme + "://" + link.Host + link.Path; got != tc.want || strings.Contains(m.ActionURL, "attacker") {
+					t.Fatalf("reset link %q, want it under %q", m.ActionURL, tc.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("no email")
+			}
+		})
+	}
+}
+
+func TestNoResetEmailWithoutAPublicURL(t *testing.T) {
+	mux, svc, mail := resetStack(t, "", "")
+	code, withoutURL := forgot(t, mux, "attacker.example", "ada")
+	if code != 200 {
+		t.Fatal(code, withoutURL)
+	}
+	select {
+	case m := <-mail:
+		t.Fatal("a reset email was sent without a configured public URL:", m.ActionURL)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := svc.RequestPasswordReset(context.Background(), "ada"); !errors.Is(err, auth.ErrNoMailLinkBase) {
+		t.Fatal("expected ErrNoMailLinkBase, got", err)
+	}
+	// Unknown accounts get the same answer, so the refusal reveals nothing.
+	if _, unknown := forgot(t, mux, "attacker.example", "nobody"); unknown != withoutURL {
+		t.Fatalf("answers differ: %q vs %q", withoutURL, unknown)
+	}
+	if code, out := call(t, mux, "GET", "/api/v1/auth/options", "", nil); code != 200 || out["passwordReset"] != false {
+		t.Fatal("password reset offered without a public URL:", code, out)
+	}
+
+	mux, _, _ = resetStack(t, "not a url", "")
+	if _, out := call(t, mux, "GET", "/api/v1/auth/options", "", nil); out["passwordReset"] != false {
+		t.Fatal("password reset offered with an invalid public URL:", out)
+	}
+	mux, _, _ = resetStack(t, "https://recall.example", "")
+	if _, out := call(t, mux, "GET", "/api/v1/auth/options", "", nil); out["passwordReset"] != true {
+		t.Fatal("password reset not offered with a public URL:", out)
+	}
+}
+
+func TestTwoFactorSetupCannotReplaceAnEnabledSecret(t *testing.T) {
+	ctx := context.Background()
+	mux, _, svc, _ := setupTestStack(t)
+	password := "Orchid-Tram-58-Lagoon"
+	user, session, err := svc.Register(ctx, "ada", nil, password, auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, setup := call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, nil)
+	if code != 200 {
+		t.Fatal(code, setup)
+	}
+	secret := setup["secret"].(string)
+	now, _ := totp.Code(secret, time.Now())
+	if _, err := svc.ActivateTwoFactor(ctx, user.ID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, nil)
+	if errBody, _ := out["error"].(map[string]any); code != 409 || errBody["code"] != "TWO_FACTOR_ALREADY_ENABLED" {
+		t.Fatal("setup was allowed while 2FA is on:", code, out)
+	}
+	if code, _ := call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, map[string]string{"password": "wrong-password", "code": now}); code != 401 {
+		t.Fatal("setup accepted a wrong password:", code)
+	}
+	if code, _ := call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, map[string]string{"password": password, "code": "000000"}); code != 401 {
+		t.Fatal("setup accepted a wrong code:", code)
+	}
+	if st, err := svc.GetTwoFactorStatus(ctx, user.ID); err != nil || !st.Enabled {
+		t.Fatal("refused setups turned 2FA off:", st, err)
+	}
+	if _, err := svc.AuthenticateCredentials(ctx, "ada", password, now, auth.RequestContext{}); err != nil {
+		t.Fatal("the original authenticator stopped working:", err)
+	}
+
+	code, out = call(t, mux, "POST", "/api/v1/auth/2fa/setup", session.Token, map[string]string{"password": password, "code": now})
+	if code != 200 || out["secret"] == secret {
+		t.Fatal("re-authenticated setup failed:", code, out)
 	}
 }
 

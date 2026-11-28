@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -37,7 +38,8 @@ func (rt *Routes) mountSignIn(mux *http.ServeMux) {
 }
 
 // baseURL is how clients reach this server: the public URL when configured,
-// otherwise the address the request came in on.
+// otherwise the address the request came in on. It may only answer the
+// requester itself; anything emailed uses MailLinkBase instead.
 func (rt *Routes) baseURL(r *http.Request) string {
 	c := rt.Svc.cfg()
 	if c.PublicURL != "" {
@@ -51,8 +53,7 @@ func (rt *Routes) baseURL(r *http.Request) string {
 }
 
 func (rt *Routes) handleOptions(w http.ResponseWriter, _ *http.Request) {
-	c := rt.Svc.cfg()
-	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"passwordReset": c.Mail.Enabled, "registration": c.RegistrationEnabled})
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"passwordReset": rt.Svc.PasswordResetAvailable(), "registration": rt.Svc.cfg().RegistrationEnabled})
 }
 
 func (rt *Routes) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
@@ -67,12 +68,14 @@ func (rt *Routes) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteError(w, r, rt.Log, err)
 		return
 	}
-	base := rt.baseURL(r)
-	// Sending must not change how long the answer takes.
+	// Sending must not change how long the answer takes, and the answer is
+	// the same whether or not an email went out.
 	go func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if err := rt.Svc.RequestPasswordReset(ctx, body.Account, base); err != nil {
+		if err := rt.Svc.RequestPasswordReset(ctx, body.Account); errors.Is(err, ErrNoMailLinkBase) {
+			rt.Log.Warn("password reset email not sent: set NEORECALL_PUBLIC_URL so reset links point at this server", "error", err)
+		} else if err != nil {
 			rt.Log.Error("password reset email failed", "error", err)
 		}
 	}(context.WithoutCancel(r.Context()))

@@ -466,7 +466,15 @@ func (rt *Routes) handle2FAStatus(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Routes) handle2FASetup(w http.ResponseWriter, r *http.Request) {
 	a := auth.FromContext(r.Context())
-	setup, err := rt.AuthSvc.BeginTwoFactor(r.Context(), a.UserID, a.User.Username)
+	var body struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := httperr.DecodeJSON(r, &body); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	setup, err := rt.AuthSvc.BeginTwoFactor(r.Context(), a.UserID, a.User.Username, body.Password, body.Code)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return

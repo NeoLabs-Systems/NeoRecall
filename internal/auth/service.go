@@ -517,7 +517,25 @@ type TwoFactorSetup struct {
 	OtpauthURI string `json:"otpauthUri"`
 }
 
-func (s *Service) BeginTwoFactor(ctx context.Context, userID, username string) (TwoFactorSetup, error) {
+// BeginTwoFactor starts setting up an authenticator. Setting it up again
+// while 2FA is on replaces the working secret and leaves 2FA off until the new
+// one is confirmed, so it asks for the password and a current code first, just
+// as turning 2FA off does.
+func (s *Service) BeginTwoFactor(ctx context.Context, userID, username, password, code string) (TwoFactorSetup, error) {
+	var enabled bool
+	err := s.DB.R.QueryRowContext(ctx, `SELECT pending = 0 FROM user_two_factor WHERE user_id = ?`, userID).Scan(&enabled)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return TwoFactorSetup{}, err
+	}
+	if enabled {
+		if password == "" || normalizeTwoFactorCode(code) == "" {
+			return TwoFactorSetup{}, httperr.New(http.StatusConflict, "TWO_FACTOR_ALREADY_ENABLED",
+				"Two-factor authentication is already on. Confirm your password and a current code to set it up again.")
+		}
+		if err := s.verifyIdentity(ctx, userID, password, code); err != nil {
+			return TwoFactorSetup{}, err
+		}
+	}
 	secret, err := totp.GenerateSecret()
 	if err != nil {
 		return TwoFactorSetup{}, err

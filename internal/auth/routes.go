@@ -320,7 +320,15 @@ func (rt *Routes) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Routes) handle2FASetup(w http.ResponseWriter, r *http.Request) {
 	a := FromContext(r.Context())
-	res, err := rt.Svc.BeginTwoFactor(r.Context(), a.UserID, a.User.Username)
+	var body struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := httperr.DecodeJSON(r, &body); err != nil {
+		httperr.WriteError(w, r, rt.Log, err)
+		return
+	}
+	res, err := rt.Svc.BeginTwoFactor(r.Context(), a.UserID, a.User.Username, body.Password, body.Code)
 	if err != nil {
 		httperr.WriteError(w, r, rt.Log, err)
 		return

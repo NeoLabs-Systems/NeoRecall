@@ -32,7 +32,7 @@ The sign-in screen of the desktop and web apps shows a QR code. A phone that is
 already signed in scans it under **Settings › Security** and approves it. Security
 keys and passkeys can be added there too.
 
-**Forgot password** appears once account email is configured:
+**Forgot password** appears once account email and a public URL are configured:
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -42,8 +42,12 @@ keys and passkeys can be added there too.
 | `NEORECALL_EMAIL_SMTP_USER` / `_SMTP_PASS` | SMTP sign-in | |
 | `NEORECALL_EMAIL_PUBLIC_URL` | Address used in the links | `NEORECALL_PUBLIC_URL` |
 
-Set a public URL when the server is reachable under another name than the request
-shows. `neorecall reset-password <user>` works without email.
+Emailed links are built only from `NEORECALL_EMAIL_PUBLIC_URL` or
+`NEORECALL_PUBLIC_URL`, never from the address a request came in on, so set
+`NEORECALL_PUBLIC_URL` to the address people open (for example
+`https://recall.example.com`). Without it no reset email is sent, the app hides
+**Forgot password**, and the server logs a warning at startup.
+`neorecall reset-password <user>` works without email.
 
 ## External inference providers
 

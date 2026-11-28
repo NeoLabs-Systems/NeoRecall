@@ -52,38 +52,7 @@ func TestClusteringMarginAndForbidden(t *testing.T) {
 
 func TestResolveConversationMergesAndVoiceprintSealing(t *testing.T) {
 	ctx := context.Background()
-	home := t.TempDir()
-	cfg, err := config.Load(func(k string) string {
-		if k == "NEORECALL_HOME" {
-			return home
-		}
-		return ""
-	}, home, home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = cfg.Paths.Ensure()
-	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err := schema.Ensure(ctx, db.W); err != nil {
-		t.Fatal(err)
-	}
-	cfgFn := func() config.Config { return cfg }
-	keyFn := func() ([]byte, error) { return crypto.MasterKey(cfg.Paths.SecretKey) }
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	authSvc := &auth.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn}
-	authn := &auth.Authenticator{Service: authSvc, Log: log}
-	procSvc := &processing.Service{DB: db, Cfg: cfgFn}
-	jobSvc := &jobs.Service{DB: db, Cfg: cfgFn}
-	spkSvc := &speakers.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn, Proc: procSvc, Jobs: jobSvc, Log: log}
-
-	mux := http.NewServeMux()
-	auth.NewRoutes(authSvc, authn, log).Mount(mux)
-	(&speakers.Routes{Svc: spkSvc, Auth: authn, Log: log}).Mount(mux)
+	db, keyFn, mux, spkSvc := newSpeakerStack(t)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -182,5 +151,136 @@ func TestResolveConversationMergesAndVoiceprintSealing(t *testing.T) {
 	_ = json.NewDecoder(gRes.Body).Decode(&listOut)
 	if len(listOut.Speakers) != 1 || listOut.Speakers[0].DisplayName == nil || *listOut.Speakers[0].DisplayName != "Alice" {
 		t.Fatalf("expected Alice in speakers list, got %+v", listOut)
+	}
+}
+
+// newSpeakerStack opens a fresh database in a temporary home with the auth
+// and speaker routes mounted.
+func newSpeakerStack(t *testing.T) (*dbx.DB, func() ([]byte, error), *http.ServeMux, *speakers.Service) {
+	t.Helper()
+	ctx := context.Background()
+	home := t.TempDir()
+	cfg, err := config.Load(func(k string) string {
+		if k == "NEORECALL_HOME" {
+			return home
+		}
+		return ""
+	}, home, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg.Paths.Ensure()
+	db, err := dbx.Open(ctx, cfg.Paths.Database, dbx.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := schema.Ensure(ctx, db.W); err != nil {
+		t.Fatal(err)
+	}
+	cfgFn := func() config.Config { return cfg }
+	keyFn := func() ([]byte, error) { return crypto.MasterKey(cfg.Paths.SecretKey) }
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	authSvc := &auth.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn}
+	authn := &auth.Authenticator{Service: authSvc, Log: log}
+	procSvc := &processing.Service{DB: db, Cfg: cfgFn}
+	jobSvc := &jobs.Service{DB: db, Cfg: cfgFn}
+	spkSvc := &speakers.Service{DB: db, Cfg: cfgFn, MasterKey: keyFn, Proc: procSvc, Jobs: jobSvc, Log: log}
+
+	mux := http.NewServeMux()
+	auth.NewRoutes(authSvc, authn, log).Mount(mux)
+	(&speakers.Routes{Svc: spkSvc, Auth: authn, Log: log}).Mount(mux)
+	return db, keyFn, mux, spkSvc
+}
+
+func TestMergeCombinesTwoSpeakers(t *testing.T) {
+	ctx := context.Background()
+	db, keyFn, mux, _ := newSpeakerStack(t)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	res, err := http.Post(srv.URL+"/api/v1/auth/register", "application/json",
+		strings.NewReader(`{"username":"mergeuser","password":"Orchid-Tram-58-Lagoon"}`))
+	if err != nil || res.StatusCode != 201 {
+		t.Fatalf("register failed: %v", err)
+	}
+	var reg struct {
+		User    auth.User         `json:"user"`
+		Session auth.SessionToken `json:"session"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&reg)
+	res.Body.Close()
+	userID := reg.User.ID
+
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.W.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	devID, sessID, srcID, convID, chunkID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	mustExec(`INSERT INTO devices (id, user_id, client_uuid, name, platform, kind) VALUES (?, ?, 'dev-merge-1234', 'Mac', 'macos', 'desktop')`, devID, userID)
+	mustExec(`INSERT INTO recording_sessions (id, user_id, device_id, client_uuid, device_started_at, corrected_started_at, timezone, initial_clock_offset_ms, consent_attested_at, status)
+		VALUES (?, ?, ?, 'sess-merge-1234', '2026-01-01T10:00:00Z', '2026-01-01T10:00:00Z', 'UTC', 0, '2026-01-01T10:00:00Z', 'ended')`, sessID, userID, devID)
+	mustExec(`INSERT INTO recording_sources (id, session_id, client_uuid, kind, channel_layout, sample_rate, sample_format) VALUES (?, ?, 'src-merge-1234', 'microphone', 'mono', 16000, 'pcm_s16le')`, srcID, sessID)
+	mustExec(`INSERT INTO audio_chunks (id, user_id, session_id, source_id, sequence, idempotency_key, sha256, byte_size, container, codec, channel_layout, device_started_at, monotonic_offset_ms, duration_ms, state)
+		VALUES (?, ?, ?, ?, 0, 'k1', '`+strings.Repeat("a", 64)+`', 100, 'wav', 'pcm_s16le', 'mono', '2026-01-01T10:00:00Z', 0, 20000, 'transcribed')`, chunkID, userID, sessID, srcID)
+	mustExec(`INSERT INTO conversations (id, user_id, state, started_at, ended_at, boundary_method, boundary_version) VALUES (?, ?, 'closed', '2026-01-01T10:00:00Z', '2026-01-01T10:00:20Z', 'gap', 'v1')`, convID, userID)
+
+	key, err := keyFn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two saved speakers, each heard in its own cluster of the conversation.
+	vps := []string{uuid.NewString(), uuid.NewString()}
+	clusters := []string{uuid.NewString(), uuid.NewString()}
+	for i, vec := range [][]float32{{1, 0, 0, 0}, {0, 1, 0, 0}} {
+		sealed, err := speakers.SealCentroid(key, vec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(`INSERT INTO voiceprints (id, user_id, display_name, centroid_embedding, embedding_model, embedding_dimensions, sample_count) VALUES (?, ?, ?, ?, ?, 4, 1)`,
+			vps[i], userID, []any{"Alice", nil}[i], sealed, speakers.ModelName)
+		raw := transcription.VectorToBytes(vec)
+		mustExec(`INSERT INTO speaker_clusters (id, user_id, session_id, local_ordinal, centroid_embedding, embedding_model, embedding_dimensions, sample_count) VALUES (?, ?, ?, ?, ?, ?, 4, 1)`,
+			clusters[i], userID, sessID, i+1, raw, speakers.ModelName)
+		mustExec(`INSERT INTO speaker_turns (id, user_id, chunk_id, cluster_id, voiceprint_id, start_ms, end_ms, embedding, quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1.0)`,
+			uuid.NewString(), userID, chunkID, clusters[i], vps[i], i*10000, i*10000+9000, raw)
+		mustExec(`INSERT INTO transcript_segments (public_id, user_id, chunk_id, conversation_id, speaker_cluster_id, source_component, chunk_start_ms, chunk_end_ms, started_at, ended_at, text)
+			VALUES (?, ?, ?, ?, ?, 'combined', ?, ?, ?, ?, 'Hello')`, uuid.NewString(), userID, chunkID, convID, clusters[i], i*10000, i*10000+9000,
+			[]string{"2026-01-01T10:00:00Z", "2026-01-01T10:00:10Z"}[i], []string{"2026-01-01T10:00:09Z", "2026-01-01T10:00:19Z"}[i])
+	}
+	if err := speakers.RebuildConversationSpeakers(ctx, db.W, userID, convID); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/speakers/"+vps[0]+"/merge", strings.NewReader(`{"sourceId":"`+vps[1]+`"}`))
+	req.Header.Set("Authorization", "Bearer "+reg.Session.Token)
+	req.Header.Set("Content-Type", "application/json")
+	mRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(mRes.Body)
+	mRes.Body.Close()
+	if mRes.StatusCode != 200 {
+		t.Fatalf("merge failed: %d %s", mRes.StatusCode, body)
+	}
+
+	var remaining, samples int
+	if err := db.R.QueryRow(`SELECT COUNT(*), COALESCE(SUM(sample_count), 0) FROM voiceprints WHERE user_id=?`, userID).Scan(&remaining, &samples); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 || samples != 2 {
+		t.Fatalf("expected one speaker with 2 samples, got %d speakers and %d samples", remaining, samples)
+	}
+	var strayTurns int
+	if err := db.R.QueryRow(`SELECT COUNT(*) FROM speaker_turns WHERE user_id=? AND voiceprint_id IS NOT ?`, userID, vps[0]).Scan(&strayTurns); err != nil || strayTurns != 0 {
+		t.Fatalf("turns not moved to the kept speaker: %d %v", strayTurns, err)
+	}
+	var labels int
+	if err := db.R.QueryRow(`SELECT COUNT(DISTINCT local_label) FROM conversation_speakers WHERE conversation_id=? AND voiceprint_id=?`, convID, vps[0]).Scan(&labels); err != nil || labels != 1 {
+		t.Fatalf("conversation was not relabelled as one speaker: %d %v", labels, err)
 	}
 }

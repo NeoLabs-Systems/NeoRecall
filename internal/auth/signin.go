@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/NeoLabs-Systems/neolabs-go/servicemail"
 	"github.com/NeoLabs-Systems/neolabs-go/userid"
 	"github.com/NeoLabs-Systems/neorecall/internal/audit"
+	"github.com/NeoLabs-Systems/neorecall/internal/config"
 	"github.com/NeoLabs-Systems/neorecall/internal/httperr"
 )
 
@@ -84,14 +87,51 @@ func (s *Service) ApproveQRLogin(ctx context.Context, a *AuthContext, challengeI
 
 func (s *Service) mailTokens() servicemail.Tokens { return servicemail.Tokens{DB: s.DB.W} }
 
+// ErrNoMailLinkBase means no usable public URL is configured, so no emailed
+// link can be built.
+var ErrNoMailLinkBase = errors.New("no public URL is configured for emailed links; set NEORECALL_PUBLIC_URL")
+
+// MailLinkBase is the address every emailed link points at: the configured
+// NEORECALL_EMAIL_PUBLIC_URL, falling back to NEORECALL_PUBLIC_URL. It never
+// comes from a request, whose Host header whoever sends it chooses.
+func MailLinkBase(c config.Config) (string, error) {
+	raw := strings.TrimSpace(c.Mail.PublicURL)
+	if raw == "" {
+		raw = strings.TrimSpace(c.PublicURL)
+	}
+	if raw == "" {
+		return "", ErrNoMailLinkBase
+	}
+	u, err := url.Parse(strings.TrimRight(raw, "/"))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("%w (%q is not an absolute http or https URL)", ErrNoMailLinkBase, raw)
+	}
+	return u.String(), nil
+}
+
+// PasswordResetAvailable reports whether reset emails can be sent at all.
+func (s *Service) PasswordResetAvailable() bool {
+	c := s.cfg()
+	if !c.Mail.Enabled {
+		return false
+	}
+	_, err := MailLinkBase(c)
+	return err == nil
+}
+
 // RequestPasswordReset emails a reset link to the account's address. It says
 // nothing about whether the account exists, so failures are only returned for
-// the caller to log.
-func (s *Service) RequestPasswordReset(ctx context.Context, account, baseURL string) error {
-	mail := s.cfg().Mail
+// the caller to log. Without a configured public URL nothing is sent.
+func (s *Service) RequestPasswordReset(ctx context.Context, account string) error {
+	c := s.cfg()
+	mail := c.Mail
 	account = strings.TrimSpace(account)
 	if !mail.Enabled || account == "" {
 		return nil
+	}
+	base, err := MailLinkBase(c)
+	if err != nil {
+		return err
 	}
 	identity, ok, err := webauthnAccounts{s}.ForSignIn(ctx, account)
 	if err != nil || !ok || identity.Email == "" {
@@ -102,13 +142,10 @@ func (s *Service) RequestPasswordReset(ctx context.Context, account, baseURL str
 	if err != nil {
 		return err
 	}
-	if mail.PublicURL != "" {
-		baseURL = mail.PublicURL
-	}
 	return s.Mailer.Send(ctx, identity.Email, servicemail.Message{
 		Subject: "Reset your NeoRecall password", Title: "Reset your password",
 		Intro:     "Use this link to set a new password for " + identity.Username + ". Ignore this email if you did not request a reset.",
-		ActionURL: baseURL + passwordResetPath + "?token=" + url.QueryEscape(token), ActionLabel: "Reset password",
+		ActionURL: base + passwordResetPath + "?token=" + url.QueryEscape(token), ActionLabel: "Reset password",
 		Details: []servicemail.Detail{{Label: "Account", Value: identity.Username}},
 	})
 }
